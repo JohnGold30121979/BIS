@@ -1,21 +1,23 @@
 ﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using BIS.ERP.Models;  // ← Важно: используем Models
 
 namespace BIS.ERP.Views
 {
     public partial class CreateCatalogDialog : Window
     {
+        // Теперь это ObservableCollection<Models.FieldInfo>
         public ObservableCollection<FieldInfo> Fields { get; set; }
 
         public string CatalogName => NameBox.Text;
         public string CatalogDescription => DescriptionBox.Text;
-        public string CatalogIcon => (IconCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "📄";
+        public string CatalogIcon => (IconCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "📚";
 
         public CreateCatalogDialog()
         {
             InitializeComponent();
-            Fields = new ObservableCollection<FieldInfo>();
+            Fields = new ObservableCollection<FieldInfo>();  // Models.FieldInfo
             FieldsList.ItemsSource = Fields;
 
             // Добавляем стандартные поля

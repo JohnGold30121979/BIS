@@ -29,7 +29,6 @@ namespace BIS.ERP.Services
         // Инициализация базовых метаданных (как в 1С)
         public async Task InitializeDefaultMetadataAsync(Guid infoBaseId)
         {
-            // Проверяем, есть ли уже конфигурация
             var config = await _context.Set<MetadataConfiguration>()
                 .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
 
@@ -39,7 +38,7 @@ namespace BIS.ERP.Services
                 {
                     Id = Guid.NewGuid(),
                     InfoBaseId = infoBaseId,
-                    CreatedAt = DateTime.Now,
+                    CreatedAt = DateTime.UtcNow,
                     IsInitialized = true
                 };
                 await _context.Set<MetadataConfiguration>().AddAsync(config);
@@ -47,13 +46,12 @@ namespace BIS.ERP.Services
             }
             else if (config.IsInitialized)
             {
-                return; // Уже инициализировано
+                return;
             }
 
             // Создаем системные справочники
             var catalogs = new List<MetadataObject>();
 
-            // 1. Справочник "Сотрудники"
             var employeesCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
@@ -69,7 +67,6 @@ namespace BIS.ERP.Services
             employeesCatalog.Fields = GetStandardCatalogFields(employeesCatalog.Id);
             catalogs.Add(employeesCatalog);
 
-            // 2. Справочник "Материалы"
             var materialsCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
@@ -85,7 +82,6 @@ namespace BIS.ERP.Services
             materialsCatalog.Fields = GetStandardCatalogFields(materialsCatalog.Id);
             catalogs.Add(materialsCatalog);
 
-            // 3. Справочник "Основные средства"
             var assetsCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
@@ -101,7 +97,6 @@ namespace BIS.ERP.Services
             assetsCatalog.Fields = GetStandardCatalogFields(assetsCatalog.Id);
             catalogs.Add(assetsCatalog);
 
-            // 4. Справочник "Подразделения"
             var departmentsCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
@@ -117,7 +112,6 @@ namespace BIS.ERP.Services
             departmentsCatalog.Fields = GetStandardCatalogFields(departmentsCatalog.Id);
             catalogs.Add(departmentsCatalog);
 
-            // 5. Справочник "Контрагенты"
             var contractorsCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
@@ -133,7 +127,6 @@ namespace BIS.ERP.Services
             contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
             catalogs.Add(contractorsCatalog);
 
-            // Добавляем все справочники
             await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
 
             // Создаем системные документы
@@ -174,10 +167,7 @@ namespace BIS.ERP.Services
             config.IsInitialized = true;
             await _context.SaveChangesAsync();
 
-            // Создаем физические таблицы в БД
             await CreateTablesFromMetadataAsync();
-
-            // Добавляем тестовые данные
             await AddTestDataAsync();
         }
 
@@ -320,6 +310,237 @@ namespace BIS.ERP.Services
             };
         }
 
+        // === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ СО СПРАВОЧНИКАМИ ===
+
+        public async Task SaveCatalogAsync(MetadataObject catalog)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var existingCatalog = await _context.Set<MetadataObject>()
+                    .Include(c => c.Fields)
+                    .FirstOrDefaultAsync(c => c.Id == catalog.Id);
+
+                if (existingCatalog == null)
+                {
+                    throw new Exception("Справочник не найден");
+                }
+
+                existingCatalog.Name = catalog.Name;
+                existingCatalog.Description = catalog.Description;
+                existingCatalog.Icon = catalog.Icon;
+
+                foreach (var field in catalog.Fields)
+                {
+                    var existingField = existingCatalog.Fields.FirstOrDefault(f => f.Id == field.Id);
+                    if (existingField != null)
+                    {
+                        existingField.Name = field.Name;
+                        existingField.DbColumnName = field.DbColumnName;
+                        existingField.FieldType = field.FieldType;
+                        existingField.IsRequired = field.IsRequired;
+                        existingField.Order = field.Order;
+                    }
+                    else
+                    {
+                        field.Id = Guid.NewGuid();
+                        field.MetadataObjectId = catalog.Id;
+                        existingCatalog.Fields.Add(field);
+                    }
+                }
+
+                var fieldsToRemove = existingCatalog.Fields
+                    .Where(f => !catalog.Fields.Any(cf => cf.Id == f.Id))
+                    .ToList();
+
+                foreach (var field in fieldsToRemove)
+                {
+                    existingCatalog.Fields.Remove(field);
+                    _context.Set<MetadataField>().Remove(field);
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                await UpdateTableStructureAsync(existingCatalog);
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                throw new Exception($"Ошибка сохранения справочника: {ex.Message}");
+            }
+        }
+
+        public async Task DeleteCatalogAsync(Guid catalogId)
+        {
+            var catalog = await _context.Set<MetadataObject>()
+                .Include(c => c.Fields)
+                .FirstOrDefaultAsync(c => c.Id == catalogId);
+
+            if (catalog == null) return;
+
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS \"{catalog.TableName}\" CASCADE;");
+
+                foreach (var field in catalog.Fields)
+                {
+                    _context.Set<MetadataField>().Remove(field);
+                }
+
+                _context.Set<MetadataObject>().Remove(catalog);
+                await _context.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                throw new Exception($"Ошибка удаления справочника: {ex.Message}");
+            }
+        }
+
+        // В методе CreateCatalogAsync
+        public async Task<MetadataObject> CreateCatalogAsync(string name, string description, string icon, List<Models.FieldInfo> fields)
+        {
+            var catalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                TableName = $"catalog_{name.ToLower().Replace(" ", "_")}_{Guid.NewGuid():N}",
+                ObjectType = "Catalog",
+                Description = description,
+                Icon = icon,
+                Order = await GetNextOrderAsync(),
+                IsSystem = false,
+                Fields = new List<MetadataField>()
+            };
+
+            int order = 1;
+            foreach (var field in fields)
+            {
+                catalog.Fields.Add(new MetadataField
+                {
+                    Id = Guid.NewGuid(),
+                    Name = field.Name,
+                    DbColumnName = field.Name.ToLower().Replace(" ", "_"),
+                    FieldType = field.Type,
+                    IsRequired = field.IsRequired,
+                    Order = order++,
+                    MetadataObjectId = catalog.Id
+                });
+            }
+
+            await _context.MetadataObjects.AddAsync(catalog);
+            await _context.SaveChangesAsync();
+
+            // Создаем физическую таблицу
+            await CreateTableForCatalogAsync(catalog);
+
+            return catalog;
+        }
+
+        private async Task CreateTableForCatalogAsync(MetadataObject catalog)
+        {
+            try
+            {
+                var sqlBuilder = new System.Text.StringBuilder();
+
+                // Экранируем имя таблицы двойными кавычками для сохранения регистра
+                sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
+                sqlBuilder.AppendLine("    \"Id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
+
+                foreach (var field in catalog.Fields.OrderBy(f => f.Order))
+                {
+                    var sqlType = GetSqlTypeForField(field);
+                    var nullable = field.IsRequired ? "NOT NULL" : "";
+                    // Используем двойные кавычки для имен колонок
+                    sqlBuilder.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
+                }
+
+                sqlBuilder.AppendLine("    \"CreatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
+                sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+                sqlBuilder.AppendLine(");");
+
+                // Создаем индексы с правильными именами колонок
+                sqlBuilder.AppendLine($"CREATE INDEX \"IX_{catalog.TableName}_Name\" ON \"{catalog.TableName}\" (\"Name\");");
+
+                await _context.Database.ExecuteSqlRawAsync(sqlBuilder.ToString());
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ошибка создания таблицы: {ex.Message}");
+            }
+        }       
+
+        public async Task<List<MetadataObject>> GetCatalogsAsync()
+        {
+            return await _context.Set<MetadataObject>()
+                .Where(m => m.ObjectType == "Catalog")
+                .Include(m => m.Fields)
+                .OrderBy(m => m.Order)
+                .ToListAsync();
+        }
+
+        public async Task<List<MetadataObject>> GetDocumentsAsync()
+        {
+            return await _context.Set<MetadataObject>()
+                .Where(m => m.ObjectType == "Document")
+                .Include(m => m.Fields)
+                .OrderBy(m => m.Order)
+                .ToListAsync();
+        }
+
+        private async Task UpdateTableStructureAsync(MetadataObject catalog)
+        {
+            var sqlBuilder = new System.Text.StringBuilder();
+
+            sqlBuilder.AppendLine($"DROP TABLE IF EXISTS \"{catalog.TableName}\" CASCADE;");
+            sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
+            sqlBuilder.AppendLine("    \"Id\" uuid PRIMARY KEY DEFAULT gen_random_uuid(),");
+
+            foreach (var field in catalog.Fields.OrderBy(f => f.Order))
+            {
+                var sqlType = GetFieldSqlType(field);
+                var nullable = field.IsRequired ? "NOT NULL" : "";
+                sqlBuilder.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
+            }
+
+            sqlBuilder.AppendLine("    \"CreatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
+            sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+            sqlBuilder.AppendLine(");");
+
+            sqlBuilder.AppendLine($"CREATE INDEX IF NOT EXISTS idx_{catalog.TableName}_name ON \"{catalog.TableName}\" (\"name\");");
+
+            await _context.Database.ExecuteSqlRawAsync(sqlBuilder.ToString());
+        }
+
+        private string GetFieldSqlType(MetadataField field)
+        {
+            return field.FieldType switch
+            {
+                "String" => $"VARCHAR({(field.Length > 0 ? field.Length : 255)})",
+                "Int" => "INTEGER",
+                "Decimal" => $"DECIMAL({field.Precision}, {field.Scale})",
+                "DateTime" => "TIMESTAMP",
+                "Bool" => "BOOLEAN",
+                _ => "TEXT"
+            };
+        }
+        private string GetSqlTypeForField(MetadataField field)
+        {
+            return field.FieldType switch
+            {
+                "String" => $"VARCHAR({(field.Length > 0 ? field.Length : 255)})",
+                "Int" => "INTEGER",
+                "Decimal" => $"DECIMAL({field.Precision}, {field.Scale})",
+                "DateTime" => "TIMESTAMP",
+                "Bool" => "BOOLEAN",
+                _ => "TEXT"
+            };
+        }
+
         private async Task CreateTablesFromMetadataAsync()
         {
             var metadataObjects = await _context.Set<MetadataObject>()
@@ -340,7 +561,7 @@ namespace BIS.ERP.Services
 
             foreach (var field in obj.Fields.OrderBy(f => f.Order))
             {
-                var sqlType = GetSqlType(field);
+                var sqlType = GetFieldSqlType(field);
                 var nullable = field.IsRequired ? "NOT NULL" : "";
                 sqlBuilder.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
             }
@@ -348,10 +569,6 @@ namespace BIS.ERP.Services
             sqlBuilder.AppendLine("    \"created_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
             sqlBuilder.AppendLine("    \"updated_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
             sqlBuilder.AppendLine(");");
-
-            // Добавляем индексы
-            sqlBuilder.AppendLine($"CREATE INDEX IF NOT EXISTS idx_{obj.TableName}_name ON \"{obj.TableName}\" (\"name\");");
-            sqlBuilder.AppendLine($"CREATE INDEX IF NOT EXISTS idx_{obj.TableName}_code ON \"{obj.TableName}\" (\"code\");");
 
             try
             {
@@ -363,22 +580,8 @@ namespace BIS.ERP.Services
             }
         }
 
-        private string GetSqlType(MetadataField field)
-        {
-            return field.FieldType switch
-            {
-                "String" => $"VARCHAR({(field.Length > 0 ? field.Length : 255)})",
-                "Int" => "INTEGER",
-                "Decimal" => $"DECIMAL({field.Precision}, {field.Scale})",
-                "DateTime" => "TIMESTAMP",
-                "Bool" => "BOOLEAN",
-                _ => "TEXT"
-            };
-        }
-
         private async Task AddTestDataAsync()
         {
-            // Добавляем тестовых сотрудников
             var employeesTable = "catalog_employees";
             var employees = new[]
             {
@@ -396,7 +599,6 @@ namespace BIS.ERP.Services
                 await _context.Database.ExecuteSqlRawAsync(sql);
             }
 
-            // Добавляем тестовые материалы
             var materialsTable = "catalog_materials";
             var materials = new[]
             {
@@ -415,55 +617,34 @@ namespace BIS.ERP.Services
             }
         }
 
-        // Получение всех справочников
-        public async Task<List<MetadataObject>> GetCatalogsAsync()
+        private async Task<int> GetNextOrderAsync()
         {
-            return await _context.Set<MetadataObject>()
+            var maxOrder = await _context.Set<MetadataObject>()
                 .Where(m => m.ObjectType == "Catalog")
-                .OrderBy(m => m.Order)
-                .ToListAsync();
+                .MaxAsync(m => (int?)m.Order) ?? 0;
+            return maxOrder + 1;
         }
 
-        // Получение всех документов
-        public async Task<List<MetadataObject>> GetDocumentsAsync()
+        private async Task<Guid> GetCurrentConfigIdAsync()
         {
-            return await _context.Set<MetadataObject>()
-                .Where(m => m.ObjectType == "Document")
-                .OrderBy(m => m.Order)
-                .ToListAsync();
-        }
+            var infoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            var config = await _context.Set<MetadataConfiguration>()
+                .FirstOrDefaultAsync(c => c.InfoBaseId == infoBase.Id);
 
-        // Получение данных справочника
-        public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
-        {
-            var catalog = await _context.Set<MetadataObject>()
-                .FirstOrDefaultAsync(m => m.Id == catalogId);
-
-            if (catalog == null) return new List<Dictionary<string, object>>();
-
-            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY code";
-            var result = new List<Dictionary<string, object>>();
-
-            using (var command = _context.Database.GetDbConnection().CreateCommand())
+            if (config == null)
             {
-                command.CommandText = sql;
-                await _context.Database.OpenConnectionAsync();
-
-                using (var reader = await command.ExecuteReaderAsync())
+                config = new MetadataConfiguration
                 {
-                    while (await reader.ReadAsync())
-                    {
-                        var row = new Dictionary<string, object>();
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            row[reader.GetName(i)] = reader.GetValue(i);
-                        }
-                        result.Add(row);
-                    }
-                }
+                    Id = Guid.NewGuid(),
+                    InfoBaseId = infoBase.Id,
+                    IsInitialized = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.Set<MetadataConfiguration>().Add(config);
+                await _context.SaveChangesAsync();
             }
 
-            return result;
+            return config.Id;
         }
     }
 }

@@ -1,209 +1,415 @@
-﻿using System.Windows;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using BIS.ERP.Models;
+using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
 {
     public partial class ConfiguratorWindow : Window
     {
+        private MetadataService _metadataService;
+        private List<MetadataObject> _catalogs;
+        private MetadataObject _selectedCatalog;
+        private bool _isLoading = false;
+
         public ConfiguratorWindow()
         {
             InitializeComponent();
-
-            // Подписываемся на событие выбора в TreeView
-            MetadataTree.SelectedItemChanged += OnMetadataSelected;
+            this.Loaded += async (s, e) => await LoadMetadata();
         }
 
-        private void OnMetadataSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+        private async Task LoadMetadata()
         {
-            if (e.NewValue is TreeViewItem selectedItem && selectedItem.Header != null)
+            if (_isLoading) return;
+            _isLoading = true;
+
+            try
             {
-                string header = selectedItem.Header.ToString().Trim();
+                Mouse.OverrideCursor = Cursors.Wait;
 
-                // Обновляем заголовок
-                EditorTitle.Text = header;
-                EditorDescription.Text = $"Редактирование объекта: {header}";
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                _metadataService = new MetadataService(context);
 
-                // Очищаем панель свойств
-                PropertiesPanel.Children.Clear();
+                _catalogs = await _metadataService.GetCatalogsAsync();
 
-                // Создаем панель редактирования в зависимости от выбранного элемента
-                if (header == "Справочники" || header == "Документы" || header == "Отчеты")
+                BuildMetadataTree();
+
+                if (_catalogs != null && _catalogs.Any())
                 {
-                    // Для корневых папок показываем информацию
-                    ShowFolderInfo(header);
+                    ShowCatalogsList();
                 }
-                else if (header.Contains("Сотрудники") || header.Contains("Материалы") ||
-                         header.Contains("Основные средства") || header.Contains("Контрагенты") ||
-                         header.Contains("Подразделения"))
-                {
-                    // Для справочников показываем редактор
-                    ShowCatalogEditor(header);
-                }
-                else
-                {
-                    // Для остальных объектов показываем общий редактор
-                    ShowGenericEditor(header);
-                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки метаданных: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+                _isLoading = false;
             }
         }
 
-        private void ShowFolderInfo(string folderName)
+        private void BuildMetadataTree()
         {
-            var stackPanel = new StackPanel
+            MetadataTree.Items.Clear();
+
+            // Корневой элемент
+            var rootItem = new TreeViewItem
             {
-                Margin = new Thickness(20)
+                Header = "📁 Метаданные",
+                IsExpanded = true,
+                Foreground = Brushes.White
             };
 
-            stackPanel.Children.Add(new TextBlock
+            // Справочники
+            var catalogsItem = new TreeViewItem
             {
-                Text = $"📁 {folderName}",
-                FontSize = 20,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.DarkSlateGray,
-                Margin = new Thickness(0, 0, 0, 20)
-            });
+                Header = "📚 Справочники",
+                IsExpanded = true,
+                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+            };
 
-            stackPanel.Children.Add(new TextBlock
+            if (_catalogs != null && _catalogs.Any())
             {
-                Text = $"Это группа объектов \"{folderName}\".\n\n" +
-                       "Здесь будут отображаться все объекты этого типа.\n" +
-                       "Для просмотра свойств объекта выберите конкретный справочник, документ или отчет.",
-                FontSize = 13,
+                foreach (var catalog in _catalogs.OrderBy(c => c.Name))
+                {
+                    var catalogItem = new TreeViewItem
+                    {
+                        Header = $"{catalog.Icon} {catalog.Name}",
+                        Tag = catalog,
+                        Foreground = Brushes.White
+                    };
+                    catalogItem.Selected += (s, e) =>
+                    {
+                        _selectedCatalog = catalog;
+                        ShowCatalogEditor(catalog);
+                    };
+                    catalogsItem.Items.Add(catalogItem);
+                }
+            }
+            else
+            {
+                var emptyItem = new TreeViewItem
+                {
+                    Header = "   (нет справочников)",
+                    Foreground = Brushes.Gray,
+                    IsEnabled = false
+                };
+                catalogsItem.Items.Add(emptyItem);
+            }
+
+            catalogsItem.Selected += (s, e) => ShowCatalogsList();
+
+            // Документы (заглушка)
+            var documentsItem = new TreeViewItem
+            {
+                Header = "📄 Документы",
+                IsExpanded = true,
+                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+            };
+            var emptyDocItem = new TreeViewItem
+            {
+                Header = "   (в разработке)",
                 Foreground = Brushes.Gray,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 10)
-            });
+                IsEnabled = false
+            };
+            documentsItem.Items.Add(emptyDocItem);
+
+            // Отчеты (заглушка)
+            var reportsItem = new TreeViewItem
+            {
+                Header = "📊 Отчеты",
+                IsExpanded = true,
+                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+            };
+            var emptyReportItem = new TreeViewItem
+            {
+                Header = "   (в разработке)",
+                Foreground = Brushes.Gray,
+                IsEnabled = false
+            };
+            reportsItem.Items.Add(emptyReportItem);
+
+            rootItem.Items.Add(catalogsItem);
+            rootItem.Items.Add(documentsItem);
+            rootItem.Items.Add(reportsItem);
+
+            MetadataTree.Items.Add(rootItem);
+        }
+
+        private void ShowCatalogsList()
+        {
+            EditorTitle.Text = "📚 Справочники";
+            EditorDescription.Text = "Список всех справочников в системе";
+            PropertiesPanel.Children.Clear();
+
+            var stackPanel = new StackPanel();
+
+            var createButton = new Button
+            {
+                Content = "➕ Создать справочник",
+                Height = 40,
+                Margin = new Thickness(0, 0, 0, 20),
+                Background = (Brush)new BrushConverter().ConvertFrom("#27AE60"),
+                Foreground = Brushes.White,
+                Cursor = Cursors.Hand
+            };
+            createButton.Click += (s, e) => OnCreateCatalogClick(s, e);
+            stackPanel.Children.Add(createButton);
+
+            if (_catalogs != null)
+            {
+                foreach (var catalog in _catalogs.OrderBy(c => c.Name))
+                {
+                    var card = CreateCatalogCard(catalog);
+                    stackPanel.Children.Add(card);
+                }
+            }
+
+            if (_catalogs == null || !_catalogs.Any())
+            {
+                stackPanel.Children.Add(new TextBlock
+                {
+                    Text = "Нет созданных справочников. Нажмите 'Создать справочник' для добавления.",
+                    Foreground = Brushes.Gray,
+                    Margin = new Thickness(0, 50, 0, 0),
+                    HorizontalAlignment = HorizontalAlignment.Center
+                });
+            }
 
             PropertiesPanel.Children.Add(stackPanel);
         }
 
-        private void ShowCatalogEditor(string catalogName)
+        private Border CreateCatalogCard(MetadataObject catalog)
         {
-            var stackPanel = new StackPanel();
-
-            // Заголовок
-            stackPanel.Children.Add(new TextBlock
+            var card = new Border
             {
-                Text = $"📚 Редактор справочника: {catalogName}",
-                FontSize = 18,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.DarkSlateGray,
-                Margin = new Thickness(0, 0, 0, 20)
-            });
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(15),
+                Margin = new Thickness(0, 0, 0, 10),
+                Tag = catalog,
+                Cursor = Cursors.Hand
+            };
 
-            // Поле для кода
-            stackPanel.Children.Add(new TextBlock
-            {
-                Text = "Код",
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 10, 0, 5)
-            });
-            var codeBox = new TextBox { Height = 30, Margin = new Thickness(0, 0, 0, 15) };
-            stackPanel.Children.Add(codeBox);
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            // Поле для наименования
-            stackPanel.Children.Add(new TextBlock
+            var icon = new TextBlock
             {
-                Text = "Наименование",
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 10, 0, 5)
+                Text = catalog.Icon,
+                FontSize = 32,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            Grid.SetColumn(icon, 0);
+
+            var infoStack = new StackPanel();
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = catalog.Name,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold
             });
-            var nameBox = new TextBox { Height = 30, Margin = new Thickness(0, 0, 0, 15) };
-            stackPanel.Children.Add(nameBox);
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = catalog.TableName,
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"Полей: {catalog.Fields?.Count ?? 0}",
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            Grid.SetColumn(infoStack, 1);
+
+            var editButton = new Button
+            {
+                Content = "✏️ Редактировать",
+                Width = 100,
+                Height = 35,
+                Margin = new Thickness(5, 0, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White
+            };
+            editButton.Click += (s, e) => ShowCatalogEditor(catalog);
+            Grid.SetColumn(editButton, 2);
+
+            grid.Children.Add(icon);
+            grid.Children.Add(infoStack);
+            grid.Children.Add(editButton);
+            card.Child = grid;
+
+            return card;
+        }
+
+        private void ShowCatalogEditor(MetadataObject catalog)
+        {
+            EditorTitle.Text = $"✏️ Редактирование: {catalog.Name}";
+            EditorDescription.Text = "Основная информация и поля справочника";
+            PropertiesPanel.Children.Clear();
+
+            var mainPanel = new StackPanel();
+
+            // Основная информация
+            var nameLabel = new TextBlock { Text = "Наименование:", FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 5) };
+            mainPanel.Children.Add(nameLabel);
+
+            var nameBox = new TextBox { Text = catalog.Name, Height = 30, Margin = new Thickness(0, 0, 0, 15) };
+            mainPanel.Children.Add(nameBox);
+
+            var descLabel = new TextBlock { Text = "Описание:", FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 5) };
+            mainPanel.Children.Add(descLabel);
+
+            var descBox = new TextBox { Text = catalog.Description, Height = 60, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) };
+            mainPanel.Children.Add(descBox);
+
+            // Поля справочника
+            var fieldsLabel = new TextBlock { Text = "Поля справочника:", FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 10), FontSize = 14 };
+            mainPanel.Children.Add(fieldsLabel);
+
+            var fieldsList = new StackPanel();
+            foreach (var field in catalog.Fields.OrderBy(f => f.Order))
+            {
+                var fieldPanel = new Border
+                {
+                    Background = (Brush)new BrushConverter().ConvertFrom("#F8F9FA"),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(10),
+                    Margin = new Thickness(0, 0, 0, 5)
+                };
+                var fieldGrid = new Grid();
+                fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+                fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var fieldName = new TextBox { Text = field.Name, Height = 25, Margin = new Thickness(5) };
+                fieldGrid.Children.Add(fieldName);
+                Grid.SetColumn(fieldName, 0);
+
+                var fieldType = new TextBlock { Text = field.FieldType, Height = 25, Margin = new Thickness(5), VerticalAlignment = VerticalAlignment.Center };
+                fieldGrid.Children.Add(fieldType);
+                Grid.SetColumn(fieldType, 1);
+
+                fieldPanel.Child = fieldGrid;
+                fieldsList.Children.Add(fieldPanel);
+            }
+            mainPanel.Children.Add(fieldsList);
 
             // Кнопка сохранения
             var saveButton = new Button
             {
-                Content = "💾 Сохранить",
-                Height = 35,
-                Width = 120,
-                Background = Brushes.Green,
-                Foreground = Brushes.White,
+                Content = "💾 Сохранить изменения",
+                Height = 40,
                 Margin = new Thickness(0, 20, 0, 0),
-                Cursor = Cursors.Hand
+                Background = (Brush)new BrushConverter().ConvertFrom("#27AE60"),
+                Foreground = Brushes.White
             };
-            saveButton.Click += (s, e) =>
+            saveButton.Click += async (s, e) =>
             {
-                MessageBox.Show($"Справочник \"{catalogName}\"\nКод: {codeBox.Text}\nНаименование: {nameBox.Text}",
-                    "Сохранено", MessageBoxButton.OK, MessageBoxImage.Information);
-                codeBox.Clear();
-                nameBox.Clear();
+                catalog.Name = nameBox.Text;
+                catalog.Description = descBox.Text;
+                await SaveCatalog(catalog);
             };
-            stackPanel.Children.Add(saveButton);
+            mainPanel.Children.Add(saveButton);
 
-            // Информация
-            stackPanel.Children.Add(new TextBlock
-            {
-                Text = "\n💡 В следующих версиях: добавление полей, настройка форм, импорт/экспорт данных",
-                FontSize = 11,
-                Foreground = Brushes.Gray,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 20, 0, 0)
-            });
-
-            PropertiesPanel.Children.Add(stackPanel);
+            PropertiesPanel.Children.Add(mainPanel);
         }
 
-        private void ShowGenericEditor(string objectName)
+        private async Task SaveCatalog(MetadataObject catalog)
         {
-            var stackPanel = new StackPanel
+            try
             {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            stackPanel.Children.Add(new TextBlock
+                Mouse.OverrideCursor = Cursors.Wait;
+                await _metadataService.SaveCatalogAsync(catalog);
+                MessageBox.Show("Справочник сохранен!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                await LoadMetadata();
+            }
+            catch (Exception ex)
             {
-                Text = "⚙️",
-                FontSize = 48,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 40, 0, 15)
-            });
-
-            stackPanel.Children.Add(new TextBlock
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
             {
-                Text = $"Редактор для объекта: {objectName}",
-                FontSize = 16,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.DarkSlateGray,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, 10)
-            });
-
-            stackPanel.Children.Add(new TextBlock
-            {
-                Text = "Настройка полей, форм и прав доступа будет доступна в следующей версии",
-                FontSize = 12,
-                Foreground = Brushes.Gray,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 20)
-            });
-
-            PropertiesPanel.Children.Add(stackPanel);
+                Mouse.OverrideCursor = null;
+            }
         }
 
-        private void OnAddMetadataClick(object sender, RoutedEventArgs e)
+        // В методе OnCreateCatalogClick
+        private async void OnCreateCatalogClick(object sender, RoutedEventArgs e)
         {
-            var dialog = new CreateMetadataObjectDialog();
+            var dialog = new CreateCatalogDialog();
             dialog.Owner = this;
 
             if (dialog.ShowDialog() == true)
             {
-                MessageBox.Show($"Создан объект: {dialog.ObjectName}\nТип: {dialog.ObjectType}",
-                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                    var metadataService = new MetadataService(context);
 
-                // TODO: Добавить созданный объект в дерево
+                    // Теперь типы совпадают - не нужно преобразование!
+                    var fieldsList = dialog.Fields.ToList();
+
+                    await metadataService.CreateCatalogAsync(
+                        dialog.CatalogName,
+                        dialog.CatalogDescription,
+                        dialog.CatalogIcon,
+                        fieldsList
+                    );
+
+                    await LoadMetadata();
+                    MessageBox.Show($"Справочник '{dialog.CatalogName}' создан!", "Успех",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
             }
         }
 
-        private void OnRefreshClick(object sender, RoutedEventArgs e)
+        private void OnCreateDocumentClick(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("Обновление метаданных...\n\n" +
-                "В следующей версии: загрузка актуальной структуры из базы данных",
-                "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("В разработке", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void OnCreateReportClick(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show("В разработке", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private async void OnRefreshClick(object sender, RoutedEventArgs e)
+        {
+            await LoadMetadata();
+        }
+
+        private void OnAboutClick(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show("BIS ERP Конфигуратор v1.0", "О программе", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void OnExitClick(object sender, RoutedEventArgs e)
+        {
+            Close();
         }
     }
 }

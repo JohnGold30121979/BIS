@@ -40,11 +40,7 @@ namespace BIS.ERP
                     return;
                 }
             }
-
-            // Запускаем окно входа
-            //  var loginWindow = new LoginWindow();
-            //loginWindow.Show();
-            // Сразу открываем окно выбора инфобазы и режима (без логина)
+        
             var infoBaseWindow = new InfoBaseSelectionWindow();
             infoBaseWindow.Show();
         }

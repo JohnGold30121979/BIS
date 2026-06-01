@@ -1,5 +1,5 @@
-﻿// Views/FieldInfo.cs (временный класс для диалога)
-namespace BIS.ERP.Views
+﻿// Models/FieldInfo.cs
+namespace BIS.ERP.Models
 {
     public class FieldInfo
     {

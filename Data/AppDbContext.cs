@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿// Data/AppDbContext.cs
+using Microsoft.EntityFrameworkCore;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 
@@ -8,28 +9,27 @@ public class AppDbContext : DbContext
 {
     private readonly string _connectionString;
 
-    // Конструктор по умолчанию
     public AppDbContext() : this(AppSettings.Instance.GetMasterConnectionString())
     {
     }
 
-    // Конструктор со строкой подключения
     public AppDbContext(string connectionString)
     {
         _connectionString = connectionString;
     }
 
-    // Конструктор с DbContextOptions (для миграций)
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
-    {
-    }
-
+    // DbSet для существующих моделей
     public DbSet<InfoBase> InfoBases { get; set; }
     public DbSet<User> Users { get; set; }
     public DbSet<Transaction> Transactions { get; set; }
     public DbSet<Material> Materials { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<Employee> Employees { get; set; }
+
+    // DbSet для метаданных
+    public DbSet<MetadataObject> MetadataObjects { get; set; }
+    public DbSet<MetadataField> MetadataFields { get; set; }
+    public DbSet<MetadataConfiguration> MetadataConfigurations { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -43,7 +43,7 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Уникальные индексы
+        // Уникальные индексы для существующих моделей
         modelBuilder.Entity<InfoBase>()
             .HasIndex(x => x.Name)
             .IsUnique();
@@ -63,6 +63,29 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Employee>()
             .HasIndex(x => x.PersonnelNumber)
             .IsUnique();
+
+        // Настройка для MetadataObject
+        modelBuilder.Entity<MetadataObject>()
+            .HasKey(m => m.Id);
+
+        modelBuilder.Entity<MetadataObject>()
+            .Property(m => m.Name)
+            .IsRequired()
+            .HasMaxLength(100);
+
+        modelBuilder.Entity<MetadataObject>()
+            .HasMany(m => m.Fields)
+            .WithOne(f => f.MetadataObject)
+            .HasForeignKey(f => f.MetadataObjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Настройка для MetadataField
+        modelBuilder.Entity<MetadataField>()
+            .HasKey(f => f.Id);
+
+        // Настройка для MetadataConfiguration
+        modelBuilder.Entity<MetadataConfiguration>()
+            .HasKey(c => c.Id);
     }
 
     public static string BuildConnectionString(string host, int port, string database, string username, string password)

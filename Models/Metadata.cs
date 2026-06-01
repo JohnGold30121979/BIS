@@ -5,22 +5,6 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace BIS.ERP.Models
 {
-    // Конфигурация метаданных для информационной базы
-    public class MetadataConfiguration
-    {
-        [Key]
-        public Guid Id { get; set; } = Guid.NewGuid();
-
-        [Required]
-        public Guid InfoBaseId { get; set; }
-
-        public DateTime CreatedAt { get; set; } = DateTime.Now;
-        public DateTime UpdatedAt { get; set; } = DateTime.Now;
-        public string Version { get; set; } = "1.0";
-        public bool IsInitialized { get; set; } = false;
-    }
-
-    // Объект метаданных (справочник, документ, отчет)
     public class MetadataObject
     {
         [Key]
@@ -31,7 +15,7 @@ namespace BIS.ERP.Models
         public string Name { get; set; } = string.Empty;
 
         [Required]
-        [MaxLength(50)]
+        [MaxLength(100)]
         public string TableName { get; set; } = string.Empty;
 
         [Required]
@@ -41,11 +25,13 @@ namespace BIS.ERP.Models
         [MaxLength(200)]
         public string Description { get; set; } = string.Empty;
 
-        public string Icon { get; set; } = "📄";
+        public string Icon { get; set; } = "📚";
 
         public int Order { get; set; } = 0;
 
         public bool IsSystem { get; set; } = false;
+
+        public Guid? ParentId { get; set; }
 
         public Guid MetadataConfigId { get; set; }
 
@@ -55,7 +41,6 @@ namespace BIS.ERP.Models
         public virtual ICollection<MetadataField> Fields { get; set; } = new List<MetadataField>();
     }
 
-    // Поле метаданных
     public class MetadataField
     {
         [Key]
@@ -71,10 +56,9 @@ namespace BIS.ERP.Models
 
         [Required]
         [MaxLength(20)]
-        public string FieldType { get; set; } = string.Empty; // String, Int, Decimal, DateTime, Bool
+        public string FieldType { get; set; } = string.Empty;
 
         public int Length { get; set; } = 0;
-
         public int Precision { get; set; } = 18;
         public int Scale { get; set; } = 2;
 
@@ -86,5 +70,19 @@ namespace BIS.ERP.Models
 
         [ForeignKey("MetadataObjectId")]
         public virtual MetadataObject MetadataObject { get; set; }
+    }
+
+    public class MetadataConfiguration
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid InfoBaseId { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public string Version { get; set; } = "1.0";
+        public bool IsInitialized { get; set; } = false;
     }
 }

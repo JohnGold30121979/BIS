@@ -7,103 +7,94 @@
         WindowState="Maximized">
 
     <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="300" MinWidth="250"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
 
-        <!-- Левая панель -->
-        <Border Grid.Column="0" Background="#2C3E50">
-            <DockPanel>
-                <Border DockPanel.Dock="Top" Background="#1A252F" Padding="15">
-                    <StackPanel>
-                        <TextBlock Text="BIS ERP" FontSize="20" FontWeight="Bold" Foreground="White"/>
-                        <TextBlock Text="Режим конфигуратора" FontSize="11" Foreground="#7F8C8D"/>
-                    </StackPanel>
-                </Border>
+        <!-- Главное меню -->
+        <Menu Grid.Row="0" Background="#2C3E50" Foreground="White">
+            <MenuItem Header="Файл">
+                <MenuItem Header="Выход" Click="OnExitClick"/>
+            </MenuItem>
+            <MenuItem Header="Создать">
+                <MenuItem Header="📚 Справочник" Click="OnCreateCatalogClick"/>
+                <MenuItem Header="📄 Документ" Click="OnCreateDocumentClick" IsEnabled="False"/>
+                <MenuItem Header="📊 Отчет" Click="OnCreateReportClick" IsEnabled="False"/>
+            </MenuItem>
+            <MenuItem Header="Справка">
+                <MenuItem Header="📖 О программе" Click="OnAboutClick"/>
+            </MenuItem>
+        </Menu>
 
-                <StackPanel DockPanel.Dock="Bottom" Margin="10">
-                    <Button x:Name="AddMetadataButton" Content="+ Добавить объект" 
-                            Background="#27AE60" Foreground="White" Height="35" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}" CornerRadius="5">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="250"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-                    <Button x:Name="RefreshButton" Content="🔄 Обновить" 
-                            Background="#3498DB" Foreground="White" Margin="0,10,0,0" Height="35" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}" CornerRadius="5">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                </StackPanel>
-
-                <TreeView x:Name="MetadataTree" Background="#2C3E50" BorderThickness="0">
-                    <TreeView.Resources>
-                        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#34495E"/>
-                    </TreeView.Resources>
-
-                    <TreeViewItem Header="📁 Метаданные" IsExpanded="True" Foreground="White" FontWeight="Bold">
-                        <TreeViewItem Header="📚 Справочники" IsExpanded="True" Foreground="#BDC3C7">
-                            <TreeViewItem Header="   Сотрудники" Foreground="White" Tag="Employees"/>
-                            <TreeViewItem Header="   Материалы" Foreground="White" Tag="Materials"/>
-                            <TreeViewItem Header="   Основные средства" Foreground="White" Tag="FixedAssets"/>
-                        </TreeViewItem>
-                        <TreeViewItem Header="📄 Документы" IsExpanded="True" Foreground="#BDC3C7">
-                            <TreeViewItem Header="   Приход товаров" Foreground="White" Tag="IncomingInvoices"/>
-                            <TreeViewItem Header="   Расход товаров" Foreground="White" Tag="OutgoingInvoices"/>
-                        </TreeViewItem>
-                        <TreeViewItem Header="📊 Отчеты" IsExpanded="True" Foreground="#BDC3C7">
-                            <TreeViewItem Header="   Оборотно-сальдовая ведомость" Foreground="White"/>
-                        </TreeViewItem>
-                    </TreeViewItem>
-                </TreeView>
-            </DockPanel>
-        </Border>
-
-        <!-- Правая панель -->
-        <Border Grid.Column="1" Background="#F5F6FA">
-            <Grid Margin="20">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-                <!-- Заголовок -->
-                <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="15" Margin="0,0,0,15">
-                    <StackPanel>
-                        <TextBlock x:Name="EditorTitle" FontSize="18" FontWeight="Bold" Foreground="#2C3E50"/>
-                        <TextBlock x:Name="EditorDescription" Foreground="#666" FontSize="12" Margin="0,5,0,0"/>
-                    </StackPanel>
-                </Border>
-
-                <!-- Область редактирования -->
-                <ScrollViewer Grid.Row="1">
-                    <Border Background="White" CornerRadius="8" Padding="20">
-                        <StackPanel x:Name="PropertiesPanel">
-                            <Border Background="#F8F9FA" CornerRadius="6" Padding="20">
-                                <StackPanel>
-                                    <TextBlock Text="📌" FontSize="32" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="Выберите объект метаданных слева" 
-                                               Foreground="#555" FontSize="13"
-                                               HorizontalAlignment="Center" Margin="0,10,0,5"/>
-                                    <TextBlock Text="для просмотра и редактирования свойств" 
-                                               Foreground="#888" FontSize="11"
-                                               HorizontalAlignment="Center"/>
-                                </StackPanel>
-                            </Border>
+            <!-- Левая панель -->
+            <Border Grid.Column="0" Background="#2C3E50">
+                <StackPanel>
+                    <Border Background="#1A252F" Padding="15">
+                        <StackPanel>
+                            <TextBlock Text="BIS ERP" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                            <TextBlock Text="Режим конфигуратора" FontSize="11" Foreground="#7F8C8D"/>
                         </StackPanel>
                     </Border>
-                </ScrollViewer>
-            </Grid>
-        </Border>
+
+                    <TreeView x:Name="MetadataTree" Background="#2C3E50" BorderThickness="0" 
+                              Margin="0,10,0,0" MaxHeight="500">
+                        <TreeView.Resources>
+                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#34495E"/>
+                        </TreeView.Resources>
+                    </TreeView>
+
+                    <StackPanel Margin="10" VerticalAlignment="Bottom">
+                        <Button x:Name="AddCatalogButton" Content="➕ Справочник" 
+                                Background="#27AE60" Foreground="White" Height="35" 
+                                Click="OnCreateCatalogClick"/>
+                        <Button x:Name="RefreshButton" Content="🔄 Обновить" 
+                                Background="#3498DB" Foreground="White" Height="35" Margin="0,10,0,0"
+                                Click="OnRefreshClick"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Правая панель -->
+            <Border Grid.Column="1" Background="#F5F6FA">
+                <Grid Margin="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+                        <StackPanel>
+                            <TextBlock x:Name="EditorTitle" FontSize="18" FontWeight="Bold" Foreground="#2C3E50"/>
+                            <TextBlock x:Name="EditorDescription" Foreground="#666" FontSize="12" Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1">
+                        <Border Background="White" CornerRadius="8" Padding="20">
+                            <StackPanel x:Name="PropertiesPanel">
+                                <Border Background="#F8F9FA" CornerRadius="6" Padding="20">
+                                    <StackPanel>
+                                        <TextBlock Text="📌" FontSize="32" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Выберите объект метаданных слева" 
+                                                   Foreground="#555" FontSize="13"
+                                                   HorizontalAlignment="Center" Margin="0,10,0,5"/>
+                                        <TextBlock Text="или нажмите 'Создать' для добавления нового" 
+                                                   Foreground="#888" FontSize="11"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
