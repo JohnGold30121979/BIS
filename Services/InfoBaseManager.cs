@@ -25,18 +25,26 @@ public class InfoBaseManager
     {
         try
         {
+            // Пытаемся использовать мастер-базу
             _masterContext.Database.EnsureCreated();
         }
-        catch (NpgsqlException)
+        catch (NpgsqlException ex) when (ex.SqlState == "3D000") // База не существует
         {
+            // Подключаемся к системной базе postgres и создаем bis_master
             var settings = AppSettings.Instance;
-            using var connection = new NpgsqlConnection($"Host={settings.Host};Port={settings.Port};Username={settings.Username};Password={settings.Password}");
+            using var connection = new NpgsqlConnection(settings.GetPostgresConnectionString());
             connection.Open();
 
             using var cmd = new NpgsqlCommand($"CREATE DATABASE {settings.DatabaseName}", connection);
             cmd.ExecuteNonQuery();
 
+            // Теперь создаем таблицы в новой базе
             _masterContext.Database.EnsureCreated();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error in EnsureMasterDatabaseExists: {ex.Message}");
+            throw;
         }
     }
 
@@ -56,50 +64,63 @@ public class InfoBaseManager
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type)
     {
+        var settings = AppSettings.Instance;
         return await CreateInfoBaseAsync(name, type,
-            AppSettings.Instance.Host,
-            AppSettings.Instance.Port,
-            AppSettings.Instance.Username,
-            AppSettings.Instance.Password);
+            settings.Host,
+            settings.Port,
+            settings.Username,
+            settings.Password);
     }
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
-        string host, int port, string username, string password)
+     string host, int port, string username, string password)
     {
-        var dbName = $"bis_{name.ToLower().Replace(" ", "_")}_{Guid.NewGuid():N}";
+        var dbName = $"bis_{Guid.NewGuid():N}";
 
-        // Создаем физическую БД
-        using var connection = new NpgsqlConnection($"Host={host};Port={port};Username={username};Password={password}");
-        await connection.OpenAsync();
-
-        using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", connection);
-        await cmd.ExecuteNonQueryAsync();
-
-        // Создаем структуру БД
-        var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
-        var dbContext = new AppDbContext(connectionString);
-        await dbContext.Database.EnsureCreatedAsync();
-
-        // Создаем запись в мастер-БД
-        var infoBase = new InfoBase
+        try
         {
-            Id = Guid.NewGuid(),
-            Name = name,
-            Type = type,
-            Host = host,
-            Port = port,
-            DatabaseName = dbName,
-            Username = username,
-            Password = password,
-            CreatedAt = DateTime.Now,
-            IsActive = false,
-            Version = "1.0"
-        };
+            // Создаем физическую БД
+            using var connection = new NpgsqlConnection($"Host={host};Port={port};Username={username};Password={password}");
+            await connection.OpenAsync();
 
-        _masterContext.InfoBases.Add(infoBase);
-        await _masterContext.SaveChangesAsync();
+            using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", connection);
+            await cmd.ExecuteNonQueryAsync();
 
-        return infoBase;
+            // Создаем структуру БД
+            var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
+            using var dbContext = new AppDbContext(connectionString);
+            await dbContext.Database.EnsureCreatedAsync();
+
+            // Создаем запись в мастер-БД
+            var infoBase = new InfoBase
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                Type = type,
+                Description = name, // Добавляем описание для отображения
+                Host = host,
+                Port = port,
+                DatabaseName = dbName,
+                Username = username,
+                Password = password,
+                CreatedAt = DateTime.UtcNow,
+                IsActive = false,
+                Version = "1.0"
+            };
+
+            _masterContext.InfoBases.Add(infoBase);
+            await _masterContext.SaveChangesAsync();
+
+            return infoBase;
+        }
+        catch (PostgresException ex)
+        {
+            throw new Exception($"Ошибка PostgreSQL: {ex.MessageText}");
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"Ошибка создания: {ex.Message}");
+        }
     }
 
     public async Task<bool> DeleteInfoBaseAsync(Guid id)

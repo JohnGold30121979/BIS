@@ -14,29 +14,32 @@ namespace BIS.ERP.Services
         public AuthService()
         {
             // Инициализация тестовых пользователей
-            _users.Add(new User
+            if (!_users.Any())
             {
-                Id = 1,
-                Login = "admin",
-                FullName = "Администратор",
-                PasswordHash = HashPassword("admin"),
-                Email = "admin@test.com",
-                Role = UserRole.Admin,
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow
-            });
+                _users.Add(new User
+                {
+                    Id = 1,
+                    Login = "admin",
+                    FullName = "Администратор",
+                    PasswordHash = HashPassword("admin"),
+                    Email = "admin@test.com",
+                    Role = UserRole.Admin,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                });
 
-            _users.Add(new User
-            {
-                Id = 2,
-                Login = "user",
-                FullName = "Пользователь",
-                PasswordHash = HashPassword("user"),
-                Email = "user@test.com",
-                Role = UserRole.User,
-                IsActive = true,
-                CreatedAt = DateTime.UtcNow
-            });
+                _users.Add(new User
+                {
+                    Id = 2,
+                    Login = "user",
+                    FullName = "Пользователь",
+                    PasswordHash = HashPassword("user"),
+                    Email = "user@test.com",
+                    Role = UserRole.User,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
         }
 
         public User? CurrentUser => _currentUser;

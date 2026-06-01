@@ -1,0 +1,76 @@
+﻿<Window x:Class="BIS.ERP.Views.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройка подключения к PostgreSQL"
+        Height="520" Width="550"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+
+    <Border Background="White" CornerRadius="10" Margin="10">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.3"/>
+        </Border.Effect>
+
+        <Grid Margin="25">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Заголовок -->
+            <TextBlock Grid.Row="0" Text="BIS ERP" FontSize="28" FontWeight="Bold" 
+                       Foreground="#2C3E50" HorizontalAlignment="Center" 
+                       Margin="0,0,0,5"/>
+
+            <TextBlock Grid.Row="1" Text="Настройка подключения к PostgreSQL" 
+                       FontSize="14" Foreground="#666" HorizontalAlignment="Center" 
+                       Margin="0,0,0,25"/>
+
+            <!-- Сервер -->
+            <TextBlock Grid.Row="2" Text="Сервер (Host)" Foreground="#333" Margin="0,0,0,5"/>
+            <TextBox x:Name="HostBox" Grid.Row="3" Text="localhost" Height="35" 
+                     Padding="10,5" Margin="0,0,0,15"/>
+
+            <!-- Порт -->
+            <TextBlock Grid.Row="4" Text="Порт" Foreground="#333" Margin="0,0,0,5"/>
+            <TextBox x:Name="PortBox" Grid.Row="5" Text="5432" Height="35" 
+                     Padding="10,5" Margin="0,0,0,15"/>
+
+            <!-- Пользователь -->
+            <TextBlock Grid.Row="6" Text="Пользователь" Foreground="#333" Margin="0,0,0,5"/>
+            <TextBox x:Name="UsernameBox" Grid.Row="7" Text="postgres" Height="35" 
+                     Padding="10,5" Margin="0,0,0,15"/>
+
+            <!-- Пароль -->
+            <TextBlock Grid.Row="8" Text="Пароль" Foreground="#333" Margin="0,0,0,5"/>
+            <PasswordBox x:Name="PasswordBox" Grid.Row="9" Height="35" 
+                         Padding="10,5" Margin="0,0,0,20"/>
+
+            <!-- Кнопки -->
+            <Button x:Name="TestButton" Grid.Row="10" Content="Проверить подключение" 
+                    Height="40" Margin="0,5,0,10" Background="#3498DB" 
+                    Foreground="White" Click="OnTestClick"
+                    FontSize="13" FontWeight="SemiBold"/>
+
+            <TextBlock x:Name="TestResultText" Grid.Row="11" Foreground="Green" 
+                       Visibility="Collapsed" Margin="0,0,0,10" 
+                       TextAlignment="Center" TextWrapping="Wrap"/>
+
+            <Button x:Name="SaveButton" Grid.Row="12" Content="Сохранить" Height="40" 
+                    Background="#27AE60" Foreground="White" Click="OnSaveClick"
+                    FontSize="13" FontWeight="SemiBold" Margin="0,5,0,0"/>
+        </Grid>
+    </Border>
+</Window>

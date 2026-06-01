@@ -8,13 +8,20 @@ public class AppDbContext : DbContext
 {
     private readonly string _connectionString;
 
+    // Конструктор по умолчанию
     public AppDbContext() : this(AppSettings.Instance.GetMasterConnectionString())
     {
     }
 
+    // Конструктор со строкой подключения
     public AppDbContext(string connectionString)
     {
         _connectionString = connectionString;
+    }
+
+    // Конструктор с DbContextOptions (для миграций)
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
     }
 
     public DbSet<InfoBase> InfoBases { get; set; }
@@ -26,7 +33,10 @@ public class AppDbContext : DbContext
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        optionsBuilder.UseNpgsql(_connectionString);
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseNpgsql(_connectionString);
+        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

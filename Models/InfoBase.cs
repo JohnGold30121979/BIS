@@ -1,7 +1,6 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using BIS.ERP.Services;
 
 namespace BIS.ERP.Models
 {
@@ -22,21 +21,23 @@ namespace BIS.ERP.Models
 
         // Параметры подключения к PostgreSQL
         [MaxLength(100)]
-        public string Host { get; set; } = AppSettings.Instance.Host;
+        public string Host { get; set; } = "localhost";
 
-        public int Port { get; set; } = AppSettings.Instance.Port;
+        public int Port { get; set; } = 5432;
 
         [MaxLength(100)]
         public string DatabaseName { get; set; } = string.Empty;
 
         [MaxLength(50)]
-        public string Username { get; set; } = AppSettings.Instance.Username;
+        public string Username { get; set; } = "postgres";
 
         [MaxLength(100)]
-        public string Password { get; set; } = AppSettings.Instance.Password;
+        public string Password { get; set; } = string.Empty;
 
-        public DateTime CreatedAt { get; set; } = DateTime.Now;
-        public DateTime? UpdatedAt { get; set; }
+        // Используем DateTime.UtcNow вместо DateTime.Now
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+       // public DateTime? UpdatedAt { get; set; }
 
         public bool IsActive { get; set; }
 
@@ -53,5 +54,9 @@ namespace BIS.ERP.Models
 
         [NotMapped]
         public string TypeName => string.IsNullOrEmpty(Type) ? "Универсальная" : Type;
+
+        // Отображаемое имя (без хэша)
+        [NotMapped]
+        public string DisplayName => string.IsNullOrEmpty(Description) ? Name : $"{Name} ({Description})";
     }
 }

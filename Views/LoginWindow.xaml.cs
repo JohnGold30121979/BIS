@@ -6,12 +6,9 @@ namespace BIS.ERP.Views
 {
     public partial class LoginWindow : Window
     {
-        private readonly IAuthService _authService;
-
         public LoginWindow()
         {
             InitializeComponent();
-            _authService = new AuthService();
         }
 
         private async void OnLoginClick(object sender, RoutedEventArgs e)
@@ -36,38 +33,12 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var result = await _authService.LoginAsync(login, password);
+                var result = await ServiceLocator.AuthService.LoginAsync(login, password);
 
                 if (result.Success && result.User != null)
                 {
-                    // Открываем окно выбора режима
-                    var modeWindow = new ModeSelectionWindow(result.User);
-                    modeWindow.Owner = this;
-                    modeWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-
-                    var modeResult = modeWindow.ShowDialog();
-
-                    if (modeResult == true)
-                    {
-                        if (modeWindow.IsConfigMode)
-                        {
-                            // Открываем конфигуратор
-                            var configWindow = new ConfiguratorWindow();
-                            configWindow.Show();
-                        }
-                        else
-                        {
-                            // Открываем рабочий режим
-                            var workWindow = new MainWorkWindow(_authService);
-                            workWindow.Show();
-                        }
-
-                        Close();
-                    }
-                    else
-                    {
-                        LoginButton.IsEnabled = true;
-                    }
+                    DialogResult = true;
+                    Close();
                 }
                 else
                 {
@@ -87,18 +58,12 @@ namespace BIS.ERP.Views
             var registerWindow = new RegisterWindow();
             registerWindow.Owner = this;
             registerWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-
-            if (registerWindow.ShowDialog() == true)
-            {
-                MessageBox.Show("Регистрация успешна! Теперь вы можете войти.",
-                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
-                LoginBox.Clear();
-                PasswordBox.Clear();
-            }
+            registerWindow.ShowDialog();
         }
 
         private void OnExitClick(object sender, RoutedEventArgs e)
         {
+            DialogResult = false;
             Close();
         }
 
@@ -106,6 +71,7 @@ namespace BIS.ERP.Views
         {
             ErrorText.Text = message;
             ErrorText.Visibility = Visibility.Visible;
+            LoginButton.IsEnabled = true;
         }
     }
 }
