@@ -1,0 +1,72 @@
+﻿<UserControl x:Class="BIS.ERP.Views.InfoBasesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="White" Padding="15" Margin="0,0,0,15">
+            <StackPanel>
+                <TextBlock Text="Информационные базы" FontSize="22" FontWeight="Bold"/>
+                <TextBlock Text="Управление базами данных предприятия" Foreground="#666" Margin="0,5,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1">
+            <StackPanel Margin="0,0,0,20">
+                <Button x:Name="CreateButton" Content="+ Создать информационную базу" 
+                        Width="200" Height="40" Margin="0,0,0,15" Click="OnCreateClick"
+                        Background="#2C3E50" Foreground="White" Cursor="Hand"/>
+
+                <ProgressBar x:Name="LoadingProgress" IsIndeterminate="True" Height="4" 
+                             Margin="0,0,0,10" Visibility="Collapsed"/>
+
+                <TextBlock x:Name="EmptyText" Text="Нет информационных баз. Создайте первую!" 
+                           Foreground="#666" HorizontalAlignment="Center" Margin="0,50,0,0"
+                           Visibility="Collapsed"/>
+
+                <ItemsControl x:Name="InfoBasesList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="White" CornerRadius="8" Padding="15" Margin="0,0,0,10"
+                                    BorderBrush="{Binding IsActive, Converter={StaticResource ActiveToBorderConverter}}"
+                                    BorderThickness="2">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border Grid.Column="0" Width="50" Height="50" CornerRadius="25" 
+                                            Background="{Binding IconColor}" Margin="0,0,15,0">
+                                        <TextBlock Text="{Binding Icon}" FontSize="24" 
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold"/>
+                                        <TextBlock Text="{Binding TypeName}" Foreground="#666" FontSize="12"/>
+                                        <TextBlock Text="{Binding CreatedAt, StringFormat=Created: dd.MM.yyyy HH:mm}" 
+                                                   Foreground="#999" FontSize="11"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Button Content="Выбрать" Width="80" Click="OnSelectClick" 
+                                                Tag="{Binding}" Background="#2C3E50" Foreground="White"/>
+                                        <Button Content="Удалить" Width="80" Click="OnDeleteClick" 
+                                                Tag="{Binding}" Background="#E74C3C" Foreground="White"
+                                                Margin="5,0,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

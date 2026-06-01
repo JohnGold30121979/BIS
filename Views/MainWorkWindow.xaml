@@ -1,0 +1,124 @@
+﻿<Window x:Class="BIS.ERP.MainWorkWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BIS ERP - Рабочий режим"
+        Height="720" Width="1280"
+        WindowStartupLocation="CenterScreen"
+        WindowState="Maximized">
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="250"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Левая панель -->
+        <Border Grid.Column="0" Background="#2C3E50">
+            <DockPanel>
+                <!-- Шапка -->
+                <Border DockPanel.Dock="Top" Background="#1A252F" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="BIS ERP" FontSize="24" FontWeight="Bold" 
+                                   Foreground="White" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
+                                   FontSize="11" Foreground="#7F8C8D" 
+                                   HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Динамическое меню -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="ModulesMenu" Margin="0,10">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button x:Name="ModuleButton" 
+                                        Click="OnModuleClick"
+                                        Tag="{Binding}"
+                                        Height="45" Margin="5,2" Cursor="Hand"
+                                        Background="Transparent" Foreground="White" 
+                                        FontSize="14" HorizontalAlignment="Stretch">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}" 
+                                                    CornerRadius="5" Padding="15,10">
+                                                <ContentPresenter HorizontalAlignment="Left" 
+                                                                  VerticalAlignment="Center"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#34495E"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Icon}" FontSize="16" Margin="0,0,10,0"/>
+                                        <TextBlock Text="{Binding Name}" FontSize="14"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <Border BorderBrush="#34495E" BorderThickness="0,1,0,0" Margin="0,10,0,0"/>
+
+                <!-- Нижнее меню -->
+                <StackPanel DockPanel.Dock="Bottom" Margin="10">
+                    <Button x:Name="ProfileButton" Click="OnProfileClick" 
+                            Height="45" Margin="5,2" Cursor="Hand"
+                            Background="Transparent" Foreground="White" 
+                            FontSize="14" HorizontalAlignment="Stretch">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" 
+                                        CornerRadius="5" Padding="15,10">
+                                    <ContentPresenter HorizontalAlignment="Left" 
+                                                      VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#34495E"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="👤" FontSize="16" Margin="0,0,10,0"/>
+                            <TextBlock Text="Профиль" FontSize="14"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button x:Name="LogoutButton" Click="OnLogoutClick" 
+                            Height="45" Margin="5,2" Cursor="Hand"
+                            Background="Transparent" Foreground="#E74C3C" 
+                            FontSize="14" HorizontalAlignment="Stretch">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}" 
+                                        CornerRadius="5" Padding="15,10">
+                                    <ContentPresenter HorizontalAlignment="Left" 
+                                                      VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#442222"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🚪" FontSize="16" Margin="0,0,10,0"/>
+                            <TextBlock Text="Выход" FontSize="14"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Правая панель - контент -->
+        <Border Grid.Column="1" Background="#F5F6FA">
+            <ContentControl x:Name="ContentArea" Margin="20"/>
+        </Border>
+    </Grid>
+</Window>

@@ -1,0 +1,89 @@
+﻿<Window x:Class="BIS.ERP.Views.CreateCatalogDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Создание справочника"
+        Height="600" Width="550"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+
+    <Border Background="White" CornerRadius="10" Padding="20">
+        <StackPanel>
+            <TextBlock Text="➕ Создание нового справочника" FontSize="20" FontWeight="Bold" 
+                       Margin="0,0,0,20" Foreground="#2C3E50"/>
+
+            <!-- Основная информация -->
+            <TextBlock Text="Наименование справочника" Foreground="#333" Margin="0,0,0,5"/>
+            <TextBox x:Name="NameBox" Height="35" Padding="10" Margin="0,0,0,15"/>
+
+            <TextBlock Text="Описание" Foreground="#333" Margin="0,0,0,5"/>
+            <TextBox x:Name="DescriptionBox" Height="60" Padding="10" 
+                     TextWrapping="Wrap" AcceptsReturn="True" Margin="0,0,0,15"/>
+
+            <TextBlock Text="Иконка" Foreground="#333" Margin="0,0,0,5"/>
+            <ComboBox x:Name="IconCombo" Height="35" Margin="0,0,0,15">
+                <ComboBoxItem Content="👥 Сотрудники" Tag="👥"/>
+                <ComboBoxItem Content="📦 Материалы" Tag="📦"/>
+                <ComboBoxItem Content="⚙️ Основные средства" Tag="⚙️"/>
+                <ComboBoxItem Content="🏢 Подразделения" Tag="🏢"/>
+                <ComboBoxItem Content="🤝 Контрагенты" Tag="🤝"/>
+                <ComboBoxItem Content="💰 Банки" Tag="💰"/>
+                <ComboBoxItem Content="🚗 Транспорт" Tag="🚗"/>
+            </ComboBox>
+
+            <!-- Поля справочника -->
+            <TextBlock Text="Реквизиты справочника" FontSize="14" FontWeight="Bold" 
+                       Margin="0,15,0,10"/>
+
+            <ScrollViewer MaxHeight="200">
+                <ItemsControl x:Name="FieldsList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,2" Background="#F8F9FA" CornerRadius="5" Padding="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="100"/>
+                                        <ColumnDefinition Width="80"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBox x:Name="FieldNameBox" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" 
+                                             Grid.Column="0" Margin="0,0,5,0" Height="30"/>
+
+                                    <ComboBox x:Name="FieldTypeCombo" Grid.Column="1" Height="30" Margin="5,0"
+                                              SelectedItem="{Binding Type}">
+                                        <ComboBoxItem Content="Строка" Tag="String"/>
+                                        <ComboBoxItem Content="Число" Tag="Int"/>
+                                        <ComboBoxItem Content="Дробное" Tag="Decimal"/>
+                                        <ComboBoxItem Content="Дата" Tag="DateTime"/>
+                                        <ComboBoxItem Content="Логический" Tag="Bool"/>
+                                    </ComboBox>
+
+                                    <CheckBox x:Name="RequiredCheck" Content="Обязат." Grid.Column="2" 
+                                              VerticalAlignment="Center" Margin="10,0"/>
+
+                                    <Button Content="❌" Grid.Column="3" Width="30" Height="30"
+                                            Background="Transparent" Click="RemoveField_Click"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <Button x:Name="AddFieldButton" Content="+ Добавить реквизит" 
+                    Background="#3498DB" Foreground="White" Height="35" Margin="0,10"
+                    Click="OnAddFieldClick"/>
+
+            <Border Height="1" Background="#E0E0E0" Margin="0,10"/>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+                <Button x:Name="CancelButton" Content="Отмена" Width="90" Height="35" 
+                        Margin="0,0,10,0" Click="OnCancelClick"/>
+                <Button x:Name="CreateButton" Content="Создать" Width="90" Height="35" 
+                        Background="#27AE60" Foreground="White" Click="OnCreateClick"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>
