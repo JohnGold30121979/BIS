@@ -19,7 +19,7 @@ namespace BIS.ERP.Models
         public string TableName { get; set; } = string.Empty;
 
         [Required]
-        [MaxLength(20)]
+        [MaxLength(200)]
         public string ObjectType { get; set; } = string.Empty;
 
         [MaxLength(200)]

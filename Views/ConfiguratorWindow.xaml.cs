@@ -87,6 +87,14 @@ namespace BIS.ERP.Views
                         Tag = catalog,
                         Foreground = Brushes.White
                     };
+
+                    // Контекстное меню для справочника
+                    var contextMenu = new ContextMenu();
+                    var deleteMenuItem = new MenuItem { Header = "🗑️ Удалить справочник", Foreground = Brushes.Red };
+                    deleteMenuItem.Click += async (s, e) => await DeleteCatalog(catalog);
+                    contextMenu.Items.Add(deleteMenuItem);
+                    catalogItem.ContextMenu = contextMenu;
+
                     catalogItem.Selected += (s, e) =>
                     {
                         _selectedCatalog = catalog;
@@ -204,6 +212,7 @@ namespace BIS.ERP.Views
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Добавляем колонку для кнопки удаления
 
             var icon = new TextBlock
             {
@@ -238,18 +247,32 @@ namespace BIS.ERP.Views
             var editButton = new Button
             {
                 Content = "✏️ Редактировать",
-                Width = 100,
+                Width = 110,
                 Height = 35,
-                Margin = new Thickness(5, 0, 0, 0),
+                Margin = new Thickness(5, 0, 5, 0),
                 Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
                 Foreground = Brushes.White
             };
             editButton.Click += (s, e) => ShowCatalogEditor(catalog);
             Grid.SetColumn(editButton, 2);
 
+            // Кнопка удаления
+            var deleteButton = new Button
+            {
+                Content = "🗑️ Удалить",
+                Width = 90,
+                Height = 35,
+                Margin = new Thickness(0, 0, 5, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#E74C3C"),
+                Foreground = Brushes.White
+            };
+            deleteButton.Click += async (s, e) => await DeleteCatalog(catalog);
+            Grid.SetColumn(deleteButton, 3);
+
             grid.Children.Add(icon);
             grid.Children.Add(infoStack);
             grid.Children.Add(editButton);
+            grid.Children.Add(deleteButton);
             card.Child = grid;
 
             return card;
@@ -296,24 +319,91 @@ namespace BIS.ERP.Views
                 fieldGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
                 var fieldName = new TextBox { Text = field.Name, Height = 25, Margin = new Thickness(5) };
+                fieldName.TextChanged += (s, e) =>
+                {
+                    field.Name = fieldName.Text;
+                    field.DbColumnName = fieldName.Text.ToLower().Replace(" ", "_");
+                };
                 fieldGrid.Children.Add(fieldName);
                 Grid.SetColumn(fieldName, 0);
 
-                var fieldType = new TextBlock { Text = field.FieldType, Height = 25, Margin = new Thickness(5), VerticalAlignment = VerticalAlignment.Center };
+                var fieldType = new ComboBox { Height = 25, Margin = new Thickness(5) };
+                var types = new[] { "String", "Int", "Decimal", "DateTime", "Bool" };
+                foreach (var t in types)
+                {
+                    fieldType.Items.Add(new ComboBoxItem { Content = GetTypeDisplayName(t), Tag = t });
+                }
+                fieldType.SelectedIndex = Math.Max(0, Array.IndexOf(types, field.FieldType));
+                fieldType.SelectionChanged += (s, e) =>
+                {
+                    var selected = fieldType.SelectedItem as ComboBoxItem;
+                    field.FieldType = selected?.Tag?.ToString() ?? "String";
+                };
                 fieldGrid.Children.Add(fieldType);
                 Grid.SetColumn(fieldType, 1);
+
+                var removeFieldButton = new Button
+                {
+                    Content = "❌",
+                    Width = 25,
+                    Height = 25,
+                    Margin = new Thickness(5),
+                    Background = Brushes.Transparent
+                };
+                removeFieldButton.Click += (s, e) =>
+                {
+                    var result = MessageBox.Show($"Удалить поле '{field.Name}'?", "Подтверждение",
+                        MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        catalog.Fields.Remove(field);
+                        fieldsList.Children.Remove(fieldPanel);
+                    }
+                };
+                fieldGrid.Children.Add(removeFieldButton);
+                Grid.SetColumn(removeFieldButton, 2);
 
                 fieldPanel.Child = fieldGrid;
                 fieldsList.Children.Add(fieldPanel);
             }
             mainPanel.Children.Add(fieldsList);
 
-            // Кнопка сохранения
+            // Кнопка добавления поля
+            var addFieldButton = new Button
+            {
+                Content = "+ Добавить поле",
+                Height = 35,
+                Margin = new Thickness(0, 10, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#27AE60"),
+                Foreground = Brushes.White
+            };
+            addFieldButton.Click += (s, e) =>
+            {
+                var newField = new MetadataField
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Новое поле",
+                    DbColumnName = "new_field",
+                    FieldType = "String",
+                    Order = catalog.Fields.Count + 1,
+                    MetadataObjectId = catalog.Id
+                };
+                catalog.Fields.Add(newField);
+
+                // Перестраиваем редактор
+                ShowCatalogEditor(catalog);
+            };
+            mainPanel.Children.Add(addFieldButton);
+
+            // Кнопки сохранения и удаления
+            var buttonsPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
+
             var saveButton = new Button
             {
                 Content = "💾 Сохранить изменения",
                 Height = 40,
-                Margin = new Thickness(0, 20, 0, 0),
+                Width = 140,
+                Margin = new Thickness(0, 0, 10, 0),
                 Background = (Brush)new BrushConverter().ConvertFrom("#27AE60"),
                 Foreground = Brushes.White
             };
@@ -323,9 +413,77 @@ namespace BIS.ERP.Views
                 catalog.Description = descBox.Text;
                 await SaveCatalog(catalog);
             };
-            mainPanel.Children.Add(saveButton);
+
+            var deleteButton = new Button
+            {
+                Content = "🗑️ Удалить справочник",
+                Height = 40,
+                Width = 140,
+                Background = (Brush)new BrushConverter().ConvertFrom("#E74C3C"),
+                Foreground = Brushes.White
+            };
+            deleteButton.Click += async (s, e) => await DeleteCatalog(catalog);
+
+            buttonsPanel.Children.Add(saveButton);
+            buttonsPanel.Children.Add(deleteButton);
+            mainPanel.Children.Add(buttonsPanel);
 
             PropertiesPanel.Children.Add(mainPanel);
+        }
+
+        private string GetTypeDisplayName(string type)
+        {
+            return type switch
+            {
+                "String" => "Строка",
+                "Int" => "Число",
+                "Decimal" => "Дробное",
+                "DateTime" => "Дата",
+                "Bool" => "Логический",
+                _ => type
+            };
+        }
+
+        private async Task DeleteCatalog(MetadataObject catalog)
+        {
+            var result = MessageBox.Show(
+                $"Удалить справочник '{catalog.Name}'?\n\n" +
+                "ВНИМАНИЕ! Это действие удалит:\n" +
+                "✓ Все данные справочника\n" +
+                "✓ Структуру таблицы\n" +
+                "✓ Метаданные справочника\n\n" +
+                "Восстановление будет невозможно!",
+                "Подтверждение удаления",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+
+                    await _metadataService.DeleteCatalogAsync(catalog.Id);
+
+                    MessageBox.Show($"Справочник '{catalog.Name}' успешно удален!",
+                        "Удаление выполнено",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    await LoadMetadata();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка удаления: {ex.Message}",
+                        "Ошибка",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            }
         }
 
         private async Task SaveCatalog(MetadataObject catalog)

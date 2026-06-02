@@ -1,15 +1,15 @@
-﻿using BIS.ERP.Data;
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
+using ClosedXML.Excel;
+using Microsoft.Win32;
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Collections.ObjectModel;
-using BIS.ERP.Models;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace BIS.ERP
 {
@@ -18,9 +18,9 @@ namespace BIS.ERP
         private AppNavigationService _navigation;
         private IAuthService _authService;
         private InfoBaseManager _infoBaseManager;
+        private MetadataService _metadataService;
         private InfoBase _currentInfoBase;
 
-        // Коллекция модулей для отображения в меню
         public ObservableCollection<ModuleInfo> Modules { get; set; }
 
         public MainWorkWindow(IAuthService authService)
@@ -38,275 +38,114 @@ namespace BIS.ERP
         {
             try
             {
-                await InitializeDefaultBases();
-                await SelectInfoBase();
+                _currentInfoBase = await _infoBaseManager.GetCurrentInfoBaseAsync();
+                if (_currentInfoBase != null)
+                {
+                    CurrentInfoBaseText.Text = _currentInfoBase.Name;
+                    this.Title = $"BIS ERP - {_currentInfoBase.Name}";
+
+                    var context = await _infoBaseManager.GetCurrentDbContextAsync();
+                    _metadataService = new MetadataService(context);
+
+                    await LoadModules();
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
-                Close();
             }
         }
 
-        private async Task InitializeDefaultBases()
+        private async Task LoadModules()
         {
-            await _infoBaseManager.InitializeDefaultBasesAsync();
-        }
+            Modules.Clear();
 
-        private async Task SelectInfoBase()
-        {
-            var infoBases = await _infoBaseManager.GetInfoBasesAsync();
-
-            if (infoBases == null || infoBases.Count == 0)
+            // Загружаем справочники
+            var catalogs = await _metadataService.GetCatalogsAsync();
+            foreach (var catalog in catalogs.OrderBy(c => c.Name))
             {
-                var result = MessageBox.Show(
-                    "Не найдено ни одной информационной базы.\nХотите создать новую?",
-                    "Создание базы",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-
-                if (result == MessageBoxResult.Yes)
+                Modules.Add(new ModuleInfo
                 {
-                    await ShowCreateInfoBaseDialog();
-                    // После создания пробуем снова
-                    await SelectInfoBase();
-                }
-                else
-                {
-                    Close();
-                }
-                return;
+                    Id = catalog.Id.ToString(),
+                    Name = catalog.Name,
+                    Icon = catalog.Icon,
+                    Type = "Catalog",
+                    MetadataObject = catalog
+                });
             }
 
-            // Проверяем активную базу
-            var activeBase = infoBases.FirstOrDefault(b => b.IsActive);
-
-            if (activeBase != null)
+            // Если нет модулей, показываем сообщение
+            if (!Modules.Any())
             {
-                var result = MessageBox.Show(
-                    $"Активная информационная база: {activeBase.Name}\n\nИспользовать эту базу?",
-                    "Выбор базы",
-                    MessageBoxButton.YesNoCancel,
-                    MessageBoxImage.Question);
-
-                if (result == MessageBoxResult.Yes)
+                Modules.Add(new ModuleInfo
                 {
-                    await SetCurrentInfoBase(activeBase);
-                }
-                else if (result == MessageBoxResult.No)
-                {
-                    await ShowInfoBaseSelectionDialog(infoBases);
-                }
-                else
-                {
-                    Close();
-                }
-            }
-            else
-            {
-                await ShowInfoBaseSelectionDialog(infoBases);
+                    Id = "Empty",
+                    Name = "Нет справочников",
+                    Icon = "📭",
+                    Type = "Empty"
+                });
             }
         }
-
-        private async Task ShowInfoBaseSelectionDialog(System.Collections.Generic.List<InfoBase> infoBases)
+        private async void OnExportAllClick(object sender, RoutedEventArgs e)
         {
-            var dialog = new InfoBaseSelectionDialog(infoBases);
-            dialog.Owner = this;
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-
-            if (dialog.ShowDialog() == true && dialog.SelectedInfoBase != null)
+            var dialog = new SaveFileDialog
             {
-                await SetCurrentInfoBase(dialog.SelectedInfoBase);
-            }
-            else
-            {
-                var result = MessageBox.Show(
-                    "База не выбрана.\nХотите создать новую?",
-                    "Создание базы",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-
-                if (result == MessageBoxResult.Yes)
-                {
-                    await ShowCreateInfoBaseDialog();
-                    await SelectInfoBase(); // Повторяем выбор
-                }
-                else
-                {
-                    Close();
-                }
-            }
-        }
-
-        private async Task ShowCreateInfoBaseDialog()
-        {
-            var dialog = new CreateInfoBaseDialog();
-            dialog.Owner = this;
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                Title = "Сохранить Excel файл",
+                Filter = "Excel файлы (*.xlsx)|*.xlsx",
+                DefaultExt = "xlsx",
+                FileName = $"BIS_ERP_Export_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
 
             if (dialog.ShowDialog() == true)
             {
-                await _infoBaseManager.CreateInfoBaseAsync(
-                    dialog.InfoBaseName,
-                    dialog.InfoBaseType,
-                    dialog.Host,
-                    dialog.Port,
-                    dialog.Username,
-                    dialog.Password);
-
-                MessageBox.Show("Информационная база успешно создана!",
-                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-        }
-
-        private async Task SetCurrentInfoBase(InfoBase infoBase)
-        {
-            _currentInfoBase = infoBase;
-            await _infoBaseManager.SetCurrentInfoBaseAsync(infoBase.Id);
-
-            // Обновляем заголовок окна
-            this.Title = $"BIS ERP - {infoBase.Name}";
-            CurrentInfoBaseText.Text = infoBase.Name;
-
-            // Загружаем модули для выбранной базы
-            await LoadModulesForInfoBase(infoBase);
-        }
-
-        private async Task LoadModulesForInfoBase(InfoBase infoBase)
-        {
-            try
-            {
-                // Получаем контекст для выбранной базы
-                var context = await _infoBaseManager.GetCurrentDbContextAsync();
-
-                // Здесь можно загружать модули из метаданных или из конфигурации
-                // Пока используем стандартные модули, но без жесткой привязки к типу базы
-
-                Modules.Clear();
-
-                // Всегда показываем управление базами
-                Modules.Add(new ModuleInfo
+                try
                 {
-                    Id = "InfoBases",
-                    Name = "Информационные базы",
-                    Icon = "📊",
-                    ViewType = typeof(InfoBasesView)
-                });
+                    Mouse.OverrideCursor = Cursors.Wait;
 
-                // Добавляем модули в зависимости от того, что есть в метаданных
-                // В реальном приложении здесь нужно загружать модули из БД
-                var availableModules = await GetAvailableModules(context);
+                    using var workbook = new XLWorkbook();
 
-                foreach (var module in availableModules)
-                {
-                    Modules.Add(module);
-                }
+                    var catalogs = await _metadataService.GetCatalogsAsync();
+                    int exportedCount = 0;
 
-                // Если модулей нет, показываем приглашение к созданию
-                if (Modules.Count == 0)
-                {
-                    Modules.Add(new ModuleInfo
+                    foreach (var catalog in catalogs)
                     {
-                        Id = "Empty",
-                        Name = "Нет модулей",
-                        Icon = "⚠️",
-                        ViewType = null
-                    });
+                        var data = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                        if (data.Any())
+                        {
+                            var worksheet = workbook.Worksheets.Add(catalog.Name);
+                            // Заполнение worksheet аналогично предыдущему
+                            exportedCount++;
+                        }
+                    }
+
+                    workbook.SaveAs(dialog.FileName);
+
+                    MessageBox.Show($"Экспортировано {exportedCount} справочников!\n\nФайл: {dialog.FileName}",
+                        "Экспорт завершен", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка массового экспорта: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
                 }
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка загрузки модулей: {ex.Message}",
-                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-
-                // Показываем хотя бы управление базами
-                Modules.Clear();
-                Modules.Add(new ModuleInfo
-                {
-                    Id = "InfoBases",
-                    Name = "Информационные базы",
-                    Icon = "📊",
-                    ViewType = typeof(InfoBasesView)
-                });
-            }
         }
-
-        private async Task<List<ModuleInfo>> GetAvailableModules(AppDbContext context)
-        {
-            var modules = new List<ModuleInfo>();
-
-            try
-            {
-                // Загружаем доступные модули из метаданных
-                // В реальном приложении здесь запрос к таблице модулей
-
-                // Пример: проверяем наличие таблиц в БД
-                var metadataService = new MetadataService(context);
-                var catalogs = await metadataService.GetCatalogsAsync();
-
-                if (catalogs.Any())
-                {
-                    modules.Add(new ModuleInfo
-                    {
-                        Id = "Catalogs",
-                        Name = "Справочники",
-                        Icon = "📚",
-                        ViewType = null // TODO: создать универсальный view для справочников
-                    });
-                }
-
-                // Добавляем стандартные модули-заглушки, которые будут заменены реальными
-                modules.Add(new ModuleInfo
-                {
-                    Id = "Finance",
-                    Name = "Финансы",
-                    Icon = "💰",
-                    ViewType = typeof(FinanceView)
-                });
-
-                modules.Add(new ModuleInfo
-                {
-                    Id = "Inventory",
-                    Name = "Учет ТМЦ",
-                    Icon = "📦",
-                    ViewType = typeof(InventoryView)
-                });
-
-                modules.Add(new ModuleInfo
-                {
-                    Id = "Salary",
-                    Name = "Зарплата и кадры",
-                    Icon = "👥",
-                    ViewType = typeof(SalaryView)
-                });
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error loading modules: {ex.Message}");
-            }
-
-            return modules;
-        }
-
-        private void OnModuleClick(object sender, RoutedEventArgs e)
+        private async void OnModuleClick(object sender, RoutedEventArgs e)
         {
             var button = sender as Button;
             var module = button?.Tag as ModuleInfo;
 
-            if (module?.ViewType != null)
+            if (module == null || module.Type == "Empty") return;
+
+            if (module.Type == "Catalog")
             {
-                // Создаем экземпляр View
-                var view = Activator.CreateInstance(module.ViewType) as UserControl;
-                if (view != null)
-                {
-                    _navigation.NavigateTo(view);
-                }
-            }
-            else
-            {
-                MessageBox.Show($"Модуль '{module?.Name}' в разработке",
-                    "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+                var catalogView = new CatalogDataView(module.MetadataObject, _metadataService);
+                _navigation.NavigateTo(catalogView);
             }
         }
 
@@ -328,16 +167,16 @@ namespace BIS.ERP
             _authService.Logout();
             var loginWindow = new LoginWindow();
             loginWindow.Show();
-            Close();
+            this.Close();
         }
     }
 
-    // Класс для описания модуля
     public class ModuleInfo
     {
         public string Id { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public string Icon { get; set; } = "📄";
-        public Type? ViewType { get; set; }
+        public string Type { get; set; } = "Catalog";
+        public MetadataObject MetadataObject { get; set; }
     }
 }

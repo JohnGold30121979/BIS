@@ -8,17 +8,16 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="250"/>
+            <ColumnDefinition Width="280"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <!-- Левая панель -->
         <Border Grid.Column="0" Background="#2C3E50">
-            <DockPanel>
-                <!-- Шапка -->
-                <Border DockPanel.Dock="Top" Background="#1A252F" Padding="20">
+            <StackPanel>
+                <Border Background="#1A252F" Padding="20">
                     <StackPanel>
-                        <TextBlock Text="BIS ERP" FontSize="24" FontWeight="Bold" 
+                        <TextBlock Text="BIS ERP" FontSize="22" FontWeight="Bold" 
                                    Foreground="White" HorizontalAlignment="Center"/>
                         <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
                                    FontSize="11" Foreground="#7F8C8D" 
@@ -26,15 +25,12 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Динамическое меню -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <ItemsControl x:Name="ModulesMenu" Margin="0,10">
+                    <ItemsControl x:Name="ModulesMenu" Margin="10,10,10,0">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button x:Name="ModuleButton" 
-                                        Click="OnModuleClick"
-                                        Tag="{Binding}"
-                                        Height="45" Margin="5,2" Cursor="Hand"
+                                <Button Click="OnModuleClick" Tag="{Binding}"
+                                        Height="45" Margin="0,2" Cursor="Hand"
                                         Background="Transparent" Foreground="White" 
                                         FontSize="14" HorizontalAlignment="Stretch">
                                     <Button.Template>
@@ -52,7 +48,7 @@
                                         </ControlTemplate>
                                     </Button.Template>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding Icon}" FontSize="16" Margin="0,0,10,0"/>
+                                        <TextBlock Text="{Binding Icon}" FontSize="18" Margin="0,0,10,0"/>
                                         <TextBlock Text="{Binding Name}" FontSize="14"/>
                                     </StackPanel>
                                 </Button>
@@ -61,12 +57,16 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <Border BorderBrush="#34495E" BorderThickness="0,1,0,0" Margin="0,10,0,0"/>
+                <Button x:Name="ExportAllButton" Content="📎 Выгрузить все" 
+                        Width="120" Height="35" Margin="0,0,10,0"
+                        Background="#9B59B6" Foreground="White" Click="OnExportAllClick"/>
 
-                <!-- Нижнее меню -->
-                <StackPanel DockPanel.Dock="Bottom" Margin="10">
+                <Border BorderBrush="#34495E" BorderThickness="0,1,0,0" Margin="10,15,10,0"/>
+
+                <StackPanel Margin="10">
+
                     <Button x:Name="ProfileButton" Click="OnProfileClick" 
-                            Height="45" Margin="5,2" Cursor="Hand"
+                            Height="45" Margin="0,2" Cursor="Hand"
                             Background="Transparent" Foreground="White" 
                             FontSize="14" HorizontalAlignment="Stretch">
                         <Button.Template>
@@ -88,9 +88,11 @@
                             <TextBlock Text="Профиль" FontSize="14"/>
                         </StackPanel>
                     </Button>
+                    
+                    
 
                     <Button x:Name="LogoutButton" Click="OnLogoutClick" 
-                            Height="45" Margin="5,2" Cursor="Hand"
+                            Height="45" Margin="0,2" Cursor="Hand"
                             Background="Transparent" Foreground="#E74C3C" 
                             FontSize="14" HorizontalAlignment="Stretch">
                         <Button.Template>
@@ -113,7 +115,7 @@
                         </StackPanel>
                     </Button>
                 </StackPanel>
-            </DockPanel>
+            </StackPanel>
         </Border>
 
         <!-- Правая панель - контент -->

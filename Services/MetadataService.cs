@@ -311,6 +311,80 @@ namespace BIS.ERP.Services
         }
 
         // === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ СО СПРАВОЧНИКАМИ ===
+        // Получение данных справочника
+        public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
+        {
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.Id == catalogId);
+
+            if (catalog == null) return new List<Dictionary<string, object>>();
+
+            var result = new List<Dictionary<string, object>>();
+            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            await _context.Database.OpenConnectionAsync();
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    row[reader.GetName(i)] = reader.GetValue(i);
+                }
+                result.Add(row);
+            }
+
+            return result;
+        }
+
+        // Добавление записи в справочник
+        public async Task AddCatalogItemAsync(Guid catalogId, Dictionary<string, object> itemData)
+        {
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.Id == catalogId);
+
+            if (catalog == null) throw new Exception("Справочник не найден");
+
+            var columns = new List<string>();
+            var values = new List<string>();
+            var parameters = new Dictionary<string, object>();
+
+            foreach (var field in catalog.Fields.OrderBy(f => f.Order))
+            {
+                if (itemData.ContainsKey(field.Name) && itemData[field.Name] != null)
+                {
+                    columns.Add($"\"{field.DbColumnName}\"");
+                    values.Add($"@{field.DbColumnName}");
+                    parameters[$"@{field.DbColumnName}"] = itemData[field.Name];
+                }
+            }
+
+            columns.Add("\"Id\"");
+            values.Add("@Id");
+            parameters["@Id"] = Guid.NewGuid();
+
+            columns.Add("\"CreatedAt\"");
+            values.Add("@CreatedAt");
+            parameters["@CreatedAt"] = DateTime.UtcNow;
+
+            var sql = $"INSERT INTO \"{catalog.TableName}\" ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            foreach (var param in parameters)
+            {
+                var dbParam = command.CreateParameter();
+                dbParam.ParameterName = param.Key;
+                dbParam.Value = param.Value ?? DBNull.Value;
+                command.Parameters.Add(dbParam);
+            }
+
+            await _context.Database.OpenConnectionAsync();
+            await command.ExecuteNonQueryAsync();
+        }
 
         public async Task SaveCatalogAsync(MetadataObject catalog)
         {
@@ -373,7 +447,7 @@ namespace BIS.ERP.Services
 
         public async Task DeleteCatalogAsync(Guid catalogId)
         {
-            var catalog = await _context.Set<MetadataObject>()
+            var catalog = await _context.MetadataObjects
                 .Include(c => c.Fields)
                 .FirstOrDefaultAsync(c => c.Id == catalogId);
 
@@ -382,14 +456,17 @@ namespace BIS.ERP.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                // Удаляем физическую таблицу
                 await _context.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS \"{catalog.TableName}\" CASCADE;");
 
-                foreach (var field in catalog.Fields)
+                // Удаляем поля
+                foreach (var field in catalog.Fields.ToList())
                 {
-                    _context.Set<MetadataField>().Remove(field);
+                    _context.MetadataFields.Remove(field);
                 }
 
-                _context.Set<MetadataObject>().Remove(catalog);
+                // Удаляем справочник
+                _context.MetadataObjects.Remove(catalog);
                 await _context.SaveChangesAsync();
 
                 await transaction.CommitAsync();
@@ -403,17 +480,19 @@ namespace BIS.ERP.Services
 
         public async Task<MetadataObject> CreateCatalogAsync(string name, string description, string icon, List<FieldInfo> fields)
         {
+            // Имя таблицы только из GUID - гарантированно без кириллицы
+            var tableName = $"catalog_{Guid.NewGuid():N}";
+
             var catalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
                 Name = name,
-                TableName = $"catalog_{name.ToLower().Replace(" ", "_")}_{Guid.NewGuid():N}",
+                TableName = tableName,
                 ObjectType = "Catalog",
                 Description = description,
                 Icon = icon,
                 Order = await GetNextOrderAsync(),
                 IsSystem = false,
-                MetadataConfigId = null, // Явно ставим null
                 Fields = new List<MetadataField>()
             };
 
