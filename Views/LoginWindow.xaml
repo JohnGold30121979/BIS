@@ -60,13 +60,12 @@
                         </Button.Template>
                     </Button>
                 </StackPanel>
-
                 <Button x:Name="ExitButton" Content="Выход" 
                         Width="100" Height="35" Background="Transparent" 
                         Foreground="#7F8C8D" FontSize="12" BorderThickness="0"
-                        Click="OnExitClick" HorizontalAlignment="Center" Cursor="Hand">
+                        Click="OnExitClick" Cursor="Hand">
                     <Button.Template>
-                        <ControlTemplate TargetType="Button">
+                        <ControlTemplate TargetType="{x:Type Button}">
                             <Border Background="{TemplateBinding Background}">
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>

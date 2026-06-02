@@ -20,7 +20,7 @@ namespace BIS.ERP.Models
 
         [Required]
         [MaxLength(20)]
-        public string ObjectType { get; set; } = string.Empty; // Catalog, Document, Report
+        public string ObjectType { get; set; } = string.Empty;
 
         [MaxLength(200)]
         public string Description { get; set; } = string.Empty;
@@ -33,10 +33,11 @@ namespace BIS.ERP.Models
 
         public Guid? ParentId { get; set; }
 
-        public Guid MetadataConfigId { get; set; }
+        // Делаем nullable
+        public Guid? MetadataConfigId { get; set; }
 
         [ForeignKey("MetadataConfigId")]
-        public virtual MetadataConfiguration MetadataConfig { get; set; }
+        public virtual MetadataConfiguration? MetadataConfig { get; set; }
 
         public virtual ICollection<MetadataField> Fields { get; set; } = new List<MetadataField>();
     }

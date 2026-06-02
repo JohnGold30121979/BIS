@@ -346,8 +346,7 @@ namespace BIS.ERP.Views
                 Mouse.OverrideCursor = null;
             }
         }
-
-        // В методе OnCreateCatalogClick
+        
         private async void OnCreateCatalogClick(object sender, RoutedEventArgs e)
         {
             var dialog = new CreateCatalogDialog();
@@ -361,7 +360,6 @@ namespace BIS.ERP.Views
                     var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                     var metadataService = new MetadataService(context);
 
-                    // Теперь типы совпадают - не нужно преобразование!
                     var fieldsList = dialog.Fields.ToList();
 
                     await metadataService.CreateCatalogAsync(
@@ -372,13 +370,18 @@ namespace BIS.ERP.Views
                     );
 
                     await LoadMetadata();
-                    MessageBox.Show($"Справочник '{dialog.CatalogName}' создан!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+
+                    MessageBox.Show($"Справочник \"{dialog.CatalogName}\" успешно создан!",
+                        "Успех",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка: {ex.Message}\n\n{ex.InnerException?.Message}",
+                        "Ошибка",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
                 }
                 finally
                 {

@@ -62,7 +62,7 @@ namespace BIS.ERP.Services
                 Icon = "👥",
                 Order = 1,
                 IsSystem = true,
-                MetadataConfigId = config.Id
+               // MetadataConfigId = config.Id
             };
             employeesCatalog.Fields = GetStandardCatalogFields(employeesCatalog.Id);
             catalogs.Add(employeesCatalog);
@@ -77,7 +77,7 @@ namespace BIS.ERP.Services
                 Icon = "📦",
                 Order = 2,
                 IsSystem = true,
-                MetadataConfigId = config.Id
+               // MetadataConfigId = config.Id
             };
             materialsCatalog.Fields = GetStandardCatalogFields(materialsCatalog.Id);
             catalogs.Add(materialsCatalog);
@@ -401,8 +401,7 @@ namespace BIS.ERP.Services
             }
         }
 
-        // В методе CreateCatalogAsync
-        public async Task<MetadataObject> CreateCatalogAsync(string name, string description, string icon, List<Models.FieldInfo> fields)
+        public async Task<MetadataObject> CreateCatalogAsync(string name, string description, string icon, List<FieldInfo> fields)
         {
             var catalog = new MetadataObject
             {
@@ -414,6 +413,7 @@ namespace BIS.ERP.Services
                 Icon = icon,
                 Order = await GetNextOrderAsync(),
                 IsSystem = false,
+                MetadataConfigId = null, // Явно ставим null
                 Fields = new List<MetadataField>()
             };
 
@@ -447,7 +447,7 @@ namespace BIS.ERP.Services
             {
                 var sqlBuilder = new System.Text.StringBuilder();
 
-                // Экранируем имя таблицы двойными кавычками для сохранения регистра
+                // Создаем таблицу
                 sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
                 sqlBuilder.AppendLine("    \"Id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
 
@@ -455,7 +455,6 @@ namespace BIS.ERP.Services
                 {
                     var sqlType = GetSqlTypeForField(field);
                     var nullable = field.IsRequired ? "NOT NULL" : "";
-                    // Используем двойные кавычки для имен колонок
                     sqlBuilder.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
                 }
 
@@ -463,8 +462,8 @@ namespace BIS.ERP.Services
                 sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
                 sqlBuilder.AppendLine(");");
 
-                // Создаем индексы с правильными именами колонок
-                sqlBuilder.AppendLine($"CREATE INDEX \"IX_{catalog.TableName}_Name\" ON \"{catalog.TableName}\" (\"Name\");");
+                // Убираем создание индекса для колонки "Name" - её может не быть
+                // sqlBuilder.AppendLine($"CREATE INDEX \"IX_{catalog.TableName}_Name\" ON \"{catalog.TableName}\" (\"Name\");");
 
                 await _context.Database.ExecuteSqlRawAsync(sqlBuilder.ToString());
             }
@@ -472,7 +471,7 @@ namespace BIS.ERP.Services
             {
                 throw new Exception($"Ошибка создания таблицы: {ex.Message}");
             }
-        }       
+        }
 
         public async Task<List<MetadataObject>> GetCatalogsAsync()
         {
@@ -511,7 +510,8 @@ namespace BIS.ERP.Services
             sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
             sqlBuilder.AppendLine(");");
 
-            sqlBuilder.AppendLine($"CREATE INDEX IF NOT EXISTS idx_{catalog.TableName}_name ON \"{catalog.TableName}\" (\"name\");");
+            // Убираем создание индекса для "name" - он не нужен
+            // sqlBuilder.AppendLine($"CREATE INDEX IF NOT EXISTS idx_{catalog.TableName}_name ON \"{catalog.TableName}\" (\"name\");");
 
             await _context.Database.ExecuteSqlRawAsync(sqlBuilder.ToString());
         }
