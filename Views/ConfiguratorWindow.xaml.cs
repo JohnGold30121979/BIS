@@ -14,7 +14,9 @@ namespace BIS.ERP.Views
     public partial class ConfiguratorWindow : Window
     {
         private MetadataService _metadataService;
+        private ReportService _reportService;
         private List<MetadataObject> _catalogs;
+        private List<Report> _reports;
         private MetadataObject _selectedCatalog;
         private bool _isLoading = false;
 
@@ -35,8 +37,10 @@ namespace BIS.ERP.Views
 
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 _metadataService = new MetadataService(context);
+                _reportService = new ReportService(context);
 
                 _catalogs = await _metadataService.GetCatalogsAsync();
+                _reports = await _reportService.GetReportsAsync();
 
                 BuildMetadataTree();
 
@@ -131,20 +135,52 @@ namespace BIS.ERP.Views
             };
             documentsItem.Items.Add(emptyDocItem);
 
-            // Отчеты (заглушка)
+            // Отчеты
             var reportsItem = new TreeViewItem
             {
                 Header = "📊 Отчеты",
                 IsExpanded = true,
                 Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
             };
-            var emptyReportItem = new TreeViewItem
+
+            if (_reports != null && _reports.Any())
             {
-                Header = "   (в разработке)",
-                Foreground = Brushes.Gray,
-                IsEnabled = false
-            };
-            reportsItem.Items.Add(emptyReportItem);
+                // В разделе отчетов при создании reportItem
+                foreach (var report in _reports.OrderBy(r => r.Name))
+                {
+                    var reportItem = new TreeViewItem
+                    {
+                        Header = $"{report.Icon} {report.Name}",
+                        Tag = report,
+                        Foreground = Brushes.White
+                    };
+
+                    // Контекстное меню для отчета
+                    var contextMenu = new ContextMenu();
+                    var editMenuItem = new MenuItem { Header = "✏️ Редактировать" };
+                    editMenuItem.Click += (s, e) => ShowReportEditor(report);
+                    contextMenu.Items.Add(editMenuItem);
+
+                    var deleteMenuItem = new MenuItem { Header = "🗑️ Удалить", Foreground = Brushes.Red };
+                    deleteMenuItem.Click += async (s, e) => await DeleteReport(report);
+                    contextMenu.Items.Add(deleteMenuItem);
+
+                    reportItem.ContextMenu = contextMenu;
+                    reportItem.Selected += (s, e) => ShowReportEditor(report);
+
+                    reportsItem.Items.Add(reportItem);
+                }
+            }
+            else
+            {
+                var emptyItem = new TreeViewItem
+                {
+                    Header = "   (нет отчетов)",
+                    Foreground = Brushes.Gray,
+                    IsEnabled = false
+                };
+                reportsItem.Items.Add(emptyItem);
+            }
 
             rootItem.Items.Add(catalogsItem);
             rootItem.Items.Add(documentsItem);
@@ -212,7 +248,7 @@ namespace BIS.ERP.Views
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Добавляем колонку для кнопки удаления
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var icon = new TextBlock
             {
@@ -256,7 +292,6 @@ namespace BIS.ERP.Views
             editButton.Click += (s, e) => ShowCatalogEditor(catalog);
             Grid.SetColumn(editButton, 2);
 
-            // Кнопка удаления
             var deleteButton = new Button
             {
                 Content = "🗑️ Удалить",
@@ -286,7 +321,6 @@ namespace BIS.ERP.Views
 
             var mainPanel = new StackPanel();
 
-            // Основная информация
             var nameLabel = new TextBlock { Text = "Наименование:", FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 5) };
             mainPanel.Children.Add(nameLabel);
 
@@ -299,7 +333,6 @@ namespace BIS.ERP.Views
             var descBox = new TextBox { Text = catalog.Description, Height = 60, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) };
             mainPanel.Children.Add(descBox);
 
-            // Поля справочника
             var fieldsLabel = new TextBlock { Text = "Поля справочника:", FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 10), FontSize = 14 };
             mainPanel.Children.Add(fieldsLabel);
 
@@ -368,7 +401,6 @@ namespace BIS.ERP.Views
             }
             mainPanel.Children.Add(fieldsList);
 
-            // Кнопка добавления поля
             var addFieldButton = new Button
             {
                 Content = "+ Добавить поле",
@@ -389,13 +421,10 @@ namespace BIS.ERP.Views
                     MetadataObjectId = catalog.Id
                 };
                 catalog.Fields.Add(newField);
-
-                // Перестраиваем редактор
                 ShowCatalogEditor(catalog);
             };
             mainPanel.Children.Add(addFieldButton);
 
-            // Кнопки сохранения и удаления
             var buttonsPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
 
             var saveButton = new Button
@@ -462,14 +491,11 @@ namespace BIS.ERP.Views
                 try
                 {
                     Mouse.OverrideCursor = Cursors.Wait;
-
                     await _metadataService.DeleteCatalogAsync(catalog.Id);
-
                     MessageBox.Show($"Справочник '{catalog.Name}' успешно удален!",
                         "Удаление выполнено",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
-
                     await LoadMetadata();
                 }
                 catch (Exception ex)
@@ -504,7 +530,7 @@ namespace BIS.ERP.Views
                 Mouse.OverrideCursor = null;
             }
         }
-        
+
         private async void OnCreateCatalogClick(object sender, RoutedEventArgs e)
         {
             var dialog = new CreateCatalogDialog();
@@ -517,7 +543,6 @@ namespace BIS.ERP.Views
                     Mouse.OverrideCursor = Cursors.Wait;
                     var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                     var metadataService = new MetadataService(context);
-
                     var fieldsList = dialog.Fields.ToList();
 
                     await metadataService.CreateCatalogAsync(
@@ -528,7 +553,6 @@ namespace BIS.ERP.Views
                     );
 
                     await LoadMetadata();
-
                     MessageBox.Show($"Справочник \"{dialog.CatalogName}\" успешно создан!",
                         "Успех",
                         MessageBoxButton.OK,
@@ -548,12 +572,32 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void OnCreateDocumentClick(object sender, RoutedEventArgs e)
+        private async void OnCreateReportClick(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("В разработке", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+            var designer = new ReportDesignerWindow();
+            designer.Owner = this;
+
+            if (designer.ShowDialog() == true)
+            {
+                await LoadMetadata();
+                MessageBox.Show("Отчет успешно создан!", "Успех",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
 
-        private void OnCreateReportClick(object sender, RoutedEventArgs e)
+        private void ShowReportEditor(Report report)
+        {
+            var designer = new ReportDesignerWindow(report);
+            designer.Owner = this;
+            designer.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+            if (designer.ShowDialog() == true)
+            {
+                _ = LoadMetadata();
+            }
+        }
+
+        private void OnCreateDocumentClick(object sender, RoutedEventArgs e)
         {
             MessageBox.Show("В разработке", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
         }
@@ -561,6 +605,8 @@ namespace BIS.ERP.Views
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadMetadata();
+            MessageBox.Show("Метаданные обновлены!", "Информация",
+                MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void OnAboutClick(object sender, RoutedEventArgs e)
@@ -571,6 +617,166 @@ namespace BIS.ERP.Views
         private void OnExitClick(object sender, RoutedEventArgs e)
         {
             Close();
+        }
+
+        private Border CreateReportCard(Report report)
+        {
+            var card = new Border
+            {
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(15),
+                Margin = new Thickness(0, 0, 0, 10),
+                Tag = report,
+                Cursor = Cursors.Hand
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); // Добавляем колонку для кнопки удаления
+
+            var icon = new TextBlock
+            {
+                Text = report.Icon,
+                FontSize = 32,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            Grid.SetColumn(icon, 0);
+
+            var infoStack = new StackPanel();
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = report.Name,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = report.Description,
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"Полей: {report.Fields?.Count ?? 0}",
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            Grid.SetColumn(infoStack, 1);
+
+            var editButton = new Button
+            {
+                Content = "✏️ Редактировать",
+                Width = 110,
+                Height = 35,
+                Margin = new Thickness(5, 0, 5, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White
+            };
+            editButton.Click += (s, e) => ShowReportEditor(report);
+            Grid.SetColumn(editButton, 2);
+
+            // Кнопка удаления отчета
+            var deleteButton = new Button
+            {
+                Content = "🗑️ Удалить",
+                Width = 90,
+                Height = 35,
+                Margin = new Thickness(0, 0, 5, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#E74C3C"),
+                Foreground = Brushes.White
+            };
+            deleteButton.Click += async (s, e) => await DeleteReport(report);
+            Grid.SetColumn(deleteButton, 3);
+
+            grid.Children.Add(icon);
+            grid.Children.Add(infoStack);
+            grid.Children.Add(editButton);
+            grid.Children.Add(deleteButton);
+            card.Child = grid;
+
+            return card;
+        }
+
+        private void OnEditClick(object sender, RoutedEventArgs e)
+        {
+            // Получаем выбранный элемент в дереве
+            var selectedItem = MetadataTree.SelectedItem as TreeViewItem;
+
+            if (selectedItem?.Tag is MetadataObject catalog)
+            {
+                ShowCatalogEditor(catalog);
+            }
+            else if (selectedItem?.Tag is Report report)
+            {
+                ShowReportEditor(report);
+            }
+            else
+            {
+                MessageBox.Show("Выберите объект для редактирования",
+                    "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private async void OnDeleteClick(object sender, RoutedEventArgs e)
+        {
+            // Получаем выбранный элемент в дереве
+            var selectedItem = MetadataTree.SelectedItem as TreeViewItem;
+
+            if (selectedItem?.Tag is MetadataObject catalog)
+            {
+                await DeleteCatalog(catalog);
+            }
+            else if (selectedItem?.Tag is Report report)
+            {
+                await DeleteReport(report);
+            }
+            else
+            {
+                MessageBox.Show("Выберите объект для удаления",
+                    "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private async Task DeleteReport(Report report)
+        {
+            var result = MessageBox.Show(
+                $"Удалить отчет '{report.Name}'?\n\n" +
+                "ВНИМАНИЕ! Это действие удалит отчет без возможности восстановления!",
+                "Подтверждение удаления",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+
+                    await _reportService.DeleteReportAsync(report.Id);
+
+                    MessageBox.Show($"Отчет '{report.Name}' успешно удален!",
+                        "Удаление выполнено",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    await LoadMetadata();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка удаления: {ex.Message}",
+                        "Ошибка",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            }
         }
     }
 }

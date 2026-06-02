@@ -18,18 +18,22 @@ public class AppDbContext : DbContext
         _connectionString = connectionString;
     }
 
-    // DbSet для существующих моделей
+    // Существующие DbSet
     public DbSet<InfoBase> InfoBases { get; set; }
     public DbSet<User> Users { get; set; }
     public DbSet<Transaction> Transactions { get; set; }
     public DbSet<Material> Materials { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<Employee> Employees { get; set; }
-
-    // DbSet для метаданных
     public DbSet<MetadataObject> MetadataObjects { get; set; }
     public DbSet<MetadataField> MetadataFields { get; set; }
     public DbSet<MetadataConfiguration> MetadataConfigurations { get; set; }
+
+    // Новые DbSet для отчетов
+    public DbSet<Report> Reports { get; set; }
+    public DbSet<ReportField> ReportFields { get; set; }
+    public DbSet<ReportFilter> ReportFilters { get; set; }
+    public DbSet<ReportGroup> ReportGroups { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -43,49 +47,28 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Уникальные индексы для существующих моделей
-        modelBuilder.Entity<InfoBase>()
-            .HasIndex(x => x.Name)
-            .IsUnique();
+        // Существующие настройки...
+        modelBuilder.Entity<InfoBase>().HasIndex(x => x.Name).IsUnique();
+        modelBuilder.Entity<User>().HasIndex(x => x.Login).IsUnique();
+        modelBuilder.Entity<Material>().HasIndex(x => x.Code).IsUnique();
+        modelBuilder.Entity<FixedAsset>().HasIndex(x => x.InventoryNumber).IsUnique();
+        modelBuilder.Entity<Employee>().HasIndex(x => x.PersonnelNumber).IsUnique();
 
-        modelBuilder.Entity<User>()
-            .HasIndex(x => x.Login)
-            .IsUnique();
+        // Настройки для метаданных
+        modelBuilder.Entity<MetadataObject>().HasKey(m => m.Id);
+        modelBuilder.Entity<MetadataObject>().HasMany(m => m.Fields).WithOne(f => f.MetadataObject).HasForeignKey(f => f.MetadataObjectId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<MetadataField>().HasKey(f => f.Id);
+        modelBuilder.Entity<MetadataConfiguration>().HasKey(c => c.Id);
 
-        modelBuilder.Entity<Material>()
-            .HasIndex(x => x.Code)
-            .IsUnique();
+        // Настройки для отчетов
+        modelBuilder.Entity<Report>().HasKey(r => r.Id);
+        modelBuilder.Entity<Report>().HasMany(r => r.Fields).WithOne(f => f.Report).HasForeignKey(f => f.ReportId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Report>().HasMany(r => r.Filters).WithOne(f => f.Report).HasForeignKey(f => f.ReportId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Report>().HasMany(r => r.Groups).WithOne(g => g.Report).HasForeignKey(g => g.ReportId).OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<FixedAsset>()
-            .HasIndex(x => x.InventoryNumber)
-            .IsUnique();
-
-        modelBuilder.Entity<Employee>()
-            .HasIndex(x => x.PersonnelNumber)
-            .IsUnique();
-
-        // Настройка для MetadataObject
-        modelBuilder.Entity<MetadataObject>()
-            .HasKey(m => m.Id);
-
-        modelBuilder.Entity<MetadataObject>()
-            .Property(m => m.Name)
-            .IsRequired()
-            .HasMaxLength(100);
-
-        modelBuilder.Entity<MetadataObject>()
-            .HasMany(m => m.Fields)
-            .WithOne(f => f.MetadataObject)
-            .HasForeignKey(f => f.MetadataObjectId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // Настройка для MetadataField
-        modelBuilder.Entity<MetadataField>()
-            .HasKey(f => f.Id);
-
-        // Настройка для MetadataConfiguration
-        modelBuilder.Entity<MetadataConfiguration>()
-            .HasKey(c => c.Id);
+        modelBuilder.Entity<ReportField>().HasKey(f => f.Id);
+        modelBuilder.Entity<ReportFilter>().HasKey(f => f.Id);
+        modelBuilder.Entity<ReportGroup>().HasKey(g => g.Id);
     }
 
     public static string BuildConnectionString(string host, int port, string database, string username, string password)

@@ -1,26 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
+using ClosedXML.Excel;
+using Microsoft.Win32;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
 {
-    public partial class CatalogDataView : UserControl, INotifyPropertyChanged
+    public partial class CatalogDataView : UserControl
     {
         private readonly MetadataObject _catalog;
         private readonly MetadataService _metadataService;
         private DataTable _dataTable;
-        private ObservableCollection<Dictionary<string, object>> _items;
-
-        public event PropertyChangedEventHandler PropertyChanged;
 
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
@@ -46,16 +42,17 @@ namespace BIS.ERP.Views
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
 
                 _dataTable = new DataTable();
+                _dataTable.TableName = _catalog.Name;
 
-                // Добавляем колонки
+                // Добавляем колонки с понятными названиями (русскими)
                 _dataTable.Columns.Add("Id", typeof(Guid));
                 foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
                 {
                     var columnType = GetColumnType(field.FieldType);
-                    _dataTable.Columns.Add(field.Name, columnType);
+                    _dataTable.Columns.Add(field.Name, columnType); // field.Name - русское имя
                 }
-                _dataTable.Columns.Add("CreatedAt", typeof(DateTime));
-                _dataTable.Columns.Add("UpdatedAt", typeof(DateTime));
+                _dataTable.Columns.Add("Дата создания", typeof(DateTime));
+                _dataTable.Columns.Add("Дата изменения", typeof(DateTime));
 
                 // Добавляем строки
                 foreach (var row in data)
@@ -65,14 +62,12 @@ namespace BIS.ERP.Views
 
                     foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
                     {
-                        var columnName = field.Name;
-                        var dbColumnName = field.DbColumnName;
-                        var value = row.ContainsKey(dbColumnName) ? row[dbColumnName] : DBNull.Value;
-                        dataRow[columnName] = value ?? DBNull.Value;
+                        // row содержит ключи с русскими именами (благодаря маппингу в GetCatalogDataAsync)
+                        dataRow[field.Name] = row.ContainsKey(field.Name) ? row[field.Name] : DBNull.Value;
                     }
 
-                    dataRow["CreatedAt"] = row.ContainsKey("CreatedAt") ? row["CreatedAt"] : DateTime.Now;
-                    dataRow["UpdatedAt"] = row.ContainsKey("UpdatedAt") ? row["UpdatedAt"] : DateTime.Now;
+                    dataRow["Дата создания"] = row.ContainsKey("CreatedAt") ? row["CreatedAt"] : DateTime.Now;
+                    dataRow["Дата изменения"] = row.ContainsKey("UpdatedAt") ? row["UpdatedAt"] : DateTime.Now;
 
                     _dataTable.Rows.Add(dataRow);
                 }
@@ -86,7 +81,7 @@ namespace BIS.ERP.Views
                     {
                         column.Visibility = Visibility.Collapsed;
                     }
-                    else if (column.Header?.ToString() == "CreatedAt" || column.Header?.ToString() == "UpdatedAt")
+                    else if (column.Header?.ToString() == "Дата создания" || column.Header?.ToString() == "Дата изменения")
                     {
                         column.Width = 150;
                     }
@@ -96,13 +91,13 @@ namespace BIS.ERP.Views
                     }
                 }
 
-                StatusText.Text = $"Загружено записей: {_dataTable.Rows.Count}";
+                StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка загрузки данных: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
-                StatusText.Text = "Ошибка загрузки";
+                StatusText.Text = "❌ Ошибка загрузки";
             }
         }
 
@@ -127,7 +122,7 @@ namespace BIS.ERP.Views
             {
                 try
                 {
-                    StatusText.Text = "Сохранение...";
+                    StatusText.Text = "💾 Сохранение...";
 
                     await _metadataService.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
                     await LoadData();
@@ -142,7 +137,7 @@ namespace BIS.ERP.Views
                 }
                 finally
                 {
-                    StatusText.Text = "Готово";
+                    StatusText.Text = "✅ Готово";
                 }
             }
         }
@@ -150,6 +145,77 @@ namespace BIS.ERP.Views
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadData();
+        }
+
+        private async void OnExportClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_dataTable == null || _dataTable.Rows.Count == 0)
+                {
+                    MessageBox.Show("Нет данных для экспорта", "Информация",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var saveDialog = new SaveFileDialog
+                {
+                    Title = "Сохранить Excel файл",
+                    Filter = "Excel файлы (*.xlsx)|*.xlsx",
+                    DefaultExt = "xlsx",
+                    FileName = $"{_catalog.Name}_{DateTime.Now:yyyyMMdd_HHmmss}"
+                };
+
+                if (saveDialog.ShowDialog() == true)
+                {
+                    ProgressText.Text = "⏳ Экспорт...";
+                    StatusText.Text = "Подготовка данных...";
+
+                    await Task.Run(() => ExportToExcel(saveDialog.FileName));
+
+                    ProgressText.Text = "";
+                    StatusText.Text = $"✅ Экспорт завершен! Сохранено: {saveDialog.FileName}";
+
+                    var result = MessageBox.Show($"Данные успешно экспортированы!\n\nФайл: {saveDialog.FileName}\n\nОткрыть файл?",
+                        "Экспорт завершен", MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = saveDialog.FileName,
+                            UseShellExecute = true
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка экспорта: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                ProgressText.Text = "";
+                StatusText.Text = "❌ Ошибка экспорта";
+            }
+        }
+
+        private void ExportToExcel(string filePath)
+        {
+            using var workbook = new XLWorkbook();
+            var worksheet = workbook.Worksheets.Add(_catalog.Name);
+
+            worksheet.Cell(1, 1).InsertTable(_dataTable);
+
+            var headerRange = worksheet.Range(1, 1, 1, _dataTable.Columns.Count);
+            headerRange.Style.Font.Bold = true;
+            headerRange.Style.Font.FontColor = XLColor.White;
+            headerRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#2C3E50");
+            headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            headerRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            headerRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            worksheet.Columns().AdjustToContents();
+
+            workbook.SaveAs(filePath);
         }
     }
 }

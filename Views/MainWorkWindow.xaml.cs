@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Data;
 
 namespace BIS.ERP
 {
@@ -19,7 +20,9 @@ namespace BIS.ERP
         private IAuthService _authService;
         private InfoBaseManager _infoBaseManager;
         private MetadataService _metadataService;
+        private ReportService _reportService; // Добавляем поле
         private InfoBase _currentInfoBase;
+        private bool _isLoadingReport = false;
 
         public ObservableCollection<ModuleInfo> Modules { get; set; }
 
@@ -32,6 +35,7 @@ namespace BIS.ERP
             Modules = new ObservableCollection<ModuleInfo>();
             ModulesMenu.ItemsSource = Modules;
             this.Loaded += OnLoaded;
+
         }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -46,6 +50,7 @@ namespace BIS.ERP
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
                     _metadataService = new MetadataService(context);
+                    _reportService = new ReportService(context); 
 
                     await LoadModules();
                 }
@@ -75,16 +80,93 @@ namespace BIS.ERP
                 });
             }
 
-            // Если нет модулей, показываем сообщение
+            // Загружаем отчеты
+            var reports = await _reportService.GetReportsAsync();
+            foreach (var report in reports.OrderBy(r => r.Name))
+            {
+                Modules.Add(new ModuleInfo
+                {
+                    Id = report.Id.ToString(),
+                    Name = report.Name,
+                    Icon = report.Icon,
+                    Type = "Report",
+                    Report = report
+                });
+            }
+
             if (!Modules.Any())
             {
                 Modules.Add(new ModuleInfo
                 {
                     Id = "Empty",
-                    Name = "Нет справочников",
+                    Name = "Нет данных",
                     Icon = "📭",
                     Type = "Empty"
                 });
+            }
+        }
+
+        // Обработчик клика по модулю
+        private async void OnModuleClick(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            var module = button?.Tag as ModuleInfo;
+
+            if (module == null || module.Type == "Empty") return;
+
+            if (_isLoadingReport) return;
+
+            if (module.Type == "Catalog" && module.MetadataObject != null)
+            {
+                try
+                {
+                    var catalogView = new CatalogDataView(module.MetadataObject, _metadataService);
+                    _navigation.NavigateTo(catalogView);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            else if (module.Type == "Report" && module.Report != null)
+            {
+                _isLoadingReport = true;
+                Mouse.OverrideCursor = Cursors.Wait;
+
+                try
+                {
+                    System.Diagnostics.Debug.WriteLine($"=== Opening report: {module.Report.Name} ===");
+
+                    var context = await _infoBaseManager.GetCurrentDbContextAsync();
+                    var reportService = new ReportService(context);
+
+                    System.Diagnostics.Debug.WriteLine("Getting report data...");
+                    var data = await reportService.GetReportDataAsync(module.Report);
+
+                    System.Diagnostics.Debug.WriteLine($"Data loaded: {data.Rows.Count} rows, {data.Columns.Count} columns");
+
+                    System.Diagnostics.Debug.WriteLine("Creating preview window...");
+                    var preview = new ReportPreviewWindow(data, module.Report);
+                    preview.Owner = this;
+
+                    System.Diagnostics.Debug.WriteLine("Showing preview window...");
+                    preview.ShowDialog();
+
+                    System.Diagnostics.Debug.WriteLine("Preview window closed");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ERROR: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                    MessageBox.Show($"Ошибка формирования отчета: {ex.Message}\n\n{ex.InnerException?.Message}",
+                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    _isLoadingReport = false;
+                    Mouse.OverrideCursor = null;
+                }
             }
         }
         private async void OnExportAllClick(object sender, RoutedEventArgs e)
@@ -134,20 +216,7 @@ namespace BIS.ERP
                     Mouse.OverrideCursor = null;
                 }
             }
-        }
-        private async void OnModuleClick(object sender, RoutedEventArgs e)
-        {
-            var button = sender as Button;
-            var module = button?.Tag as ModuleInfo;
-
-            if (module == null || module.Type == "Empty") return;
-
-            if (module.Type == "Catalog")
-            {
-                var catalogView = new CatalogDataView(module.MetadataObject, _metadataService);
-                _navigation.NavigateTo(catalogView);
-            }
-        }
+        }       
 
         private void OnProfileClick(object sender, RoutedEventArgs e)
         {
@@ -178,5 +247,6 @@ namespace BIS.ERP
         public string Icon { get; set; } = "📄";
         public string Type { get; set; } = "Catalog";
         public MetadataObject MetadataObject { get; set; }
+        public Report Report { get; set; } // Добавляем поле для отчета
     }
 }

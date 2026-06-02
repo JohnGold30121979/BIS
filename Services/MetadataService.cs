@@ -5,6 +5,7 @@ using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 
 namespace BIS.ERP.Services
@@ -62,7 +63,7 @@ namespace BIS.ERP.Services
                 Icon = "👥",
                 Order = 1,
                 IsSystem = true,
-               // MetadataConfigId = config.Id
+                MetadataConfigId = config.Id
             };
             employeesCatalog.Fields = GetStandardCatalogFields(employeesCatalog.Id);
             catalogs.Add(employeesCatalog);
@@ -77,7 +78,7 @@ namespace BIS.ERP.Services
                 Icon = "📦",
                 Order = 2,
                 IsSystem = true,
-               // MetadataConfigId = config.Id
+                MetadataConfigId = config.Id
             };
             materialsCatalog.Fields = GetStandardCatalogFields(materialsCatalog.Id);
             catalogs.Add(materialsCatalog);
@@ -310,11 +311,11 @@ namespace BIS.ERP.Services
             };
         }
 
-        // === НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ СО СПРАВОЧНИКАМИ ===
         // Получение данных справочника
         public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
         {
             var catalog = await _context.MetadataObjects
+                .Include(c => c.Fields)
                 .FirstOrDefaultAsync(m => m.Id == catalogId);
 
             if (catalog == null) return new List<Dictionary<string, object>>();
@@ -327,16 +328,26 @@ namespace BIS.ERP.Services
             await _context.Database.OpenConnectionAsync();
 
             using var reader = await command.ExecuteReaderAsync();
+
+            // Создаем маппинг DbColumnName -> Name для отображения (латиница -> русское)
+            var fieldMapping = catalog.Fields.ToDictionary(f => f.DbColumnName, f => f.Name);
+            fieldMapping["Id"] = "Id";
+            fieldMapping["CreatedAt"] = "CreatedAt";
+            fieldMapping["UpdatedAt"] = "UpdatedAt";
+
             while (await reader.ReadAsync())
             {
                 var row = new Dictionary<string, object>();
                 for (int i = 0; i < reader.FieldCount; i++)
                 {
-                    row[reader.GetName(i)] = reader.GetValue(i);
+                    var dbName = reader.GetName(i);
+                    var displayName = fieldMapping.ContainsKey(dbName) ? fieldMapping[dbName] : dbName;
+                    row[displayName] = reader.GetValue(i);  // Ключ - русское имя!
                 }
                 result.Add(row);
             }
 
+            await _context.Database.CloseConnectionAsync();
             return result;
         }
 
@@ -344,6 +355,7 @@ namespace BIS.ERP.Services
         public async Task AddCatalogItemAsync(Guid catalogId, Dictionary<string, object> itemData)
         {
             var catalog = await _context.MetadataObjects
+                .Include(c => c.Fields)
                 .FirstOrDefaultAsync(m => m.Id == catalogId);
 
             if (catalog == null) throw new Exception("Справочник не найден");
@@ -352,7 +364,7 @@ namespace BIS.ERP.Services
             var values = new List<string>();
             var parameters = new Dictionary<string, object>();
 
-            foreach (var field in catalog.Fields.OrderBy(f => f.Order))
+            foreach (var field in catalog.Fields)
             {
                 if (itemData.ContainsKey(field.Name) && itemData[field.Name] != null)
                 {
@@ -384,6 +396,7 @@ namespace BIS.ERP.Services
 
             await _context.Database.OpenConnectionAsync();
             await command.ExecuteNonQueryAsync();
+            await _context.Database.CloseConnectionAsync();
         }
 
         public async Task SaveCatalogAsync(MetadataObject catalog)
@@ -456,16 +469,13 @@ namespace BIS.ERP.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // Удаляем физическую таблицу
                 await _context.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS \"{catalog.TableName}\" CASCADE;");
 
-                // Удаляем поля
                 foreach (var field in catalog.Fields.ToList())
                 {
                     _context.MetadataFields.Remove(field);
                 }
 
-                // Удаляем справочник
                 _context.MetadataObjects.Remove(catalog);
                 await _context.SaveChangesAsync();
 
@@ -480,7 +490,6 @@ namespace BIS.ERP.Services
 
         public async Task<MetadataObject> CreateCatalogAsync(string name, string description, string icon, List<FieldInfo> fields)
         {
-            // Имя таблицы только из GUID - гарантированно без кириллицы
             var tableName = $"catalog_{Guid.NewGuid():N}";
 
             var catalog = new MetadataObject
@@ -499,11 +508,13 @@ namespace BIS.ERP.Services
             int order = 1;
             foreach (var field in fields)
             {
+                var dbColumnName = Transliterate(field.Name);
+
                 catalog.Fields.Add(new MetadataField
                 {
                     Id = Guid.NewGuid(),
                     Name = field.Name,
-                    DbColumnName = field.Name.ToLower().Replace(" ", "_"),
+                    DbColumnName = dbColumnName,
                     FieldType = field.Type,
                     IsRequired = field.IsRequired,
                     Order = order++,
@@ -514,19 +525,61 @@ namespace BIS.ERP.Services
             await _context.MetadataObjects.AddAsync(catalog);
             await _context.SaveChangesAsync();
 
-            // Создаем физическую таблицу
             await CreateTableForCatalogAsync(catalog);
 
             return catalog;
+        }
+
+        private string Transliterate(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "field";
+
+            var translitMap = new Dictionary<char, string>
+            {
+                {'а', "a"}, {'б', "b"}, {'в', "v"}, {'г', "g"}, {'д', "d"}, {'е', "e"},
+                {'ё', "yo"}, {'ж', "zh"}, {'з', "z"}, {'и', "i"}, {'й', "y"}, {'к', "k"},
+                {'л', "l"}, {'м', "m"}, {'н', "n"}, {'о', "o"}, {'п', "p"}, {'р', "r"},
+                {'с', "s"}, {'т', "t"}, {'у', "u"}, {'ф', "f"}, {'х', "h"}, {'ц', "ts"},
+                {'ч', "ch"}, {'ш', "sh"}, {'щ', "sch"}, {'ъ', ""}, {'ы', "y"}, {'ь', ""},
+                {'э', "e"}, {'ю', "yu"}, {'я', "ya"},
+                {'А', "a"}, {'Б', "b"}, {'В', "v"}, {'Г', "g"}, {'Д', "d"}, {'Е', "e"},
+                {'Ё', "yo"}, {'Ж', "zh"}, {'З', "z"}, {'И', "i"}, {'Й', "y"}, {'К', "k"},
+                {'Л', "l"}, {'М', "m"}, {'Н', "n"}, {'О', "o"}, {'П', "p"}, {'Р', "r"},
+                {'С', "s"}, {'Т', "t"}, {'У', "u"}, {'Ф', "f"}, {'Х', "h"}, {'Ц', "ts"},
+                {'Ч', "ch"}, {'Ш', "sh"}, {'Щ', "sch"}, {'Ъ', ""}, {'Ы', "y"}, {'Ь', ""},
+                {'Э', "e"}, {'Ю', "yu"}, {'Я', "ya"},
+                {' ', "_"}, {'-', "_"}, {'.', "_"}, {',', "_"}, {'№', "n"}, {'#', "sharp"}
+            };
+
+            var result = new StringBuilder();
+            foreach (char c in text)
+            {
+                if (translitMap.ContainsKey(c))
+                    result.Append(translitMap[c]);
+                else if (char.IsLetterOrDigit(c))
+                    result.Append(char.ToLower(c));
+                else
+                    result.Append('_');
+            }
+
+            var final = result.ToString();
+            while (final.Contains("__"))
+                final = final.Replace("__", "_");
+
+            final = final.Trim('_');
+
+            if (string.IsNullOrEmpty(final))
+                final = "field";
+
+            return final;
         }
 
         private async Task CreateTableForCatalogAsync(MetadataObject catalog)
         {
             try
             {
-                var sqlBuilder = new System.Text.StringBuilder();
+                var sqlBuilder = new StringBuilder();
 
-                // Создаем таблицу
                 sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
                 sqlBuilder.AppendLine("    \"Id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
 
@@ -540,9 +593,6 @@ namespace BIS.ERP.Services
                 sqlBuilder.AppendLine("    \"CreatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
                 sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
                 sqlBuilder.AppendLine(");");
-
-                // Убираем создание индекса для колонки "Name" - её может не быть
-                // sqlBuilder.AppendLine($"CREATE INDEX \"IX_{catalog.TableName}_Name\" ON \"{catalog.TableName}\" (\"Name\");");
 
                 await _context.Database.ExecuteSqlRawAsync(sqlBuilder.ToString());
             }
@@ -572,7 +622,7 @@ namespace BIS.ERP.Services
 
         private async Task UpdateTableStructureAsync(MetadataObject catalog)
         {
-            var sqlBuilder = new System.Text.StringBuilder();
+            var sqlBuilder = new StringBuilder();
 
             sqlBuilder.AppendLine($"DROP TABLE IF EXISTS \"{catalog.TableName}\" CASCADE;");
             sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
@@ -580,7 +630,7 @@ namespace BIS.ERP.Services
 
             foreach (var field in catalog.Fields.OrderBy(f => f.Order))
             {
-                var sqlType = GetFieldSqlType(field);
+                var sqlType = GetSqlTypeForField(field);
                 var nullable = field.IsRequired ? "NOT NULL" : "";
                 sqlBuilder.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
             }
@@ -589,24 +639,9 @@ namespace BIS.ERP.Services
             sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
             sqlBuilder.AppendLine(");");
 
-            // Убираем создание индекса для "name" - он не нужен
-            // sqlBuilder.AppendLine($"CREATE INDEX IF NOT EXISTS idx_{catalog.TableName}_name ON \"{catalog.TableName}\" (\"name\");");
-
             await _context.Database.ExecuteSqlRawAsync(sqlBuilder.ToString());
         }
 
-        private string GetFieldSqlType(MetadataField field)
-        {
-            return field.FieldType switch
-            {
-                "String" => $"VARCHAR({(field.Length > 0 ? field.Length : 255)})",
-                "Int" => "INTEGER",
-                "Decimal" => $"DECIMAL({field.Precision}, {field.Scale})",
-                "DateTime" => "TIMESTAMP",
-                "Bool" => "BOOLEAN",
-                _ => "TEXT"
-            };
-        }
         private string GetSqlTypeForField(MetadataField field)
         {
             return field.FieldType switch
@@ -634,19 +669,19 @@ namespace BIS.ERP.Services
 
         private async Task CreateTableForMetadataObjectAsync(MetadataObject obj)
         {
-            var sqlBuilder = new System.Text.StringBuilder();
+            var sqlBuilder = new StringBuilder();
             sqlBuilder.AppendLine($"CREATE TABLE IF NOT EXISTS \"{obj.TableName}\" (");
-            sqlBuilder.AppendLine("    \"id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
+            sqlBuilder.AppendLine("    \"Id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
 
             foreach (var field in obj.Fields.OrderBy(f => f.Order))
             {
-                var sqlType = GetFieldSqlType(field);
+                var sqlType = GetSqlTypeForField(field);
                 var nullable = field.IsRequired ? "NOT NULL" : "";
                 sqlBuilder.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
             }
 
-            sqlBuilder.AppendLine("    \"created_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
-            sqlBuilder.AppendLine("    \"updated_at\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+            sqlBuilder.AppendLine("    \"CreatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
+            sqlBuilder.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
             sqlBuilder.AppendLine(");");
 
             try

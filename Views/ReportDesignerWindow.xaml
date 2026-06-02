@@ -1,0 +1,270 @@
+﻿<Window x:Class="BIS.ERP.Views.ReportDesignerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Конструктор отчетов"
+        Height="800" Width="1200"
+        WindowStartupLocation="CenterScreen"
+        WindowState="Maximized">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Верхняя панель -->
+        <Border Grid.Row="0" Background="#2C3E50" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="Конструктор отчетов" FontSize="18" FontWeight="Bold" Foreground="White"/>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="PreviewButton" Content="👁️ Предпросмотр" 
+                            Width="100" Height="30" Margin="5"
+                            Background="#3498DB" Foreground="White" Click="OnPreviewClick"/>
+                    <Button x:Name="SaveButton" Content="💾 Сохранить" 
+                            Width="100" Height="30" Margin="5"
+                            Background="#27AE60" Foreground="White" Click="OnSaveClick"/>
+                    <Button x:Name="CancelButton" Content="❌ Отмена" 
+                            Width="80" Height="30" Margin="5"
+                            Background="#95A5A6" Foreground="White" Click="OnCancelClick"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Основное содержимое -->
+        <TabControl Grid.Row="1" Margin="10">
+            <!-- Вкладка: Общие -->
+            <TabItem Header="📋 Общие">
+                <Border Padding="15" Background="White">
+                    <StackPanel>
+                        <TextBlock Text="Название отчета" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBox x:Name="ReportNameBox" Height="35" Margin="0,0,0,15"/>
+
+                        <TextBlock Text="Описание" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <TextBox x:Name="ReportDescBox" Height="60" TextWrapping="Wrap" Margin="0,0,0,15"/>
+
+                        <TextBlock Text="Источник данных" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="DataSourceCombo" Height="35" Margin="0,0,0,15"/>
+
+                        <TextBlock Text="Иконка" FontWeight="Bold" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="IconCombo" Height="35" Margin="0,0,0,15">
+                            <ComboBoxItem>📊</ComboBoxItem>
+                            <ComboBoxItem>📈</ComboBoxItem>
+                            <ComboBoxItem>📉</ComboBoxItem>
+                            <ComboBoxItem>📋</ComboBoxItem>
+                            <ComboBoxItem>📄</ComboBoxItem>
+                        </ComboBox>
+                    </StackPanel>
+                </Border>
+            </TabItem>
+
+            <!-- Вкладка: Поля -->
+            <TabItem Header="📊 Поля">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="250"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Доступные поля -->
+                    <Border Grid.Column="0" Background="#F0F4F8" Margin="0,0,10,0">
+                        <StackPanel Margin="10">
+                            <TextBlock Text="Доступные поля" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <ListBox x:Name="AvailableFields" Height="400"
+                                     MouseDoubleClick="OnFieldDoubleClick"
+                                     PreviewMouseLeftButtonDown="OnFieldMouseDown">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="5" Margin="0,1">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="📋" Margin="0,0,5,0"/>
+                                                <TextBlock Text="{Binding Name}"/>
+                                                <TextBlock Text=" (" Foreground="#666"/>
+                                                <TextBlock Text="{Binding Type}" Foreground="#666"/>
+                                                <TextBlock Text=")" Foreground="#666"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Поля отчета -->
+                    <Border Grid.Column="1" Background="White">
+                        <StackPanel Margin="10">
+                            <TextBlock Text="Поля отчета" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <DataGrid x:Name="ReportFieldsGrid" AutoGenerateColumns="False"
+                                      CanUserAddRows="True" CanUserDeleteRows="True"
+                                      RowHeight="35" MaxHeight="400">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Поле" Binding="{Binding FieldName}" Width="120"/>
+                                    <DataGridTextColumn Header="Отображаемое имя" Binding="{Binding DisplayName}" Width="150"/>
+                                    <DataGridComboBoxColumn Header="Тип агрегации" Width="120"/>
+                                    <DataGridTextColumn Header="Ширина" Binding="{Binding Width}" Width="80"/>
+                                    <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="80"/>
+                                    <DataGridTextColumn Header="Формат" Binding="{Binding Format}" Width="100"/>
+                                    <DataGridComboBoxColumn Header="Выравнивание" Width="100"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <Button x:Name="RemoveFieldButton" Content="🗑️ Удалить выбранное поле" 
+                                    Width="150" Height="30" Margin="0,10"
+                                    Background="#E74C3C" Foreground="White"
+                                    Click="OnRemoveFieldClick"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- Вкладка: Шапка и подвал -->
+            <TabItem Header="📌 Шапка/Подвал">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Шапка -->
+                    <Border Grid.Column="0" Background="#F0F4F8" Margin="0,0,10,0">
+                        <StackPanel Margin="10">
+                            <TextBlock Text="Заголовок отчета" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <TextBox x:Name="ReportTitleBox" Height="35" Margin="0,0,0,10" 
+                                     Text="Название отчета"/>
+
+                            <TextBlock Text="Подзаголовок" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="ReportSubtitleBox" Height="35" Margin="0,0,0,10"/>
+
+                            <TextBlock Text="Логотип/Иконка" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="HeaderLogoBox" Height="35" Margin="0,0,0,10"/>
+
+                            <TextBlock Text="Дополнительный текст" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="HeaderTextBox" Height="60" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                            <CheckBox x:Name="ShowDateCheckBox" Content="Показывать дату" Margin="0,5" IsChecked="True"/>
+                            <CheckBox x:Name="ShowPageNumberCheckBox" Content="Показывать номера страниц" Margin="0,5" IsChecked="True"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Подвал -->
+                    <Border Grid.Column="1" Background="White">
+                        <StackPanel Margin="10">
+                            <TextBlock Text="Подвал отчета" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+
+                            <TextBlock Text="Текст в подвале" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="FooterTextBox" Height="60" TextWrapping="Wrap" Margin="0,0,0,10"
+                                     Text="© BIS ERP - Сформировано в системе"/>
+
+                            <TextBlock Text="Итоговая строка" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="FooterTotalBox" Height="35" Margin="0,0,0,10"/>
+
+                            <TextBlock Text="Подпись" FontWeight="Bold" Margin="0,0,0,5"/>
+                            <TextBox x:Name="FooterSignatureBox" Height="35" Margin="0,0,0,10"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- Вкладка: Настройки -->
+            <TabItem Header="⚙️ Настройки">
+                <Border Padding="15" Background="White">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Ориентация:" VerticalAlignment="Center" Margin="5"/>
+                        <ComboBox x:Name="OrientationCombo" Grid.Row="0" Grid.Column="1" Height="30" Margin="5" SelectedIndex="0">
+                            <ComboBoxItem>Книжная</ComboBoxItem>
+                            <ComboBoxItem>Альбомная</ComboBoxItem>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Шрифт:" VerticalAlignment="Center" Margin="5"/>
+                        <ComboBox x:Name="FontCombo" Grid.Row="1" Grid.Column="1" Height="30" Margin="5" SelectedIndex="0">
+                            <ComboBoxItem>Segoe UI</ComboBoxItem>
+                            <ComboBoxItem>Arial</ComboBoxItem>
+                            <ComboBoxItem>Times New Roman</ComboBoxItem>
+                            <ComboBoxItem>Calibri</ComboBoxItem>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Размер шрифта:" VerticalAlignment="Center" Margin="5"/>
+                        <ComboBox x:Name="FontSizeCombo" Grid.Row="0" Grid.Column="3" Height="30" Margin="5" SelectedIndex="2">
+                            <ComboBoxItem>8</ComboBoxItem>
+                            <ComboBoxItem>9</ComboBoxItem>
+                            <ComboBoxItem>10</ComboBoxItem>
+                            <ComboBoxItem>11</ComboBoxItem>
+                            <ComboBoxItem>12</ComboBoxItem>
+                            <ComboBoxItem>14</ComboBoxItem>
+                        </ComboBox>
+
+                        <CheckBox x:Name="ShowGridLinesCheckBox" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4" 
+                                  Content="Показывать линии сетки" Margin="5" IsChecked="True"/>
+                        <CheckBox x:Name="ShowHeaderCheckBox" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" 
+                                  Content="Показывать заголовок" Margin="5" IsChecked="True"/>
+                        <CheckBox x:Name="ShowFooterCheckBox" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="4" 
+                                  Content="Показывать подвал" Margin="5" IsChecked="True"/>
+                        <CheckBox x:Name="AlternateRowColorCheckBox" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="4" 
+                                  Content="Чередовать цвет строк" Margin="5" IsChecked="True"/>
+                    </Grid>
+                </Border>
+            </TabItem>
+
+            <!-- Вкладка: Фильтры -->
+            <TabItem Header="🔍 Фильтры">
+                <Border Padding="15" Background="White">
+                    <StackPanel>
+                        <TextBlock Text="Условия отбора" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Button x:Name="AddFilterButton" Content="+ Добавить фильтр" 
+                                Width="150" Height="30" Margin="0,0,0,10"
+                                Background="#3498DB" Foreground="White" Click="OnAddFilterClick"/>
+                        <ItemsControl x:Name="FiltersList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#F8F9FA" CornerRadius="5" Padding="10" Margin="0,0,0,10">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <ComboBox x:Name="FilterField" Grid.Column="0" Height="30" Margin="5"
+                                                      ItemsSource="{Binding Fields}" DisplayMemberPath="Name"/>
+                                            <ComboBox x:Name="FilterOp" Grid.Column="1" Height="30" Margin="5" SelectedIndex="0">
+                                                <ComboBoxItem>=</ComboBoxItem>
+                                                <ComboBoxItem>&lt;</ComboBoxItem>
+                                                <ComboBoxItem>&gt;</ComboBoxItem>
+                                                <ComboBoxItem>&lt;=</ComboBoxItem>
+                                                <ComboBoxItem>&gt;=</ComboBoxItem>
+                                                <ComboBoxItem>Like</ComboBoxItem>
+                                            </ComboBox>
+                                            <TextBox x:Name="FilterValue" Grid.Column="2" Height="30" Margin="5" Text="{Binding Value}"/>
+                                            <Button Content="❌" Grid.Column="3" Width="30" Height="30" Margin="5"
+                                                    Background="Transparent" Click="RemoveFilter_Click"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>

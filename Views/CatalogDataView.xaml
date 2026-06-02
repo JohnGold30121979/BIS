@@ -24,6 +24,9 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="ExportButton" Content="📎 Экспорт в Excel" 
+                            Width="120" Height="35" Margin="0,0,10,0"
+                            Background="#9B59B6" Foreground="White" Click="OnExportClick"/>
                     <Button x:Name="AddButton" Content="➕ Добавить" 
                             Width="100" Height="35" Margin="0,0,10,0"
                             Background="#27AE60" Foreground="White" Click="OnAddClick"/>
@@ -56,9 +59,11 @@
 
         <!-- Статус бар -->
         <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="15" Margin="0,20,0,0">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock x:Name="StatusText" Text="Готово" Foreground="#666" FontSize="12"/>
-            </StackPanel>
+            <Grid>
+                <TextBlock x:Name="StatusText" Text="Готово" Foreground="#666" FontSize="12" VerticalAlignment="Center"/>
+                <TextBlock x:Name="ProgressText" Text="" Foreground="#3498DB" FontSize="12" 
+                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>
