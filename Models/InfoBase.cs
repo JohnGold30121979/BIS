@@ -57,6 +57,6 @@ namespace BIS.ERP.Models
 
         // Отображаемое имя (без хэша)
         [NotMapped]
-        public string DisplayName => string.IsNullOrEmpty(Description) ? Name : $"{Name} ({Description})";
+        public string DisplayName => string.IsNullOrEmpty(Description) ? Name : $"{Name}";
     }
 }

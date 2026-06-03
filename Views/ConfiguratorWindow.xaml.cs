@@ -740,6 +740,39 @@ namespace BIS.ERP.Views
                     "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
+        private async void OnImportFrxClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new FrxImportWindow();
+            dialog.Owner = this;
+
+            if (dialog.ShowDialog() == true)
+            {
+                await LoadMetadata();
+                MessageBox.Show("Отчеты импортированы! Проверьте раздел 'Отчеты'.",
+                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        private void OnSwitchModeClick(object sender, RoutedEventArgs e)
+        {
+            var result = MessageBox.Show("Выйти в окно выбора режима?\nНесохраненные данные будут потеряны.",
+                "Смена режима", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                // Закрываем конфигуратор и открываем окно выбора режима
+                var modeWindow = new InfoBaseSelectionWindow();
+                modeWindow.Show();
+                this.Close();
+            }
+        }
+
+        private void OnImportDbfClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new DbfImportWindow();
+            dialog.Owner = this;
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            dialog.ShowDialog();
+        }
 
         private async Task DeleteReport(Report report)
         {

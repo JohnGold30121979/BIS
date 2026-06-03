@@ -61,9 +61,10 @@ namespace BIS.ERP.Views
 
                 try
                 {
+                    // Убираем InfoBaseType - теперь тип всегда "Universal"
                     await _manager.CreateInfoBaseAsync(
                         dialog.InfoBaseName,
-                        dialog.InfoBaseType,
+                        "Universal",
                         dialog.Host,
                         dialog.Port,
                         dialog.Username,

@@ -8,7 +8,7 @@ namespace BIS.ERP.Views
     public partial class CreateInfoBaseDialog : Window
     {
         public string InfoBaseName => NameBox.Text;
-        public string InfoBaseType => (TypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Finance";
+       // public string InfoBaseType => (TypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Finance";
         public string Host => HostBox.Text;
         public int Port => int.TryParse(PortBox.Text, out var port) ? port : 5432;
         public string Username => UsernameBox.Text;
@@ -154,7 +154,7 @@ namespace BIS.ERP.Views
                 // Создаем базу с описанием
                 var newBase = await manager.CreateInfoBaseAsync(
                     InfoBaseName,
-                    InfoBaseType,
+                    "Universal",
                     Host,
                     Port,
                     Username,
@@ -178,6 +178,17 @@ namespace BIS.ERP.Views
                 ShowError($"Ошибка создания: {ex.Message}");
                 CreateButton.IsEnabled = true;
             }
+        }
+        private void OnExpanderExpanded(object sender, RoutedEventArgs e)
+        {
+            // Увеличиваем высоту окна при раскрытии
+            this.Height = 560;
+        }
+
+        private void OnExpanderCollapsed(object sender, RoutedEventArgs e)
+        {
+            // Возвращаем высоту при сворачивании
+            this.Height = 380;
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e)

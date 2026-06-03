@@ -49,8 +49,7 @@ namespace BIS.ERP.Models
         public bool ShowHeader { get; set; } = true;
         public bool ShowFooter { get; set; } = true;
         public bool ShowPageNumbers { get; set; } = true;
-        public bool ShowGridLines { get; set; } = true;
-        public string HeaderColor { get; set; } = "#2C3E50";
+        public bool ShowGridLines { get; set; } = true;        
         public string AlternateRowColor { get; set; } = "#F8F9FA";
 
         // Текст шапки и подвала
@@ -66,6 +65,13 @@ namespace BIS.ERP.Models
         public virtual ICollection<ReportFilter> Filters { get; set; } = new List<ReportFilter>();
         public virtual ICollection<ReportGroup> Groups { get; set; } = new List<ReportGroup>();
         public virtual ICollection<ReportHeaderFooter> HeadersFooters { get; set; } = new List<ReportHeaderFooter>();
+
+        public string TitleText { get; set; } = string.Empty;
+        public string SubtitleText { get; set; } = string.Empty;
+        public string SummaryText { get; set; } = string.Empty;
+        public bool AlternateRowColors { get; set; } = true;
+        public bool ShowGrandTotal { get; set; } = true;
+        public string HeaderColor { get; set; } = "#2C3E50";
     }
 
     public class ReportField

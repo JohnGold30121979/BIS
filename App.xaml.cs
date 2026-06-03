@@ -1,6 +1,7 @@
-﻿using System.Windows;
-using BIS.ERP.Services;
+﻿using BIS.ERP.Services;
 using BIS.ERP.Views;
+using System.Text;
+using System.Windows;
 
 namespace BIS.ERP
 {
@@ -9,6 +10,8 @@ namespace BIS.ERP
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            // Регистрируем кодировки для поддержки CP866 (DOS кириллица)
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
             // Загружаем настройки
             var settings = AppSettings.Instance;

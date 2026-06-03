@@ -51,7 +51,7 @@ namespace BIS.ERP
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context); 
-
+                     await _metadataService.InitializePredefinedCatalogsAsync();
                     await LoadModules();
                 }
             }
@@ -238,7 +238,24 @@ namespace BIS.ERP
             loginWindow.Show();
             this.Close();
         }
+
+        private void OnSwitchModeClick(object sender, RoutedEventArgs e)
+        {
+            var result = MessageBox.Show("Выйти в окно выбора режима?\nНесохраненные данные будут потеряны.",
+                "Смена режима", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                _authService.Logout();
+
+                // Открываем окно выбора режима
+                var modeWindow = new InfoBaseSelectionWindow();
+                modeWindow.Show();
+                this.Close();
+            }
+        }
     }
+
 
     public class ModuleInfo
     {

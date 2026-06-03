@@ -73,31 +73,28 @@ public class InfoBaseManager
     }
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
-     string host, int port, string username, string password)
+    string host, int port, string username, string password)
     {
         var dbName = $"bis_{Guid.NewGuid():N}";
 
         try
         {
-            // Создаем физическую БД
             using var connection = new NpgsqlConnection($"Host={host};Port={port};Username={username};Password={password}");
             await connection.OpenAsync();
 
             using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", connection);
             await cmd.ExecuteNonQueryAsync();
 
-            // Создаем структуру БД
             var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
             using var dbContext = new AppDbContext(connectionString);
             await dbContext.Database.EnsureCreatedAsync();
 
-            // Создаем запись в мастер-БД
             var infoBase = new InfoBase
             {
                 Id = Guid.NewGuid(),
                 Name = name,
-                Type = type,
-                Description = name, // Добавляем описание для отображения
+                Type = "Universal",  // Всегда Universal
+                Description = name,
                 Host = host,
                 Port = port,
                 DatabaseName = dbName,
@@ -108,18 +105,19 @@ public class InfoBaseManager
                 Version = "1.0"
             };
 
+            // В InfoBaseManager.CreateInfoBaseAsync
+            var metadataService = new MetadataService(dbContext);
+            await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
+            await metadataService.InitializePredefinedCatalogsAsync(); // ← только здесь
+
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();
 
             return infoBase;
         }
-        catch (PostgresException ex)
-        {
-            throw new Exception($"Ошибка PostgreSQL: {ex.MessageText}");
-        }
         catch (Exception ex)
         {
-            throw new Exception($"Ошибка создания: {ex.Message}");
+            throw new Exception($"Ошибка создания базы данных: {ex.Message}");
         }
     }
 

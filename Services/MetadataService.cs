@@ -329,7 +329,6 @@ namespace BIS.ERP.Services
 
             using var reader = await command.ExecuteReaderAsync();
 
-            // Создаем маппинг DbColumnName -> Name для отображения (латиница -> русское)
             var fieldMapping = catalog.Fields.ToDictionary(f => f.DbColumnName, f => f.Name);
             fieldMapping["Id"] = "Id";
             fieldMapping["CreatedAt"] = "CreatedAt";
@@ -342,7 +341,7 @@ namespace BIS.ERP.Services
                 {
                     var dbName = reader.GetName(i);
                     var displayName = fieldMapping.ContainsKey(dbName) ? fieldMapping[dbName] : dbName;
-                    row[displayName] = reader.GetValue(i);  // Ключ - русское имя!
+                    row[displayName] = reader.GetValue(i);
                 }
                 result.Add(row);
             }
@@ -708,8 +707,7 @@ namespace BIS.ERP.Services
             {
                 var sql = $@"
                     INSERT INTO ""{employeesTable}"" (code, name, description) 
-                    VALUES ('{emp.code}', '{emp.name}', '{emp.description}')
-                    ON CONFLICT (code) DO NOTHING";
+                    VALUES ('{emp.code}', '{emp.name}', '{emp.description}')";
                 await _context.Database.ExecuteSqlRawAsync(sql);
             }
 
@@ -725,8 +723,7 @@ namespace BIS.ERP.Services
             {
                 var sql = $@"
                     INSERT INTO ""{materialsTable}"" (code, name, description) 
-                    VALUES ('{mat.code}', '{mat.name}', '{mat.description}')
-                    ON CONFLICT (code) DO NOTHING";
+                    VALUES ('{mat.code}', '{mat.name}', '{mat.description}')";
                 await _context.Database.ExecuteSqlRawAsync(sql);
             }
         }
@@ -737,6 +734,211 @@ namespace BIS.ERP.Services
                 .Where(m => m.ObjectType == "Catalog")
                 .MaxAsync(m => (int?)m.Order) ?? 0;
             return maxOrder + 1;
+        }
+
+        // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
+
+        public async Task InitializePredefinedCatalogsAsync()
+        {
+            try
+            {
+                var existingCatalogs = await _context.MetadataObjects
+                    .Where(m => m.ObjectType == "Catalog" && (m.Name == "План счетов" || m.Name == "Банки"))
+                    .Select(m => m.Name)
+                    .ToListAsync();
+
+                bool hasPlanScheta = existingCatalogs.Contains("План счетов");
+                bool hasBanks = existingCatalogs.Contains("Банки");
+
+                if (hasPlanScheta && hasBanks)
+                {
+                    System.Diagnostics.Debug.WriteLine("Предустановленные справочники уже существуют");
+                    return;
+                }
+
+                var infoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+                var config = await _context.MetadataConfigurations
+                    .FirstOrDefaultAsync(c => c.InfoBaseId == infoBase.Id);
+
+                if (config == null)
+                {
+                    config = new MetadataConfiguration
+                    {
+                        Id = Guid.NewGuid(),
+                        InfoBaseId = infoBase.Id,
+                        IsInitialized = true,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow,
+                        Version = "1.0"
+                    };
+                    await _context.MetadataConfigurations.AddAsync(config);
+                    await _context.SaveChangesAsync();
+                }
+
+                if (!hasPlanScheta)
+                {
+                    await CreateChartOfAccountsCatalog(config);
+                }
+
+                if (!hasBanks)
+                {
+                    await CreateBanksCatalog(config);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников: {ex.Message}");
+            }
+        }
+
+        private async Task CreateChartOfAccountsCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "План счетов",
+                    TableName = $"catalog_plan_schetov_{DateTime.Now:yyyyMMddHHmmss}",
+                    ObjectType = "Catalog",
+                    Description = "План счетов бухгалтерского учета Кыргызской Республики",
+                    Icon = "📊",
+                    Order = 10,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = new List<MetadataField>()
+                };
+
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Код", DbColumnName = "code", FieldType = "String", Length = 20, IsRequired = true, IsUnique = true, Order = 1 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 2 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Тип счета", DbColumnName = "account_type", FieldType = "String", Length = 20, Order = 3 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Описание", DbColumnName = "description", FieldType = "String", Length = 500, Order = 4 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Уровень", DbColumnName = "level", FieldType = "Int", Order = 5 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 6 });
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddChartOfAccountsDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'План счетов' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'План счетов': {ex.Message}");
+            }
+        }
+
+        private async Task CreateBanksCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Банки",
+                    TableName = $"catalog_banks_{DateTime.Now:yyyyMMddHHmmss}",
+                    ObjectType = "Catalog",
+                    Description = "Справочник банков Кыргызской Республики",
+                    Icon = "🏦",
+                    Order = 11,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = new List<MetadataField>()
+                };
+
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 1 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Краткое наименование", DbColumnName = "short_name", FieldType = "String", Length = 100, Order = 2 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "БИК", DbColumnName = "bic", FieldType = "String", Length = 20, Order = 3 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "ИНН", DbColumnName = "inn", FieldType = "String", Length = 50, Order = 4 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Адрес", DbColumnName = "address", FieldType = "String", Length = 500, Order = 5 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Телефон", DbColumnName = "phone", FieldType = "String", Length = 100, Order = 6 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Сайт", DbColumnName = "website", FieldType = "String", Length = 200, Order = 7 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "E-mail", DbColumnName = "email", FieldType = "String", Length = 100, Order = 8 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "SWIFT", DbColumnName = "swift", FieldType = "String", Length = 50, Order = 9 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Корр. счет", DbColumnName = "corr_account", FieldType = "String", Length = 50, Order = 10 });
+                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 11 });
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddBanksDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Банки' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Банки': {ex.Message}");
+            }
+        }
+
+        private async Task AddChartOfAccountsDataToTable(MetadataObject catalog)
+        {
+            var accounts = InitialDataProvider.GetChartOfAccounts();
+
+            foreach (var account in accounts)
+            {
+                try
+                {
+                    var sql = $@"
+                        INSERT INTO ""{catalog.TableName}"" 
+                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+                        VALUES (
+                            '{Guid.NewGuid()}',
+                            '{account.Code}',
+                            '{account.Name.Replace("'", "''")}',
+                            '{account.AccountType}',
+                            '{account.Description?.Replace("'", "''") ?? ""}',
+                            {account.Level},
+                            true,
+                            NOW(),
+                            NOW()
+                        )";
+                    await _context.Database.ExecuteSqlRawAsync(sql);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка добавления счета {account.Code}: {ex.Message}");
+                }
+            }
+            System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
+        }
+
+        private async Task AddBanksDataToTable(MetadataObject catalog)
+        {
+            var banks = InitialDataProvider.GetBanks();
+
+            foreach (var bank in banks)
+            {
+                try
+                {
+                    var sql = $@"
+                        INSERT INTO ""{catalog.TableName}"" 
+                        (""Id"", ""name"", ""short_name"", ""bic"", ""inn"", ""address"", ""phone"", ""website"", ""email"", ""swift"", ""corr_account"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+                        VALUES (
+                            '{Guid.NewGuid()}',
+                            '{bank.Name.Replace("'", "''")}',
+                            '{bank.ShortName?.Replace("'", "''") ?? ""}',
+                            '{bank.BIC}',
+                            '{bank.INN}',
+                            '{bank.Address?.Replace("'", "''") ?? ""}',
+                            '{bank.Phone}',
+                            '{bank.Website}',
+                            '{bank.Email}',
+                            '{bank.SwiftCode}',
+                            '{bank.CorrespondentAccount}',
+                            true,
+                            NOW(),
+                            NOW()
+                        )";
+                    await _context.Database.ExecuteSqlRawAsync(sql);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка добавления банка {bank.Name}: {ex.Message}");
+                }
+            }
+            System.Diagnostics.Debug.WriteLine($"Добавлено банков: {banks.Count}");
         }
 
         private async Task<Guid> GetCurrentConfigIdAsync()

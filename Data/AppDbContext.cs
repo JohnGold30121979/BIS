@@ -34,6 +34,7 @@ public class AppDbContext : DbContext
     public DbSet<ReportField> ReportFields { get; set; }
     public DbSet<ReportFilter> ReportFilters { get; set; }
     public DbSet<ReportGroup> ReportGroups { get; set; }
+    public DbSet<Document> Documents { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
