@@ -33,6 +33,7 @@
             <StackPanel>
                 <TextBlock x:Name="FileInfoText" Text="Файл не выбран" FontWeight="SemiBold"/>
                 <TextBlock x:Name="RecordInfoText" Text="" Foreground="#666"/>
+                <TextBlock x:Name="FieldInfoText" Text="" Foreground="#666" Margin="0,5,0,0" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
 

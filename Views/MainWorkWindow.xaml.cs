@@ -20,7 +20,8 @@ namespace BIS.ERP
         private IAuthService _authService;
         private InfoBaseManager _infoBaseManager;
         private MetadataService _metadataService;
-        private ReportService _reportService; // Добавляем поле
+        private ReportService _reportService;
+        private DocumentService _documentService; // Добавляем DocumentService
         private InfoBase _currentInfoBase;
         private bool _isLoadingReport = false;
 
@@ -35,7 +36,6 @@ namespace BIS.ERP
             Modules = new ObservableCollection<ModuleInfo>();
             ModulesMenu.ItemsSource = Modules;
             this.Loaded += OnLoaded;
-
         }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -50,8 +50,10 @@ namespace BIS.ERP
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
                     _metadataService = new MetadataService(context);
-                    _reportService = new ReportService(context); 
-                     await _metadataService.InitializePredefinedCatalogsAsync();
+                    _reportService = new ReportService(context);
+                    _documentService = new DocumentService(context); // Инициализируем DocumentService
+
+                    await _metadataService.InitializePredefinedCatalogsAsync();
                     await LoadModules();
                 }
             }
@@ -79,6 +81,34 @@ namespace BIS.ERP
                     MetadataObject = catalog
                 });
             }
+
+            // Добавляем раздел Документы
+            Modules.Add(new ModuleInfo
+            {
+                Id = "Documents",
+                Name = "Документы",
+                Icon = "📄",
+                Type = "DocumentsGroup"
+            });
+
+            // Добавляем раздел DBF Документы (импортированные)
+            var dbfDocsCount = await _documentService.GetDocumentsCountAsync();
+            Modules.Add(new ModuleInfo
+            {
+                Id = "DynamicDocuments",
+                Name = $"DBF Документы {(dbfDocsCount > 0 ? $"({dbfDocsCount})" : "")}",
+                Icon = "🗄️",
+                Type = "DynamicDocuments"
+            });
+
+            // Добавляем Операции
+            Modules.Add(new ModuleInfo
+            {
+                Id = "Operations",
+                Name = "Операции",
+                Icon = "📋",
+                Type = "Operations"
+            });
 
             // Загружаем отчеты
             var reports = await _reportService.GetReportsAsync();
@@ -129,6 +159,23 @@ namespace BIS.ERP
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
+          //  else if (module.Type == "DocumentsGroup")
+         //   {
+                // Открываем управление документами
+           //     var documentsView = new DocumentsManagementView(_documentService);
+           //     _navigation.NavigateTo(documentsView);
+           // }
+            else if (module.Type == "DynamicDocuments")
+            {
+                // Открываем список импортированных DBF документов
+                var dynamicDocsView = new DynamicDocumentsView(_documentService);
+                _navigation.NavigateTo(dynamicDocsView);
+            }
+            else if (module.Type == "Operations")
+            {
+                var operationsView = new OperationsView();
+                _navigation.NavigateTo(operationsView);
+            }
             else if (module.Type == "Report" && module.Report != null)
             {
                 _isLoadingReport = true;
@@ -146,20 +193,14 @@ namespace BIS.ERP
 
                     System.Diagnostics.Debug.WriteLine($"Data loaded: {data.Rows.Count} rows, {data.Columns.Count} columns");
 
-                    System.Diagnostics.Debug.WriteLine("Creating preview window...");
                     var preview = new ReportPreviewWindow(data, module.Report);
                     preview.Owner = this;
-
-                    System.Diagnostics.Debug.WriteLine("Showing preview window...");
                     preview.ShowDialog();
-
-                    System.Diagnostics.Debug.WriteLine("Preview window closed");
                 }
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"ERROR: {ex.Message}");
-                    System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                    MessageBox.Show($"Ошибка формирования отчета: {ex.Message}\n\n{ex.InnerException?.Message}",
+                    MessageBox.Show($"Ошибка формирования отчета: {ex.Message}",
                         "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -169,6 +210,7 @@ namespace BIS.ERP
                 }
             }
         }
+
         private async void OnExportAllClick(object sender, RoutedEventArgs e)
         {
             var dialog = new SaveFileDialog
@@ -184,9 +226,7 @@ namespace BIS.ERP
                 try
                 {
                     Mouse.OverrideCursor = Cursors.Wait;
-
                     using var workbook = new XLWorkbook();
-
                     var catalogs = await _metadataService.GetCatalogsAsync();
                     int exportedCount = 0;
 
@@ -196,13 +236,12 @@ namespace BIS.ERP
                         if (data.Any())
                         {
                             var worksheet = workbook.Worksheets.Add(catalog.Name);
-                            // Заполнение worksheet аналогично предыдущему
+                            // Заполнение worksheet
                             exportedCount++;
                         }
                     }
 
                     workbook.SaveAs(dialog.FileName);
-
                     MessageBox.Show($"Экспортировано {exportedCount} справочников!\n\nФайл: {dialog.FileName}",
                         "Экспорт завершен", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
@@ -216,7 +255,7 @@ namespace BIS.ERP
                     Mouse.OverrideCursor = null;
                 }
             }
-        }       
+        }
 
         private void OnProfileClick(object sender, RoutedEventArgs e)
         {
@@ -247,15 +286,12 @@ namespace BIS.ERP
             if (result == MessageBoxResult.Yes)
             {
                 _authService.Logout();
-
-                // Открываем окно выбора режима
                 var modeWindow = new InfoBaseSelectionWindow();
                 modeWindow.Show();
                 this.Close();
             }
         }
     }
-
 
     public class ModuleInfo
     {
@@ -264,6 +300,6 @@ namespace BIS.ERP
         public string Icon { get; set; } = "📄";
         public string Type { get; set; } = "Catalog";
         public MetadataObject MetadataObject { get; set; }
-        public Report Report { get; set; } // Добавляем поле для отчета
+        public Report Report { get; set; }
     }
 }

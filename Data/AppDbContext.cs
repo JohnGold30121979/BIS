@@ -34,7 +34,15 @@ public class AppDbContext : DbContext
     public DbSet<ReportField> ReportFields { get; set; }
     public DbSet<ReportFilter> ReportFilters { get; set; }
     public DbSet<ReportGroup> ReportGroups { get; set; }
+
+    // DbSet для документов (без внешних ключей на InfoBase)
     public DbSet<Document> Documents { get; set; }
+    public DbSet<DocumentMovement> DocumentMovements { get; set; }
+    public DbSet<DocumentRow> DocumentRows { get; set; }
+
+    public DbSet<DynamicDocument> DynamicDocuments { get; set; }
+    public DbSet<DynamicDocumentRow> DynamicDocumentRows { get; set; }
+    public DbSet<DbfMetadata> DbfMetadata { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -70,7 +78,81 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<ReportField>().HasKey(f => f.Id);
         modelBuilder.Entity<ReportFilter>().HasKey(f => f.Id);
         modelBuilder.Entity<ReportGroup>().HasKey(g => g.Id);
+
+        // НАСТРОЙКИ ДЛЯ ДОКУМЕНТОВ (без связи с InfoBase)
+        modelBuilder.Entity<Document>().HasKey(d => d.Id);
+        modelBuilder.Entity<Document>().Property(d => d.Number).HasMaxLength(50);
+        modelBuilder.Entity<Document>().Property(d => d.DocumentType).HasMaxLength(20);
+        modelBuilder.Entity<Document>().Property(d => d.OperationCode).HasMaxLength(50);
+        modelBuilder.Entity<Document>().Property(d => d.OperationDescription).HasMaxLength(500);
+        modelBuilder.Entity<Document>().Property(d => d.KontragentCode).HasMaxLength(100);
+        modelBuilder.Entity<Document>().Property(d => d.KontragentName).HasMaxLength(200);
+
+        // Индексы для документов
+        modelBuilder.Entity<Document>().HasIndex(d => d.Number);
+        modelBuilder.Entity<Document>().HasIndex(d => d.Date);
+
+        // Настройки для движений документов
+        modelBuilder.Entity<DocumentMovement>().HasKey(m => m.Id);
+        modelBuilder.Entity<DocumentMovement>()
+            .HasOne(m => m.Document)
+            .WithMany()
+            .HasForeignKey(m => m.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Настройки для документов и строк
+        modelBuilder.Entity<Document>()
+            .HasMany(d => d.Rows)
+            .WithOne(r => r.Document)
+            .HasForeignKey(r => r.DocumentId)
+            .OnDelete(DeleteBehavior.Cascade);      
+
+        modelBuilder.Entity<DocumentRow>()
+            .HasKey(r => r.Id);
+
+        // Настройки для DynamicDocument
+        modelBuilder.Entity<DynamicDocument>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Number).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Date).IsRequired();
+            entity.Property(e => e.DocumentType).HasMaxLength(50);
+            entity.Property(e => e.SourceFile).HasMaxLength(200);
+            entity.Property(e => e.TotalRows).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasMany(e => e.Rows)
+                  .WithOne(e => e.Document)
+                  .HasForeignKey(e => e.DocumentId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Настройки для DynamicDocumentRow
+        modelBuilder.Entity<DynamicDocumentRow>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DocumentId).IsRequired();
+            entity.Property(e => e.RowNumber).IsRequired();
+            entity.Property(e => e.Data)
+                  .HasColumnType("jsonb")
+                  .IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+        });
+
+        // Настройки для DbfMetadata
+        modelBuilder.Entity<DbfMetadata>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FileName).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.Fields)
+                  .HasColumnType("jsonb")
+                  .IsRequired();
+            entity.Property(e => e.TotalRecords).IsRequired();
+            entity.Property(e => e.ImportedAt).IsRequired();
+        });
     }
+
+
 
     public static string BuildConnectionString(string host, int port, string database, string username, string password)
     {

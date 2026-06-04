@@ -129,24 +129,47 @@ public class InfoBaseManager
 
         try
         {
-            using var connection = new NpgsqlConnection($"Host={infoBase.Host};Port={infoBase.Port};Username={infoBase.Username};Password={infoBase.Password}");
+            // Подключаемся к системной базе postgres (более надежно)
+            using var connection = new NpgsqlConnection($"Host={infoBase.Host};Port={infoBase.Port};Database=postgres;Username={infoBase.Username};Password={infoBase.Password}");
             await connection.OpenAsync();
 
+            // Закрываем все подключения к удаляемой базе
             using var killCmd = new NpgsqlCommand($@"
-                SELECT pg_terminate_backend(pg_stat_activity.pid)
-                FROM pg_stat_activity
-                WHERE pg_stat_activity.datname = '{infoBase.DatabaseName}'
-                  AND pid <> pg_backend_pid()", connection);
-            await killCmd.ExecuteNonQueryAsync();
+            SELECT pg_terminate_backend(pid)
+            FROM pg_stat_activity
+            WHERE datname = '{infoBase.DatabaseName}'", connection);
+            int killed = await killCmd.ExecuteNonQueryAsync();
+            System.Diagnostics.Debug.WriteLine($"Закрыто подключений: {killed}");
 
+            // Небольшая пауза для завершения процессов
+            await Task.Delay(500);
+
+            // Удаляем базу данных
             using var dropCmd = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{infoBase.DatabaseName}\"", connection);
             await dropCmd.ExecuteNonQueryAsync();
+
+            System.Diagnostics.Debug.WriteLine($"База данных '{infoBase.DatabaseName}' успешно удалена");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Error deleting database: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Ошибка при удалении базы: {ex.Message}");
+            // Пробуем альтернативный способ - через мастер-базу
+            try
+            {
+                using var connection = new NpgsqlConnection(AppSettings.Instance.GetMasterConnectionString());
+                await connection.OpenAsync();
+
+                using var dropCmd = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{infoBase.DatabaseName}\"", connection);
+                await dropCmd.ExecuteNonQueryAsync();
+                System.Diagnostics.Debug.WriteLine($"База данных '{infoBase.DatabaseName}' удалена (альтернативный способ)");
+            }
+            catch (Exception ex2)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка при альтернативном удалении: {ex2.Message}");
+            }
         }
 
+        // Удаляем запись из мастер-базы
         _masterContext.InfoBases.Remove(infoBase);
         await _masterContext.SaveChangesAsync();
 

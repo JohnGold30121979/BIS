@@ -1,0 +1,118 @@
+﻿<UserControl x:Class="BIS.ERP.Views.DynamicDocumentsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Панель инструментов -->
+        <Border Grid.Row="0" Background="White" CornerRadius="5" Padding="10" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="📥 Импорт DBF" Click="OnImportClick" 
+                        Background="#4CAF50" Foreground="White" Padding="15,8" Margin="0,0,10,0"
+                        Cursor="Hand" FontWeight="Bold"/>
+                <Button Content="🔄 Обновить" Click="OnRefreshClick" 
+                        Background="#2196F3" Foreground="White" Padding="15,8" Margin="0,0,10,0"
+                        Cursor="Hand"/>
+                <Button x:Name="DeleteButton" Content="🗑️ Удалить" Click="OnDeleteClick" 
+                        Background="#F44336" Foreground="White" Padding="15,8" Margin="0,0,10,0"
+                        Cursor="Hand" IsEnabled="False"/>
+                <Button x:Name="ExportButton" Content="📎 Экспорт JSON" Click="OnExportClick" 
+                        Background="#FF9800" Foreground="White" Padding="15,8"
+                        Cursor="Hand" IsEnabled="False"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Основная область -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.5*"/>
+                <ColumnDefinition Width="2.5*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Список документов -->
+            <Border Grid.Column="0" Background="White" CornerRadius="5" Padding="10" Margin="0,0,10,0">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="📄 DBF Документы" FontWeight="Bold" 
+                               FontSize="16" Margin="0,0,0,10"/>
+                    <ListBox x:Name="DocumentsList" SelectionChanged="OnDocumentSelectionChanged">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="10,8">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="14"/>
+                                        <TextBlock Text="{Binding ShortInfo}" FontSize="11" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding SourceFile}" FontSize="10" Foreground="#4CAF50"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- Детали документа -->
+            <Border Grid.Column="1" Background="White" CornerRadius="5" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" x:Name="DocumentTitle" Text="Выберите документ" 
+                               FontWeight="Bold" FontSize="16" Margin="0,0,0,10"/>
+
+                    <TabControl>
+                        <TabItem Header="📊 Данные">
+                            <Grid>
+                                <DataGrid x:Name="DataGrid" 
+                                          AutoGenerateColumns="True"
+                                          CanUserAddRows="False"
+                                          CanUserDeleteRows="False"
+                                          IsReadOnly="True"
+                                          VirtualizingPanel.IsVirtualizing="True"
+                                          VirtualizingPanel.VirtualizationMode="Recycling"
+                                          EnableColumnVirtualization="True"
+                                          EnableRowVirtualization="True"
+                                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <DataGrid.Resources>
+                                        <Style TargetType="DataGridColumnHeader">
+                                            <Setter Property="Height" Value="40"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                            <Setter Property="Background" Value="#F5F5F5"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                                        </Style>
+                                        <Style TargetType="DataGridCell">
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                            <Setter Property="Padding" Value="5,2"/>
+                                            <Setter Property="TextBlock.TextWrapping" Value="NoWrap"/>
+                                            <Setter Property="ToolTip" Value="{Binding RelativeSource={RelativeSource Self}, Path=Content.Text}"/>
+                                        </Style>
+                                    </DataGrid.Resources>
+                                </DataGrid>
+                            </Grid>
+                        </TabItem>
+
+                        <TabItem Header="📋 Информация">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                <StackPanel Margin="10">
+                                    <TextBlock x:Name="DetailsInfo" TextWrapping="Wrap" FontFamily="Consolas"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+                    </TabControl>
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <!-- Статус бар -->
+        <StatusBar Grid.Row="2" Margin="0,5,0,0">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" Text="Готов"/>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</UserControl>

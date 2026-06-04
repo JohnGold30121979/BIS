@@ -120,20 +120,25 @@ namespace BIS.ERP.Views
 
             catalogsItem.Selected += (s, e) => ShowCatalogsList();
 
-            // Документы (заглушка)
+            // Документы - теперь не заглушка, а реальные документы
             var documentsItem = new TreeViewItem
             {
-                Header = "📄 Документы",
-                IsExpanded = true,
-                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+               Header = "📄 Документы",
+               IsExpanded = true,
+               Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7"),
+               Tag = "DocumentsFolder"
             };
-            var emptyDocItem = new TreeViewItem
+            documentsItem.Selected += (s, e) => ShowDocumentsList();
+
+            // Добавляем дочерние элементы для документов (если нужно)
+            var operationsItem = new TreeViewItem
             {
-                Header = "   (в разработке)",
-                Foreground = Brushes.Gray,
-                IsEnabled = false
+                Header = "📋 Операции",
+                Tag = "Operations",
+                Foreground = Brushes.White
             };
-            documentsItem.Items.Add(emptyDocItem);
+            operationsItem.Selected += (s, e) => ShowOperationsList();
+            documentsItem.Items.Add(operationsItem);
 
             // Отчеты
             var reportsItem = new TreeViewItem
@@ -189,6 +194,307 @@ namespace BIS.ERP.Views
             MetadataTree.Items.Add(rootItem);
         }
 
+        private async Task ShowDocumentsList()
+        {
+            EditorTitle.Text = "📄 Документы";
+            EditorDescription.Text = "Управление документами";
+            PropertiesPanel.Children.Clear();
+
+            var stackPanel = new StackPanel();
+
+            // Кнопка импорта
+            var importButton = new Button
+            {
+                Content = "📁 Импорт из DBF",
+                Height = 40,
+                Margin = new Thickness(0, 0, 0, 20),
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White,
+                Cursor = Cursors.Hand
+            };
+            importButton.Click += (s, e) => OnImportDbfClick(s, e);
+            stackPanel.Children.Add(importButton);
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var documentService = new DocumentService(context);
+                var documents = await documentService.GetDocumentsAsync(); // List<DynamicDocument>
+
+                foreach (var doc in documents.OrderByDescending(d => d.Date))
+                {
+                    var card = CreateDynamicDocumentCard(doc);
+                    stackPanel.Children.Add(card);
+                }
+
+                if (!documents.Any())
+                {
+                    stackPanel.Children.Add(new TextBlock
+                    {
+                        Text = "Нет документов. Нажмите 'Импорт из DBF' для загрузки.",
+                        Foreground = Brushes.Gray,
+                        Margin = new Thickness(0, 50, 0, 0),
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                stackPanel.Children.Add(new TextBlock
+                {
+                    Text = $"Ошибка загрузки: {ex.Message}",
+                    Foreground = Brushes.Red,
+                    Margin = new Thickness(10)
+                });
+            }
+
+            PropertiesPanel.Children.Add(stackPanel);
+        }
+
+        // Создание карточки для DynamicDocument
+        private Border CreateDynamicDocumentCard(DynamicDocument doc)
+        {
+            var card = new Border
+            {
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(15),
+                Margin = new Thickness(0, 0, 0, 10),
+                Cursor = Cursors.Hand
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var icon = new TextBlock
+            {
+                Text = "📄",
+                FontSize = 32,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            Grid.SetColumn(icon, 0);
+
+            var infoStack = new StackPanel();
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"№{doc.Number} от {doc.Date:dd.MM.yyyy HH:mm:ss}",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"Тип: {doc.DocumentType}",
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"Строк: {doc.TotalRows} | Файл: {doc.SourceFile}",
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            Grid.SetColumn(infoStack, 1);
+
+            var detailButton = new Button
+            {
+                Content = "📋 Детали",
+                Width = 80,
+                Height = 30,
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White
+            };
+            detailButton.Click += async (s, e) => await ShowDynamicDocumentDetails(doc);
+            Grid.SetColumn(detailButton, 2);
+
+            grid.Children.Add(icon);
+            grid.Children.Add(infoStack);
+            grid.Children.Add(detailButton);
+            card.Child = grid;
+
+            return card;
+        }
+
+        // Показ деталей документа
+        private async Task ShowDynamicDocumentDetails(DynamicDocument doc)
+        {
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var documentService = new DocumentService(context);
+
+            // Получаем первую строку для отображения полей
+            var firstRow = doc.Rows?.FirstOrDefault();
+            Dictionary<string, object> rowData = new Dictionary<string, object>();
+
+            if (firstRow != null)
+            {
+                rowData = documentService.GetRowData(firstRow);
+            }
+
+            var details = $"📄 Документ №{doc.Number}\n" +
+                          $"📅 Дата: {doc.Date:dd.MM.yyyy HH:mm:ss}\n" +
+                          $"📂 Тип: {doc.DocumentType}\n" +
+                          $"📁 Файл: {doc.SourceFile}\n" +
+                          $"📊 Строк: {doc.TotalRows}\n\n" +
+                          $"📋 Поля в документе:\n";
+
+            foreach (var field in rowData.Keys.OrderBy(k => k))
+            {
+                var value = rowData[field]?.ToString();
+                if (value?.Length > 50) value = value.Substring(0, 50) + "...";
+                details += $"  • {field}: {value}\n";
+            }
+
+            var scrollViewer = new ScrollViewer
+            {
+                MaxHeight = 400,
+                Width = 500,
+                Content = new TextBlock
+                {
+                    Text = details,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                    Margin = new Thickness(10)
+                }
+            };
+
+            var window = new Window
+            {
+                Title = $"Детали документа №{doc.Number}",
+                Content = scrollViewer,
+                Width = 550,
+                Height = 500,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+            window.ShowDialog();
+        }
+
+        private async Task ShowOperationsList()
+        {
+            EditorTitle.Text = "📋 Операции";
+            EditorDescription.Text = "Список всех операций";
+            PropertiesPanel.Children.Clear();
+
+            var stackPanel = new StackPanel();
+
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var documentService = new DocumentService(context);
+            var documents = await documentService.GetDocumentsAsync();
+
+            // Таблица с документами
+            var dataGrid = new DataGrid
+            {
+                AutoGenerateColumns = false,
+                Height = 400,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+
+            dataGrid.Columns.Add(new DataGridTextColumn { Header = "Номер", Binding = new System.Windows.Data.Binding("Number"), Width = 120 });
+            dataGrid.Columns.Add(new DataGridTextColumn { Header = "Дата", Binding = new System.Windows.Data.Binding("Date"), Width = 120 });
+            dataGrid.Columns.Add(new DataGridTextColumn { Header = "Контрагент", Binding = new System.Windows.Data.Binding("KontragentName"), Width = 200 });
+            dataGrid.Columns.Add(new DataGridTextColumn { Header = "Сумма", Binding = new System.Windows.Data.Binding("TotalAmount"), Width = 100 });
+            dataGrid.Columns.Add(new DataGridTextColumn { Header = "Статус", Binding = new System.Windows.Data.Binding("IsPosted"), Width = 80 });
+
+            dataGrid.ItemsSource = documents;
+            stackPanel.Children.Add(dataGrid);
+
+            // Кнопка обновления
+            var refreshButton = new Button
+            {
+                Content = "🔄 Обновить",
+                Width = 100,
+                Height = 35,
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White,
+                Cursor = Cursors.Hand
+            };
+            refreshButton.Click += async (s, e) => await ShowOperationsList();
+            stackPanel.Children.Add(refreshButton);
+
+            PropertiesPanel.Children.Add(stackPanel);
+        }
+
+        private Border CreateDocumentCard(Document doc)
+        {
+            var card = new Border
+            {
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(15),
+                Margin = new Thickness(0, 0, 0, 10),
+                Cursor = Cursors.Hand
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var icon = new TextBlock
+            {
+                Text = doc.IsPosted ? "✅" : "📄",
+                FontSize = 32,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            Grid.SetColumn(icon, 0);
+
+            var infoStack = new StackPanel();
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"№{doc.Number} от {doc.Date:dd.MM.yyyy}",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = doc.KontragentName,
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"Сумма: {doc.TotalAmount:N2} | Строк: {doc.Rows?.Count ?? 0}",
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            Grid.SetColumn(infoStack, 1);
+
+            var detailButton = new Button
+            {
+                Content = "📋 Детали",
+                Width = 80,
+                Height = 30,
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White
+            };
+            detailButton.Click += (s, e) => ShowDocumentDetails(doc);
+            Grid.SetColumn(detailButton, 2);
+
+            grid.Children.Add(icon);
+            grid.Children.Add(infoStack);
+            grid.Children.Add(detailButton);
+            card.Child = grid;
+
+            return card;
+        }
+
+        private void ShowDocumentDetails(Document doc)
+        {
+            var details = $"Документ №{doc.Number}\nДата: {doc.Date:dd.MM.yyyy HH:mm:ss}\nКонтрагент: {doc.KontragentName}\nСумма: {doc.TotalAmount:N2}\n\nСтроки:\n";
+
+            if (doc.Rows != null)
+            {
+                foreach (var row in doc.Rows.OrderBy(r => r.LineNumber))
+                {
+                    details += $"{row.LineNumber}. {row.OperationDescription} - {row.Amount:N2}\n";
+                }
+            }
+
+            MessageBox.Show(details, "Детали документа", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
         private void ShowCatalogsList()
         {
             EditorTitle.Text = "📚 Справочники";

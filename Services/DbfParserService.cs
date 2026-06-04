@@ -19,31 +19,35 @@ namespace BIS.ERP.Services
                     using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                     using (var reader = new BinaryReader(fs))
                     {
-                        // Читаем количество записей
+                        // Количество записей
                         fs.Seek(4, SeekOrigin.Begin);
                         result.RecordCount = reader.ReadInt32();
 
-                        // Читаем длину заголовка
+                        // Длина заголовка
                         fs.Seek(8, SeekOrigin.Begin);
                         var headerLength = reader.ReadInt16();
 
-                        // Читаем длину записи
+                        // Длина записи
                         fs.Seek(10, SeekOrigin.Begin);
                         var recordLength = reader.ReadInt16();
 
-                        // Читаем поля
+                        // Читаем ВСЕ поля
                         var fields = new List<DbfFieldInfo>();
                         fs.Seek(32, SeekOrigin.Begin);
 
-                        for (int i = 0; i < 1000; i++)
+                        while (true)
                         {
                             var fieldNameBytes = reader.ReadBytes(11);
                             var fieldName = Encoding.ASCII.GetString(fieldNameBytes).TrimEnd('\0');
-                            if (string.IsNullOrEmpty(fieldName)) break;
+
+                            if (string.IsNullOrEmpty(fieldName) || fieldNameBytes[0] == 0x0D)
+                                break;
 
                             var fieldType = (char)reader.ReadByte();
+                            reader.ReadInt32(); // смещение
                             var fieldLength = reader.ReadByte();
                             var fieldDecimal = reader.ReadByte();
+                            reader.ReadBytes(14); // резерв
 
                             fields.Add(new DbfFieldInfo
                             {
@@ -52,9 +56,6 @@ namespace BIS.ERP.Services
                                 Length = fieldLength,
                                 DecimalCount = fieldDecimal
                             });
-
-                            // Пропускаем остаток (20 байт)
-                            fs.Seek(20, SeekOrigin.Current);
                         }
 
                         result.Fields = fields;
@@ -63,11 +64,12 @@ namespace BIS.ERP.Services
                         // Читаем данные
                         var encoding = Encoding.GetEncoding(1251);
                         result.Rows = new List<Dictionary<string, object>>();
+                        var dataStart = headerLength;
 
                         for (int i = 0; i < result.RecordCount; i++)
                         {
-                            var row = new Dictionary<string, object>();
                             var rowData = reader.ReadBytes(recordLength);
+                            var row = new Dictionary<string, object>();
                             var offset = 0;
 
                             foreach (var field in fields)
@@ -76,16 +78,21 @@ namespace BIS.ERP.Services
                                 {
                                     var valueBytes = new byte[field.Length];
                                     Array.Copy(rowData, offset, valueBytes, 0, field.Length);
-                                    var value = encoding.GetString(valueBytes).Trim();
+                                    var value = encoding.GetString(valueBytes).TrimEnd('\0').Trim();
 
-                                    // Очищаем от нулевых байтов и недопустимых символов
-                                    value = CleanString(value);
-
-                                    row[field.Name] = string.IsNullOrEmpty(value) ? null : value;
-                                }
-                                else
-                                {
-                                    row[field.Name] = null;
+                                    // Преобразуем типы
+                                    if (field.Type == "N" && !string.IsNullOrEmpty(value))
+                                    {
+                                        var numStr = value.Replace('.', ',');
+                                        if (decimal.TryParse(numStr, out decimal dec))
+                                            row[field.Name] = dec;
+                                        else
+                                            row[field.Name] = value;
+                                    }
+                                    else
+                                    {
+                                        row[field.Name] = string.IsNullOrEmpty(value) ? null : value;
+                                    }
                                 }
                                 offset += field.Length;
                             }
@@ -104,7 +111,6 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        // Очистка строки от недопустимых UTF-8 символов
         private string CleanString(string input)
         {
             if (string.IsNullOrEmpty(input)) return input;
@@ -112,8 +118,7 @@ namespace BIS.ERP.Services
             var result = new StringBuilder();
             foreach (char c in input)
             {
-                // Пропускаем нулевые байты и другие недопустимые символы
-                if (c != '\0' && c != '\u001A' && c != '\uFFFD' && !char.IsControl(c))
+                if (c != '\0' && c != '\u001A' && c != '\uFFFD')
                 {
                     result.Append(c);
                 }
@@ -138,5 +143,6 @@ namespace BIS.ERP.Services
         public string Type { get; set; } = string.Empty;
         public int Length { get; set; }
         public int DecimalCount { get; set; }
+        public int Index { get; set; }
     }
 }
