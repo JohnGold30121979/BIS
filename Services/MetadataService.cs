@@ -941,6 +941,597 @@ namespace BIS.ERP.Services
             System.Diagnostics.Debug.WriteLine($"Добавлено банков: {banks.Count}");
         }
 
+        // Добавьте эти методы в конец класса MetadataService
+
+        #region Универсальные динамические методы
+
+        /// <summary>
+        /// Универсальное создание записи через метаданные
+        /// </summary>
+        public async Task<Guid> CreateDynamicRecordAsync(Guid metadataId, Dictionary<string, object> data)
+        {
+            var metadata = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
+
+            var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
+            var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
+
+            foreach (var field in metadata.Fields)
+            {
+                if (data.ContainsKey(field.Name) && data[field.Name] != null)
+                {
+                    columns.Add($"\"{field.DbColumnName}\"");
+                    values.Add(FormatSqlValue(data[field.Name], field.FieldType));
+                }
+                else if (field.IsRequired && (!data.ContainsKey(field.Name) || data[field.Name] == null))
+                {
+                    throw new Exception($"Поле '{field.Name}' обязательно для заполнения");
+                }
+            }
+
+            var sql = $@"
+        INSERT INTO ""{metadata.TableName}"" ({string.Join(", ", columns)}) 
+        VALUES ({string.Join(", ", values)}) 
+        RETURNING ""Id""";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            var newId = await command.ExecuteScalarAsync();
+            await _context.Database.CloseConnectionAsync();
+
+            var recordId = Guid.Parse(newId.ToString());
+
+            // Выполняем автоматические расчеты
+            await ExecuteAutoCalculationsAsync(metadataId, recordId);
+
+            return recordId;
+        }
+
+        /// <summary>
+        /// Универсальное обновление записи
+        /// </summary>
+        public async Task UpdateDynamicRecordAsync(Guid metadataId, Guid recordId, Dictionary<string, object> data)
+        {
+            var metadata = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
+
+            var setClauses = new List<string>();
+
+            foreach (var field in metadata.Fields)
+            {
+                if (data.ContainsKey(field.Name))
+                {
+                    setClauses.Add($"\"{field.DbColumnName}\" = {FormatSqlValue(data[field.Name], field.FieldType)}");
+                }
+            }
+
+            setClauses.Add("\"UpdatedAt\" = NOW()");
+
+            var sql = $@"
+        UPDATE ""{metadata.TableName}"" 
+        SET {string.Join(", ", setClauses)} 
+        WHERE ""Id"" = '{recordId}'";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            await command.ExecuteNonQueryAsync();
+            await _context.Database.CloseConnectionAsync();
+
+            // Выполняем автоматические расчеты
+            await ExecuteAutoCalculationsAsync(metadataId, recordId);
+        }
+
+        /// <summary>
+        /// Универсальное удаление записи
+        /// </summary>
+        public async Task DeleteDynamicRecordAsync(Guid metadataId, Guid recordId)
+        {
+            var metadata = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
+
+            var sql = $"DELETE FROM \"{metadata.TableName}\" WHERE \"Id\" = '{recordId}'";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            await command.ExecuteNonQueryAsync();
+            await _context.Database.CloseConnectionAsync();
+        }
+
+        /// <summary>
+        /// Выполнение автоматических расчетов
+        /// </summary>
+        public async Task ExecuteAutoCalculationsAsync(Guid metadataId, Guid recordId)
+        {
+            var metadata = await _context.MetadataObjects
+                .Include(m => m.Calculations)
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null || !metadata.Calculations.Any(c => c.IsAuto)) return;
+
+            var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
+
+            foreach (var calc in metadata.Calculations.Where(c => c.IsAuto).OrderBy(c => c.ExecutionOrder))
+            {
+                try
+                {
+                    object result = null;
+
+                    switch (calc.CalculationType)
+                    {
+                        case "Depreciation":
+                            result = CalculateDepreciation(calc, recordData);
+                            break;
+                        case "Sum":
+                            result = CalculateSum(calc, recordData);
+                            break;
+                        case "Average":
+                            result = CalculateAverage(calc, recordData);
+                            break;
+                        case "Formula":
+                            result = EvaluateFormula(calc.Formula, recordData);
+                            break;
+                    }
+
+                    if (result != null)
+                    {
+                        await UpdateRecordFieldAsync(metadata.TableName, recordId, calc.TargetField, result);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка расчета {calc.Name}: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Создание проводок по правилам
+        /// </summary>
+        public async Task<List<Dictionary<string, object>>> GeneratePostingsAsync(Guid metadataId, Guid recordId)
+        {
+            var postings = new List<Dictionary<string, object>>();
+
+            var metadata = await _context.MetadataObjects
+                .Include(m => m.PostingRules)
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null || !metadata.PostingRules.Any()) return postings;
+
+            var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
+
+            foreach (var rule in metadata.PostingRules.OrderBy(r => r.Order))
+            {
+                // Проверяем условие
+                if (!string.IsNullOrEmpty(rule.Condition))
+                {
+                    var conditionMet = EvaluateCondition(rule.Condition, recordData);
+                    if (!conditionMet) continue;
+                }
+
+                var posting = new Dictionary<string, object>
+                {
+                    ["Id"] = Guid.NewGuid(),
+                    ["ObjectId"] = recordId,
+                    ["ObjectType"] = metadata.Name,
+                    ["ObjectTypeId"] = metadataId,
+                    ["Date"] = recordData.ContainsKey("Date") ? recordData["Date"] : DateTime.Now,
+                    ["DebitAccount"] = EvaluateExpression(rule.DebitAccountExpression, recordData),
+                    ["CreditAccount"] = EvaluateExpression(rule.CreditAccountExpression, recordData),
+                    ["Amount"] = Convert.ToDecimal(EvaluateExpression(rule.AmountExpression, recordData)),
+                    ["CreatedAt"] = DateTime.Now
+                };
+
+                postings.Add(posting);
+            }
+
+            return postings;
+        }
+
+        /// <summary>
+        /// Получение данных записи
+        /// </summary>
+        private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId)
+        {
+            var result = new Dictionary<string, object>();
+            var sql = $"SELECT * FROM \"{tableName}\" WHERE \"Id\" = '{recordId}'";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            using var reader = await command.ExecuteReaderAsync();
+
+            if (await reader.ReadAsync())
+            {
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    result[reader.GetName(i)] = reader.GetValue(i);
+                }
+            }
+
+            await _context.Database.CloseConnectionAsync();
+            return result;
+        }
+
+        /// <summary>
+        /// Обновление поля записи
+        /// </summary>
+        private async Task UpdateRecordFieldAsync(string tableName, Guid recordId, string fieldName, object value)
+        {
+            var formattedValue = FormatSqlValue(value, "Unknown");
+            var sql = $"UPDATE \"{tableName}\" SET \"{fieldName}\" = {formattedValue}, \"UpdatedAt\" = NOW() WHERE \"Id\" = '{recordId}'";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            await command.ExecuteNonQueryAsync();
+            await _context.Database.CloseConnectionAsync();
+        }
+
+        #endregion
+
+        #region Вычислительные методы
+
+        private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
+        {
+            var initialCost = Convert.ToDecimal(data.GetValueOrDefault("InitialCost", 0));
+            var usefulLife = Convert.ToInt32(data.GetValueOrDefault("UsefulLife", 0));
+            var depreciationRate = Convert.ToDecimal(data.GetValueOrDefault("DepreciationRate", 0));
+
+            if (usefulLife > 0)
+                return initialCost / usefulLife;
+            else if (depreciationRate > 0)
+                return initialCost * depreciationRate / 100;
+
+            return 0;
+        }
+
+        private decimal CalculateSum(MetadataCalculation calc, Dictionary<string, object> data)
+        {
+            if (string.IsNullOrEmpty(calc.SourceFields)) return 0;
+
+            var fields = System.Text.Json.JsonSerializer.Deserialize<List<string>>(calc.SourceFields);
+            decimal sum = 0;
+
+            foreach (var field in fields)
+            {
+                if (data.ContainsKey(field))
+                    sum += Convert.ToDecimal(data[field]);
+            }
+
+            return sum;
+        }
+
+        private decimal CalculateAverage(MetadataCalculation calc, Dictionary<string, object> data)
+        {
+            if (string.IsNullOrEmpty(calc.SourceFields)) return 0;
+
+            var fields = System.Text.Json.JsonSerializer.Deserialize<List<string>>(calc.SourceFields);
+            decimal sum = 0;
+            int count = 0;
+
+            foreach (var field in fields)
+            {
+                if (data.ContainsKey(field))
+                {
+                    sum += Convert.ToDecimal(data[field]);
+                    count++;
+                }
+            }
+
+            return count > 0 ? sum / count : 0;
+        }
+
+        private decimal EvaluateFormula(string formula, Dictionary<string, object> data)
+        {
+            var result = formula;
+            foreach (var kvp in data)
+            {
+                var value = kvp.Value?.ToString() ?? "0";
+                result = result.Replace($"{{{kvp.Key}}}", value);
+            }
+
+            using var table = new System.Data.DataTable();
+            return Convert.ToDecimal(table.Compute(result, ""));
+        }
+
+        private bool EvaluateCondition(string condition, Dictionary<string, object> data)
+        {
+            var result = condition;
+            foreach (var kvp in data)
+            {
+                var value = kvp.Value?.ToString() ?? "null";
+                result = result.Replace($"{{{kvp.Key}}}", value);
+            }
+
+            using var table = new System.Data.DataTable();
+            return Convert.ToBoolean(table.Compute(result, ""));
+        }
+
+        private string EvaluateExpression(string expression, Dictionary<string, object> data)
+        {
+            var result = expression;
+            foreach (var kvp in data)
+            {
+                var value = kvp.Value?.ToString() ?? "";
+                result = result.Replace($"{{{kvp.Key}}}", value);
+            }
+            return result;
+        }
+
+        private string FormatSqlValue(object value, string fieldType)
+        {
+            if (value == null) return "NULL";
+
+            return fieldType switch
+            {
+                "String" => $"'{value.ToString().Replace("'", "''")}'",
+                "DateTime" => $"'{Convert.ToDateTime(value):yyyy-MM-dd HH:mm:ss}'",
+                "Bool" => Convert.ToBoolean(value) ? "TRUE" : "FALSE",
+                "Int" => Convert.ToInt32(value).ToString(),
+                "Decimal" => Convert.ToDecimal(value).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                _ => $"'{value}'"
+            };
+        }
+
+        // Добавьте эти методы в MetadataService.cs
+
+        public async Task CreateMetadataObjectAsync(MetadataObject obj)
+        {
+            await _context.MetadataObjects.AddAsync(obj);
+            await _context.SaveChangesAsync();
+        }     
+
+        public async Task DeleteMetadataObjectAsync(Guid id)
+        {
+            var obj = await _context.MetadataObjects.FindAsync(id);
+            if (obj != null)
+            {
+                _context.MetadataObjects.Remove(obj);
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        public async Task<List<MetadataObject>> GetAllMetadataObjectsAsync()
+        {
+            return await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .OrderBy(m => m.Order)
+                .ToListAsync();
+        }
+        #endregion
+
+
+
+        // Добавьте эти методы в конец класса MetadataService
+
+
+
+        public async Task UpdateMetadataObjectAsync(MetadataObject obj)
+        {
+            try
+            {
+                // Загружаем существующий объект
+                var existing = await _context.MetadataObjects
+                    .FirstOrDefaultAsync(m => m.Id == obj.Id);
+
+                if (existing == null)
+                {
+                    throw new Exception($"Объект с ID {obj.Id} не найден");
+                }
+
+                // Получаем существующие поля из БД
+                var existingFields = await _context.MetadataFields
+                    .Where(f => f.MetadataObjectId == obj.Id)
+                    .ToListAsync();
+
+                // ОЧИЩАЕМ obj.Fields от дубликатов по имени
+                var uniqueFields = obj.Fields
+                    .GroupBy(f => f.Name)
+                    .Select(g => g.First())
+                    .ToList();
+                obj.Fields = uniqueFields;
+
+                // Обновляем основные поля
+                existing.Name = obj.Name;
+                existing.Description = obj.Description;
+                existing.Icon = obj.Icon;
+                existing.Order = obj.Order;
+                existing.UsePostings = obj.UsePostings;
+                existing.UseBalances = obj.UseBalances;
+                existing.UseMovements = obj.UseMovements;
+
+                // Находим новые поля (которых нет в БД) - по имени
+                var existingFieldNames = existingFields.Select(f => f.Name).ToHashSet();
+                var newFields = obj.Fields.Where(f => !existingFieldNames.Contains(f.Name)).ToList();
+
+                // Обновляем существующие поля
+                foreach (var field in obj.Fields)
+                {
+                    var existingField = existingFields.FirstOrDefault(f => f.Id == field.Id);
+                    if (existingField != null)
+                    {
+                        existingField.Name = field.Name;
+                        existingField.DbColumnName = field.DbColumnName;
+                        existingField.FieldType = field.FieldType;
+                        existingField.Length = field.Length;
+                        existingField.Precision = field.Precision;
+                        existingField.Scale = field.Scale;
+                        existingField.IsRequired = field.IsRequired;
+                        existingField.IsUnique = field.IsUnique;
+                        existingField.Order = field.Order;
+                    }
+                }
+
+                // Добавляем новые поля в метаданные
+                foreach (var field in newFields)
+                {
+                    field.Id = Guid.NewGuid();
+                    field.MetadataObjectId = obj.Id;
+                    await _context.MetadataFields.AddAsync(field);
+
+                    // Добавляем новую колонку в таблицу
+                    await AddColumnToTableAsync(existing.TableName, field);
+                }
+
+                // Удаляем поля, которых больше нет в метаданных
+                var fieldIdsToKeep = obj.Fields.Select(f => f.Id).ToHashSet();
+                var fieldsToRemove = existingFields.Where(f => !fieldIdsToKeep.Contains(f.Id)).ToList();
+
+                foreach (var field in fieldsToRemove)
+                {
+                    await DropColumnFromTableAsync(existing.TableName, field.DbColumnName);
+                    _context.MetadataFields.Remove(field);
+                }
+
+                // Обновляем расчеты
+                var existingCalcs = await _context.MetadataCalculations
+                    .Where(c => c.MetadataObjectId == obj.Id)
+                    .ToListAsync();
+                _context.MetadataCalculations.RemoveRange(existingCalcs);
+                foreach (var calc in obj.Calculations)
+                {
+                    calc.Id = Guid.NewGuid();
+                    calc.MetadataObjectId = obj.Id;
+                    await _context.MetadataCalculations.AddAsync(calc);
+                }
+
+                // Обновляем правила проводок
+                var existingRules = await _context.MetadataPostingRules
+                    .Where(r => r.MetadataObjectId == obj.Id)
+                    .ToListAsync();
+                _context.MetadataPostingRules.RemoveRange(existingRules);
+                foreach (var rule in obj.PostingRules)
+                {
+                    rule.Id = Guid.NewGuid();
+                    rule.MetadataObjectId = obj.Id;
+                    await _context.MetadataPostingRules.AddAsync(rule);
+                }
+
+                await _context.SaveChangesAsync();
+
+                System.Diagnostics.Debug.WriteLine($"Объект {obj.Name} обновлен. Добавлено {newFields.Count} новых полей.");
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ошибка обновления: {ex.Message}");
+            }
+        }
+
+        // Добавление новой колонки в существующую таблицу
+        private async Task AddColumnToTableAsync(string tableName, MetadataField field)
+        {
+            try
+            {
+                // Проверяем существование колонки
+                var checkSql = $@"
+            SELECT COUNT(*) 
+            FROM information_schema.columns 
+            WHERE table_name = '{tableName}' 
+            AND column_name = '{field.DbColumnName}'";
+
+                using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
+                checkCommand.CommandText = checkSql;
+                await _context.Database.OpenConnectionAsync();
+                var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+                await _context.Database.CloseConnectionAsync();
+
+                if (exists > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Колонка {field.DbColumnName} уже существует");
+                    return;
+                }
+
+                // Добавляем колонку
+                var sqlType = GetSqlTypeForField(field);
+                var nullable = field.IsRequired ? "NOT NULL" : "";
+
+                var defaultValue = "";
+                if (field.IsRequired)
+                {
+                    defaultValue = field.FieldType switch
+                    {
+                        "String" => " DEFAULT ''",
+                        "Int" => " DEFAULT 0",
+                        "Decimal" => " DEFAULT 0",
+                        "DateTime" => " DEFAULT CURRENT_TIMESTAMP",
+                        "Bool" => " DEFAULT false",
+                        _ => ""
+                    };
+                }
+
+                var sql = $"ALTER TABLE \"{tableName}\" ADD COLUMN \"{field.DbColumnName}\" {sqlType} {nullable} {defaultValue}";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+
+                System.Diagnostics.Debug.WriteLine($"Добавлена колонка {field.DbColumnName} в таблицу {tableName}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка добавления колонки: {ex.Message}");
+            }
+        }
+
+        // Удаление колонки из таблицы
+        private async Task DropColumnFromTableAsync(string tableName, string columnName)
+        {
+            try
+            {
+                var sql = $"ALTER TABLE \"{tableName}\" DROP COLUMN IF EXISTS \"{columnName}\" CASCADE";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+
+                System.Diagnostics.Debug.WriteLine($"Удалена колонка {columnName} из таблицы {tableName}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка удаления колонки: {ex.Message}");
+                // Не выбрасываем исключение, чтобы не прерывать операцию
+            }
+        }
+
+        public async Task CreateDynamicTableAsync(MetadataObject obj)
+        {
+            var sql = new StringBuilder();
+            sql.AppendLine($"CREATE TABLE IF NOT EXISTS \"{obj.TableName}\" (");
+            sql.AppendLine("    \"Id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
+
+            foreach (var field in obj.Fields.OrderBy(f => f.Order))
+            {
+                var sqlType = GetSqlTypeForField(field);
+                var nullable = field.IsRequired ? "NOT NULL" : "";
+                sql.AppendLine($"    \"{field.DbColumnName}\" {sqlType} {nullable},");
+            }
+
+            sql.AppendLine("    \"CreatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,");
+            sql.AppendLine("    \"UpdatedAt\" TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+            sql.AppendLine(");");
+
+            await _context.Database.ExecuteSqlRawAsync(sql.ToString());
+        }
+
+        public async Task UpdateDynamicTableAsync(MetadataObject obj)
+        {
+            // Пересоздаем таблицу с новой структурой
+            await _context.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS \"{obj.TableName}\" CASCADE;");
+            await CreateDynamicTableAsync(obj);
+        }
+
+     
+
         private async Task<Guid> GetCurrentConfigIdAsync()
         {
             var infoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();

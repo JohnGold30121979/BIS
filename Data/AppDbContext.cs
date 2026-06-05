@@ -43,6 +43,9 @@ public class AppDbContext : DbContext
     public DbSet<DynamicDocument> DynamicDocuments { get; set; }
     public DbSet<DynamicDocumentRow> DynamicDocumentRows { get; set; }
     public DbSet<DbfMetadata> DbfMetadata { get; set; }
+   
+    public DbSet<MetadataCalculation> MetadataCalculations { get; set; }
+    public DbSet<MetadataPostingRule> MetadataPostingRules { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {

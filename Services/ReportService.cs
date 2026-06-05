@@ -406,6 +406,40 @@ namespace BIS.ERP.Services
                 .ToListAsync();
         }
 
+
+        // Добавьте этот метод в класс ReportService (после GetReportsAsync или перед DeleteReportAsync)       
+        public async Task UpdateReportAsync(Report report)
+        {
+            try
+            {
+                var existingReport = await _context.Reports
+                    .Include(r => r.Fields)
+                    .Include(r => r.Filters)
+                    .FirstOrDefaultAsync(r => r.Id == report.Id);
+
+                if (existingReport != null)
+                {
+                    existingReport.Name = report.Name;
+                    existingReport.Description = report.Description;
+                    existingReport.Icon = report.Icon;
+                    existingReport.DataSourceType = report.DataSourceType;
+                    existingReport.DataSourceId = report.DataSourceId;
+                    existingReport.Order = report.Order;
+                    existingReport.UpdatedAt = DateTime.UtcNow;
+
+                    _context.Reports.Update(existingReport);
+                    await _context.SaveChangesAsync();
+                }
+                else
+                {
+                    throw new Exception($"Отчет с ID {report.Id} не найден");
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Ошибка обновления отчета: {ex.Message}");
+            }
+        }
         // Удаление отчета
         // Удаление отчета
         public async Task DeleteReportAsync(Guid reportId)

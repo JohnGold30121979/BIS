@@ -63,7 +63,7 @@ namespace BIS.ERP.Views
 
         private void OnExitClick(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+          //  DialogResult = false;
             Close();
         }
 

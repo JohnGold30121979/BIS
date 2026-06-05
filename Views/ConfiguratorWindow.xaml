@@ -18,18 +18,25 @@
                 <MenuItem Header="Выход" Click="OnExitClick"/>
             </MenuItem>
             <MenuItem Header="Создать">
-                <MenuItem Header="📚 Справочник" Click="OnCreateCatalogClick"/>
-                <MenuItem Header="📄 Документ" Click="OnCreateDocumentClick" IsEnabled="False"/>
+                <MenuItem Header="📚 Справочник" Click="OnCreateCatalogClick"/>               
                 <MenuItem Header="📊 Отчет" Click="OnCreateReportClick"/>
+
+                <!-- В раздел "Создать" меню добавьте: -->
+                <MenuItem Header="Создать Динамически">
+                    <MenuItem Header="📚 Справочник" Click="OnCreateDynamicCatalogClick"/>
+                    <MenuItem Header="📄 Документ" Click="OnCreateDynamicDocumentClick"/>
+                    <Separator/>
+                    <MenuItem Header="📊 Отчет" Click="OnCreateReportClick"/>
+                </MenuItem>
             </MenuItem>
-            <MenuItem Header="Правка">
-                <MenuItem Header="✏️ Редактировать" Click="OnEditClick"/>
-                <MenuItem Header="🗑️ Удалить" Click="OnDeleteClick"/>
+            <MenuItem Header="Правка">             
+               
                 <Separator/>
                 <MenuItem Header="📋 Копировать" IsEnabled="False"/>
                 <MenuItem Header="✂️ Вырезать" IsEnabled="False"/>
                 <MenuItem Header="📎 Вставить" IsEnabled="False"/>
             </MenuItem>
+            
             <MenuItem Header="Справка">
                 <MenuItem Header="📖 О программе" Click="OnAboutClick"/>
             </MenuItem>

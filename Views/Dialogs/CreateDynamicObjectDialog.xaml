@@ -1,0 +1,37 @@
+﻿<Window x:Class="BIS.ERP.Views.Dialogs.CreateDynamicObjectDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Создание динамического объекта"
+        Height="500" Width="600"
+        WindowStartupLocation="CenterOwner">
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Наименование:" FontWeight="Bold" Margin="0,5"/>
+        <TextBox x:Name="txtName" Grid.Row="1" Margin="0,0,0,10"/>
+
+        <TextBlock Text="Иконка:" FontWeight="Bold" Grid.Row="2" Margin="0,5"/>
+        <TextBox x:Name="txtIcon" Grid.Row="3" Text="📄" Margin="0,0,0,10"/>
+
+        <TextBlock Text="Описание:" FontWeight="Bold" Grid.Row="4" Margin="0,5"/>
+        <TextBox x:Name="txtDescription" Grid.Row="5" Height="60" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <CheckBox x:Name="chkPostings" Grid.Row="6" Content="Использует проводки" Margin="0,5"/>
+        <CheckBox x:Name="chkBalances" Grid.Row="7" Content="Использует балансы" Margin="0,5"/>
+
+        <StackPanel Grid.Row="8" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="✅ Создать" Click="OnCreateClick" Width="100" Height="35" Margin="5" Background="#4CAF50" Foreground="White"/>
+            <Button Content="❌ Отмена" Click="OnCancelClick" Width="100" Height="35" Margin="5"/>
+        </StackPanel>
+    </Grid>
+</Window>

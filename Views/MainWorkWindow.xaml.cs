@@ -10,10 +10,27 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Data;
+using System.ComponentModel;
+using System.Windows.Data;
 
 namespace BIS.ERP
 {
+    public class NavigationItem : INotifyPropertyChanged
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = "📄";
+        public string Type { get; set; } = "Item";
+        public string Badge { get; set; } = string.Empty;
+        public bool HasBadge => !string.IsNullOrEmpty(Badge);
+        public object Tag { get; set; }
+        public ObservableCollection<NavigationItem> Children { get; set; } = new ObservableCollection<NavigationItem>();
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        protected void OnPropertyChanged(string name) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
     public partial class MainWorkWindow : Window
     {
         private AppNavigationService _navigation;
@@ -21,11 +38,11 @@ namespace BIS.ERP
         private InfoBaseManager _infoBaseManager;
         private MetadataService _metadataService;
         private ReportService _reportService;
-        private DocumentService _documentService; // Добавляем DocumentService
+        private DocumentService _documentService;
         private InfoBase _currentInfoBase;
         private bool _isLoadingReport = false;
 
-        public ObservableCollection<ModuleInfo> Modules { get; set; }
+        public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
         public MainWorkWindow(IAuthService authService)
         {
@@ -33,8 +50,8 @@ namespace BIS.ERP
             _authService = authService;
             _infoBaseManager = new InfoBaseManager();
             _navigation = new AppNavigationService(ContentArea);
-            Modules = new ObservableCollection<ModuleInfo>();
-            ModulesMenu.ItemsSource = Modules;
+            NavigationItems = new ObservableCollection<NavigationItem>();
+            NavigationTree.ItemsSource = NavigationItems;
             this.Loaded += OnLoaded;
         }
 
@@ -51,10 +68,10 @@ namespace BIS.ERP
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context);
-                    _documentService = new DocumentService(context); // Инициализируем DocumentService
+                    _documentService = new DocumentService(context);
 
                     await _metadataService.InitializePredefinedCatalogsAsync();
-                    await LoadModules();
+                    await BuildNavigationTree();
                 }
             }
             catch (Exception ex)
@@ -64,45 +81,85 @@ namespace BIS.ERP
             }
         }
 
-        private async Task LoadModules()
+        private async Task BuildNavigationTree()
         {
-            Modules.Clear();
+            NavigationItems.Clear();
 
-            // Загружаем справочники
-            var catalogs = await _metadataService.GetCatalogsAsync();
-            foreach (var catalog in catalogs.OrderBy(c => c.Name))
+            // ========== РАЗДЕЛ: ДАННЫЕ ==========
+            var dataSection = new NavigationItem
             {
-                Modules.Add(new ModuleInfo
+                Id = "DataSection",
+                Name = "ДАННЫЕ",
+                Icon = "📊",
+                Type = "Section"
+            };
+
+            // Справочники
+            var catalogs = await _metadataService.GetCatalogsAsync();
+            if (catalogs.Any())
+            {
+                var catalogsGroup = new NavigationItem
                 {
-                    Id = catalog.Id.ToString(),
-                    Name = catalog.Name,
-                    Icon = catalog.Icon,
-                    Type = "Catalog",
-                    MetadataObject = catalog
-                });
+                    Id = "CatalogsGroup",
+                    Name = "Справочники",
+                    Icon = "📚",
+                    Type = "Group"
+                };
+
+                foreach (var catalog in catalogs.OrderBy(c => c.Name))
+                {
+                    catalogsGroup.Children.Add(new NavigationItem
+                    {
+                        Id = catalog.Id.ToString(),
+                        Name = catalog.Name,
+                        Icon = catalog.Icon,
+                        Type = "Catalog",
+                        Tag = catalog
+                    });
+                }
+                dataSection.Children.Add(catalogsGroup);
             }
 
-            // Добавляем раздел Документы
-            Modules.Add(new ModuleInfo
+            // Динамические документы
+            var documents = await _metadataService.GetDocumentsAsync();
+            if (documents.Any())
             {
-                Id = "Documents",
-                Name = "Документы",
-                Icon = "📄",
-                Type = "DocumentsGroup"
-            });
+                var docsGroup = new NavigationItem
+                {
+                    Id = "DocumentsGroup",
+                    Name = "Документы",
+                    Icon = "📄",
+                    Type = "Group"
+                };
 
-            // Добавляем раздел DBF Документы (импортированные)
-            var dbfDocsCount = await _documentService.GetDocumentsCountAsync();
-            Modules.Add(new ModuleInfo
+                foreach (var doc in documents.OrderBy(d => d.Name))
+                {
+                    docsGroup.Children.Add(new NavigationItem
+                    {
+                        Id = doc.Id.ToString(),
+                        Name = doc.Name,
+                        Icon = doc.Icon,
+                        Type = "DynamicDocument",
+                        Tag = doc
+                    });
+                }
+                dataSection.Children.Add(docsGroup);
+            }
+
+            // Импортированные DBF документы
+            var dbfCount = await _documentService.GetDocumentsCountAsync();
+            var dbfItem = new NavigationItem
             {
-                Id = "DynamicDocuments",
-                Name = $"DBF Документы {(dbfDocsCount > 0 ? $"({dbfDocsCount})" : "")}",
+                Id = "DbfDocuments",
+                Name = "DBF Документы",
                 Icon = "🗄️",
-                Type = "DynamicDocuments"
-            });
+                Type = "DbfDocuments",
+                Badge = dbfCount > 0 ? dbfCount.ToString() : ""
+            };
+            dataSection.Children.Add(dbfItem);
 
-            // Добавляем Операции
-            Modules.Add(new ModuleInfo
+            // Операции
+            dataSection.Children.Add(new NavigationItem
             {
                 Id = "Operations",
                 Name = "Операции",
@@ -110,172 +167,215 @@ namespace BIS.ERP
                 Type = "Operations"
             });
 
-            // Загружаем отчеты
+            NavigationItems.Add(dataSection);
+
+            // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
-            foreach (var report in reports.OrderBy(r => r.Name))
+            if (reports.Any())
             {
-                Modules.Add(new ModuleInfo
+                var reportsSection = new NavigationItem
                 {
-                    Id = report.Id.ToString(),
-                    Name = report.Name,
-                    Icon = report.Icon,
-                    Type = "Report",
-                    Report = report
-                });
+                    Id = "ReportsSection",
+                    Name = "ОТЧЕТЫ",
+                    Icon = "📈",
+                    Type = "Section"
+                };
+
+                foreach (var report in reports.OrderBy(r => r.Name))
+                {
+                    reportsSection.Children.Add(new NavigationItem
+                    {
+                        Id = report.Id.ToString(),
+                        Name = report.Name,
+                        Icon = report.Icon,
+                        Type = "Report",
+                        Tag = report
+                    });
+                }
+                NavigationItems.Add(reportsSection);
             }
 
-            if (!Modules.Any())
+            // ========== РАЗДЕЛ: АДМИНИСТРИРОВАНИЕ ==========
+            var adminSection = new NavigationItem
             {
-                Modules.Add(new ModuleInfo
-                {
-                    Id = "Empty",
-                    Name = "Нет данных",
-                    Icon = "📭",
-                    Type = "Empty"
-                });
+                Id = "AdminSection",
+                Name = "АДМИНИСТРИРОВАНИЕ",
+                Icon = "⚙️",
+                Type = "Section"
+            };
+
+            adminSection.Children.Add(new NavigationItem
+            {
+                Id = "UserProfile",
+                Name = "Профиль",
+                Icon = "👤",
+                Type = "Profile"
+            });
+
+            adminSection.Children.Add(new NavigationItem
+            {
+                Id = "SwitchMode",
+                Name = "Сменить режим",
+                Icon = "🔄",
+                Type = "SwitchMode"
+            });
+
+            adminSection.Children.Add(new NavigationItem
+            {
+                Id = "Logout",
+                Name = "Выход",
+                Icon = "🚪",
+                Type = "Logout"
+            });
+
+            NavigationItems.Add(adminSection);
+
+            // Подписываемся на события выбора
+            NavigationTree.SelectedItemChanged += OnNavigationItemSelected;
+
+            // Раскрываем секции по умолчанию
+            foreach (var item in NavigationItems)
+            {
+                var treeItem = GetTreeViewItem(NavigationTree, item);
+                if (treeItem != null)
+                    treeItem.IsExpanded = true;
             }
         }
 
-        // Обработчик клика по модулю
-        private async void OnModuleClick(object sender, RoutedEventArgs e)
+        private TreeViewItem GetTreeViewItem(ItemsControl container, object item)
         {
-            var button = sender as Button;
-            var module = button?.Tag as ModuleInfo;
+            if (container == null) return null;
 
-            if (module == null || module.Type == "Empty") return;
+            var treeItem = container.ItemContainerGenerator.ContainerFromItem(item) as TreeViewItem;
+            if (treeItem != null) return treeItem;
+
+            foreach (object child in container.Items)
+            {
+                var childContainer = container.ItemContainerGenerator.ContainerFromItem(child) as ItemsControl;
+                if (childContainer != null)
+                {
+                    treeItem = GetTreeViewItem(childContainer, item);
+                    if (treeItem != null) return treeItem;
+                }
+            }
+            return null;
+        }
+
+        private async void OnNavigationItemSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            var item = e.NewValue as NavigationItem;
+            if (item == null) return;
 
             if (_isLoadingReport) return;
 
-            if (module.Type == "Catalog" && module.MetadataObject != null)
+            try
             {
-                try
+                switch (item.Type)
                 {
-                    var catalogView = new CatalogDataView(module.MetadataObject, _metadataService);
-                    _navigation.NavigateTo(catalogView);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
-          //  else if (module.Type == "DocumentsGroup")
-         //   {
-                // Открываем управление документами
-           //     var documentsView = new DocumentsManagementView(_documentService);
-           //     _navigation.NavigateTo(documentsView);
-           // }
-            else if (module.Type == "DynamicDocuments")
-            {
-                // Открываем список импортированных DBF документов
-                var dynamicDocsView = new DynamicDocumentsView(_documentService);
-                _navigation.NavigateTo(dynamicDocsView);
-            }
-            else if (module.Type == "Operations")
-            {
-                var operationsView = new OperationsView();
-                _navigation.NavigateTo(operationsView);
-            }
-            else if (module.Type == "Report" && module.Report != null)
-            {
-                _isLoadingReport = true;
-                Mouse.OverrideCursor = Cursors.Wait;
-
-                try
-                {
-                    System.Diagnostics.Debug.WriteLine($"=== Opening report: {module.Report.Name} ===");
-
-                    var context = await _infoBaseManager.GetCurrentDbContextAsync();
-                    var reportService = new ReportService(context);
-
-                    System.Diagnostics.Debug.WriteLine("Getting report data...");
-                    var data = await reportService.GetReportDataAsync(module.Report);
-
-                    System.Diagnostics.Debug.WriteLine($"Data loaded: {data.Rows.Count} rows, {data.Columns.Count} columns");
-
-                    var preview = new ReportPreviewWindow(data, module.Report);
-                    preview.Owner = this;
-                    preview.ShowDialog();
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"ERROR: {ex.Message}");
-                    MessageBox.Show($"Ошибка формирования отчета: {ex.Message}",
-                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    _isLoadingReport = false;
-                    Mouse.OverrideCursor = null;
-                }
-            }
-        }
-
-        private async void OnExportAllClick(object sender, RoutedEventArgs e)
-        {
-            var dialog = new SaveFileDialog
-            {
-                Title = "Сохранить Excel файл",
-                Filter = "Excel файлы (*.xlsx)|*.xlsx",
-                DefaultExt = "xlsx",
-                FileName = $"BIS_ERP_Export_{DateTime.Now:yyyyMMdd_HHmmss}"
-            };
-
-            if (dialog.ShowDialog() == true)
-            {
-                try
-                {
-                    Mouse.OverrideCursor = Cursors.Wait;
-                    using var workbook = new XLWorkbook();
-                    var catalogs = await _metadataService.GetCatalogsAsync();
-                    int exportedCount = 0;
-
-                    foreach (var catalog in catalogs)
-                    {
-                        var data = await _metadataService.GetCatalogDataAsync(catalog.Id);
-                        if (data.Any())
+                    case "Catalog":
+                        if (item.Tag is MetadataObject catalog)
                         {
-                            var worksheet = workbook.Worksheets.Add(catalog.Name);
-                            // Заполнение worksheet
-                            exportedCount++;
+                            var catalogView = new CatalogDataView(catalog, _metadataService);
+                            _navigation.NavigateTo(catalogView);
                         }
-                    }
+                        break;
 
-                    workbook.SaveAs(dialog.FileName);
-                    MessageBox.Show($"Экспортировано {exportedCount} справочников!\n\nФайл: {dialog.FileName}",
-                        "Экспорт завершен", MessageBoxButton.OK, MessageBoxImage.Information);
+                    case "DynamicDocument":
+                        if (item.Tag is MetadataObject document)
+                        {
+                            var dynamicView = new DynamicDocumentWorkView(document, _metadataService);
+                            _navigation.NavigateTo(dynamicView);
+                        }
+                        break;
+
+                    case "DbfDocuments":
+                        var dbfView = new DynamicDocumentsView(_documentService);
+                        _navigation.NavigateTo(dbfView);
+                        break;
+
+                    case "Operations":
+                        var operationsView = new OperationsView();
+                        _navigation.NavigateTo(operationsView);
+                        break;
+
+                    case "Report":
+                        if (item.Tag is Report report)
+                        {
+                            await OpenReport(report);
+                        }
+                        break;
+
+                    case "Profile":
+                        OnProfileClick(null, null);
+                        break;
+
+                    case "SwitchMode":
+                        OnSwitchModeClick(null, null);
+                        break;
+
+                    case "Logout":
+                        OnLogoutClick(null, null);
+                        break;
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка массового экспорта: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    Mouse.OverrideCursor = null;
-                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        private void OnProfileClick(object sender, RoutedEventArgs e)
+        private async Task OpenReport(Report report)
+        {
+            _isLoadingReport = true;
+            Mouse.OverrideCursor = Cursors.Wait;
+
+            try
+            {
+                var context = await _infoBaseManager.GetCurrentDbContextAsync();
+                var reportService = new ReportService(context);
+                var data = await reportService.GetReportDataAsync(report);
+
+                var preview = new ReportPreviewWindow(data, report);
+                preview.Owner = this;
+                preview.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка формирования отчета: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _isLoadingReport = false;
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        private async void OnProfileClick(object sender, RoutedEventArgs e)
         {
             var user = _authService.CurrentUser;
             if (user != null)
             {
                 MessageBox.Show($"Пользователь: {user.FullName}\n" +
-                               $"Логин: {user.Login}\n" +
-                               $"Email: {user.Email}\n" +
-                               $"Роль: {(user.Role == UserRole.Admin ? "Администратор" : "Пользователь")}",
-                               "Профиль", MessageBoxButton.OK, MessageBoxImage.Information);
+                                $"Логин: {user.Login}\n" +
+                                $"Email: {user.Email}\n" +
+                                $"Роль: {(user.Role == UserRole.Admin ? "Администратор" : "Пользователь")}",
+                                "Профиль", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
 
         private void OnLogoutClick(object sender, RoutedEventArgs e)
         {
-            _authService.Logout();
-            var loginWindow = new LoginWindow();
-            loginWindow.Show();
-            this.Close();
+            var result = MessageBox.Show("Вы действительно хотите выйти?", "Выход",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                _authService.Logout();
+                var loginWindow = new LoginWindow();
+                loginWindow.Show();
+                this.Close();
+            }
         }
 
         private void OnSwitchModeClick(object sender, RoutedEventArgs e)
@@ -291,15 +391,5 @@ namespace BIS.ERP
                 this.Close();
             }
         }
-    }
-
-    public class ModuleInfo
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string Icon { get; set; } = "📄";
-        public string Type { get; set; } = "Catalog";
-        public MetadataObject MetadataObject { get; set; }
-        public Report Report { get; set; }
     }
 }
