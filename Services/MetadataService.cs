@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using BIS.ERP.Services;
 
 namespace BIS.ERP.Services
 {
@@ -56,12 +57,12 @@ namespace BIS.ERP.Services
             var employeesCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
-                Name = "Сотрудники",
+                Name = "Сотрудники (Списочный состав)",
                 TableName = "catalog_employees",
                 ObjectType = "Catalog",
                 Description = "Список сотрудников предприятия",
                 Icon = "👥",
-                Order = 1,
+                Order = 3,
                 IsSystem = true,
                 MetadataConfigId = config.Id
             };
@@ -91,7 +92,7 @@ namespace BIS.ERP.Services
                 ObjectType = "Catalog",
                 Description = "Основные средства предприятия",
                 Icon = "⚙️",
-                Order = 3,
+                Order = 4,
                 IsSystem = true,
                 MetadataConfigId = config.Id
             };
@@ -106,7 +107,7 @@ namespace BIS.ERP.Services
                 ObjectType = "Catalog",
                 Description = "Структура подразделений",
                 Icon = "🏢",
-                Order = 4,
+                Order = 5,
                 IsSystem = true,
                 MetadataConfigId = config.Id
             };
@@ -127,6 +128,56 @@ namespace BIS.ERP.Services
             };
             contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
             catalogs.Add(contractorsCatalog);
+
+            // ========== НОВЫЕ СПРАВОЧНИКИ ==========
+
+            // Справочник "Организации"
+            var organizationsCatalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = "Организации",
+                TableName = "catalog_organizations",
+                ObjectType = "Catalog",
+                Description = "Справочник организаций предприятия",
+                Icon = "🏢",
+                Order = 1,
+                IsSystem = true,
+                MetadataConfigId = config.Id
+            };
+            organizationsCatalog.Fields = GetOrganizationFields(organizationsCatalog.Id);
+            catalogs.Add(organizationsCatalog);
+
+            // Справочник "Валюты"
+            var currenciesCatalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = "Валюты",
+                TableName = "catalog_currencies",
+                ObjectType = "Catalog",
+                Description = "Справочник валют",
+                Icon = "💵",
+                Order = 7,
+                IsSystem = true,
+                MetadataConfigId = config.Id
+            };
+            currenciesCatalog.Fields = GetCurrencyFields(currenciesCatalog.Id);
+            catalogs.Add(currenciesCatalog);
+
+            // Справочник "Банки" (если нужен)
+            var banksCatalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = "Банки",
+                TableName = "catalog_banks",
+                ObjectType = "Catalog",
+                Description = "Справочник банков",
+                Icon = "🏦",
+                Order = 2,
+                IsSystem = true,
+                MetadataConfigId = config.Id
+            };
+            banksCatalog.Fields = GetBankFields(banksCatalog.Id);
+            catalogs.Add(banksCatalog);
 
             await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
 
@@ -213,6 +264,255 @@ namespace BIS.ERP.Services
             };
         }
 
+        // Поля для справочника "Организации"
+        private List<MetadataField> GetOrganizationFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Полное наименование",
+            DbColumnName = "full_name",
+            FieldType = "String",
+            Length = 500,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "ИНН",
+            DbColumnName = "inn",
+            FieldType = "String",
+            Length = 50,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "КПП",
+            DbColumnName = "kpp",
+            FieldType = "String",
+            Length = 50,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Юридический адрес",
+            DbColumnName = "legal_address",
+            FieldType = "String",
+            Length = 500,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Телефон",
+            DbColumnName = "phone",
+            FieldType = "String",
+            Length = 50,
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Email",
+            DbColumnName = "email",
+            FieldType = "String",
+            Length = 100,
+            Order = 8,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активна",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            Order = 9,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+        }
+
+        // Поля для справочника "Валюты"
+        private List<MetadataField> GetCurrencyFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 3,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 100,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Символ",
+            DbColumnName = "symbol",
+            FieldType = "String",
+            Length = 5,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Курс",
+            DbColumnName = "rate",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 4,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Базовая",
+            DbColumnName = "is_base",
+            FieldType = "Bool",
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активна",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+        }
+
+        // Поля для справочника "Банки"
+        private List<MetadataField> GetBankFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "БИК",
+            DbColumnName = "bic",
+            FieldType = "String",
+            Length = 20,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Корр. счет",
+            DbColumnName = "corr_account",
+            FieldType = "String",
+            Length = 50,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Адрес",
+            DbColumnName = "address",
+            FieldType = "String",
+            Length = 500,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Телефон",
+            DbColumnName = "phone",
+            FieldType = "String",
+            Length = 50,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+        }
         private List<MetadataField> GetContractorFields(Guid metadataObjectId)
         {
             var fields = GetStandardCatalogFields(metadataObjectId);
@@ -1530,7 +1830,19 @@ namespace BIS.ERP.Services
             await CreateDynamicTableAsync(obj);
         }
 
-     
+        // Добавьте эти методы в конец класса MetadataService
+
+        public async Task<List<DynamicDocument>> GetAllPostingsAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _context.DynamicDocuments.AsQueryable();
+
+            if (startDate.HasValue)
+                query = query.Where(d => d.Date >= startDate.Value);
+            if (endDate.HasValue)
+                query = query.Where(d => d.Date <= endDate.Value);
+
+            return await query.OrderByDescending(d => d.Date).ToListAsync();
+        }       
 
         private async Task<Guid> GetCurrentConfigIdAsync()
         {

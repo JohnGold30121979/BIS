@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CatalogSchema",
+  "description": "Схема для импорта справочников в систему",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Наименование справочника"
+    },
+    "icon": {
+      "type": "string",
+      "description": "Иконка справочника (эмодзи)",
+      "default": "📚"
+    },
+    "description": {
+      "type": "string",
+      "description": "Описание справочника"
+    },
+    "tableName": {
+      "type": "string",
+      "description": "Имя таблицы в БД (опционально)"
+    },
+    "fields": {
+      "type": "array",
+      "description": "Список полей справочника",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Имя поля"
+          },
+          "dbColumnName": {
+            "type": "string",
+            "description": "Имя колонки в БД"
+          },
+          "type": {
+            "type": "string",
+            "enum": [ "String", "Int", "Decimal", "DateTime", "Bool", "Reference" ],
+            "description": "Тип поля",
+            "default": "String"
+          },
+          "length": {
+            "type": "integer",
+            "description": "Длина строки",
+            "default": 255
+          },
+          "precision": {
+            "type": "integer",
+            "description": "Точность для Decimal",
+            "default": 18
+          },
+          "scale": {
+            "type": "integer",
+            "description": "Масштаб для Decimal",
+            "default": 2
+          },
+          "isRequired": {
+            "type": "boolean",
+            "description": "Обязательное поле",
+            "default": false
+          },
+          "isUnique": {
+            "type": "boolean",
+            "description": "Уникальное поле",
+            "default": false
+          },
+          "referenceCatalog": {
+            "type": "string",
+            "description": "Имя справочника для Reference типа"
+          },
+          "formula": {
+            "type": "string",
+            "description": "Формула для вычисляемого поля"
+          }
+        },
+        "required": [ "name" ]
+      }
+    },
+    "data": {
+      "type": "array",
+      "description": "Начальные данные справочника",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [ "name", "fields" ]
+}

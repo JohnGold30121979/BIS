@@ -1,5 +1,4 @@
-﻿// Data/AppDbContext.cs
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 
@@ -46,6 +45,9 @@ public class AppDbContext : DbContext
    
     public DbSet<MetadataCalculation> MetadataCalculations { get; set; }
     public DbSet<MetadataPostingRule> MetadataPostingRules { get; set; }
+    public DbSet<Organization> Organizations { get; set; }   
+    public DbSet<Counterparty> Counterparties { get; set; }
+    public DbSet<Posting> Postings { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {

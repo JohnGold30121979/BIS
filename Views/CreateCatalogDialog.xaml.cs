@@ -1,13 +1,15 @@
-﻿using System.Collections.ObjectModel;
+﻿using BIS.ERP.Models;
+using Microsoft.Win32;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using BIS.ERP.Models;  // ← Важно: используем Models
 
 namespace BIS.ERP.Views
 {
     public partial class CreateCatalogDialog : Window
     {
-        // Теперь это ObservableCollection<Models.FieldInfo>
         public ObservableCollection<FieldInfo> Fields { get; set; }
 
         public string CatalogName => NameBox.Text;
@@ -17,7 +19,7 @@ namespace BIS.ERP.Views
         public CreateCatalogDialog()
         {
             InitializeComponent();
-            Fields = new ObservableCollection<FieldInfo>();  // Models.FieldInfo
+            Fields = new ObservableCollection<FieldInfo>();
             FieldsList.ItemsSource = Fields;
 
             // Добавляем стандартные поля
@@ -58,5 +60,78 @@ namespace BIS.ERP.Views
             DialogResult = false;
             Close();
         }
+
+        private async void OnLoadFromJsonClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "Выберите JSON файл со структурой справочника",
+                Filter = "JSON файлы (*.json)|*.json"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
+                {
+                    var json = await File.ReadAllTextAsync(dialog.FileName);
+
+                    // Используем анонимный тип для десериализации
+                    var schema = JsonSerializer.Deserialize<CatalogSchema>(json);
+
+                    if (schema != null)
+                    {
+                        NameBox.Text = schema.Name;
+                        DescriptionBox.Text = schema.Description ?? "";
+
+                        // Устанавливаем иконку
+                        if (!string.IsNullOrEmpty(schema.Icon))
+                        {
+                            for (int i = 0; i < IconCombo.Items.Count; i++)
+                            {
+                                var item = IconCombo.Items[i] as ComboBoxItem;
+                                if (item?.Tag?.ToString() == schema.Icon)
+                                {
+                                    IconCombo.SelectedIndex = i;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Заполняем поля
+                        Fields.Clear();
+                        foreach (var field in schema.Fields)
+                        {
+                            Fields.Add(new FieldInfo
+                            {
+                                Name = field.Name,
+                                Type = field.FieldType,
+                                IsRequired = field.IsRequired
+                            });
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка загрузки JSON: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+    }
+
+    // Схема JSON для импорта
+    public class CatalogSchema
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = "📚";
+        public string Description { get; set; } = string.Empty;
+        public List<FieldSchema> Fields { get; set; } = new();
+    }
+
+    public class FieldSchema
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FieldType { get; set; } = "String";
+        public bool IsRequired { get; set; } = false;
     }
 }

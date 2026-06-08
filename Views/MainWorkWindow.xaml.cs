@@ -1,6 +1,7 @@
 ﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
+using BIS.ERP.Views.Dialogs;
 using ClosedXML.Excel;
 using Microsoft.Win32;
 using System;
@@ -94,6 +95,8 @@ namespace BIS.ERP
                 Type = "Section"
             };
 
+
+
             // Справочники
             var catalogs = await _metadataService.GetCatalogsAsync();
             if (catalogs.Any())
@@ -105,6 +108,8 @@ namespace BIS.ERP
                     Icon = "📚",
                     Type = "Group"
                 };
+
+
 
                 foreach (var catalog in catalogs.OrderBy(c => c.Name))
                 {
@@ -148,15 +153,14 @@ namespace BIS.ERP
 
             // Импортированные DBF документы
             var dbfCount = await _documentService.GetDocumentsCountAsync();
-            var dbfItem = new NavigationItem
+            dataSection.Children.Add(new NavigationItem
             {
                 Id = "DbfDocuments",
                 Name = "DBF Документы",
                 Icon = "🗄️",
                 Type = "DbfDocuments",
                 Badge = dbfCount > 0 ? dbfCount.ToString() : ""
-            };
-            dataSection.Children.Add(dbfItem);
+            });
 
             // Операции
             dataSection.Children.Add(new NavigationItem
@@ -165,6 +169,15 @@ namespace BIS.ERP
                 Name = "Операции",
                 Icon = "📋",
                 Type = "Operations"
+            });
+
+            // Журнал проводок
+            dataSection.Children.Add(new NavigationItem
+            {
+                Id = "PostingsJournal",
+                Name = "Журнал проводок",
+                Icon = "📋",
+                Type = "PostingsJournal"
             });
 
             NavigationItems.Add(dataSection);
@@ -275,8 +288,19 @@ namespace BIS.ERP
                     case "Catalog":
                         if (item.Tag is MetadataObject catalog)
                         {
-                            var catalogView = new CatalogDataView(catalog, _metadataService);
-                            _navigation.NavigateTo(catalogView);
+                            // Если это справочник "Сотрудники" - открываем кастомную форму
+                            if (catalog.Name == "Сотрудники" || catalog.Name == "Списочный состав")
+                            {
+                                var context1 = await _infoBaseManager.GetCurrentDbContextAsync();
+                                var employeeService = new EmployeeService(context1);
+                                var employeesView = new EmployeesCatalogView(employeeService);
+                                _navigation.NavigateTo(employeesView);
+                            }
+                            else
+                            {
+                                var catalogView = new CatalogDataView(catalog, _metadataService);
+                                _navigation.NavigateTo(catalogView);
+                            }
                         }
                         break;
 
@@ -296,6 +320,13 @@ namespace BIS.ERP
                     case "Operations":
                         var operationsView = new OperationsView();
                         _navigation.NavigateTo(operationsView);
+                        break;
+
+                    case "PostingsJournal":
+                        var context = await _infoBaseManager.GetCurrentDbContextAsync();
+                        var postingService = new PostingService(context);
+                        var journalView = new PostingsJournalView(postingService);
+                        _navigation.NavigateTo(journalView);
                         break;
 
                     case "Report":
