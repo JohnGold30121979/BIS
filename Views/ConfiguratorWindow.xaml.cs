@@ -738,7 +738,7 @@ namespace BIS.ERP.Views
             {
                 Header = "Тип",
                 SelectedItemBinding = new System.Windows.Data.Binding("FieldType"),
-                ItemsSource = new List<string> { "String", "Int", "Decimal", "DateTime", "Bool" },
+                ItemsSource = new List<string> { "String", "Int", "Decimal", "DateTime", "Bool", "Reference"},
                 Width = 100
             });
             fieldsGrid.Columns.Add(new DataGridTextColumn { Header = "Длина", Binding = new System.Windows.Data.Binding("Length"), Width = 80 });
