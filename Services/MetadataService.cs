@@ -162,23 +162,37 @@ namespace BIS.ERP.Services
             contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
             catalogs.Add(contractorsCatalog);
 
-           var sitesCatalog = new MetadataObject
-           {
+            // Справочник "Участки"
+            var sitesCatalog = new MetadataObject
+            {
                 Id = Guid.NewGuid(),
                 Name = "Участки",
-                TableName = "sites",
+                TableName = "catalog_sites",
                 ObjectType = "Catalog",
-                Description = "Участки",
-                Icon = "🤝",
-                Order = 5,
+                Description = "Справочник участков предприятия",
+                Icon = "🏭",
+                Order = 6,
                 IsSystem = true,
                 MetadataConfigId = config.Id
-           };
-            sitesCatalog.Fields = GetContractorFields(sitesCatalog.Id);
+            };
+            sitesCatalog.Fields = GetSiteFields(sitesCatalog.Id);
             catalogs.Add(sitesCatalog);
 
-            // ========== НОВЫЕ СПРАВОЧНИКИ ==========
-
+            // Справочник "Материально-ответственные лица (МОЛ)"
+            var responsiblePersonsCatalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = "МОЛ",
+                TableName = "catalog_responsible_persons",
+                ObjectType = "Catalog",
+                Description = "Материально-ответственные лица",
+                Icon = "👥",
+                Order = 7,
+                IsSystem = true,
+                MetadataConfigId = config.Id
+            };
+            responsiblePersonsCatalog.Fields = GetResponsiblePersonFields(responsiblePersonsCatalog.Id);
+            catalogs.Add(responsiblePersonsCatalog);
 
 
             // Справочник "Валюты"
@@ -241,6 +255,147 @@ namespace BIS.ERP.Services
 
             await CreateTablesFromMetadataAsync();
            
+        }
+
+        /// <summary>
+        /// Поля для справочника "Участки"
+        /// </summary>
+        private List<MetadataField> GetSiteFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код участка",
+            DbColumnName = "site_code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование участка",
+            DbColumnName = "site_name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Описание",
+            DbColumnName = "description",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+        }
+       
+        private List<MetadataField> GetResponsiblePersonFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Табельный номер",
+            DbColumnName = "personnel_number",
+            FieldType = "Reference",           // ← меняем на Reference
+            ReferenceCatalog = "Сотрудники (Списочный состав)", // ← ссылка на сотрудников
+            Length = 0,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "ФИО",
+            DbColumnName = "full_name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+           Id = Guid.NewGuid(),
+           Name = "Участок",
+           DbColumnName = "site_id",
+           FieldType = "Reference",           // ← ДОЛЖНО БЫТЬ "Reference", а не "String"!
+           ReferenceCatalog = "Участки",      // ← Имя справочника
+           Length = 0,
+           IsRequired = false,
+           IsUnique = false,
+           Order = 3,
+           MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Должность",
+            DbColumnName = "position",
+            FieldType = "String",
+            Length = 100,
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Телефон",
+            DbColumnName = "phone",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Примечание",
+            DbColumnName = "note",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        }
+    };
         }
 
         private List<MetadataField> GetStandardCatalogFields(Guid metadataObjectId)

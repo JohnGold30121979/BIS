@@ -46,10 +46,7 @@ public class AppDbContext : DbContext
     public DbSet<MetadataPostingRule> MetadataPostingRules { get; set; }
     public DbSet<Organization> Organizations { get; set; }   
     public DbSet<Counterparty> Counterparties { get; set; }
-    public DbSet<Posting> Postings { get; set; }
-
-    public DbSet<Site> Sites { get; set; }
-    public DbSet<ResponsiblePerson> ResponsiblePersons { get; set; }
+    public DbSet<Posting> Postings { get; set; }  
     
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

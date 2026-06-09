@@ -37,12 +37,12 @@ namespace BIS.ERP.Services
             }
         }
 
-        // Получение всех проводок из разных источников
+        // Получение всех проводок из динамических документов
         public async Task<List<PostingViewModel>> GetAllPostingsAsync(DateTime? startDate = null, DateTime? endDate = null)
         {
             var postings = new List<PostingViewModel>();
 
-            // 1. Проводки из DynamicDocuments (импортированные DBF)
+            // Проводки из DynamicDocuments (импортированные DBF)
             var dynamicDocs = await _context.DynamicDocuments
                 .Include(d => d.Rows)
                 .ToListAsync();
@@ -53,46 +53,37 @@ namespace BIS.ERP.Services
                 {
                     var rowData = GetRowData(row);
 
-                    // Проверяем наличие полей DEBET и KREDIT
-                    var hasDebet = rowData.ContainsKey("DEBET") || rowData.ContainsKey("Дебет");
-                    var hasCredit = rowData.ContainsKey("KREDIT") || rowData.ContainsKey("Кредит");
+                    // Пытаемся найти суммы в разных вариантах
+                    decimal amount = 0;
+                    if (rowData.ContainsKey("SUMMA"))
+                        amount = Convert.ToDecimal(rowData["SUMMA"] ?? 0);
+                    else if (rowData.ContainsKey("Сумма"))
+                        amount = Convert.ToDecimal(rowData["Сумма"] ?? 0);
+                    else if (rowData.ContainsKey("AMOUNT"))
+                        amount = Convert.ToDecimal(rowData["AMOUNT"] ?? 0);
 
-                    if (hasDebet && hasCredit)
+                    decimal amountCurrency = 0;
+                    if (rowData.ContainsKey("SUMMA_V"))
+                        amountCurrency = Convert.ToDecimal(rowData["SUMMA_V"] ?? 0);
+                    else if (rowData.ContainsKey("Сумма в валюте"))
+                        amountCurrency = Convert.ToDecimal(rowData["Сумма в валюте"] ?? 0);
+
+                    var debet = rowData.ContainsKey("DEBET") ? rowData["DEBET"]?.ToString() :
+                               (rowData.ContainsKey("Дебет") ? rowData["Дебет"]?.ToString() : "");
+                    var credit = rowData.ContainsKey("KREDIT") ? rowData["KREDIT"]?.ToString() :
+                                (rowData.ContainsKey("Кредит") ? rowData["Кредит"]?.ToString() : "");
+
+                    var note = rowData.ContainsKey("TEX") ? rowData["TEX"]?.ToString() :
+                              (rowData.ContainsKey("Примечание") ? rowData["Примечание"]?.ToString() : "");
+
+                    var organization = rowData.ContainsKey("ORGANIZATION") ? rowData["ORGANIZATION"]?.ToString() :
+                                      (rowData.ContainsKey("Организация") ? rowData["Организация"]?.ToString() : "");
+
+                    var employee = rowData.ContainsKey("EMPLOYEE") ? rowData["EMPLOYEE"]?.ToString() :
+                                  (rowData.ContainsKey("Сотрудник") ? rowData["Сотрудник"]?.ToString() : "");
+
+                    if (!string.IsNullOrEmpty(debet) || !string.IsNullOrEmpty(credit))
                     {
-                        // Пытаемся найти сумму в разных вариантах
-                        decimal amount = 0;
-                        if (rowData.ContainsKey("SUMMA"))
-                            amount = Convert.ToDecimal(rowData["SUMMA"] ?? 0);
-                        else if (rowData.ContainsKey("Сумма"))
-                            amount = Convert.ToDecimal(rowData["Сумма"] ?? 0);
-                        else if (rowData.ContainsKey("AMOUNT"))
-                            amount = Convert.ToDecimal(rowData["AMOUNT"] ?? 0);
-
-                        // Сумма в валюте
-                        decimal amountCurrency = 0;
-                        if (rowData.ContainsKey("SUMMA_V"))
-                            amountCurrency = Convert.ToDecimal(rowData["SUMMA_V"] ?? 0);
-                        else if (rowData.ContainsKey("Сумма в валюте"))
-                            amountCurrency = Convert.ToDecimal(rowData["Сумма в валюте"] ?? 0);
-
-                        // Счета
-                        var debet = rowData.ContainsKey("DEBET") ? rowData["DEBET"]?.ToString() :
-                                   (rowData.ContainsKey("Дебет") ? rowData["Дебет"]?.ToString() : "");
-                        var credit = rowData.ContainsKey("KREDIT") ? rowData["KREDIT"]?.ToString() :
-                                    (rowData.ContainsKey("Кредит") ? rowData["Кредит"]?.ToString() : "");
-
-                        // Примечание
-                        var note = rowData.ContainsKey("TEX") ? rowData["TEX"]?.ToString() :
-                                  (rowData.ContainsKey("Примечание") ? rowData["Примечание"]?.ToString() : "");
-
-                        // Организация
-                        var organization = rowData.ContainsKey("KONTRAGENT") ? rowData["KONTRAGENT"]?.ToString() :
-                                          (rowData.ContainsKey("Организация") ? rowData["Организация"]?.ToString() : "");
-
-                        // Сотрудник
-                        var employee = rowData.ContainsKey("SOTRUDNIK") ? rowData["SOTRUDNIK"]?.ToString() :
-                                      (rowData.ContainsKey("Сотрудник") ? rowData["Сотрудник"]?.ToString() : "");
-
                         postings.Add(new PostingViewModel
                         {
                             Date = doc.Date,
@@ -105,14 +96,11 @@ namespace BIS.ERP.Services
                             Note = note ?? "",
                             Organization = organization ?? "",
                             Employee = employee ?? "",
-                            Currency = rowData.ContainsKey("Валюта") ? rowData["Валюта"]?.ToString() : "KGS"
+                            Currency = rowData.ContainsKey("Currency") ? rowData["Currency"]?.ToString() : "KGS"
                         });
                     }
                 }
             }
-
-            // 2. Проводки из DynamicPostings (если есть таблица)
-            // TODO: Добавить таблицу проводок когда появится
 
             // Фильтрация по дате
             if (startDate.HasValue)
@@ -169,9 +157,7 @@ namespace BIS.ERP.Services
                 }
             }
 
-            // Итоговая строка
             result.Rows.Add(DateTime.Now, "ИТОГО:", "", totalDebet, totalCredit, "");
-
             return result;
         }
 
@@ -206,34 +192,6 @@ namespace BIS.ERP.Services
             }
 
             return result;
-        }
-
-        // Получение сальдо по счету на дату
-        public async Task<decimal> GetBalanceAsync(string accountCode, DateTime date)
-        {
-            var postings = await GetAllPostingsAsync(null, date);
-
-            decimal debitTotal = postings.Where(p => p.DebitAccount == accountCode).Sum(p => p.Amount);
-            decimal creditTotal = postings.Where(p => p.CreditAccount == accountCode).Sum(p => p.Amount);
-
-            return debitTotal - creditTotal;
-        }
-
-        // Получение всех счетов, участвующих в проводках
-        public async Task<List<string>> GetAllAccountsAsync()
-        {
-            var postings = await GetAllPostingsAsync();
-
-            var accounts = new HashSet<string>();
-            foreach (var posting in postings)
-            {
-                if (!string.IsNullOrEmpty(posting.DebitAccount))
-                    accounts.Add(posting.DebitAccount);
-                if (!string.IsNullOrEmpty(posting.CreditAccount))
-                    accounts.Add(posting.CreditAccount);
-            }
-
-            return accounts.OrderBy(a => a).ToList();
         }
     }
 }

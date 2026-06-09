@@ -24,14 +24,22 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button x:Name="ExportButton" Content="📎 Экспорт в Excel" 
-                            Width="120" Height="35" Margin="0,0,10,0"
+                    <Button x:Name="EditButton" Content="✏️ Редактировать" 
+                            Width="110" Height="35" Margin="0,0,10,0"
+                            Background="#3498DB" Foreground="White" Click="OnEditClick"
+                            IsEnabled="False"/>
+                    <Button x:Name="DeleteButton" Content="🗑️ Удалить" 
+                            Width="90" Height="35" Margin="0,0,10,0"
+                            Background="#E74C3C" Foreground="White" Click="OnDeleteClick"
+                            IsEnabled="False"/>
+                    <Button x:Name="ExportButton" Content="📎 Экспорт" 
+                            Width="90" Height="35" Margin="0,0,10,0"
                             Background="#9B59B6" Foreground="White" Click="OnExportClick"/>
                     <Button x:Name="AddButton" Content="➕ Добавить" 
                             Width="100" Height="35" Margin="0,0,10,0"
                             Background="#27AE60" Foreground="White" Click="OnAddClick"/>
                     <Button x:Name="RefreshButton" Content="🔄 Обновить" 
-                            Width="100" Height="35"
+                            Width="90" Height="35"
                             Background="#3498DB" Foreground="White" Click="OnRefreshClick"/>
                 </StackPanel>
             </Grid>
@@ -39,10 +47,10 @@
 
         <!-- Таблица данных -->
         <DataGrid x:Name="DataGrid" Grid.Row="1" 
-                  AutoGenerateColumns="True"
+                  AutoGenerateColumns="False"
                   CanUserAddRows="False"
                   CanUserDeleteRows="False"
-                  IsReadOnly="False"
+                  IsReadOnly="True"
                   SelectionMode="Single"
                   SelectionUnit="FullRow"
                   RowHeaderWidth="0"
@@ -51,7 +59,8 @@
                   BorderBrush="#E0E0E0"
                   BorderThickness="0"
                   RowHeight="35"
-                  FontSize="13">
+                  FontSize="13"
+                  SelectionChanged="DataGrid_SelectionChanged">
             <DataGrid.Resources>
                 <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3498DB" Opacity="0.3"/>
             </DataGrid.Resources>

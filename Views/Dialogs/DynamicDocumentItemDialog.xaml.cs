@@ -57,14 +57,20 @@ namespace BIS.ERP.Views.Dialogs
                     {
                         Height = 30,
                         Name = field.Name,
-                        DisplayMemberPath = "Name",
+                        DisplayMemberPath = "DisplayName",
                         SelectedValuePath = "Id",
                         MinWidth = 200
                     };
 
+                    System.Diagnostics.Debug.WriteLine($"=== Поле: {field.Name}, Справочник: {field.ReferenceCatalog}");
+
                     if (catalogsDict.TryGetValue(field.ReferenceCatalog, out var catalog))
                     {
+                        System.Diagnostics.Debug.WriteLine($"Справочник найден: {catalog.Name}, TableName: {catalog.TableName}");
+
                         var data = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                        System.Diagnostics.Debug.WriteLine($"Получено записей: {data.Count}");
+
                         var items = new List<ReferenceItem>();
 
                         foreach (var d in data)
@@ -74,8 +80,13 @@ namespace BIS.ERP.Views.Dialogs
                             if (d.ContainsKey("Id"))
                                 item.Id = Guid.Parse(d["Id"].ToString());
 
+                            // ВЫВОДИМ ВСЕ КЛЮЧИ ДЛЯ ОТЛАДКИ
+                            System.Diagnostics.Debug.WriteLine($"Ключи записи: {string.Join(", ", d.Keys)}");
+
                             // Ищем название поля с наименованием
-                            if (d.ContainsKey("Наименование"))
+                            if (d.ContainsKey("site_name"))
+                                item.Name = d["site_name"].ToString();
+                            else if (d.ContainsKey("Наименование"))
                                 item.Name = d["Наименование"].ToString();
                             else if (d.ContainsKey("name"))
                                 item.Name = d["name"].ToString();
@@ -84,16 +95,25 @@ namespace BIS.ERP.Views.Dialogs
                             else if (d.ContainsKey("Код"))
                                 item.Name = d["Код"].ToString();
                             else
-                                item.Name = "Без имени";
+                            {
+                                // Если ничего не нашли, берем первое значение
+                                var firstValue = d.Values.FirstOrDefault();
+                                item.Name = firstValue?.ToString() ?? "Без имени";
+                            }
 
                             items.Add(item);
                         }
 
                         comboBox.ItemsSource = items;
                         System.Diagnostics.Debug.WriteLine($"Загружено {items.Count} записей из {field.ReferenceCatalog}");
+                        if (items.Any())
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Первая запись: Id={items[0].Id}, Name={items[0].Name}");
+                        }
                     }
                     else
                     {
+                        System.Diagnostics.Debug.WriteLine($"Справочник '{field.ReferenceCatalog}' НЕ НАЙДЕН!");
                         comboBox.ItemsSource = new List<ReferenceItem> { new ReferenceItem { Name = $"Справочник '{field.ReferenceCatalog}' не найден" } };
                     }
 
@@ -123,7 +143,7 @@ namespace BIS.ERP.Views.Dialogs
                 FieldsPanel.Children.Add(panel);
                 _fieldControls[field.Name] = inputControl;
             }
-        }      
+        }
 
         // Маленький класс для отображения
         public class ReferenceItem
@@ -131,59 +151,7 @@ namespace BIS.ERP.Views.Dialogs
             public Guid Id { get; set; }
             public string Name { get; set; } = string.Empty;
         }
-
-        private async Task LoadReferenceData(ComboBox comboBox, string catalogName)
-        {
-            try
-            {
-                var catalogs = await _metadataService.GetCatalogsAsync();
-                var catalog = catalogs.FirstOrDefault(c => c.Name == catalogName);
-
-                if (catalog != null)
-                {
-                    var data = await _metadataService.GetCatalogDataAsync(catalog.Id);
-
-                    var items = new List<ReferenceItem>();
-                    foreach (var d in data)
-                    {
-                        var item = new ReferenceItem();
-
-                        // Пытаемся найти Id
-                        if (d.ContainsKey("Id"))
-                            item.Id = Guid.Parse(d["Id"].ToString());
-
-                        // Пытаемся найти Наименование (разные варианты)
-                        if (d.ContainsKey("Наименование"))
-                            item.Name = d["Наименование"].ToString();
-                        else if (d.ContainsKey("Name"))
-                            item.Name = d["Name"].ToString();
-                        else if (d.ContainsKey("name"))
-                            item.Name = d["name"].ToString();
-                        else if (d.ContainsKey("Код"))
-                            item.Name = d["Код"].ToString();
-                        else
-                            item.Name = "Без имени";
-
-                        items.Add(item);
-                    }
-
-                    comboBox.ItemsSource = items;
-                    comboBox.SelectedValuePath = "Id";
-                    comboBox.DisplayMemberPath = "Name";
-
-                    System.Diagnostics.Debug.WriteLine($"Загружено {items.Count} записей из справочника {catalogName}");
-                }
-                else
-                {
-                    comboBox.ItemsSource = new List<ReferenceItem> { new ReferenceItem { Name = $"Справочник '{catalogName}' не найден" } };
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка: {ex.Message}");
-                comboBox.ItemsSource = new List<ReferenceItem> { new ReferenceItem { Name = $"Ошибка: {ex.Message}" } };
-            }
-        }
+      
 
         private void OnSaveClick(object sender, RoutedEventArgs e)
         {

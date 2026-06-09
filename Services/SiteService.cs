@@ -1,85 +1,106 @@
-﻿using System;
+﻿using BIS.ERP.Data;
+using BIS.ERP.Models;
+using Microsoft.EntityFrameworkCore;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using BIS.ERP.Data;
-using BIS.ERP.Models;
 
 namespace BIS.ERP.Services
 {
     public class SiteService
     {
         private readonly AppDbContext _context;
+        private readonly MetadataService _metadataService;
+        private Guid? _catalogId;
 
-        public SiteService(AppDbContext context)
+        public SiteService(AppDbContext context, MetadataService metadataService)
         {
             _context = context;
+            _metadataService = metadataService;
+        }
+
+        private async Task<Guid> GetCatalogIdAsync()
+        {
+            if (_catalogId.HasValue) return _catalogId.Value;
+
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.Name == "Участки" && m.ObjectType == "Catalog");
+
+            _catalogId = catalog?.Id ?? Guid.Empty;
+            return _catalogId.Value;
         }
 
         public async Task<List<Site>> GetAllSitesAsync()
         {
-            return await _context.Sites
-                .OrderBy(s => s.Code)
-                .ToListAsync();
-        }
+            var catalogId = await GetCatalogIdAsync();
+            if (catalogId == Guid.Empty) return new List<Site>();
 
-        public async Task<Site> GetSiteByIdAsync(Guid id)
-        {
-            return await _context.Sites.FindAsync(id);
-        }
+            var data = await _metadataService.GetCatalogDataAsync(catalogId);
+            var sites = new List<Site>();
 
-        public async Task<Site> GetSiteByCodeAsync(string code)
-        {
-            return await _context.Sites
-                .FirstOrDefaultAsync(s => s.Code == code);
+            foreach (var row in data)
+            {
+                sites.Add(new Site
+                {
+                    Id = row.ContainsKey("Id") ? Guid.Parse(row["Id"].ToString()) : Guid.NewGuid(),
+                    SiteCode = GetStringValue(row, "Код участка"),
+                    SiteName = GetStringValue(row, "Наименование участка"),
+                    Description = GetStringValue(row, "Описание"),
+                    IsActive = GetStringValue(row, "Активен", "true") == "true"
+                });
+            }
+
+            return sites.OrderBy(s => s.SiteCode).ToList();
         }
 
         public async Task<Site> AddSiteAsync(Site site)
         {
-            site.Id = Guid.NewGuid();
-            site.CreatedAt = DateTime.UtcNow;
-            await _context.Sites.AddAsync(site);
-            await _context.SaveChangesAsync();
+            var catalogId = await GetCatalogIdAsync();
+            if (catalogId == Guid.Empty) throw new Exception("Справочник участков не найден");
+
+            var data = new Dictionary<string, object>
+            {
+                ["Код участка"] = site.SiteCode,
+                ["Наименование участка"] = site.SiteName,
+                ["Описание"] = site.Description,
+                ["Активен"] = site.IsActive
+            };
+
+            var recordId = await _metadataService.CreateDynamicRecordAsync(catalogId, data);
+            site.Id = recordId;
             return site;
         }
 
         public async Task<Site> UpdateSiteAsync(Site site)
         {
-            var existing = await _context.Sites.FindAsync(site.Id);
-            if (existing == null)
-                throw new Exception($"Участок с ID {site.Id} не найден");
+            var catalogId = await GetCatalogIdAsync();
+            if (catalogId == Guid.Empty) throw new Exception("Справочник участков не найден");
 
-            existing.Code = site.Code;
-            existing.Name = site.Name;
-            existing.Description = site.Description;
-            existing.IsActive = site.IsActive;
-            existing.UpdatedAt = DateTime.UtcNow;
+            var data = new Dictionary<string, object>
+            {
+                ["Код участка"] = site.SiteCode,
+                ["Наименование участка"] = site.SiteName,
+                ["Описание"] = site.Description,
+                ["Активен"] = site.IsActive
+            };
 
-            _context.Sites.Update(existing);
-            await _context.SaveChangesAsync();
-            return existing;
+            await _metadataService.UpdateDynamicRecordAsync(catalogId, site.Id, data);
+            return site;
         }
 
         public async Task<bool> DeleteSiteAsync(Guid id)
         {
-            var site = await _context.Sites.FindAsync(id);
-            if (site == null) return false;
+            var catalogId = await GetCatalogIdAsync();
+            if (catalogId == Guid.Empty) return false;
 
-            _context.Sites.Remove(site);
-            await _context.SaveChangesAsync();
+            await _metadataService.DeleteDynamicRecordAsync(catalogId, id);
             return true;
         }
 
-        public async Task<List<Site>> SearchSitesAsync(string searchText)
+        private string GetStringValue(Dictionary<string, object> row, string key, string defaultValue = "")
         {
-            if (string.IsNullOrWhiteSpace(searchText))
-                return await GetAllSitesAsync();
-
-            return await _context.Sites
-                .Where(s => s.Code.Contains(searchText) || s.Name.Contains(searchText))
-                .OrderBy(s => s.Code)
-                .ToListAsync();
+            return row.ContainsKey(key) && row[key] != null ? row[key].ToString() : defaultValue;
         }
     }
 }
