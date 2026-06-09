@@ -67,8 +67,7 @@ namespace BIS.ERP.Views.Dialogs
                 Employee.Phone = txtPhone.Text;
                 Employee.Email = txtEmail.Text;
                 Employee.TaxId = txtTaxId.Text;
-                Employee.IsActive = Employee.Status == "Активен";
-                Employee.UpdatedAt = DateTime.UtcNow;
+                Employee.IsActive = Employee.Status == "Активен";             
 
                 DialogResult = true;
                 Close();

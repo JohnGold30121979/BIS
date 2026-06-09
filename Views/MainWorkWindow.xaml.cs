@@ -98,6 +98,7 @@ namespace BIS.ERP
 
 
             // Справочники
+            // Справочники
             var catalogs = await _metadataService.GetCatalogsAsync();
             if (catalogs.Any())
             {
@@ -109,21 +110,38 @@ namespace BIS.ERP
                     Type = "Group"
                 };
 
-
-
                 foreach (var catalog in catalogs.OrderBy(c => c.Name))
                 {
-                    catalogsGroup.Children.Add(new NavigationItem
+                    // Для справочника сотрудников используем кастомный тип
+                    if (catalog.Name == "Сотрудники (Списочный состав)")
                     {
-                        Id = catalog.Id.ToString(),
-                        Name = catalog.Name,
-                        Icon = catalog.Icon,
-                        Type = "Catalog",
-                        Tag = catalog
-                    });
+                        catalogsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = catalog.Id.ToString(),
+                            Name = "Сотрудники",  // ← отображаем как "Сотрудники"
+                            Icon = catalog.Icon,
+                            Type = "EmployeesCatalog",  // ← кастомный тип
+                            Tag = catalog
+                        });
+                    }
+                    else
+                    {
+                        catalogsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = catalog.Id.ToString(),
+                            Name = catalog.Name,
+                            Icon = catalog.Icon,
+                            Type = "Catalog",
+                            Tag = catalog
+                        });
+                    }
                 }
+
                 dataSection.Children.Add(catalogsGroup);
             }
+
+            // Убираем отдельное добавление EmployeesCatalog
+            // Не добавляем отдельный пункт!
 
             // Динамические документы
             var documents = await _metadataService.GetDocumentsAsync();
@@ -288,20 +306,16 @@ namespace BIS.ERP
                     case "Catalog":
                         if (item.Tag is MetadataObject catalog)
                         {
-                            // Если это справочник "Сотрудники" - открываем кастомную форму
-                            if (catalog.Name == "Сотрудники" || catalog.Name == "Списочный состав")
-                            {
-                                var context1 = await _infoBaseManager.GetCurrentDbContextAsync();
-                                var employeeService = new EmployeeService(context1);
-                                var employeesView = new EmployeesCatalogView(employeeService);
-                                _navigation.NavigateTo(employeesView);
-                            }
-                            else
-                            {
-                                var catalogView = new CatalogDataView(catalog, _metadataService);
-                                _navigation.NavigateTo(catalogView);
-                            }
+                            var catalogView = new CatalogDataView(catalog, _metadataService);
+                            _navigation.NavigateTo(catalogView);
                         }
+                        break;
+
+                    case "EmployeesCatalog":
+                        var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        var employeeService = new EmployeeService(dbContext, _metadataService);  // ← два параметра!
+                        var employeesView = new EmployeesCatalogView(employeeService);
+                        _navigation.NavigateTo(employeesView);
                         break;
 
                     case "DynamicDocument":
@@ -323,8 +337,8 @@ namespace BIS.ERP
                         break;
 
                     case "PostingsJournal":
-                        var context = await _infoBaseManager.GetCurrentDbContextAsync();
-                        var postingService = new PostingService(context);
+                        var journalContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        var postingService = new PostingService(journalContext);
                         var journalView = new PostingsJournalView(postingService);
                         _navigation.NavigateTo(journalView);
                         break;

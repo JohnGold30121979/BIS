@@ -23,7 +23,6 @@ public class AppDbContext : DbContext
     public DbSet<Transaction> Transactions { get; set; }
     public DbSet<Material> Materials { get; set; }
     public DbSet<FixedAsset> FixedAssets { get; set; }
-    public DbSet<Employee> Employees { get; set; }
     public DbSet<MetadataObject> MetadataObjects { get; set; }
     public DbSet<MetadataField> MetadataFields { get; set; }
     public DbSet<MetadataConfiguration> MetadataConfigurations { get; set; }
@@ -49,6 +48,10 @@ public class AppDbContext : DbContext
     public DbSet<Counterparty> Counterparties { get; set; }
     public DbSet<Posting> Postings { get; set; }
 
+    public DbSet<Site> Sites { get; set; }
+    public DbSet<ResponsiblePerson> ResponsiblePersons { get; set; }
+    
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
@@ -65,8 +68,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<InfoBase>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<User>().HasIndex(x => x.Login).IsUnique();
         modelBuilder.Entity<Material>().HasIndex(x => x.Code).IsUnique();
-        modelBuilder.Entity<FixedAsset>().HasIndex(x => x.InventoryNumber).IsUnique();
-        modelBuilder.Entity<Employee>().HasIndex(x => x.PersonnelNumber).IsUnique();
+        modelBuilder.Entity<FixedAsset>().HasIndex(x => x.InventoryNumber).IsUnique();       
 
         // Настройки для метаданных
         modelBuilder.Entity<MetadataObject>().HasKey(m => m.Id);

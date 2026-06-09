@@ -54,6 +54,39 @@ namespace BIS.ERP.Services
             // Создаем системные справочники
             var catalogs = new List<MetadataObject>();
 
+            // Справочник "Организации"
+            var organizationsCatalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = "Организации",
+                TableName = "catalog_organizations",
+                ObjectType = "Catalog",
+                Description = "Справочник организаций предприятия",
+                Icon = "🏢",
+                Order = 1,
+                IsSystem = true,
+                MetadataConfigId = config.Id
+            };
+            organizationsCatalog.Fields = GetOrganizationFields(organizationsCatalog.Id);
+            catalogs.Add(organizationsCatalog);
+
+
+            // Справочник "Банки" (если нужен)
+            var banksCatalog = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = "Банки",
+                TableName = "catalog_banks",
+                ObjectType = "Catalog",
+                Description = "Справочник банков",
+                Icon = "🏦",
+                Order = 2,
+                IsSystem = true,
+                MetadataConfigId = config.Id
+            };
+            banksCatalog.Fields = GetBankFields(banksCatalog.Id);
+            catalogs.Add(banksCatalog);
+
             var employeesCatalog = new MetadataObject
             {
                 Id = Guid.NewGuid(),
@@ -66,7 +99,7 @@ namespace BIS.ERP.Services
                 IsSystem = true,
                 MetadataConfigId = config.Id
             };
-            employeesCatalog.Fields = GetStandardCatalogFields(employeesCatalog.Id);
+            employeesCatalog.Fields = GetEmployeeCatalogFields(employeesCatalog.Id);
             catalogs.Add(employeesCatalog);
 
             var materialsCatalog = new MetadataObject
@@ -77,7 +110,7 @@ namespace BIS.ERP.Services
                 ObjectType = "Catalog",
                 Description = "Номенклатура материалов и товаров",
                 Icon = "📦",
-                Order = 2,
+                Order = 3,
                 IsSystem = true,
                 MetadataConfigId = config.Id
             };
@@ -129,23 +162,24 @@ namespace BIS.ERP.Services
             contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
             catalogs.Add(contractorsCatalog);
 
-            // ========== НОВЫЕ СПРАВОЧНИКИ ==========
-
-            // Справочник "Организации"
-            var organizationsCatalog = new MetadataObject
-            {
+           var sitesCatalog = new MetadataObject
+           {
                 Id = Guid.NewGuid(),
-                Name = "Организации",
-                TableName = "catalog_organizations",
+                Name = "Участки",
+                TableName = "sites",
                 ObjectType = "Catalog",
-                Description = "Справочник организаций предприятия",
-                Icon = "🏢",
-                Order = 1,
+                Description = "Участки",
+                Icon = "🤝",
+                Order = 5,
                 IsSystem = true,
                 MetadataConfigId = config.Id
-            };
-            organizationsCatalog.Fields = GetOrganizationFields(organizationsCatalog.Id);
-            catalogs.Add(organizationsCatalog);
+           };
+            sitesCatalog.Fields = GetContractorFields(sitesCatalog.Id);
+            catalogs.Add(sitesCatalog);
+
+            // ========== НОВЫЕ СПРАВОЧНИКИ ==========
+
+
 
             // Справочник "Валюты"
             var currenciesCatalog = new MetadataObject
@@ -163,21 +197,7 @@ namespace BIS.ERP.Services
             currenciesCatalog.Fields = GetCurrencyFields(currenciesCatalog.Id);
             catalogs.Add(currenciesCatalog);
 
-            // Справочник "Банки" (если нужен)
-            var banksCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Банки",
-                TableName = "catalog_banks",
-                ObjectType = "Catalog",
-                Description = "Справочник банков",
-                Icon = "🏦",
-                Order = 2,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            banksCatalog.Fields = GetBankFields(banksCatalog.Id);
-            catalogs.Add(banksCatalog);
+           
 
             await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
 
@@ -220,7 +240,7 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
 
             await CreateTablesFromMetadataAsync();
-            await AddTestDataAsync();
+           
         }
 
         private List<MetadataField> GetStandardCatalogFields(Guid metadataObjectId)
@@ -262,6 +282,172 @@ namespace BIS.ERP.Services
                     MetadataObjectId = metadataObjectId
                 }
             };
+        }
+
+        /// <summary>
+        /// Поля для справочника "Сотрудники (Списочный состав)" - расширенная версия
+        /// </summary>
+        private List<MetadataField> GetEmployeeCatalogFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        // Стандартные поля (обязательные)
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Примечание",
+            DbColumnName = "description",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        
+        // Расширенные поля для сотрудников
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Табельный номер",
+            DbColumnName = "personnel_number",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            IsUnique = true,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "ФИО",
+            DbColumnName = "full_name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Должность",
+            DbColumnName = "position",
+            FieldType = "String",
+            Length = 100,
+            IsRequired = false,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Подразделение",
+            DbColumnName = "department",
+            FieldType = "String",
+            Length = 100,
+            IsRequired = false,
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Дата приема",
+            DbColumnName = "hire_date",
+            FieldType = "DateTime",
+            IsRequired = false,
+            Order = 8,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Дата увольнения",
+            DbColumnName = "termination_date",
+            FieldType = "DateTime",
+            IsRequired = false,
+            Order = 9,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Статус",
+            DbColumnName = "status",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 10,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Телефон",
+            DbColumnName = "phone",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 11,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Email",
+            DbColumnName = "email",
+            FieldType = "String",
+            Length = 100,
+            IsRequired = false,
+            Order = 12,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "ИНН",
+            DbColumnName = "tax_id",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 13,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 14,
+            MetadataObjectId = metadataObjectId
+        }
+    };
         }
 
         // Поля для справочника "Организации"
@@ -991,42 +1177,7 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Error creating table {obj.TableName}: {ex.Message}");
             }
-        }
-
-        private async Task AddTestDataAsync()
-        {
-            var employeesTable = "catalog_employees";
-            var employees = new[]
-            {
-                new { code = "001", name = "Иванов Иван Иванович", description = "Генеральный директор" },
-                new { code = "002", name = "Петрова Мария Сергеевна", description = "Главный бухгалтер" },
-                new { code = "003", name = "Сидоров Алексей Владимирович", description = "Менеджер по продажам" }
-            };
-
-            foreach (var emp in employees)
-            {
-                var sql = $@"
-                    INSERT INTO ""{employeesTable}"" (code, name, description) 
-                    VALUES ('{emp.code}', '{emp.name}', '{emp.description}')";
-                await _context.Database.ExecuteSqlRawAsync(sql);
-            }
-
-            var materialsTable = "catalog_materials";
-            var materials = new[]
-            {
-                new { code = "001", name = "Ноутбук Lenovo ThinkPad", description = "Для сотрудников" },
-                new { code = "002", name = "Стол офисный", description = "Мебель" },
-                new { code = "003", name = "Бумага А4", description = "Расходные материалы" }
-            };
-
-            foreach (var mat in materials)
-            {
-                var sql = $@"
-                    INSERT INTO ""{materialsTable}"" (code, name, description) 
-                    VALUES ('{mat.code}', '{mat.name}', '{mat.description}')";
-                await _context.Database.ExecuteSqlRawAsync(sql);
-            }
-        }
+        }      
 
         private async Task<int> GetNextOrderAsync()
         {
