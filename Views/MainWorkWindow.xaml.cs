@@ -13,6 +13,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.ComponentModel;
 using System.Windows.Data;
+using System.Windows.Media;
 
 namespace BIS.ERP
 {
@@ -26,6 +27,13 @@ namespace BIS.ERP
         public bool HasBadge => !string.IsNullOrEmpty(Badge);
         public object Tag { get; set; }
         public ObservableCollection<NavigationItem> Children { get; set; } = new ObservableCollection<NavigationItem>();
+
+        private int _order;
+        public int Order
+        {
+            get => _order;
+            set { _order = value; OnPropertyChanged(nameof(Order)); }
+        }
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged(string name) =>
@@ -42,6 +50,8 @@ namespace BIS.ERP
         private DocumentService _documentService;
         private InfoBase _currentInfoBase;
         private bool _isLoadingReport = false;
+        private Point _dragStartPoint;
+        private NavigationItem _draggedItem;
 
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
@@ -95,9 +105,6 @@ namespace BIS.ERP
                 Type = "Section"
             };
 
-
-
-            // Справочники
             // Справочники
             var catalogs = await _metadataService.GetCatalogsAsync();
             if (catalogs.Any())
@@ -110,7 +117,7 @@ namespace BIS.ERP
                     Type = "Group"
                 };
 
-                foreach (var catalog in catalogs.OrderBy(c => c.Name))
+                foreach (var catalog in catalogs.OrderBy(c => c.Order).ThenBy(c => c.Name))
                 {
                     // Для справочника сотрудников используем кастомный тип
                     if (catalog.Name == "Сотрудники (Списочный состав)")
@@ -118,10 +125,11 @@ namespace BIS.ERP
                         catalogsGroup.Children.Add(new NavigationItem
                         {
                             Id = catalog.Id.ToString(),
-                            Name = "Сотрудники",  // ← отображаем как "Сотрудники"
+                            Name = "Сотрудники",
                             Icon = catalog.Icon,
-                            Type = "EmployeesCatalog",  // ← кастомный тип
-                            Tag = catalog
+                            Type = "EmployeesCatalog",
+                            Tag = catalog,
+                            Order = catalog.Order
                         });
                     }
                     else
@@ -132,16 +140,14 @@ namespace BIS.ERP
                             Name = catalog.Name,
                             Icon = catalog.Icon,
                             Type = "Catalog",
-                            Tag = catalog
+                            Tag = catalog,
+                            Order = catalog.Order
                         });
                     }
                 }
 
                 dataSection.Children.Add(catalogsGroup);
             }
-
-            // Убираем отдельное добавление EmployeesCatalog
-            // Не добавляем отдельный пункт!
 
             // Динамические документы
             var documents = await _metadataService.GetDocumentsAsync();
@@ -155,7 +161,7 @@ namespace BIS.ERP
                     Type = "Group"
                 };
 
-                foreach (var doc in documents.OrderBy(d => d.Name))
+                foreach (var doc in documents.OrderBy(d => d.Order).ThenBy(d => d.Name))
                 {
                     docsGroup.Children.Add(new NavigationItem
                     {
@@ -163,7 +169,8 @@ namespace BIS.ERP
                         Name = doc.Name,
                         Icon = doc.Icon,
                         Type = "DynamicDocument",
-                        Tag = doc
+                        Tag = doc,
+                        Order = doc.Order
                     });
                 }
                 dataSection.Children.Add(docsGroup);
@@ -212,7 +219,7 @@ namespace BIS.ERP
                     Type = "Section"
                 };
 
-                foreach (var report in reports.OrderBy(r => r.Name))
+                foreach (var report in reports.OrderBy(r => r.Order).ThenBy(r => r.Name))
                 {
                     reportsSection.Children.Add(new NavigationItem
                     {
@@ -220,7 +227,8 @@ namespace BIS.ERP
                         Name = report.Name,
                         Icon = report.Icon,
                         Type = "Report",
-                        Tag = report
+                        Tag = report,
+                        Order = report.Order
                     });
                 }
                 NavigationItems.Add(reportsSection);
@@ -313,7 +321,7 @@ namespace BIS.ERP
 
                     case "EmployeesCatalog":
                         var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        var employeeService = new EmployeeService(dbContext, _metadataService);  // ← два параметра!
+                        var employeeService = new EmployeeService(dbContext, _metadataService);
                         var employeesView = new EmployeesCatalogView(employeeService);
                         _navigation.NavigateTo(employeesView);
                         break;
@@ -368,6 +376,135 @@ namespace BIS.ERP
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        #region Drag & Drop
+
+        private void NavigationTree_PreviewMouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.LeftButton == MouseButtonState.Pressed)
+            {
+                var position = e.GetPosition(null);
+                if (Math.Abs(position.X - _dragStartPoint.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                    Math.Abs(position.Y - _dragStartPoint.Y) > SystemParameters.MinimumVerticalDragDistance)
+                {
+                    StartDrag();
+                }
+            }
+            else
+            {
+                _dragStartPoint = new Point(0, 0);
+            }
+        }
+
+        private void StartDrag()
+        {
+            _draggedItem = GetSelectedNavigationItem();
+            if (_draggedItem == null) return;
+
+            // Нельзя перетаскивать заголовки секций
+            if (_draggedItem.Type == "Section" || _draggedItem.Type == "Group") return;
+
+            DragDrop.DoDragDrop(NavigationTree, _draggedItem, DragDropEffects.Move);
+        }
+
+        private NavigationItem GetSelectedNavigationItem()
+        {
+            var selectedItem = NavigationTree.SelectedItem;
+            return selectedItem as NavigationItem;
+        }
+
+        private void NavigationTree_DragOver(object sender, DragEventArgs e)
+        {
+            e.Effects = DragDropEffects.Move;
+            e.Handled = true;
+        }
+
+        private async void NavigationTree_Drop(object sender, DragEventArgs e)
+        {
+            var draggedItem = e.Data.GetData(typeof(NavigationItem)) as NavigationItem;
+            if (draggedItem == null) return;
+
+            var targetItem = GetTargetNavigationItem(e.GetPosition(NavigationTree));
+            if (targetItem == null || targetItem == draggedItem) return;
+
+            // Нельзя перемещать между разными родителями
+            if (draggedItem.Type != targetItem.Type) return;
+
+            await ReorderNavigationItems(draggedItem, targetItem);
+        }
+
+        private NavigationItem GetTargetNavigationItem(Point point)
+        {
+            var result = VisualTreeHelper.HitTest(NavigationTree, point);
+            if (result == null) return null;
+
+            var treeViewItem = FindVisualParent<TreeViewItem>(result.VisualHit);
+            if (treeViewItem == null) return null;
+
+            return treeViewItem.Header as NavigationItem;
+        }
+
+        private T FindVisualParent<T>(DependencyObject child) where T : DependencyObject
+        {
+            var parent = VisualTreeHelper.GetParent(child);
+            while (parent != null)
+            {
+                if (parent is T typedParent)
+                    return typedParent;
+                parent = VisualTreeHelper.GetParent(parent);
+            }
+            return null;
+        }
+
+        private async Task ReorderNavigationItems(NavigationItem draggedItem, NavigationItem targetItem)
+        {
+            // Находим родительские коллекции
+            ObservableCollection<NavigationItem> draggedCollection = null;
+            ObservableCollection<NavigationItem> targetCollection = null;
+
+            foreach (var section in NavigationItems)
+            {
+                if (section.Children.Contains(draggedItem))
+                    draggedCollection = section.Children;
+                if (section.Children.Contains(targetItem))
+                    targetCollection = section.Children;
+
+                foreach (var child in section.Children)
+                {
+                    if (child.Children.Contains(draggedItem))
+                        draggedCollection = child.Children;
+                    if (child.Children.Contains(targetItem))
+                        targetCollection = child.Children;
+                }
+            }
+
+            if (draggedCollection == null || targetCollection == null) return;
+            if (draggedCollection != targetCollection) return;
+
+            var draggedIndex = draggedCollection.IndexOf(draggedItem);
+            var targetIndex = targetCollection.IndexOf(targetItem);
+
+            draggedCollection.Move(draggedIndex, targetIndex);
+
+            await SaveOrderToDatabaseAsync(draggedCollection);
+        }
+
+        private async Task SaveOrderToDatabaseAsync(ObservableCollection<NavigationItem> items)
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items[i];
+                item.Order = i + 1;
+
+                if (item.Tag is MetadataObject metadata)
+                {
+                    metadata.Order = item.Order;
+                    await _metadataService.UpdateMetadataObjectOrderAsync(metadata.Id, item.Order);
+                }
+            }
+        }
+
+        #endregion
 
         private async Task OpenReport(Report report)
         {

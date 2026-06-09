@@ -5,7 +5,8 @@
         Title="BIS ERP - Рабочий режим"
         Height="720" Width="1280"
         WindowStartupLocation="CenterScreen"
-        WindowState="Maximized">
+        WindowState="Maximized"
+        AllowDrop="True">
 
     <Window.Resources>
         <local:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -32,7 +33,13 @@
 
                 <!-- Дерево навигации -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <TreeView x:Name="NavigationTree" Background="#2C3E50" BorderThickness="0">
+                    <TreeView x:Name="NavigationTree" 
+                              Background="#2C3E50" 
+                              BorderThickness="0"
+                              AllowDrop="True"
+                              DragOver="NavigationTree_DragOver"
+                              Drop="NavigationTree_Drop"
+                              PreviewMouseMove="NavigationTree_PreviewMouseMove">
                         <TreeView.Resources>
                             <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#34495E"/>
                         </TreeView.Resources>

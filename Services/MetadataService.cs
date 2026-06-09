@@ -1954,6 +1954,16 @@ namespace BIS.ERP.Services
             }
         }
 
+        public async Task UpdateMetadataObjectOrderAsync(Guid id, int order)
+        {
+            var obj = await _context.MetadataObjects.FindAsync(id);
+            if (obj != null)
+            {
+                obj.Order = order;
+                await _context.SaveChangesAsync();
+            }
+        }
+
         public async Task CreateDynamicTableAsync(MetadataObject obj)
         {
             var sql = new StringBuilder();
