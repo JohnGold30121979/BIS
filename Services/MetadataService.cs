@@ -100,22 +100,7 @@ namespace BIS.ERP.Services
                 MetadataConfigId = config.Id
             };
             employeesCatalog.Fields = GetEmployeeCatalogFields(employeesCatalog.Id);
-            catalogs.Add(employeesCatalog);
-
-            var materialsCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Материалы",
-                TableName = "catalog_materials",
-                ObjectType = "Catalog",
-                Description = "Номенклатура материалов и товаров",
-                Icon = "📦",
-                Order = 3,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            materialsCatalog.Fields = GetStandardCatalogFields(materialsCatalog.Id);
-            catalogs.Add(materialsCatalog);
+            catalogs.Add(employeesCatalog);          
 
             var assetsCatalog = new MetadataObject
             {
@@ -209,9 +194,7 @@ namespace BIS.ERP.Services
                 MetadataConfigId = config.Id
             };
             currenciesCatalog.Fields = GetCurrencyFields(currenciesCatalog.Id);
-            catalogs.Add(currenciesCatalog);
-
-           
+            catalogs.Add(currenciesCatalog);           
 
             await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
 
@@ -257,9 +240,62 @@ namespace BIS.ERP.Services
            
         }
 
-        /// <summary>
-        /// Поля для справочника "Участки"
-        /// </summary>
+
+        /// Поля для справочника "Наименования категорий"        
+        private List<MetadataField> GetMaterialCategoryFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование категории",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            IsUnique = false,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Примечание",
+            DbColumnName = "description",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            IsUnique = false,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            Length = 0,
+            IsRequired = false,
+            IsUnique = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+        }
         private List<MetadataField> GetSiteFields(Guid metadataObjectId)
         {
             return new List<MetadataField>
@@ -1355,6 +1391,7 @@ namespace BIS.ERP.Services
 
                 bool hasPlanScheta = existingCatalogs.Contains("План счетов");
                 bool hasBanks = existingCatalogs.Contains("Банки");
+                bool hasMaterialCategories = existingCatalogs.Contains("Наименования категорий");
 
                 if (hasPlanScheta && hasBanks)
                 {
@@ -1390,6 +1427,11 @@ namespace BIS.ERP.Services
                 {
                     await CreateBanksCatalog(config);
                 }
+
+                if (!hasMaterialCategories)
+                {
+                    await CreateMaterialCategoriesCatalog(config);
+                }
             }
             catch (Exception ex)
             {
@@ -1397,6 +1439,67 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task CreateMaterialCategoriesCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Наименования категорий",
+                    TableName = "catalog_material_categories",
+                    ObjectType = "Catalog",
+                    Description = "Справочник категорий материалов",
+                    Icon = "📁",
+                    Order = 8,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetMaterialCategoryFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddMaterialCategoriesDataToTable(catalog);  // ← добавление данных
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Наименования категорий' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Наименования категорий': {ex.Message}");
+            }
+        }
+
+        private async Task AddMaterialCategoriesDataToTable(MetadataObject catalog)
+        {
+            var categories = new[]
+            {
+            new { code = "1", name = "ЗАПАСЫ ОСНОВНОГО ПРОИЗВОДСТВА", description = "Основные производственные запасы", is_active = true },
+            new { code = "2", name = "ТОПЛИВО", description = "Топливные материалы", is_active = true },
+            new { code = "3", name = "ТАРА", description = "Тара и упаковка", is_active = true },
+            new { code = "4", name = "ЗАПЧАСТИ", description = "Запасные части для оборудования", is_active = true },
+            new { code = "5", name = "СТРОЙМАТЕРИАЛЫ", description = "Строительные материалы", is_active = true },
+            new { code = "6", name = "ПРОЧИЕ МАТЕРИАЛЫ", description = "Прочие материалы", is_active = true }
+        };
+
+            foreach (var cat in categories)
+            {
+                var sql = $@"
+            INSERT INTO ""{catalog.TableName}"" 
+            (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+            VALUES (
+                '{Guid.NewGuid()}',
+                '{cat.code}',
+                '{cat.name.Replace("'", "''")}',
+                '{cat.description?.Replace("'", "''") ?? ""}',
+                {cat.is_active},
+                NOW(),
+                NOW()
+            )";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+            System.Diagnostics.Debug.WriteLine($"Добавлено категорий: {categories.Length}");
+        }
         private async Task CreateChartOfAccountsCatalog(MetadataConfiguration config)
         {
             try
@@ -2158,28 +2261,6 @@ namespace BIS.ERP.Services
                 query = query.Where(d => d.Date <= endDate.Value);
 
             return await query.OrderByDescending(d => d.Date).ToListAsync();
-        }       
-
-        private async Task<Guid> GetCurrentConfigIdAsync()
-        {
-            var infoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
-            var config = await _context.Set<MetadataConfiguration>()
-                .FirstOrDefaultAsync(c => c.InfoBaseId == infoBase.Id);
-
-            if (config == null)
-            {
-                config = new MetadataConfiguration
-                {
-                    Id = Guid.NewGuid(),
-                    InfoBaseId = infoBase.Id,
-                    IsInitialized = true,
-                    CreatedAt = DateTime.UtcNow
-                };
-                _context.Set<MetadataConfiguration>().Add(config);
-                await _context.SaveChangesAsync();
-            }
-
-            return config.Id;
-        }
+        }           
     }
 }
