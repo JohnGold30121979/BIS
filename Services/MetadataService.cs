@@ -1392,6 +1392,7 @@ namespace BIS.ERP.Services
                 bool hasPlanScheta = existingCatalogs.Contains("План счетов");
                 bool hasBanks = existingCatalogs.Contains("Банки");
                 bool hasMaterialCategories = existingCatalogs.Contains("Наименования категорий");
+                bool hasMaterialCategoriesTypes = existingCatalogs.Contains("Справочник видов материалов");
 
                 if (hasPlanScheta && hasBanks)
                 {
@@ -1432,11 +1433,143 @@ namespace BIS.ERP.Services
                 {
                     await CreateMaterialCategoriesCatalog(config);
                 }
+
+                if (!hasMaterialCategoriesTypes)
+                {
+                    await CreateMaterialTypesCatalog(config);
+                }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников: {ex.Message}");
             }
+        }
+
+        private async Task CreateMaterialTypesCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Виды материалов",
+                    TableName = "catalog_material_types",
+                    ObjectType = "Catalog",
+                    Description = "Справочник видов материалов",
+                    Icon = "📦",
+                    Order = 9,  // после категорий (у категорий было 8)
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetMaterialTypeFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddMaterialTypesDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Виды материалов' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Виды материалов': {ex.Message}");
+            }
+        }
+
+       
+        /// Поля для справочника "Наименования типов категорий"       
+        private List<MetadataField> GetMaterialTypeFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Код",
+                DbColumnName = "code",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Наименование вида",
+                DbColumnName = "name",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Примечание",
+                DbColumnName = "description",
+                FieldType = "String",
+                Length = 500,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Активен",
+                DbColumnName = "is_active",
+                FieldType = "Bool",
+                Length = 0,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 4,
+                MetadataObjectId = metadataObjectId
+           }
+        };
+        }
+
+        private async Task AddMaterialTypesDataToTable(MetadataObject catalog)
+        {
+            var materialTypes = new[]
+            {
+        new { code = "1", name = "ОС", description = "Основные средства", is_active = true },
+        new { code = "2", name = "Малоценка", description = "Малоценные предметы", is_active = true },
+        new { code = "3", name = "Прочие материалы", description = "Прочие материалы", is_active = true },
+        new { code = "8", name = "Спец.одежда", description = "Специальная одежда", is_active = true },
+        new { code = "9", name = "Бензин, л", description = "Бензин в литрах", is_active = true },
+        new { code = "10", name = "Див. топливо, л", description = "Дизельное топливо в литрах", is_active = true },
+        new { code = "11", name = "Авто Масла и про", description = "Автомасла и прочие жидкости", is_active = true },
+        new { code = "12", name = "Сера, кг", description = "Сера в килограммах", is_active = true },
+        new { code = "13", name = "Тринатрий фосфат, кг", description = "Тринатрий фосфат в кг", is_active = true },
+        new { code = "14", name = "Известь хлорная, кг", description = "Известь хлорная в кг", is_active = true },
+        new { code = "15", name = "Жир технический, кг", description = "Жир технический в кг", is_active = true },
+        new { code = "16", name = "Мешки 50 кг, шт", description = "Мешки 50 кг в штуках", is_active = true },
+        new { code = "17", name = "Мешки 25 кг, шт", description = "Мешки 25 кг в штуках", is_active = true },
+        new { code = "18", name = "Бирки для мешков 25 кг, л", description = "Бирки для мешков 25 кг", is_active = true }
+    };
+
+            foreach (var type in materialTypes)
+            {
+                var sql = $@"
+            INSERT INTO ""{catalog.TableName}"" 
+            (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+            VALUES (
+                '{Guid.NewGuid()}',
+                '{type.code}',
+                '{type.name.Replace("'", "''")}',
+                '{type.description?.Replace("'", "''") ?? ""}',
+                {type.is_active.ToString().ToLower()},
+                NOW(),
+                NOW()
+            )";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+            System.Diagnostics.Debug.WriteLine($"Добавлено видов материалов: {materialTypes.Length}");
         }
 
         private async Task CreateMaterialCategoriesCatalog(MetadataConfiguration config)
@@ -1879,6 +2012,8 @@ namespace BIS.ERP.Services
         /// <summary>
         /// Обновление поля записи
         /// </summary>
+        /// 
+
         private async Task UpdateRecordFieldAsync(string tableName, Guid recordId, string fieldName, object value)
         {
             var formattedValue = FormatSqlValue(value, "Unknown");
