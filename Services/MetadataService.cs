@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using BIS.ERP.Services;
+using System.Linq.Expressions;
 
 namespace BIS.ERP.Services
 {
@@ -31,221 +32,340 @@ namespace BIS.ERP.Services
         // Инициализация базовых метаданных (как в 1С)
         public async Task InitializeDefaultMetadataAsync(Guid infoBaseId)
         {
-            var config = await _context.Set<MetadataConfiguration>()
+            try
+            {
+                var config = await _context.Set<MetadataConfiguration>()
                 .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
 
-            if (config == null)
-            {
-                config = new MetadataConfiguration
+                if (config == null)
+                {
+                    config = new MetadataConfiguration
+                    {
+                        Id = Guid.NewGuid(),
+                        InfoBaseId = infoBaseId,
+                        CreatedAt = DateTime.UtcNow,
+                        IsInitialized = true
+                    };
+                    await _context.Set<MetadataConfiguration>().AddAsync(config);
+                    await _context.SaveChangesAsync();
+                }
+                else if (config.IsInitialized)
+                {
+                    return;
+                }
+
+                // Создаем системные справочники
+                var catalogs = new List<MetadataObject>();
+
+
+                // Справочник "Организации"
+                var organizationsCatalog = new MetadataObject
                 {
                     Id = Guid.NewGuid(),
-                    InfoBaseId = infoBaseId,
-                    CreatedAt = DateTime.UtcNow,
-                    IsInitialized = true
+                    Name = "Организации",
+                    TableName = "catalog_organizations",
+                    ObjectType = "Catalog",
+                    Description = "Справочник организаций предприятия",
+                    Icon = "🏢",
+                    Order = 1,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
                 };
-                await _context.Set<MetadataConfiguration>().AddAsync(config);
+                organizationsCatalog.Fields = GetOrganizationFields(organizationsCatalog.Id);
+                catalogs.Add(organizationsCatalog);
+
+
+                // Справочник "Банки"
+                var banksCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Банки",
+                    TableName = "catalog_banks",
+                    ObjectType = "Catalog",
+                    Description = "Справочник банков",
+                    Icon = "🏦",
+                    Order = 2,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                banksCatalog.Fields = GetBankFields(banksCatalog.Id);
+                catalogs.Add(banksCatalog);
+
+                // Справочник Список сотрудников предприятия
+                var employeesCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Сотрудники (Списочный состав)",
+                    TableName = "catalog_employees",
+                    ObjectType = "Catalog",
+                    Description = "Список сотрудников предприятия",
+                    Icon = "👥",
+                    Order = 3,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                employeesCatalog.Fields = GetEmployeeCatalogFields(employeesCatalog.Id);
+                catalogs.Add(employeesCatalog);
+
+                // Справочник Основные средства предприятия
+                var assetsCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Основные средства",
+                    TableName = "catalog_assets",
+                    ObjectType = "Catalog",
+                    Description = "Основные средства предприятия",
+                    Icon = "⚙️",
+                    Order = 4,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                assetsCatalog.Fields = GetStandardCatalogFields(assetsCatalog.Id);
+                catalogs.Add(assetsCatalog);
+
+                // Справочник Структура подразделений
+                var departmentsCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Подразделения",
+                    TableName = "catalog_departments",
+                    ObjectType = "Catalog",
+                    Description = "Структура подразделений",
+                    Icon = "🏢",
+                    Order = 5,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                departmentsCatalog.Fields = GetStandardCatalogFields(departmentsCatalog.Id);
+                catalogs.Add(departmentsCatalog);
+
+                // Справочник Контрагенты (клиенты, поставщики)
+                var contractorsCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Контрагенты",
+                    TableName = "catalog_contractors",
+                    ObjectType = "Catalog",
+                    Description = "Контрагенты (клиенты, поставщики)",
+                    Icon = "🤝",
+                    Order = 5,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
+                catalogs.Add(contractorsCatalog);
+
+                // Справочник "Участки"
+                var sitesCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Участки",
+                    TableName = "catalog_sites",
+                    ObjectType = "Catalog",
+                    Description = "Справочник участков предприятия",
+                    Icon = "🏭",
+                    Order = 6,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                sitesCatalog.Fields = GetSiteFields(sitesCatalog.Id);
+                catalogs.Add(sitesCatalog);
+
+                // Справочник "Материально-ответственные лица (МОЛ)"
+                var responsiblePersonsCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "МОЛ",
+                    TableName = "catalog_responsible_persons",
+                    ObjectType = "Catalog",
+                    Description = "Материально-ответственные лица",
+                    Icon = "👥",
+                    Order = 7,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                responsiblePersonsCatalog.Fields = GetResponsiblePersonFields(responsiblePersonsCatalog.Id);
+                catalogs.Add(responsiblePersonsCatalog);
+
+                // Справочник "Валюты"
+                var currenciesCatalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Валюты",
+                    TableName = "catalog_currencies",
+                    ObjectType = "Catalog",
+                    Description = "Справочник валют",
+                    Icon = "💵",
+                    Order = 7,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                currenciesCatalog.Fields = GetCurrencyFields(currenciesCatalog.Id);
+                catalogs.Add(currenciesCatalog);       
+
+
+                await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
+
+                // Создаем системные документы
+                var documents = new List<MetadataObject>();
+
+                var incomingDoc = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Приход товаров",
+                    TableName = "doc_incoming",
+                    ObjectType = "Document",
+                    Description = "Приход товаров на склад",
+                    Icon = "📥",
+                    Order = 1,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                incomingDoc.Fields = GetStandardDocumentFields(incomingDoc.Id);
+                documents.Add(incomingDoc);
+
+                var outgoingDoc = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Расход товаров",
+                    TableName = "doc_outgoing",
+                    ObjectType = "Document",
+                    Description = "Расход товаров со склада",
+                    Icon = "📤",
+                    Order = 2,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                outgoingDoc.Fields = GetStandardDocumentFields(outgoingDoc.Id);
+                documents.Add(outgoingDoc);
+
+                await _context.Set<MetadataObject>().AddRangeAsync(documents);
+
+                config.IsInitialized = true;
                 await _context.SaveChangesAsync();
+
+                await CreateTablesFromMetadataAsync();
+            } catch (Exception ex) {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочников': {ex.Message}");
             }
-            else if (config.IsInitialized)
-            {
-                return;
-            }
-
-            // Создаем системные справочники
-            var catalogs = new List<MetadataObject>();
-
-            // Справочник "Организации"
-            var organizationsCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Организации",
-                TableName = "catalog_organizations",
-                ObjectType = "Catalog",
-                Description = "Справочник организаций предприятия",
-                Icon = "🏢",
-                Order = 1,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            organizationsCatalog.Fields = GetOrganizationFields(organizationsCatalog.Id);
-            catalogs.Add(organizationsCatalog);
-
-
-            // Справочник "Банки" (если нужен)
-            var banksCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Банки",
-                TableName = "catalog_banks",
-                ObjectType = "Catalog",
-                Description = "Справочник банков",
-                Icon = "🏦",
-                Order = 2,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            banksCatalog.Fields = GetBankFields(banksCatalog.Id);
-            catalogs.Add(banksCatalog);
-
-            var employeesCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Сотрудники (Списочный состав)",
-                TableName = "catalog_employees",
-                ObjectType = "Catalog",
-                Description = "Список сотрудников предприятия",
-                Icon = "👥",
-                Order = 3,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            employeesCatalog.Fields = GetEmployeeCatalogFields(employeesCatalog.Id);
-            catalogs.Add(employeesCatalog);          
-
-            var assetsCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Основные средства",
-                TableName = "catalog_assets",
-                ObjectType = "Catalog",
-                Description = "Основные средства предприятия",
-                Icon = "⚙️",
-                Order = 4,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            assetsCatalog.Fields = GetStandardCatalogFields(assetsCatalog.Id);
-            catalogs.Add(assetsCatalog);
-
-            var departmentsCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Подразделения",
-                TableName = "catalog_departments",
-                ObjectType = "Catalog",
-                Description = "Структура подразделений",
-                Icon = "🏢",
-                Order = 5,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            departmentsCatalog.Fields = GetStandardCatalogFields(departmentsCatalog.Id);
-            catalogs.Add(departmentsCatalog);
-
-            var contractorsCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Контрагенты",
-                TableName = "catalog_contractors",
-                ObjectType = "Catalog",
-                Description = "Контрагенты (клиенты, поставщики)",
-                Icon = "🤝",
-                Order = 5,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
-            catalogs.Add(contractorsCatalog);
-
-            // Справочник "Участки"
-            var sitesCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Участки",
-                TableName = "catalog_sites",
-                ObjectType = "Catalog",
-                Description = "Справочник участков предприятия",
-                Icon = "🏭",
-                Order = 6,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            sitesCatalog.Fields = GetSiteFields(sitesCatalog.Id);
-            catalogs.Add(sitesCatalog);
-
-            // Справочник "Материально-ответственные лица (МОЛ)"
-            var responsiblePersonsCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "МОЛ",
-                TableName = "catalog_responsible_persons",
-                ObjectType = "Catalog",
-                Description = "Материально-ответственные лица",
-                Icon = "👥",
-                Order = 7,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            responsiblePersonsCatalog.Fields = GetResponsiblePersonFields(responsiblePersonsCatalog.Id);
-            catalogs.Add(responsiblePersonsCatalog);
-
-
-            // Справочник "Валюты"
-            var currenciesCatalog = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Валюты",
-                TableName = "catalog_currencies",
-                ObjectType = "Catalog",
-                Description = "Справочник валют",
-                Icon = "💵",
-                Order = 7,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            currenciesCatalog.Fields = GetCurrencyFields(currenciesCatalog.Id);
-            catalogs.Add(currenciesCatalog);           
-
-            await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
-
-            // Создаем системные документы
-            var documents = new List<MetadataObject>();
-
-            var incomingDoc = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Приход товаров",
-                TableName = "doc_incoming",
-                ObjectType = "Document",
-                Description = "Приход товаров на склад",
-                Icon = "📥",
-                Order = 1,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            incomingDoc.Fields = GetStandardDocumentFields(incomingDoc.Id);
-            documents.Add(incomingDoc);
-
-            var outgoingDoc = new MetadataObject
-            {
-                Id = Guid.NewGuid(),
-                Name = "Расход товаров",
-                TableName = "doc_outgoing",
-                ObjectType = "Document",
-                Description = "Расход товаров со склада",
-                Icon = "📤",
-                Order = 2,
-                IsSystem = true,
-                MetadataConfigId = config.Id
-            };
-            outgoingDoc.Fields = GetStandardDocumentFields(outgoingDoc.Id);
-            documents.Add(outgoingDoc);
-
-            await _context.Set<MetadataObject>().AddRangeAsync(documents);
-
-            config.IsInitialized = true;
-            await _context.SaveChangesAsync();
-
-            await CreateTablesFromMetadataAsync();
-           
         }
 
 
-        /// Поля для справочника "Наименования категорий"        
-        private List<MetadataField> GetMaterialCategoryFields(Guid metadataObjectId)
+        /// Поля для справочника "Наименования категорий"         
+        private List<MetadataField> GetMaterialFields(Guid metadataObjectId)
         {
             return new List<MetadataField>
     {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование материала",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ед изм",
+            DbColumnName = "unit",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ном номер",
+            DbColumnName = "article",
+            FieldType = "String",
+            Length = 100,
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Вид материала",
+            DbColumnName = "material_type_id",
+            FieldType = "Reference",              // ← "Reference" с большой буквы
+            ReferenceCatalog = "Виды материалов",
+            DisplayPattern = "{Наименование вида}",  // ← добавить
+            DisplayFields = "Наименование вида",     // ← добавить
+            IsRequired = false,
+            IsUnique = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Вместимость",
+            DbColumnName = "capacity",
+            FieldType = "Decimal",                // ← "Decimal"
+            Precision = 18,
+            Scale = 6,
+            IsRequired = false,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Счет хранения",
+            DbColumnName = "storage_account",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",                   // ← "Bool"
+            IsRequired = true,
+            Order = 8,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Примечание",
+            DbColumnName = "description",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            Order = 9,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+        }
+
+        private List<MetadataField> GetMaterialCategoryFields(Guid metadataObjectId)
+        {
+            return new List<MetadataField>
+        {
         new MetadataField
         {
             Id = Guid.NewGuid(),
@@ -294,12 +414,12 @@ namespace BIS.ERP.Services
             Order = 4,
             MetadataObjectId = metadataObjectId
         }
-    };
+        };
         }
         private List<MetadataField> GetSiteFields(Guid metadataObjectId)
         {
             return new List<MetadataField>
-    {
+        {
         new MetadataField
         {
             Id = Guid.NewGuid(),
@@ -344,20 +464,22 @@ namespace BIS.ERP.Services
             Order = 4,
             MetadataObjectId = metadataObjectId
         }
-    };
+        };
         }
        
         private List<MetadataField> GetResponsiblePersonFields(Guid metadataObjectId)
         {
             return new List<MetadataField>
-    {
+        {
         new MetadataField
         {
             Id = Guid.NewGuid(),
             Name = "Табельный номер",
             DbColumnName = "personnel_number",
             FieldType = "Reference",           // ← меняем на Reference
-            ReferenceCatalog = "Сотрудники (Списочный состав)", // ← ссылка на сотрудников
+            ReferenceCatalog = "Сотрудники (Списочный состав)", // ← ссылка на сотруднико
+            DisplayPattern = "{Табельный номер} - {ФИО}",  // ← шаблон
+            DisplayFields = "Табельный номер,ФИО",         // ← поля для подстановки
             Length = 0,
             IsRequired = true,
             IsUnique = true,
@@ -431,7 +553,7 @@ namespace BIS.ERP.Services
             Order = 7,
             MetadataObjectId = metadataObjectId
         }
-    };
+        };
         }
 
         private List<MetadataField> GetStandardCatalogFields(Guid metadataObjectId)
@@ -474,14 +596,13 @@ namespace BIS.ERP.Services
                 }
             };
         }
-
-        /// <summary>
+       
         /// Поля для справочника "Сотрудники (Списочный состав)" - расширенная версия
-        /// </summary>
+       
         private List<MetadataField> GetEmployeeCatalogFields(Guid metadataObjectId)
         {
             return new List<MetadataField>
-    {
+        {
         // Стандартные поля (обязательные)
         new MetadataField
         {
@@ -989,7 +1110,7 @@ namespace BIS.ERP.Services
         }
 
         // Получение данных справочника
-        public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
+        public async Task<List<Dictionary<string, object>>> GetCatalogDataAsyncOld(Guid catalogId)
         {
             var catalog = await _context.MetadataObjects
                 .Include(c => c.Fields)
@@ -1024,6 +1145,120 @@ namespace BIS.ERP.Services
             }
 
             await _context.Database.CloseConnectionAsync();
+            return result;
+        }
+
+        public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(c => c.Fields)
+                .FirstOrDefaultAsync(m => m.Id == catalogId);
+
+            if (catalog == null) return new List<Dictionary<string, object>>();
+
+            // 1. Получаем Reference поля
+            var referenceFields = catalog.Fields
+                .Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog))
+                .ToList();
+
+            // 2. Загружаем данные из основной таблицы
+            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
+            var result = new List<Dictionary<string, object>>();
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            await _context.Database.OpenConnectionAsync();
+
+            using var reader = await command.ExecuteReaderAsync();
+
+            // 3. Для каждого Reference поля загружаем связанные данные один раз
+            var referenceDataCache = new Dictionary<string, Dictionary<Guid, string>>();
+
+            foreach (var refField in referenceFields)
+            {
+                referenceDataCache[refField.DbColumnName] = await LoadReferenceDictionaryAsync(refField.ReferenceCatalog);
+            }
+
+            // 4. Читаем данные и подменяем GUID на наименование
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object>();
+
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    var dbName = reader.GetName(i);
+                    var value = reader.GetValue(i);
+
+                    // Проверяем, является ли это поле Reference
+                    var refField = referenceFields.FirstOrDefault(f => f.DbColumnName == dbName);
+
+                    if (refField != null && value != DBNull.Value && value is Guid guidValue)
+                    {
+                        // Подменяем GUID на наименование
+                        var dict = referenceDataCache[refField.DbColumnName];
+                        if (dict.TryGetValue(guidValue, out var displayName))
+                        {
+                            row[refField.Name] = displayName;
+                        }
+                        else
+                        {
+                            row[refField.Name] = guidValue.ToString();
+                        }
+                    }
+                    else
+                    {
+                        // Обычное поле
+                        var field = catalog.Fields.FirstOrDefault(f => f.DbColumnName == dbName);
+                        var displayName = field?.Name ?? dbName;
+                        row[displayName] = value;
+                    }
+                }
+
+                result.Add(row);
+            }
+
+            await _context.Database.CloseConnectionAsync();
+            return result;
+        }
+
+        // Вспомогательный метод: загружает словарь Id -> Name из справочника
+        private async Task<Dictionary<Guid, string>> LoadReferenceDictionaryAsync(string catalogName)
+        {
+            var result = new Dictionary<Guid, string>();
+
+            try
+            {
+                // Находим справочник по имени
+                var catalog = await _context.MetadataObjects
+                    .FirstOrDefaultAsync(m => m.Name == catalogName && m.ObjectType == "Catalog");
+
+                if (catalog == null) return result;
+
+                // Загружаем Id и Name (или другое поле для отображения)
+                var sql = $"SELECT \"Id\", \"name\" FROM \"{catalog.TableName}\" WHERE \"is_active\" = true";
+
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = sql;
+
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                    await _context.Database.OpenConnectionAsync();
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var id = reader.GetGuid(0);
+                    var name = reader.GetString(1);
+                    result[id] = name;
+                }
+
+                if (_context.Database.GetDbConnection().State == System.Data.ConnectionState.Open)
+                    await _context.Database.CloseConnectionAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки справочника {catalogName}: {ex.Message}");
+            }
+
             return result;
         }
 
@@ -1380,36 +1615,20 @@ namespace BIS.ERP.Services
 
         // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
 
-        public async Task InitializePredefinedCatalogsAsync()
+        public async Task InitializePredefinedCatalogsAsync(Guid infoBaseId)  // ← добавить параметр
         {
             try
             {
-                var existingCatalogs = await _context.MetadataObjects
-                    .Where(m => m.ObjectType == "Catalog" && (m.Name == "План счетов" || m.Name == "Банки"))
-                    .Select(m => m.Name)
-                    .ToListAsync();
-
-                bool hasPlanScheta = existingCatalogs.Contains("План счетов");
-                bool hasBanks = existingCatalogs.Contains("Банки");
-                bool hasMaterialCategories = existingCatalogs.Contains("Наименования категорий");
-                bool hasMaterialCategoriesTypes = existingCatalogs.Contains("Справочник видов материалов");
-
-                if (hasPlanScheta && hasBanks)
-                {
-                    System.Diagnostics.Debug.WriteLine("Предустановленные справочники уже существуют");
-                    return;
-                }
-
-                var infoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+                // Получаем конфигурацию по переданному Id
                 var config = await _context.MetadataConfigurations
-                    .FirstOrDefaultAsync(c => c.InfoBaseId == infoBase.Id);
+                    .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
 
                 if (config == null)
                 {
                     config = new MetadataConfiguration
                     {
                         Id = Guid.NewGuid(),
-                        InfoBaseId = infoBase.Id,
+                        InfoBaseId = infoBaseId,
                         IsInitialized = true,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow,
@@ -1419,29 +1638,34 @@ namespace BIS.ERP.Services
                     await _context.SaveChangesAsync();
                 }
 
-                if (!hasPlanScheta)
-                {
+                // Проверяем существующие справочники
+                var existingCatalogs = await _context.MetadataObjects
+                    .Where(m => m.ObjectType == "Catalog")
+                    .Select(m => m.Name)
+                    .ToListAsync();
+
+                // Создаём недостающие справочники
+                if (!existingCatalogs.Contains("План счетов"))
                     await CreateChartOfAccountsCatalog(config);
-                }
 
-                if (!hasBanks)
-                {
+                if (!existingCatalogs.Contains("Банки"))
                     await CreateBanksCatalog(config);
-                }
 
-                if (!hasMaterialCategories)
-                {
+                if (!existingCatalogs.Contains("Наименования категорий"))
                     await CreateMaterialCategoriesCatalog(config);
-                }
 
-                if (!hasMaterialCategoriesTypes)
-                {
+                if (!existingCatalogs.Contains("Виды материалов"))
                     await CreateMaterialTypesCatalog(config);
-                }
+
+                if (!existingCatalogs.Contains("Справочник материалов"))
+                    await CreateMaterialCatalog(config);
+
+                System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
             }
         }
 
@@ -1600,6 +1824,34 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Наименования категорий': {ex.Message}");
+            }
+        }
+
+        private async Task CreateMaterialCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                // Справочник Справочник материалов на складе
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Справочник материалов",
+                    TableName = "catalog_materials",
+                    ObjectType = "Catalog",
+                    Description = "Справочник материалов на складе",
+                    Icon = "📦",
+                    Order = 10,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetMaterialFields(Guid.NewGuid())
+                };
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);               
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Справочник материалов на складе': {ex.Message}");
             }
         }
 

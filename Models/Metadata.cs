@@ -147,7 +147,10 @@ namespace BIS.ERP.Models
         [MaxLength(50)]
         public string? ReferenceCatalog { get; set; } 
 
-        public string? Formula { get; set; }  
+        public string? Formula { get; set; }
+
+        public string? DisplayPattern { get; set; }      // "{code} - {name}"
+        public string? DisplayFields { get; set; }       // "code,name"
     }
 
     public class MetadataConfiguration

@@ -81,7 +81,8 @@ namespace BIS.ERP
                     _reportService = new ReportService(context);
                     _documentService = new DocumentService(context);
 
-                    await _metadataService.InitializePredefinedCatalogsAsync();
+                    // await _metadataService.InitializePredefinedCatalogsAsync();
+                    await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
                     await BuildNavigationTree();
                 }
             }

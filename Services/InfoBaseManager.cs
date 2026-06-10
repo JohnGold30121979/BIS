@@ -108,7 +108,7 @@ public class InfoBaseManager
             // В InfoBaseManager.CreateInfoBaseAsync
             var metadataService = new MetadataService(dbContext);
             await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
-            await metadataService.InitializePredefinedCatalogsAsync(); // ← только здесь
+            await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
 
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();

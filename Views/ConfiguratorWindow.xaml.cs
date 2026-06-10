@@ -754,6 +754,25 @@ namespace BIS.ERP.Views
                 Width = 150
             };
 
+            // ========== НОВЫЕ ПОЛЯ ==========
+            // DisplayPattern - шаблон отображения
+            var displayPatternColumn = new DataGridTextColumn
+            {
+                Header = "Шаблон отображения",
+                Binding = new System.Windows.Data.Binding("DisplayPattern"),
+                Width = 150
+            };
+            fieldsGrid.Columns.Add(displayPatternColumn);
+
+            // DisplayFields - поля для подстановки
+            var displayFieldsColumn = new DataGridTextColumn
+            {
+                Header = "Поля для подстановки",
+                Binding = new System.Windows.Data.Binding("DisplayFields"),
+                Width = 150
+            };
+            fieldsGrid.Columns.Add(displayFieldsColumn);
+
             // Загружаем список доступных справочников
             var catalogNames = _catalogs?.Select(c => c.Name).ToList() ?? new List<string>();
             referenceColumn.ItemsSource = catalogNames;
@@ -797,7 +816,9 @@ namespace BIS.ERP.Views
                     Length = 100,
                     Order = fieldsList.Count + 1,
                     MetadataObjectId = obj.Id,
-                    ReferenceCatalog = null
+                    ReferenceCatalog = null,
+                    DisplayPattern = null,     
+                    DisplayFields = null 
                 });
             };
             fieldsPanel.Children.Add(addFieldButton);

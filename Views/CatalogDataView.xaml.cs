@@ -17,12 +17,15 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _catalog;
         private readonly MetadataService _metadataService;
         private DataTable _dataTable;
+        private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
+        private Dictionary<string, MetadataObject> _catalogsDict;
 
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
             InitializeComponent();
             _catalog = catalog;
             _metadataService = metadataService;
+            _referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
 
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
@@ -45,8 +48,13 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Загрузка данных...";
+                ProgressText.Text = "⏳ Загрузка...";
 
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+
+                // Загружаем все справочники один раз
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                _catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
 
                 _dataTable = new DataTable();
                 _dataTable.TableName = _catalog.Name;
@@ -61,82 +69,8 @@ namespace BIS.ERP.Views
                 _dataTable.Columns.Add("Дата создания", typeof(DateTime));
                 _dataTable.Columns.Add("Дата изменения", typeof(DateTime));
 
-                // Загружаем данные справочников для подстановки имен
-                var referenceCatalogs = new Dictionary<string, Dictionary<Guid, string>>();
-
-                foreach (var field in _catalog.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
-                {
-                    var catalog = (await _metadataService.GetCatalogsAsync()).FirstOrDefault(c => c.Name == field.ReferenceCatalog);
-                    if (catalog != null)
-                    {
-                        var catalogData = await _metadataService.GetCatalogDataAsync(catalog.Id);
-                        var dict = new Dictionary<Guid, string>();
-
-                        foreach (var item in catalogData)
-                        {
-                            if (item.ContainsKey("Id") && item["Id"] != null)
-                            {
-                                var id = Guid.Parse(item["Id"].ToString());
-                                var displayValue = "";
-
-                                // Для справочника сотрудников - показываем "Табельный номер - ФИО"
-                                if (field.ReferenceCatalog == "Сотрудники (Списочный состав)")
-                                {
-                                    var personnelNumber = "";
-                                    var fullName = "";
-
-                                    if (item.ContainsKey("Табельный номер"))
-                                        personnelNumber = item["Табельный номер"].ToString();
-                                    else if (item.ContainsKey("personnel_number"))
-                                        personnelNumber = item["personnel_number"].ToString();
-                                    else if (item.ContainsKey("Код"))
-                                        personnelNumber = item["Код"].ToString();
-
-                                    if (item.ContainsKey("ФИО"))
-                                        fullName = item["ФИО"].ToString();
-                                    else if (item.ContainsKey("full_name"))
-                                        fullName = item["full_name"].ToString();
-                                    else if (item.ContainsKey("Наименование"))
-                                        fullName = item["Наименование"].ToString();
-
-                                    // Для поля "Табельный номер" - показываем табельный номер
-                                    if (field.Name == "Табельный номер")
-                                    {
-                                        displayValue = personnelNumber;
-                                    }
-                                    // Для других полей (если нужно) - показываем ФИО
-                                    else
-                                    {
-                                        displayValue = fullName;
-                                    }
-                                }
-                                // Для справочника участков
-                                else if (field.ReferenceCatalog == "Участки")
-                                {
-                                    if (item.ContainsKey("site_name"))
-                                        displayValue = item["site_name"].ToString();
-                                    else if (item.ContainsKey("Наименование участка"))
-                                        displayValue = item["Наименование участка"].ToString();
-                                    else if (item.ContainsKey("Наименование"))
-                                        displayValue = item["Наименование"].ToString();
-                                    else if (item.ContainsKey("name"))
-                                        displayValue = item["name"].ToString();
-                                }
-                                else
-                                {
-                                    if (item.ContainsKey("Наименование"))
-                                        displayValue = item["Наименование"].ToString();
-                                    else if (item.ContainsKey("name"))
-                                        displayValue = item["name"].ToString();
-                                }
-
-                                if (id != Guid.Empty && !string.IsNullOrEmpty(displayValue))
-                                    dict[id] = displayValue;
-                            }
-                        }
-                        referenceCatalogs[field.Name] = dict;
-                    }
-                }
+                // Загружаем данные справочников для подстановки имен (универсально)
+                await LoadReferenceDataAsync();
 
                 // Добавляем строки
                 foreach (var row in data)
@@ -148,10 +82,10 @@ namespace BIS.ERP.Views
                     {
                         var rawValue = row.ContainsKey(field.Name) ? row[field.Name] : DBNull.Value;
 
-                        // Если поле ссылается на справочник - подставляем DisplayName вместо GUID
-                        if (referenceCatalogs.TryGetValue(field.Name, out var dict) && rawValue != DBNull.Value && rawValue.ToString() != "")
+                        // Если поле ссылается на справочник - подставляем DisplayName
+                        if (!string.IsNullOrEmpty(field.ReferenceCatalog) && _referenceCache.TryGetValue(field.Name, out var dict))
                         {
-                            if (Guid.TryParse(rawValue.ToString(), out var guid))
+                            if (rawValue != DBNull.Value && rawValue != null && Guid.TryParse(rawValue.ToString(), out var guid))
                             {
                                 dataRow[field.Name] = dict.ContainsKey(guid) ? dict[guid] : rawValue.ToString();
                             }
@@ -172,10 +106,9 @@ namespace BIS.ERP.Views
                     _dataTable.Rows.Add(dataRow);
                 }
 
-                // Очищаем колонки и добавляем вручную
+                // Настраиваем DataGrid
                 DataGrid.Columns.Clear();
 
-                // Добавляем колонки для каждого поля
                 foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
                 {
                     DataGrid.Columns.Add(new DataGridTextColumn
@@ -187,7 +120,6 @@ namespace BIS.ERP.Views
                     });
                 }
 
-                // Добавляем колонки с датами
                 DataGrid.Columns.Add(new DataGridTextColumn
                 {
                     Header = "Дата создания",
@@ -205,15 +137,119 @@ namespace BIS.ERP.Views
                 DataGrid.ItemsSource = _dataTable.DefaultView;
 
                 StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
+                ProgressText.Text = "";
                 EditButton.IsEnabled = false;
                 DeleteButton.IsEnabled = false;
             }
             catch (Exception ex)
             {
                 StatusText.Text = $"❌ Ошибка: {ex.Message}";
+                ProgressText.Text = "";
                 MessageBox.Show($"Ошибка загрузки данных: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        /// <summary>
+        /// Универсальная загрузка данных для всех Reference полей
+        /// </summary>
+        private async Task LoadReferenceDataAsync()
+        {
+            _referenceCache.Clear();
+
+            foreach (var field in _catalog.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
+            {
+                if (!_catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
+                    continue;
+
+                var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
+                var dict = new Dictionary<Guid, string>();
+
+                foreach (var row in refData)
+                {
+                    if (!row.ContainsKey("Id") || row["Id"] == null)
+                        continue;
+
+                    var id = Guid.Parse(row["Id"].ToString());
+
+                    // Универсальное форматирование через шаблон из метаданных
+                    var displayValue = GetDisplayValueFromRow(row, field, refCatalog.Name);
+                    dict[id] = displayValue;
+                }
+
+                _referenceCache[field.Name] = dict;
+            }
+        }
+
+        /// <summary>
+        /// Универсальное получение отображаемого значения по шаблону из метаданных
+        /// </summary>
+        private string GetDisplayValueFromRow(Dictionary<string, object> row, MetadataField field, string catalogName)
+        {
+            // Если есть шаблон - используем его
+            if (!string.IsNullOrEmpty(field.DisplayPattern))
+            {
+                var result = field.DisplayPattern;
+                var fieldNames = field.DisplayFields?.Split(',') ?? Array.Empty<string>();
+
+                foreach (var fld in fieldNames)
+                {
+                    var fieldKey = fld.Trim();
+                    var value = "";
+
+                    if (row.ContainsKey(fieldKey))
+                        value = row[fieldKey]?.ToString() ?? "";
+                    else if (row.ContainsKey(fieldKey.Replace(" ", "_")))
+                        value = row[fieldKey.Replace(" ", "_")]?.ToString() ?? "";
+                    else if (row.ContainsKey(fieldKey.ToLower()))
+                        value = row[fieldKey.ToLower()]?.ToString() ?? "";
+
+                    result = result.Replace($"{{{fieldKey}}}", value);
+                    result = result.Replace($"{{{fieldKey.Replace(" ", "_")}}}", value);
+                }
+
+                return result;
+            }
+
+            // === БЕЗ ШАБЛОНА - автоопределение ===
+
+            // Для поля "Табельный номер" в справочнике МОЛ
+            if (field.Name == "Табельный номер" && catalogName == "Сотрудники (Списочный состав)")
+            {
+                if (row.ContainsKey("Табельный номер"))
+                    return row["Табельный номер"]?.ToString() ?? "";
+                if (row.ContainsKey("personnel_number"))
+                    return row["personnel_number"]?.ToString() ?? "";
+                if (row.ContainsKey("Код"))
+                    return row["Код"]?.ToString() ?? "";
+                if (row.ContainsKey("code"))
+                    return row["code"]?.ToString() ?? "";
+            }
+
+            // Приоритеты полей для отображения
+            var priorityFields = new[]
+            {
+                "Наименование", "name", "Name",
+                "ФИО", "full_name", "FullName",
+                "Наименование вида", "Наименование категории",
+                "site_name", "Наименование участка",
+                "Код", "code", "Code"
+            };
+
+            foreach (var priority in priorityFields)
+            {
+                if (row.ContainsKey(priority) && row[priority] != null)
+                    return row[priority].ToString();
+            }
+
+            // Ищем любое строковое поле
+            foreach (var key in row.Keys)
+            {
+                if (key != "Id" && key != "CreatedAt" && key != "UpdatedAt" && row[key] is string strVal && !string.IsNullOrEmpty(strVal))
+                    return strVal;
+            }
+
+            return row.ContainsKey("Id") ? row["Id"].ToString() : "Без имени";
         }
 
         private Type GetColumnType(string fieldType)
@@ -238,6 +274,7 @@ namespace BIS.ERP.Views
                 try
                 {
                     StatusText.Text = "💾 Сохранение...";
+                    ProgressText.Text = "⏳ Сохранение...";
                     await _metadataService.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
                     await LoadData();
                     MessageBox.Show("Запись успешно добавлена!", "Успех",
@@ -250,6 +287,7 @@ namespace BIS.ERP.Views
                 }
                 finally
                 {
+                    ProgressText.Text = "";
                     StatusText.Text = "✅ Готово";
                 }
             }
@@ -266,7 +304,8 @@ namespace BIS.ERP.Views
             foreach (DataColumn column in _dataTable.Columns)
             {
                 var value = selectedRow[column.ColumnName];
-                if (value != DBNull.Value)
+                if (value != DBNull.Value && column.ColumnName != "Id" &&
+                    column.ColumnName != "Дата создания" && column.ColumnName != "Дата изменения")
                 {
                     existingData[column.ColumnName] = value;
                 }
@@ -280,6 +319,7 @@ namespace BIS.ERP.Views
                 try
                 {
                     StatusText.Text = "💾 Обновление...";
+                    ProgressText.Text = "⏳ Обновление...";
                     await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, dialog.ItemData);
                     await LoadData();
                     MessageBox.Show("Запись успешно обновлена!", "Успех",
@@ -292,6 +332,7 @@ namespace BIS.ERP.Views
                 }
                 finally
                 {
+                    ProgressText.Text = "";
                     StatusText.Text = "✅ Готово";
                 }
             }
@@ -303,7 +344,10 @@ namespace BIS.ERP.Views
             if (selectedRow == null) return;
 
             var id = (Guid)selectedRow["Id"];
-            var name = selectedRow[_catalog.Fields.FirstOrDefault()?.Name ?? "Id"]?.ToString() ?? id.ToString();
+            var firstField = _catalog.Fields.FirstOrDefault();
+            var name = firstField != null && selectedRow[firstField.Name] != null
+                ? selectedRow[firstField.Name].ToString()
+                : id.ToString();
 
             var result = MessageBox.Show($"Удалить запись '{name}'?\nВосстановление будет невозможно!",
                 "Подтверждение удаления", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -313,6 +357,7 @@ namespace BIS.ERP.Views
                 try
                 {
                     StatusText.Text = "🗑️ Удаление...";
+                    ProgressText.Text = "⏳ Удаление...";
                     await _metadataService.DeleteDynamicRecordAsync(_catalog.Id, id);
                     await LoadData();
                     MessageBox.Show("Запись успешно удалена!", "Успех",
@@ -325,6 +370,7 @@ namespace BIS.ERP.Views
                 }
                 finally
                 {
+                    ProgressText.Text = "";
                     StatusText.Text = "✅ Готово";
                 }
             }
