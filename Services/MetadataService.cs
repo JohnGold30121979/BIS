@@ -12,7 +12,7 @@ using System.Linq.Expressions;
 
 namespace BIS.ERP.Services
 {
-    public class MetadataService
+    public partial class MetadataService
     {
         private readonly AppDbContext _context;
 
@@ -21,21 +21,13 @@ namespace BIS.ERP.Services
             _context = context;
         }
 
-        // Проверка инициализации метаданных
-        public async Task<bool> IsMetadataInitializedAsync(Guid infoBaseId)
-        {
-            var config = await _context.Set<MetadataConfiguration>()
-                .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
-            return config != null && config.IsInitialized;
-        }
-
         // Инициализация базовых метаданных (как в 1С)
         public async Task InitializeDefaultMetadataAsync(Guid infoBaseId)
         {
             try
             {
                 var config = await _context.Set<MetadataConfiguration>()
-                .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
+                    .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
 
                 if (config == null)
                 {
@@ -44,169 +36,21 @@ namespace BIS.ERP.Services
                         Id = Guid.NewGuid(),
                         InfoBaseId = infoBaseId,
                         CreatedAt = DateTime.UtcNow,
-                        IsInitialized = true
+                        IsInitialized = false
                     };
                     await _context.Set<MetadataConfiguration>().AddAsync(config);
                     await _context.SaveChangesAsync();
                 }
-                else if (config.IsInitialized)
+
+                // Если уже инициализирована, выходим
+                if (config.IsInitialized)
                 {
+                    System.Diagnostics.Debug.WriteLine("Метаданные уже инициализированы");
                     return;
                 }
 
-                // Создаем системные справочники
-                var catalogs = new List<MetadataObject>();
-
-
-                // Справочник "Организации"
-                var organizationsCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Организации",
-                    TableName = "catalog_organizations",
-                    ObjectType = "Catalog",
-                    Description = "Справочник организаций предприятия",
-                    Icon = "🏢",
-                    Order = 1,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                organizationsCatalog.Fields = GetOrganizationFields(organizationsCatalog.Id);
-                catalogs.Add(organizationsCatalog);
-
-
-                // Справочник "Банки"
-                var banksCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Банки",
-                    TableName = "catalog_banks",
-                    ObjectType = "Catalog",
-                    Description = "Справочник банков",
-                    Icon = "🏦",
-                    Order = 2,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                banksCatalog.Fields = GetBankFields(banksCatalog.Id);
-                catalogs.Add(banksCatalog);
-
-                // Справочник Список сотрудников предприятия
-                var employeesCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Сотрудники (Списочный состав)",
-                    TableName = "catalog_employees",
-                    ObjectType = "Catalog",
-                    Description = "Список сотрудников предприятия",
-                    Icon = "👥",
-                    Order = 3,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                employeesCatalog.Fields = GetEmployeeCatalogFields(employeesCatalog.Id);
-                catalogs.Add(employeesCatalog);
-
-                // Справочник Основные средства предприятия
-                var assetsCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Основные средства",
-                    TableName = "catalog_assets",
-                    ObjectType = "Catalog",
-                    Description = "Основные средства предприятия",
-                    Icon = "⚙️",
-                    Order = 4,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                assetsCatalog.Fields = GetStandardCatalogFields(assetsCatalog.Id);
-                catalogs.Add(assetsCatalog);
-
-                // Справочник Структура подразделений
-                var departmentsCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Подразделения",
-                    TableName = "catalog_departments",
-                    ObjectType = "Catalog",
-                    Description = "Структура подразделений",
-                    Icon = "🏢",
-                    Order = 5,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                departmentsCatalog.Fields = GetStandardCatalogFields(departmentsCatalog.Id);
-                catalogs.Add(departmentsCatalog);
-
-                // Справочник Контрагенты (клиенты, поставщики)
-                var contractorsCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Контрагенты",
-                    TableName = "catalog_contractors",
-                    ObjectType = "Catalog",
-                    Description = "Контрагенты (клиенты, поставщики)",
-                    Icon = "🤝",
-                    Order = 5,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                contractorsCatalog.Fields = GetContractorFields(contractorsCatalog.Id);
-                catalogs.Add(contractorsCatalog);
-
-                // Справочник "Участки"
-                var sitesCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Участки",
-                    TableName = "catalog_sites",
-                    ObjectType = "Catalog",
-                    Description = "Справочник участков предприятия",
-                    Icon = "🏭",
-                    Order = 6,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                sitesCatalog.Fields = GetSiteFields(sitesCatalog.Id);
-                catalogs.Add(sitesCatalog);
-
-                // Справочник "Материально-ответственные лица (МОЛ)"
-                var responsiblePersonsCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "МОЛ",
-                    TableName = "catalog_responsible_persons",
-                    ObjectType = "Catalog",
-                    Description = "Материально-ответственные лица",
-                    Icon = "👥",
-                    Order = 7,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                responsiblePersonsCatalog.Fields = GetResponsiblePersonFields(responsiblePersonsCatalog.Id);
-                catalogs.Add(responsiblePersonsCatalog);
-
-                // Справочник "Валюты"
-                var currenciesCatalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Валюты",
-                    TableName = "catalog_currencies",
-                    ObjectType = "Catalog",
-                    Description = "Справочник валют",
-                    Icon = "💵",
-                    Order = 7,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id
-                };
-                currenciesCatalog.Fields = GetCurrencyFields(currenciesCatalog.Id);
-                catalogs.Add(currenciesCatalog);       
-
-
-                await _context.Set<MetadataObject>().AddRangeAsync(catalogs);
-
-                // Создаем системные документы
+                // ========== СОЗДАЁМ ТОЛЬКО ДОКУМЕНТЫ ==========
+                // (справочники создаются в InitializePredefinedCatalogsAsync)
                 var documents = new List<MetadataObject>();
 
                 var incomingDoc = new MetadataObject
@@ -240,914 +84,26 @@ namespace BIS.ERP.Services
                 documents.Add(outgoingDoc);
 
                 await _context.Set<MetadataObject>().AddRangeAsync(documents);
+                await _context.SaveChangesAsync();
+
+                // Создаём таблицы для документов
+                foreach (var doc in documents)
+                {
+                    await CreateTableForCatalogAsync(doc);
+                }
 
                 config.IsInitialized = true;
                 await _context.SaveChangesAsync();
 
-                await CreateTablesFromMetadataAsync();
-            } catch (Exception ex) {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочников': {ex.Message}");
+                System.Diagnostics.Debug.WriteLine("✅ Базовая инициализация завершена (документы созданы)");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ Ошибка инициализации: {ex.Message}");
             }
         }
-
-
-        /// Поля для справочника "Наименования категорий"         
-        private List<MetadataField> GetMaterialFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-    {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код",
-            DbColumnName = "code",
-            FieldType = "String",
-            Length = 50,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование материала",
-            DbColumnName = "name",
-            FieldType = "String",
-            Length = 500,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Ед изм",
-            DbColumnName = "unit",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = false,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Ном номер",
-            DbColumnName = "article",
-            FieldType = "String",
-            Length = 100,
-            IsRequired = false,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Вид материала",
-            DbColumnName = "material_type_id",
-            FieldType = "Reference",              // ← "Reference" с большой буквы
-            ReferenceCatalog = "Виды материалов",
-            DisplayPattern = "{Наименование вида}",  // ← добавить
-            DisplayFields = "Наименование вида",     // ← добавить
-            IsRequired = false,
-            IsUnique = false,
-            Order = 5,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Вместимость",
-            DbColumnName = "capacity",
-            FieldType = "Decimal",                // ← "Decimal"
-            Precision = 18,
-            Scale = 6,
-            IsRequired = false,
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Счет хранения",
-            DbColumnName = "storage_account",
-            FieldType = "String",
-            Length = 50,
-            IsRequired = false,
-            Order = 7,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активен",
-            DbColumnName = "is_active",
-            FieldType = "Bool",                   // ← "Bool"
-            IsRequired = true,
-            Order = 8,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Примечание",
-            DbColumnName = "description",
-            FieldType = "String",
-            Length = 500,
-            IsRequired = false,
-            Order = 9,
-            MetadataObjectId = metadataObjectId
-        }
-    };
-        }
-
-        private List<MetadataField> GetMaterialCategoryFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-        {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код",
-            DbColumnName = "code",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование категории",
-            DbColumnName = "name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = true,
-            IsUnique = false,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Примечание",
-            DbColumnName = "description",
-            FieldType = "String",
-            Length = 500,
-            IsRequired = false,
-            IsUnique = false,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активен",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            Length = 0,
-            IsRequired = false,
-            IsUnique = false,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        }
-        };
-        }
-        private List<MetadataField> GetSiteFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-        {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код участка",
-            DbColumnName = "site_code",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование участка",
-            DbColumnName = "site_name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Описание",
-            DbColumnName = "description",
-            FieldType = "String",
-            Length = 500,
-            IsRequired = false,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активен",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            IsRequired = false,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        }
-        };
-        }
-       
-        private List<MetadataField> GetResponsiblePersonFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-        {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Табельный номер",
-            DbColumnName = "personnel_number",
-            FieldType = "Reference",           // ← меняем на Reference
-            ReferenceCatalog = "Сотрудники (Списочный состав)", // ← ссылка на сотруднико
-            DisplayPattern = "{Табельный номер} - {ФИО}",  // ← шаблон
-            DisplayFields = "Табельный номер,ФИО",         // ← поля для подстановки
-            Length = 0,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "ФИО",
-            DbColumnName = "full_name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-           Id = Guid.NewGuid(),
-           Name = "Участок",
-           DbColumnName = "site_id",
-           FieldType = "Reference",           // ← ДОЛЖНО БЫТЬ "Reference", а не "String"!
-           ReferenceCatalog = "Участки",      // ← Имя справочника
-           Length = 0,
-           IsRequired = false,
-           IsUnique = false,
-           Order = 3,
-           MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Должность",
-            DbColumnName = "position",
-            FieldType = "String",
-            Length = 100,
-            IsRequired = false,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Телефон",
-            DbColumnName = "phone",
-            FieldType = "String",
-            Length = 50,
-            IsRequired = false,
-            Order = 5,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Примечание",
-            DbColumnName = "note",
-            FieldType = "String",
-            Length = 500,
-            IsRequired = false,
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активен",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            IsRequired = false,
-            Order = 7,
-            MetadataObjectId = metadataObjectId
-        }
-        };
-        }
-
-        private List<MetadataField> GetStandardCatalogFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-            {
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Код",
-                    DbColumnName = "code",
-                    FieldType = "String",
-                    Length = 50,
-                    IsRequired = true,
-                    IsUnique = true,
-                    Order = 1,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Наименование",
-                    DbColumnName = "name",
-                    FieldType = "String",
-                    Length = 200,
-                    IsRequired = true,
-                    Order = 2,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Примечание",
-                    DbColumnName = "description",
-                    FieldType = "String",
-                    Length = 500,
-                    IsRequired = false,
-                    Order = 3,
-                    MetadataObjectId = metadataObjectId
-                }
-            };
-        }
-       
-        /// Поля для справочника "Сотрудники (Списочный состав)" - расширенная версия
-       
-        private List<MetadataField> GetEmployeeCatalogFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-        {
-        // Стандартные поля (обязательные)
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код",
-            DbColumnName = "code",
-            FieldType = "String",
-            Length = 50,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование",
-            DbColumnName = "name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Примечание",
-            DbColumnName = "description",
-            FieldType = "String",
-            Length = 500,
-            IsRequired = false,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
         
-        // Расширенные поля для сотрудников
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Табельный номер",
-            DbColumnName = "personnel_number",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = false,
-            IsUnique = true,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "ФИО",
-            DbColumnName = "full_name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = false,
-            Order = 5,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Должность",
-            DbColumnName = "position",
-            FieldType = "String",
-            Length = 100,
-            IsRequired = false,
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Подразделение",
-            DbColumnName = "department",
-            FieldType = "String",
-            Length = 100,
-            IsRequired = false,
-            Order = 7,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Дата приема",
-            DbColumnName = "hire_date",
-            FieldType = "DateTime",
-            IsRequired = false,
-            Order = 8,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Дата увольнения",
-            DbColumnName = "termination_date",
-            FieldType = "DateTime",
-            IsRequired = false,
-            Order = 9,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Статус",
-            DbColumnName = "status",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = false,
-            Order = 10,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Телефон",
-            DbColumnName = "phone",
-            FieldType = "String",
-            Length = 50,
-            IsRequired = false,
-            Order = 11,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Email",
-            DbColumnName = "email",
-            FieldType = "String",
-            Length = 100,
-            IsRequired = false,
-            Order = 12,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "ИНН",
-            DbColumnName = "tax_id",
-            FieldType = "String",
-            Length = 50,
-            IsRequired = false,
-            Order = 13,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активен",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            IsRequired = false,
-            Order = 14,
-            MetadataObjectId = metadataObjectId
-        }
-    };
-        }
-
-        // Поля для справочника "Организации"
-        private List<MetadataField> GetOrganizationFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-    {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код",
-            DbColumnName = "code",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование",
-            DbColumnName = "name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Полное наименование",
-            DbColumnName = "full_name",
-            FieldType = "String",
-            Length = 500,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "ИНН",
-            DbColumnName = "inn",
-            FieldType = "String",
-            Length = 50,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "КПП",
-            DbColumnName = "kpp",
-            FieldType = "String",
-            Length = 50,
-            Order = 5,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Юридический адрес",
-            DbColumnName = "legal_address",
-            FieldType = "String",
-            Length = 500,
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Телефон",
-            DbColumnName = "phone",
-            FieldType = "String",
-            Length = 50,
-            Order = 7,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Email",
-            DbColumnName = "email",
-            FieldType = "String",
-            Length = 100,
-            Order = 8,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активна",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            Order = 9,
-            MetadataObjectId = metadataObjectId
-        }
-    };
-        }
-
-        // Поля для справочника "Валюты"
-        private List<MetadataField> GetCurrencyFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-    {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код",
-            DbColumnName = "code",
-            FieldType = "String",
-            Length = 3,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование",
-            DbColumnName = "name",
-            FieldType = "String",
-            Length = 100,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Символ",
-            DbColumnName = "symbol",
-            FieldType = "String",
-            Length = 5,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Курс",
-            DbColumnName = "rate",
-            FieldType = "Decimal",
-            Precision = 18,
-            Scale = 4,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Базовая",
-            DbColumnName = "is_base",
-            FieldType = "Bool",
-            Order = 5,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активна",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        }
-    };
-        }
-
-        // Поля для справочника "Банки"
-        private List<MetadataField> GetBankFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-    {
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Код",
-            DbColumnName = "code",
-            FieldType = "String",
-            Length = 20,
-            IsRequired = true,
-            IsUnique = true,
-            Order = 1,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Наименование",
-            DbColumnName = "name",
-            FieldType = "String",
-            Length = 200,
-            IsRequired = true,
-            Order = 2,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "БИК",
-            DbColumnName = "bic",
-            FieldType = "String",
-            Length = 20,
-            Order = 3,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Корр. счет",
-            DbColumnName = "corr_account",
-            FieldType = "String",
-            Length = 50,
-            Order = 4,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Адрес",
-            DbColumnName = "address",
-            FieldType = "String",
-            Length = 500,
-            Order = 5,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Телефон",
-            DbColumnName = "phone",
-            FieldType = "String",
-            Length = 50,
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Активен",
-            DbColumnName = "is_active",
-            FieldType = "Bool",
-            Order = 7,
-            MetadataObjectId = metadataObjectId
-        }
-    };
-        }
-        private List<MetadataField> GetContractorFields(Guid metadataObjectId)
-        {
-            var fields = GetStandardCatalogFields(metadataObjectId);
-            fields.AddRange(new[]
-            {
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "ИНН",
-                    DbColumnName = "inn",
-                    FieldType = "String",
-                    Length = 12,
-                    Order = 4,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "КПП",
-                    DbColumnName = "kpp",
-                    FieldType = "String",
-                    Length = 9,
-                    Order = 5,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Юридический адрес",
-                    DbColumnName = "legal_address",
-                    FieldType = "String",
-                    Length = 300,
-                    Order = 6,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Телефон",
-                    DbColumnName = "phone",
-                    FieldType = "String",
-                    Length = 20,
-                    Order = 7,
-                    MetadataObjectId = metadataObjectId
-                }
-            });
-            return fields;
-        }
-
-        private List<MetadataField> GetStandardDocumentFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-            {
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Номер",
-                    DbColumnName = "number",
-                    FieldType = "String",
-                    Length = 20,
-                    IsRequired = true,
-                    Order = 1,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Дата",
-                    DbColumnName = "date",
-                    FieldType = "DateTime",
-                    IsRequired = true,
-                    Order = 2,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Сумма",
-                    DbColumnName = "amount",
-                    FieldType = "Decimal",
-                    Precision = 18,
-                    Scale = 2,
-                    Order = 3,
-                    MetadataObjectId = metadataObjectId
-                },
-                new MetadataField
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Примечание",
-                    DbColumnName = "description",
-                    FieldType = "String",
-                    Length = 500,
-                    Order = 4,
-                    MetadataObjectId = metadataObjectId
-                }
-            };
-        }
-
-        // Получение данных справочника
-        public async Task<List<Dictionary<string, object>>> GetCatalogDataAsyncOld(Guid catalogId)
-        {
-            var catalog = await _context.MetadataObjects
-                .Include(c => c.Fields)
-                .FirstOrDefaultAsync(m => m.Id == catalogId);
-
-            if (catalog == null) return new List<Dictionary<string, object>>();
-
-            var result = new List<Dictionary<string, object>>();
-            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
-
-            using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-            await _context.Database.OpenConnectionAsync();
-
-            using var reader = await command.ExecuteReaderAsync();
-
-            var fieldMapping = catalog.Fields.ToDictionary(f => f.DbColumnName, f => f.Name);
-            fieldMapping["Id"] = "Id";
-            fieldMapping["CreatedAt"] = "CreatedAt";
-            fieldMapping["UpdatedAt"] = "UpdatedAt";
-
-            while (await reader.ReadAsync())
-            {
-                var row = new Dictionary<string, object>();
-                for (int i = 0; i < reader.FieldCount; i++)
-                {
-                    var dbName = reader.GetName(i);
-                    var displayName = fieldMapping.ContainsKey(dbName) ? fieldMapping[dbName] : dbName;
-                    row[displayName] = reader.GetValue(i);
-                }
-                result.Add(row);
-            }
-
-            await _context.Database.CloseConnectionAsync();
-            return result;
-        }
-
+        // Получение данных справочника      
         public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
         {
             var catalog = await _context.MetadataObjects
@@ -1156,72 +112,55 @@ namespace BIS.ERP.Services
 
             if (catalog == null) return new List<Dictionary<string, object>>();
 
-            // 1. Получаем Reference поля
-            var referenceFields = catalog.Fields
-                .Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog))
-                .ToList();
-
-            // 2. Загружаем данные из основной таблицы
-            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
             var result = new List<Dictionary<string, object>>();
+            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
-            await _context.Database.OpenConnectionAsync();
 
-            using var reader = await command.ExecuteReaderAsync();
-
-            // 3. Для каждого Reference поля загружаем связанные данные один раз
-            var referenceDataCache = new Dictionary<string, Dictionary<Guid, string>>();
-
-            foreach (var refField in referenceFields)
+            try
             {
-                referenceDataCache[refField.DbColumnName] = await LoadReferenceDictionaryAsync(refField.ReferenceCatalog);
-            }
+                await _context.Database.OpenConnectionAsync();
+                using var reader = await command.ExecuteReaderAsync();
 
-            // 4. Читаем данные и подменяем GUID на наименование
-            while (await reader.ReadAsync())
-            {
-                var row = new Dictionary<string, object>();
-
-                for (int i = 0; i < reader.FieldCount; i++)
+                // Безопасное создание fieldMapping (обрабатывает дубликаты)
+                var fieldMapping = new Dictionary<string, string>();
+                foreach (var field in catalog.Fields)
                 {
-                    var dbName = reader.GetName(i);
-                    var value = reader.GetValue(i);
+                    if (string.IsNullOrEmpty(field.DbColumnName)) continue;
 
-                    // Проверяем, является ли это поле Reference
-                    var refField = referenceFields.FirstOrDefault(f => f.DbColumnName == dbName);
-
-                    if (refField != null && value != DBNull.Value && value is Guid guidValue)
-                    {
-                        // Подменяем GUID на наименование
-                        var dict = referenceDataCache[refField.DbColumnName];
-                        if (dict.TryGetValue(guidValue, out var displayName))
-                        {
-                            row[refField.Name] = displayName;
-                        }
-                        else
-                        {
-                            row[refField.Name] = guidValue.ToString();
-                        }
-                    }
+                    if (!fieldMapping.ContainsKey(field.DbColumnName))
+                        fieldMapping[field.DbColumnName] = field.Name;
                     else
-                    {
-                        // Обычное поле
-                        var field = catalog.Fields.FirstOrDefault(f => f.DbColumnName == dbName);
-                        var displayName = field?.Name ?? dbName;
-                        row[displayName] = value;
-                    }
+                        System.Diagnostics.Debug.WriteLine($"⚠️ Дубликат колонки: {field.DbColumnName} в {catalog.Name}");
                 }
 
-                result.Add(row);
+                // Системные поля
+                if (!fieldMapping.ContainsKey("Id")) fieldMapping["Id"] = "Id";
+                if (!fieldMapping.ContainsKey("CreatedAt")) fieldMapping["CreatedAt"] = "CreatedAt";
+                if (!fieldMapping.ContainsKey("UpdatedAt")) fieldMapping["UpdatedAt"] = "UpdatedAt";
+
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        var dbName = reader.GetName(i);
+                        var displayName = fieldMapping.TryGetValue(dbName, out var name) ? name : dbName;
+                        row[displayName] = reader.GetValue(i);
+                    }
+                    result.Add(row);
+                }
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
             }
 
-            await _context.Database.CloseConnectionAsync();
             return result;
         }
 
-        // Вспомогательный метод: загружает словарь Id -> Name из справочника
+
         private async Task<Dictionary<Guid, string>> LoadReferenceDictionaryAsync(string catalogName)
         {
             var result = new Dictionary<Guid, string>();
@@ -1613,6 +552,22 @@ namespace BIS.ERP.Services
             return maxOrder + 1;
         }
 
+        private string FormatSqlValue(object value, string fieldType)
+        {
+            if (value == null) return "NULL";
+
+            return fieldType switch
+            {
+                "String" => $"'{value.ToString().Replace("'", "''")}'",
+                "DateTime" => $"'{Convert.ToDateTime(value):yyyy-MM-dd HH:mm:ss}'",
+                "Bool" => Convert.ToBoolean(value) ? "TRUE" : "FALSE",
+                "Int" => Convert.ToInt32(value).ToString(),
+                "Decimal" => Convert.ToDecimal(value).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                _ => $"'{value}'"
+            };
+        }
+
+
         // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
 
         public async Task InitializePredefinedCatalogsAsync(Guid infoBaseId)  // ← добавить параметр
@@ -1644,7 +599,23 @@ namespace BIS.ERP.Services
                     .Select(m => m.Name)
                     .ToListAsync();
 
-                // Создаём недостающие справочники
+                // Создаём  справочники
+                
+                if (!existingCatalogs.Contains("Участки"))
+                    await CreateSitesCatalog(config);
+
+                if (!existingCatalogs.Contains("Сотрудники (Списочный состав)"))
+                    await CreateEmployeesCatalog(config);
+
+                if (!existingCatalogs.Contains("Основные средства"))
+                    await CreateAssetsCatalog(config);
+
+                if (!existingCatalogs.Contains("Организации"))
+                    await CreateOrganizationsCatalog(config);
+
+                if (!existingCatalogs.Contains("Расчетные счета организаций"))
+                    await CreateBankAccountsCatalog(config);
+
                 if (!existingCatalogs.Contains("План счетов"))
                     await CreateChartOfAccountsCatalog(config);
 
@@ -1660,6 +631,18 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Справочник материалов"))
                     await CreateMaterialCatalog(config);
 
+                if (!existingCatalogs.Contains("Справочник валют"))
+                    await CreateCurrencyCatalog(config);
+
+                if (!existingCatalogs.Contains("Справочник курсов валют"))
+                    await CreateCurrencyRatesCatalog(config);
+
+                if (!existingCatalogs.Contains("Контрагенты"))
+                    await CreateContractorsCatalog(config);
+
+                if (!existingCatalogs.Contains("МОЛ"))
+                    await CreateResponsiblePersonsCatalog(config);
+
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }
             catch (Exception ex)
@@ -1667,381 +650,9 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
             }
-        }
-
-        private async Task CreateMaterialTypesCatalog(MetadataConfiguration config)
-        {
-            try
-            {
-                var catalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Виды материалов",
-                    TableName = "catalog_material_types",
-                    ObjectType = "Catalog",
-                    Description = "Справочник видов материалов",
-                    Icon = "📦",
-                    Order = 9,  // после категорий (у категорий было 8)
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-                    Fields = GetMaterialTypeFields(Guid.NewGuid())
-                };
-
-                await _context.MetadataObjects.AddAsync(catalog);
-                await _context.SaveChangesAsync();
-                await CreateTableForCatalogAsync(catalog);
-                await AddMaterialTypesDataToTable(catalog);
-
-                System.Diagnostics.Debug.WriteLine("Справочник 'Виды материалов' создан");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Виды материалов': {ex.Message}");
-            }
-        }
-
+        }   
        
-        /// Поля для справочника "Наименования типов категорий"       
-        private List<MetadataField> GetMaterialTypeFields(Guid metadataObjectId)
-        {
-            return new List<MetadataField>
-        {
-            new MetadataField
-            {
-                Id = Guid.NewGuid(),
-                Name = "Код",
-                DbColumnName = "code",
-                FieldType = "String",
-                Length = 20,
-                IsRequired = true,
-                IsUnique = true,
-                Order = 1,
-                MetadataObjectId = metadataObjectId
-            },
-            new MetadataField
-            {
-                Id = Guid.NewGuid(),
-                Name = "Наименование вида",
-                DbColumnName = "name",
-                FieldType = "String",
-                Length = 200,
-                IsRequired = true,
-                IsUnique = false,
-                Order = 2,
-                MetadataObjectId = metadataObjectId
-            },
-            new MetadataField
-            {
-                Id = Guid.NewGuid(),
-                Name = "Примечание",
-                DbColumnName = "description",
-                FieldType = "String",
-                Length = 500,
-                IsRequired = false,
-                IsUnique = false,
-                Order = 3,
-                MetadataObjectId = metadataObjectId
-            },
-            new MetadataField
-            {
-                Id = Guid.NewGuid(),
-                Name = "Активен",
-                DbColumnName = "is_active",
-                FieldType = "Bool",
-                Length = 0,
-                IsRequired = false,
-                IsUnique = false,
-                Order = 4,
-                MetadataObjectId = metadataObjectId
-           }
-        };
-        }
-
-        private async Task AddMaterialTypesDataToTable(MetadataObject catalog)
-        {
-            var materialTypes = new[]
-            {
-        new { code = "1", name = "ОС", description = "Основные средства", is_active = true },
-        new { code = "2", name = "Малоценка", description = "Малоценные предметы", is_active = true },
-        new { code = "3", name = "Прочие материалы", description = "Прочие материалы", is_active = true },
-        new { code = "8", name = "Спец.одежда", description = "Специальная одежда", is_active = true },
-        new { code = "9", name = "Бензин, л", description = "Бензин в литрах", is_active = true },
-        new { code = "10", name = "Див. топливо, л", description = "Дизельное топливо в литрах", is_active = true },
-        new { code = "11", name = "Авто Масла и про", description = "Автомасла и прочие жидкости", is_active = true },
-        new { code = "12", name = "Сера, кг", description = "Сера в килограммах", is_active = true },
-        new { code = "13", name = "Тринатрий фосфат, кг", description = "Тринатрий фосфат в кг", is_active = true },
-        new { code = "14", name = "Известь хлорная, кг", description = "Известь хлорная в кг", is_active = true },
-        new { code = "15", name = "Жир технический, кг", description = "Жир технический в кг", is_active = true },
-        new { code = "16", name = "Мешки 50 кг, шт", description = "Мешки 50 кг в штуках", is_active = true },
-        new { code = "17", name = "Мешки 25 кг, шт", description = "Мешки 25 кг в штуках", is_active = true },
-        new { code = "18", name = "Бирки для мешков 25 кг, л", description = "Бирки для мешков 25 кг", is_active = true }
-    };
-
-            foreach (var type in materialTypes)
-            {
-                var sql = $@"
-            INSERT INTO ""{catalog.TableName}"" 
-            (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-            VALUES (
-                '{Guid.NewGuid()}',
-                '{type.code}',
-                '{type.name.Replace("'", "''")}',
-                '{type.description?.Replace("'", "''") ?? ""}',
-                {type.is_active.ToString().ToLower()},
-                NOW(),
-                NOW()
-            )";
-                await _context.Database.ExecuteSqlRawAsync(sql);
-            }
-            System.Diagnostics.Debug.WriteLine($"Добавлено видов материалов: {materialTypes.Length}");
-        }
-
-        private async Task CreateMaterialCategoriesCatalog(MetadataConfiguration config)
-        {
-            try
-            {
-                var catalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Наименования категорий",
-                    TableName = "catalog_material_categories",
-                    ObjectType = "Catalog",
-                    Description = "Справочник категорий материалов",
-                    Icon = "📁",
-                    Order = 8,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-                    Fields = GetMaterialCategoryFields(Guid.NewGuid())
-                };
-
-                await _context.MetadataObjects.AddAsync(catalog);
-                await _context.SaveChangesAsync();
-                await CreateTableForCatalogAsync(catalog);
-                await AddMaterialCategoriesDataToTable(catalog);  // ← добавление данных
-
-                System.Diagnostics.Debug.WriteLine("Справочник 'Наименования категорий' создан");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Наименования категорий': {ex.Message}");
-            }
-        }
-
-        private async Task CreateMaterialCatalog(MetadataConfiguration config)
-        {
-            try
-            {
-                // Справочник Справочник материалов на складе
-                var catalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Справочник материалов",
-                    TableName = "catalog_materials",
-                    ObjectType = "Catalog",
-                    Description = "Справочник материалов на складе",
-                    Icon = "📦",
-                    Order = 10,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-                    Fields = GetMaterialFields(Guid.NewGuid())
-                };
-                await _context.MetadataObjects.AddAsync(catalog);
-                await _context.SaveChangesAsync();
-                await CreateTableForCatalogAsync(catalog);               
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Справочник материалов на складе': {ex.Message}");
-            }
-        }
-
-        private async Task AddMaterialCategoriesDataToTable(MetadataObject catalog)
-        {
-            var categories = new[]
-            {
-            new { code = "1", name = "ЗАПАСЫ ОСНОВНОГО ПРОИЗВОДСТВА", description = "Основные производственные запасы", is_active = true },
-            new { code = "2", name = "ТОПЛИВО", description = "Топливные материалы", is_active = true },
-            new { code = "3", name = "ТАРА", description = "Тара и упаковка", is_active = true },
-            new { code = "4", name = "ЗАПЧАСТИ", description = "Запасные части для оборудования", is_active = true },
-            new { code = "5", name = "СТРОЙМАТЕРИАЛЫ", description = "Строительные материалы", is_active = true },
-            new { code = "6", name = "ПРОЧИЕ МАТЕРИАЛЫ", description = "Прочие материалы", is_active = true }
-        };
-
-            foreach (var cat in categories)
-            {
-                var sql = $@"
-            INSERT INTO ""{catalog.TableName}"" 
-            (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-            VALUES (
-                '{Guid.NewGuid()}',
-                '{cat.code}',
-                '{cat.name.Replace("'", "''")}',
-                '{cat.description?.Replace("'", "''") ?? ""}',
-                {cat.is_active},
-                NOW(),
-                NOW()
-            )";
-                await _context.Database.ExecuteSqlRawAsync(sql);
-            }
-            System.Diagnostics.Debug.WriteLine($"Добавлено категорий: {categories.Length}");
-        }
-        private async Task CreateChartOfAccountsCatalog(MetadataConfiguration config)
-        {
-            try
-            {
-                var catalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "План счетов",
-                    TableName = $"catalog_plan_schetov_{DateTime.Now:yyyyMMddHHmmss}",
-                    ObjectType = "Catalog",
-                    Description = "План счетов бухгалтерского учета Кыргызской Республики",
-                    Icon = "📊",
-                    Order = 10,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-                    Fields = new List<MetadataField>()
-                };
-
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Код", DbColumnName = "code", FieldType = "String", Length = 20, IsRequired = true, IsUnique = true, Order = 1 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 2 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Тип счета", DbColumnName = "account_type", FieldType = "String", Length = 20, Order = 3 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Описание", DbColumnName = "description", FieldType = "String", Length = 500, Order = 4 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Уровень", DbColumnName = "level", FieldType = "Int", Order = 5 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 6 });
-
-                await _context.MetadataObjects.AddAsync(catalog);
-                await _context.SaveChangesAsync();
-                await CreateTableForCatalogAsync(catalog);
-                await AddChartOfAccountsDataToTable(catalog);
-
-                System.Diagnostics.Debug.WriteLine("Справочник 'План счетов' создан");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'План счетов': {ex.Message}");
-            }
-        }
-
-        private async Task CreateBanksCatalog(MetadataConfiguration config)
-        {
-            try
-            {
-                var catalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Банки",
-                    TableName = $"catalog_banks_{DateTime.Now:yyyyMMddHHmmss}",
-                    ObjectType = "Catalog",
-                    Description = "Справочник банков Кыргызской Республики",
-                    Icon = "🏦",
-                    Order = 11,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-                    Fields = new List<MetadataField>()
-                };
-
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 1 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Краткое наименование", DbColumnName = "short_name", FieldType = "String", Length = 100, Order = 2 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "БИК", DbColumnName = "bic", FieldType = "String", Length = 20, Order = 3 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "ИНН", DbColumnName = "inn", FieldType = "String", Length = 50, Order = 4 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Адрес", DbColumnName = "address", FieldType = "String", Length = 500, Order = 5 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Телефон", DbColumnName = "phone", FieldType = "String", Length = 100, Order = 6 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Сайт", DbColumnName = "website", FieldType = "String", Length = 200, Order = 7 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "E-mail", DbColumnName = "email", FieldType = "String", Length = 100, Order = 8 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "SWIFT", DbColumnName = "swift", FieldType = "String", Length = 50, Order = 9 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Корр. счет", DbColumnName = "corr_account", FieldType = "String", Length = 50, Order = 10 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 11 });
-
-                await _context.MetadataObjects.AddAsync(catalog);
-                await _context.SaveChangesAsync();
-                await CreateTableForCatalogAsync(catalog);
-                await AddBanksDataToTable(catalog);
-
-                System.Diagnostics.Debug.WriteLine("Справочник 'Банки' создан");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Банки': {ex.Message}");
-            }
-        }
-
-        private async Task AddChartOfAccountsDataToTable(MetadataObject catalog)
-        {
-            var accounts = InitialDataProvider.GetChartOfAccounts();
-
-            foreach (var account in accounts)
-            {
-                try
-                {
-                    var sql = $@"
-                        INSERT INTO ""{catalog.TableName}"" 
-                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-                        VALUES (
-                            '{Guid.NewGuid()}',
-                            '{account.Code}',
-                            '{account.Name.Replace("'", "''")}',
-                            '{account.AccountType}',
-                            '{account.Description?.Replace("'", "''") ?? ""}',
-                            {account.Level},
-                            true,
-                            NOW(),
-                            NOW()
-                        )";
-                    await _context.Database.ExecuteSqlRawAsync(sql);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка добавления счета {account.Code}: {ex.Message}");
-                }
-            }
-            System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
-        }
-
-        private async Task AddBanksDataToTable(MetadataObject catalog)
-        {
-            var banks = InitialDataProvider.GetBanks();
-
-            foreach (var bank in banks)
-            {
-                try
-                {
-                    var sql = $@"
-                        INSERT INTO ""{catalog.TableName}"" 
-                        (""Id"", ""name"", ""short_name"", ""bic"", ""inn"", ""address"", ""phone"", ""website"", ""email"", ""swift"", ""corr_account"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-                        VALUES (
-                            '{Guid.NewGuid()}',
-                            '{bank.Name.Replace("'", "''")}',
-                            '{bank.ShortName?.Replace("'", "''") ?? ""}',
-                            '{bank.BIC}',
-                            '{bank.INN}',
-                            '{bank.Address?.Replace("'", "''") ?? ""}',
-                            '{bank.Phone}',
-                            '{bank.Website}',
-                            '{bank.Email}',
-                            '{bank.SwiftCode}',
-                            '{bank.CorrespondentAccount}',
-                            true,
-                            NOW(),
-                            NOW()
-                        )";
-                    await _context.Database.ExecuteSqlRawAsync(sql);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка добавления банка {bank.Name}: {ex.Message}");
-                }
-            }
-            System.Diagnostics.Debug.WriteLine($"Добавлено банков: {banks.Count}");
-        }
-
-        // Добавьте эти методы в конец класса MetadataService
-
-        #region Универсальные динамические методы
-
-        /// <summary>
-        /// Универсальное создание записи через метаданные
-        /// </summary>
+      
         public async Task<Guid> CreateDynamicRecordAsync(Guid metadataId, Dictionary<string, object> data)
         {
             var metadata = await _context.MetadataObjects
@@ -2085,10 +696,7 @@ namespace BIS.ERP.Services
 
             return recordId;
         }
-
-        /// <summary>
-        /// Универсальное обновление записи
-        /// </summary>
+       
         public async Task UpdateDynamicRecordAsync(Guid metadataId, Guid recordId, Dictionary<string, object> data)
         {
             var metadata = await _context.MetadataObjects
@@ -2125,9 +733,8 @@ namespace BIS.ERP.Services
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
         }
 
-        /// <summary>
-        /// Универсальное удаление записи
-        /// </summary>
+       
+        // Универсальное удаление записи      
         public async Task DeleteDynamicRecordAsync(Guid metadataId, Guid recordId)
         {
             var metadata = await _context.MetadataObjects
@@ -2144,144 +751,6 @@ namespace BIS.ERP.Services
             await command.ExecuteNonQueryAsync();
             await _context.Database.CloseConnectionAsync();
         }
-
-        /// <summary>
-        /// Выполнение автоматических расчетов
-        /// </summary>
-        public async Task ExecuteAutoCalculationsAsync(Guid metadataId, Guid recordId)
-        {
-            var metadata = await _context.MetadataObjects
-                .Include(m => m.Calculations)
-                .FirstOrDefaultAsync(m => m.Id == metadataId);
-
-            if (metadata == null || !metadata.Calculations.Any(c => c.IsAuto)) return;
-
-            var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
-
-            foreach (var calc in metadata.Calculations.Where(c => c.IsAuto).OrderBy(c => c.ExecutionOrder))
-            {
-                try
-                {
-                    object result = null;
-
-                    switch (calc.CalculationType)
-                    {
-                        case "Depreciation":
-                            result = CalculateDepreciation(calc, recordData);
-                            break;
-                        case "Sum":
-                            result = CalculateSum(calc, recordData);
-                            break;
-                        case "Average":
-                            result = CalculateAverage(calc, recordData);
-                            break;
-                        case "Formula":
-                            result = EvaluateFormula(calc.Formula, recordData);
-                            break;
-                    }
-
-                    if (result != null)
-                    {
-                        await UpdateRecordFieldAsync(metadata.TableName, recordId, calc.TargetField, result);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка расчета {calc.Name}: {ex.Message}");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Создание проводок по правилам
-        /// </summary>
-        public async Task<List<Dictionary<string, object>>> GeneratePostingsAsync(Guid metadataId, Guid recordId)
-        {
-            var postings = new List<Dictionary<string, object>>();
-
-            var metadata = await _context.MetadataObjects
-                .Include(m => m.PostingRules)
-                .FirstOrDefaultAsync(m => m.Id == metadataId);
-
-            if (metadata == null || !metadata.PostingRules.Any()) return postings;
-
-            var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
-
-            foreach (var rule in metadata.PostingRules.OrderBy(r => r.Order))
-            {
-                // Проверяем условие
-                if (!string.IsNullOrEmpty(rule.Condition))
-                {
-                    var conditionMet = EvaluateCondition(rule.Condition, recordData);
-                    if (!conditionMet) continue;
-                }
-
-                var posting = new Dictionary<string, object>
-                {
-                    ["Id"] = Guid.NewGuid(),
-                    ["ObjectId"] = recordId,
-                    ["ObjectType"] = metadata.Name,
-                    ["ObjectTypeId"] = metadataId,
-                    ["Date"] = recordData.ContainsKey("Date") ? recordData["Date"] : DateTime.Now,
-                    ["DebitAccount"] = EvaluateExpression(rule.DebitAccountExpression, recordData),
-                    ["CreditAccount"] = EvaluateExpression(rule.CreditAccountExpression, recordData),
-                    ["Amount"] = Convert.ToDecimal(EvaluateExpression(rule.AmountExpression, recordData)),
-                    ["CreatedAt"] = DateTime.Now
-                };
-
-                postings.Add(posting);
-            }
-
-            return postings;
-        }
-
-        /// <summary>
-        /// Получение данных записи
-        /// </summary>
-        private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId)
-        {
-            var result = new Dictionary<string, object>();
-            var sql = $"SELECT * FROM \"{tableName}\" WHERE \"Id\" = '{recordId}'";
-
-            using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-
-            await _context.Database.OpenConnectionAsync();
-            using var reader = await command.ExecuteReaderAsync();
-
-            if (await reader.ReadAsync())
-            {
-                for (int i = 0; i < reader.FieldCount; i++)
-                {
-                    result[reader.GetName(i)] = reader.GetValue(i);
-                }
-            }
-
-            await _context.Database.CloseConnectionAsync();
-            return result;
-        }
-
-        /// <summary>
-        /// Обновление поля записи
-        /// </summary>
-        /// 
-
-        private async Task UpdateRecordFieldAsync(string tableName, Guid recordId, string fieldName, object value)
-        {
-            var formattedValue = FormatSqlValue(value, "Unknown");
-            var sql = $"UPDATE \"{tableName}\" SET \"{fieldName}\" = {formattedValue}, \"UpdatedAt\" = NOW() WHERE \"Id\" = '{recordId}'";
-
-            using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-
-            await _context.Database.OpenConnectionAsync();
-            await command.ExecuteNonQueryAsync();
-            await _context.Database.CloseConnectionAsync();
-        }
-
-        #endregion
-
-        #region Вычислительные методы
 
         private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
         {
@@ -2346,6 +815,94 @@ namespace BIS.ERP.Services
             return Convert.ToDecimal(table.Compute(result, ""));
         }
 
+
+        // Выполнение автоматических расчетов        
+        public async Task ExecuteAutoCalculationsAsync(Guid metadataId, Guid recordId)
+        {
+            var metadata = await _context.MetadataObjects
+                .Include(m => m.Calculations)
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null || !metadata.Calculations.Any(c => c.IsAuto)) return;
+
+            var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
+
+            foreach (var calc in metadata.Calculations.Where(c => c.IsAuto).OrderBy(c => c.ExecutionOrder))
+            {
+                try
+                {
+                    object result = null;
+
+                    switch (calc.CalculationType)
+                    {
+                        case "Depreciation":
+                            result = CalculateDepreciation(calc, recordData);
+                            break;
+                        case "Sum":
+                            result = CalculateSum(calc, recordData);
+                            break;
+                        case "Average":
+                            result = CalculateAverage(calc, recordData);
+                            break;
+                        case "Formula":
+                            result = EvaluateFormula(calc.Formula, recordData);
+                            break;
+                    }
+
+                    if (result != null)
+                    {
+                        await UpdateRecordFieldAsync(metadata.TableName, recordId, calc.TargetField, result);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка расчета {calc.Name}: {ex.Message}");
+                }
+            }
+        }
+
+     
+        // Создание проводок по правилам       
+        public async Task<List<Dictionary<string, object>>> GeneratePostingsAsync(Guid metadataId, Guid recordId)
+        {
+            var postings = new List<Dictionary<string, object>>();
+
+            var metadata = await _context.MetadataObjects
+                .Include(m => m.PostingRules)
+                .FirstOrDefaultAsync(m => m.Id == metadataId);
+
+            if (metadata == null || !metadata.PostingRules.Any()) return postings;
+
+            var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
+
+            foreach (var rule in metadata.PostingRules.OrderBy(r => r.Order))
+            {
+                // Проверяем условие
+                if (!string.IsNullOrEmpty(rule.Condition))
+                {
+                    var conditionMet = EvaluateCondition(rule.Condition, recordData);
+                    if (!conditionMet) continue;
+                }
+
+                var posting = new Dictionary<string, object>
+                {
+                    ["Id"] = Guid.NewGuid(),
+                    ["ObjectId"] = recordId,
+                    ["ObjectType"] = metadata.Name,
+                    ["ObjectTypeId"] = metadataId,
+                    ["Date"] = recordData.ContainsKey("Date") ? recordData["Date"] : DateTime.Now,
+                    ["DebitAccount"] = EvaluateExpression(rule.DebitAccountExpression, recordData),
+                    ["CreditAccount"] = EvaluateExpression(rule.CreditAccountExpression, recordData),
+                    ["Amount"] = Convert.ToDecimal(EvaluateExpression(rule.AmountExpression, recordData)),
+                    ["CreatedAt"] = DateTime.Now
+                };
+
+                postings.Add(posting);
+            }
+
+            return postings;
+        }
+
         private bool EvaluateCondition(string condition, Dictionary<string, object> data)
         {
             var result = condition;
@@ -2370,53 +927,43 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        private string FormatSqlValue(object value, string fieldType)
+        // Получение данных записи       
+        private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId)
         {
-            if (value == null) return "NULL";
+            var result = new Dictionary<string, object>();
+            var sql = $"SELECT * FROM \"{tableName}\" WHERE \"Id\" = '{recordId}'";
 
-            return fieldType switch
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            using var reader = await command.ExecuteReaderAsync();
+
+            if (await reader.ReadAsync())
             {
-                "String" => $"'{value.ToString().Replace("'", "''")}'",
-                "DateTime" => $"'{Convert.ToDateTime(value):yyyy-MM-dd HH:mm:ss}'",
-                "Bool" => Convert.ToBoolean(value) ? "TRUE" : "FALSE",
-                "Int" => Convert.ToInt32(value).ToString(),
-                "Decimal" => Convert.ToDecimal(value).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                _ => $"'{value}'"
-            };
-        }
-
-        // Добавьте эти методы в MetadataService.cs
-
-        public async Task CreateMetadataObjectAsync(MetadataObject obj)
-        {
-            await _context.MetadataObjects.AddAsync(obj);
-            await _context.SaveChangesAsync();
-        }     
-
-        public async Task DeleteMetadataObjectAsync(Guid id)
-        {
-            var obj = await _context.MetadataObjects.FindAsync(id);
-            if (obj != null)
-            {
-                _context.MetadataObjects.Remove(obj);
-                await _context.SaveChangesAsync();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    result[reader.GetName(i)] = reader.GetValue(i);
+                }
             }
+
+            await _context.Database.CloseConnectionAsync();
+            return result;
         }
 
-        public async Task<List<MetadataObject>> GetAllMetadataObjectsAsync()
+       // Обновление поля записи        
+        private async Task UpdateRecordFieldAsync(string tableName, Guid recordId, string fieldName, object value)
         {
-            return await _context.MetadataObjects
-                .Include(m => m.Fields)
-                .OrderBy(m => m.Order)
-                .ToListAsync();
+            var formattedValue = FormatSqlValue(value, "Unknown");
+            var sql = $"UPDATE \"{tableName}\" SET \"{fieldName}\" = {formattedValue}, \"UpdatedAt\" = NOW() WHERE \"Id\" = '{recordId}'";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            await _context.Database.OpenConnectionAsync();
+            await command.ExecuteNonQueryAsync();
+            await _context.Database.CloseConnectionAsync();
         }
-        #endregion
-
-
-
-        // Добавьте эти методы в конец класса MetadataService
-
-
 
         public async Task UpdateMetadataObjectAsync(MetadataObject obj)
         {
@@ -2648,6 +1195,30 @@ namespace BIS.ERP.Services
                 query = query.Where(d => d.Date <= endDate.Value);
 
             return await query.OrderByDescending(d => d.Date).ToListAsync();
-        }           
+        }
+
+        public async Task<List<MetadataObject>> GetAllMetadataObjectsAsync()
+        {
+            return await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .OrderBy(m => m.Order)
+                .ToListAsync();
+        }
+
+        public async Task CreateMetadataObjectAsync(MetadataObject obj)
+        {
+            await _context.MetadataObjects.AddAsync(obj);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task DeleteMetadataObjectAsync(Guid id)
+        {
+            var obj = await _context.MetadataObjects.FindAsync(id);
+            if (obj != null)
+            {
+                _context.MetadataObjects.Remove(obj);
+                await _context.SaveChangesAsync();
+            }
+        }
     }
 }
