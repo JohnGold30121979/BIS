@@ -42,7 +42,6 @@ namespace BIS.ERP.Services
         {
             var postings = new List<PostingViewModel>();
 
-            // Проводки из DynamicDocuments (импортированные DBF)
             var dynamicDocs = await _context.DynamicDocuments
                 .Include(d => d.Rows)
                 .ToListAsync();
@@ -53,7 +52,6 @@ namespace BIS.ERP.Services
                 {
                     var rowData = GetRowData(row);
 
-                    // Пытаемся найти суммы в разных вариантах
                     decimal amount = 0;
                     if (rowData.ContainsKey("SUMMA"))
                         amount = Convert.ToDecimal(rowData["SUMMA"] ?? 0);
@@ -102,7 +100,6 @@ namespace BIS.ERP.Services
                 }
             }
 
-            // Фильтрация по дате
             if (startDate.HasValue)
                 postings = postings.Where(p => p.Date >= startDate.Value).ToList();
             if (endDate.HasValue)

@@ -83,6 +83,23 @@ namespace BIS.ERP.Services
                 outgoingDoc.Fields = GetStandardDocumentFields(outgoingDoc.Id);
                 documents.Add(outgoingDoc);
 
+                // ========== ДОБАВЛЯЕМ ДОКУМЕНТ "ПРОВОДКИ" ==========
+                var postingsDoc = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Проводки",
+                    TableName = "doc_postings",
+                    ObjectType = "Document",
+                    Description = "Журнал бухгалтерских проводок",
+                    Icon = "📝",
+                    Order = 3,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                postingsDoc.Fields = GetPostingFields(postingsDoc.Id);
+                documents.Add(postingsDoc);
+                // =================================================
+
                 await _context.Set<MetadataObject>().AddRangeAsync(documents);
                 await _context.SaveChangesAsync();
 
@@ -599,8 +616,14 @@ namespace BIS.ERP.Services
                     .Select(m => m.Name)
                     .ToListAsync();
 
+                // В конце метода, после справочников
+                var existingDocuments = await _context.MetadataObjects
+                    .Where(m => m.ObjectType == "Document")
+                    .Select(m => m.Name)
+                    .ToListAsync();              
+
                 // Создаём  справочники
-                
+
                 if (!existingCatalogs.Contains("Участки"))
                     await CreateSitesCatalog(config);
 
@@ -609,6 +632,9 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Основные средства"))
                     await CreateAssetsCatalog(config);
+
+                if (!existingCatalogs.Contains("Государства"))
+                    await CreateCountriesCatalog(config);
 
                 if (!existingCatalogs.Contains("Организации"))
                     await CreateOrganizationsCatalog(config);
@@ -641,13 +667,13 @@ namespace BIS.ERP.Services
                     await CreateContractorsCatalog(config);
 
                 if (!existingCatalogs.Contains("МОЛ"))
-                    await CreateResponsiblePersonsCatalog(config);
+                    await CreateResponsiblePersonsCatalog(config);              
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников : {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
             }
         }   
@@ -1221,4 +1247,7 @@ namespace BIS.ERP.Services
             }
         }
     }
+
+
 }
+

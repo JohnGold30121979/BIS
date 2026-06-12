@@ -21,7 +21,6 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _postingService = postingService;
 
-            // Устанавливаем даты в конструкторе (не в XAML)
             var today = DateTime.Now;
             dpStartDate.SelectedDate = new DateTime(today.Year, today.Month, 1);
             dpEndDate.SelectedDate = today;

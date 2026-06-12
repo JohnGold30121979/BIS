@@ -175,20 +175,8 @@ namespace BIS.ERP.Services
                     Order = 11,
                     IsSystem = true,
                     MetadataConfigId = config.Id,
-                    Fields = new List<MetadataField>()
-                };
-
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 1 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Краткое наименование", DbColumnName = "short_name", FieldType = "String", Length = 100, Order = 2 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "БИК", DbColumnName = "bic", FieldType = "String", Length = 20, Order = 3 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "ИНН", DbColumnName = "inn", FieldType = "String", Length = 50, Order = 4 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Адрес", DbColumnName = "address", FieldType = "String", Length = 500, Order = 5 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Телефон", DbColumnName = "phone", FieldType = "String", Length = 100, Order = 6 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Сайт", DbColumnName = "website", FieldType = "String", Length = 200, Order = 7 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "E-mail", DbColumnName = "email", FieldType = "String", Length = 100, Order = 8 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "SWIFT", DbColumnName = "swift", FieldType = "String", Length = 50, Order = 9 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Корр. счет", DbColumnName = "corr_account", FieldType = "String", Length = 50, Order = 10 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 11 });
+                    Fields = GetBankFields(Guid.NewGuid())
+                };            
 
                 await _context.MetadataObjects.AddAsync(catalog);
                 await _context.SaveChangesAsync();
@@ -297,8 +285,39 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Основные средства': {ex.Message}");
             }
-        }       
+        }
 
+        // Справочник государств
+        private async Task CreateCountriesCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Государства",
+                    TableName = "catalog_countries",
+                    ObjectType = "Catalog",
+                    Description = "Справочник государств",
+                    Icon = "🌍",
+                    Order = 3,  // после организаций
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetCountryFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddCountriesDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Государства' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Государства': {ex.Message}");
+            }
+        }
         // Контрагенты
         private async Task CreateContractorsCatalog(MetadataConfiguration config)
         {
@@ -445,8 +464,6 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Расчетные счета организаций': {ex.Message}");
             }
         }
-     
-
     }
 }
 

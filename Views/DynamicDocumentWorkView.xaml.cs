@@ -146,29 +146,30 @@ namespace BIS.ERP.Views
 
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
-            var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService);
-            dialog.Owner = Window.GetWindow(this);
-
-            if (dialog.ShowDialog() == true)
+            // Для документа "Проводки" используем кастомный диалог
+            if (_documentMetadata.Name == "Проводки")
             {
-                try
+                var dialog = new PostingEditDialog(_documentMetadata, _metadataService);
+                dialog.Owner = Window.GetWindow(this);
+                if (dialog.ShowDialog() == true)
                 {
-                    StatusText.Text = "💾 Сохранение...";
-                    await _metadataService.AddCatalogItemAsync(_documentMetadata.Id, dialog.ItemData);
+                    await LoadData();
+                    MessageBox.Show("Проводка добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            else
+            {
+                var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService);
+                dialog.Owner = Window.GetWindow(this);
+                if (dialog.ShowDialog() == true)
+                {
                     await LoadData();
                     MessageBox.Show("Запись добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    StatusText.Text = "✅ Готово";
-                    UpdateButtonsState();
-                }
             }
+            UpdateButtonsState();
         }
+
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
@@ -181,28 +182,29 @@ namespace BIS.ERP.Views
             }
 
             var id = (Guid)selectedRow["Id"];
-            var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService, id);
-            dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true)
+            // Для документа "Проводки" используем кастомный диалог
+            if (_documentMetadata.Name == "Проводки")
             {
-                try
+                var dialog = new PostingEditDialog(_documentMetadata, _metadataService, id);
+                dialog.Owner = Window.GetWindow(this);
+                if (dialog.ShowDialog() == true)
                 {
-                    StatusText.Text = "💾 Обновление...";
-                    await _metadataService.UpdateDynamicRecordAsync(_documentMetadata.Id, id, dialog.ItemData);
+                    await LoadData();
+                    MessageBox.Show("Проводка обновлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            else
+            {
+                var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService, id);
+                dialog.Owner = Window.GetWindow(this);
+                if (dialog.ShowDialog() == true)
+                {
                     await LoadData();
                     MessageBox.Show("Запись обновлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    StatusText.Text = "✅ Готово";
-                    UpdateButtonsState();
-                }
             }
+            UpdateButtonsState();
         }
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)

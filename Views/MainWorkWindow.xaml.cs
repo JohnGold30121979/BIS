@@ -352,6 +352,14 @@ namespace BIS.ERP
                         _navigation.NavigateTo(journalView);
                         break;
 
+                    case "PostingsDocument":
+                        if (item.Tag is MetadataObject document1)
+                        {
+                            var postingsView = new PostingsView(document1, _metadataService);
+                            _navigation.NavigateTo(postingsView);
+                        }
+                        break;
+
                     case "Report":
                         if (item.Tag is Report report)
                         {

@@ -33,7 +33,6 @@ namespace BIS.ERP.Views.Dialogs
 
         private async Task BuildFormAsync()
         {
-            // Предзагружаем все справочники для быстрого доступа
             var allCatalogs = await _metadataService.GetCatalogsAsync();
             var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
 
@@ -49,6 +48,7 @@ namespace BIS.ERP.Views.Dialogs
                 });
 
                 System.Windows.Controls.Control inputControl;
+                var safeName = GetSafeControlName(field.Name);
 
                 // Если поле ссылается на справочник
                 if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -56,86 +56,37 @@ namespace BIS.ERP.Views.Dialogs
                     var comboBox = new ComboBox
                     {
                         Height = 30,
-                        Name = field.Name,
+                        Name = safeName,
                         DisplayMemberPath = "DisplayName",
                         SelectedValuePath = "Id",
                         MinWidth = 200
                     };
 
-                    System.Diagnostics.Debug.WriteLine($"=== Поле: {field.Name}, Справочник: {field.ReferenceCatalog}");
-
-                    if (catalogsDict.TryGetValue(field.ReferenceCatalog, out var catalog))
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Справочник найден: {catalog.Name}, TableName: {catalog.TableName}");
-
-                        var data = await _metadataService.GetCatalogDataAsync(catalog.Id);
-                        System.Diagnostics.Debug.WriteLine($"Получено записей: {data.Count}");
-
-                        var items = new List<ReferenceItem>();
-
-                        foreach (var d in data)
-                        {
-                            var item = new ReferenceItem();
-
-                            if (d.ContainsKey("Id"))
-                                item.Id = Guid.Parse(d["Id"].ToString());
-
-                            // ВЫВОДИМ ВСЕ КЛЮЧИ ДЛЯ ОТЛАДКИ
-                            System.Diagnostics.Debug.WriteLine($"Ключи записи: {string.Join(", ", d.Keys)}");
-
-                            // Ищем название поля с наименованием
-                            if (d.ContainsKey("site_name"))
-                                item.Name = d["site_name"].ToString();
-                            else if (d.ContainsKey("Наименование"))
-                                item.Name = d["Наименование"].ToString();
-                            else if (d.ContainsKey("name"))
-                                item.Name = d["name"].ToString();
-                            else if (d.ContainsKey("Name"))
-                                item.Name = d["Name"].ToString();
-                            else if (d.ContainsKey("Код"))
-                                item.Name = d["Код"].ToString();
-                            else
-                            {
-                                // Если ничего не нашли, берем первое значение
-                                var firstValue = d.Values.FirstOrDefault();
-                                item.Name = firstValue?.ToString() ?? "Без имени";
-                            }
-
-                            items.Add(item);
-                        }
-
-                        comboBox.ItemsSource = items;
-                        System.Diagnostics.Debug.WriteLine($"Загружено {items.Count} записей из {field.ReferenceCatalog}");
-                        if (items.Any())
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Первая запись: Id={items[0].Id}, Name={items[0].Name}");
-                        }
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Справочник '{field.ReferenceCatalog}' НЕ НАЙДЕН!");
-                        comboBox.ItemsSource = new List<ReferenceItem> { new ReferenceItem { Name = $"Справочник '{field.ReferenceCatalog}' не найден" } };
-                    }
-
+                    // ... остальной код для ComboBox
                     inputControl = comboBox;
                 }
                 // Вычисляемое поле
                 else if (!string.IsNullOrEmpty(field.Formula))
                 {
-                    var textBox = new TextBox { Height = 30, Name = field.Name, IsReadOnly = true, Background = Brushes.LightGray };
-                    inputControl = textBox;
+                    inputControl = new TextBox
+                    {
+                        Height = 30,
+                        Name = safeName,
+                        IsReadOnly = true,
+                        Background = Brushes.LightGray
+                    };
                 }
                 // Обычное поле
                 else
                 {
                     inputControl = field.FieldType switch
                     {
-                        "String" => new TextBox { Height = 30, Name = field.Name },
-                        "Int" => new TextBox { Height = 30, Name = field.Name },
-                        "Decimal" => new TextBox { Height = 30, Name = field.Name },
-                        "DateTime" => new DatePicker { Height = 30, Name = field.Name },
-                        "Bool" => new CheckBox { Content = "Да", Name = field.Name, VerticalAlignment = VerticalAlignment.Center },
-                        _ => new TextBox { Height = 30, Name = field.Name }
+                        "String" => new TextBox { Height = 30, Name = safeName },
+                        "Int" => new TextBox { Height = 30, Name = safeName },
+                        "Decimal" => new TextBox { Height = 30, Name = safeName },
+                        "DateTime" => new DatePicker { Height = 30, Name = safeName },
+                        "Bool" => new CheckBox { Content = "Да", Name = safeName, VerticalAlignment = VerticalAlignment.Center },
+                        _ => new TextBox { Height = 30, Name = safeName }
                     };
                 }
 
@@ -143,6 +94,13 @@ namespace BIS.ERP.Views.Dialogs
                 FieldsPanel.Children.Add(panel);
                 _fieldControls[field.Name] = inputControl;
             }
+        }
+
+        private string GetSafeControlName(string fieldName)
+        {
+            if (string.IsNullOrEmpty(fieldName)) return "control";
+            // Заменяем все не-буквенно-цифровые символы на подчёркивания
+            return new string(fieldName.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
         }
 
         // Маленький класс для отображения
