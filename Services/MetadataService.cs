@@ -667,7 +667,10 @@ namespace BIS.ERP.Services
                     await CreateContractorsCatalog(config);
 
                 if (!existingCatalogs.Contains("МОЛ"))
-                    await CreateResponsiblePersonsCatalog(config);              
+                    await CreateResponsiblePersonsCatalog(config);
+
+                if (!existingCatalogs.Contains("Кассы"))
+                    await CreateCashDesksCatalog(config);
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }

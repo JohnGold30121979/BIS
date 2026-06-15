@@ -464,6 +464,38 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Расчетные счета организаций': {ex.Message}");
             }
         }
+
+        private async Task CreateCashDesksCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Кассы",
+                    TableName = "catalog_cash_desks",
+                    ObjectType = "Catalog",
+                    Description = "Справочник касс предприятия",
+                    Icon = "💰",
+                    Order = 12,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetCashDeskFields(Guid.NewGuid())
+                };
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                // Добавим начальные данные: основная касса в сомах
+                await AddInitialCashDeskData(catalog);
+                System.Diagnostics.Debug.WriteLine("Справочник 'Кассы' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Кассы': {ex.Message}");
+            }
+        }      
+
+
     }
 }
 

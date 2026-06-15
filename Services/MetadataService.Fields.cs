@@ -1398,4 +1398,70 @@ public partial class MetadataService
     };
     }
 
+    private List<MetadataField> GetCashDeskFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            IsUnique = false,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Валюта",
+            DbColumnName = "currency_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "Справочник валют",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            IsRequired = true,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Начальный остаток",
+            DbColumnName = "initial_balance",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 2,
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = true,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+    }
+
 }

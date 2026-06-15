@@ -476,5 +476,31 @@ namespace BIS.ERP.Services
 
             System.Diagnostics.Debug.WriteLine($"Добавлено государств: {countries.Length}");
         }
+
+        private async Task AddInitialCashDeskData(MetadataObject catalog)
+        {
+            // Получим валюту KGS
+            var currencyKgs = await _context.MetadataObjects
+                .Where(m => m.Name == "Справочник валют")
+                .SelectMany(m => _context.Database.SqlQueryRaw<(Guid Id, string Code)>(
+                    $"SELECT \"Id\", \"code\" FROM \"catalog_currencies\" WHERE \"code\" = 'KGS'"))
+                .FirstOrDefaultAsync();
+            if (currencyKgs.Id == Guid.Empty) return;
+
+            var sql = $@"
+            INSERT INTO ""{catalog.TableName}"" 
+            (""Id"", ""code"", ""name"", ""currency_id"", ""initial_balance"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+            VALUES (
+                '{Guid.NewGuid()}',
+                '1',
+                'Основная касса (сомы)',
+                '{currencyKgs.Id}',
+                0,
+                true,
+                NOW(),
+                NOW()
+            )";
+            await _context.Database.ExecuteSqlRawAsync(sql);
+        }
     }
 }
