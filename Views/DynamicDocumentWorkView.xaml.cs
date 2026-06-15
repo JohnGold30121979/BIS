@@ -242,6 +242,43 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnPostClick(object sender, RoutedEventArgs e)
+        {
+            var selectedRow = DataGrid.SelectedItem as DataRowView;
+            if (selectedRow == null)
+            {
+                MessageBox.Show("Выберите документ для проведения!", "Внимание",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var id = (Guid)selectedRow["Id"];
+            var result = MessageBox.Show("Провести выбранный документ?", "Подтверждение",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    StatusText.Text = "🔄 Проведение...";
+                    await _metadataService.PostDocumentAsync(_documentMetadata.Id, id);
+                    await LoadData();
+                    MessageBox.Show("Документ проведён!", "Успех",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка проведения: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    StatusText.Text = "✅ Готово";
+                    UpdateButtonsState();
+                }
+            }
+        }
+
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadData();

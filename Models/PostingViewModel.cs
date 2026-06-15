@@ -4,6 +4,7 @@ namespace BIS.ERP.Models
 {
     public class PostingViewModel
     {
+        public Guid Id { get; set; }
         public DateTime Date { get; set; }
         public string DocumentNumber { get; set; } = string.Empty;
         public string DocumentType { get; set; } = string.Empty;

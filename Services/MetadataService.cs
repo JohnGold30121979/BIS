@@ -100,6 +100,44 @@ namespace BIS.ERP.Services
                 documents.Add(postingsDoc);
                 // =================================================
 
+                var cashReceiptdoc = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Приходный кассовый ордер",
+                    TableName = "doc_cash_receipt",
+                    ObjectType = "Document",
+                    Description = "Приходный кассовый ордер",
+                    Icon = "📥",
+                    Order = 4,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id
+                };
+                cashReceiptdoc.Fields = GetCashReceiptFields(cashReceiptdoc.Id);
+                documents.Add(cashReceiptdoc);
+
+
+                var cashPaymentdoc = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Расходный кассовый ордер",
+                    TableName = "doc_cash_payment",
+                    ObjectType = "Document",
+                    Description = "Расходный кассовый ордер",
+                    Icon = "📤",
+                    Order = 5,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+
+                };
+                cashPaymentdoc.Fields = GetCashPaymentFields(cashPaymentdoc.Id);
+                documents.Add(cashPaymentdoc);
+
+                // doc.PostingRules = GetCashPaymentPostingRules(doc.Id);
+                //  await _context.MetadataObjects.AddAsync(doc);
+                // await _context.SaveChangesAsync();
+                //   await CreateTableForCatalogAsync(doc);
+
+
                 await _context.Set<MetadataObject>().AddRangeAsync(documents);
                 await _context.SaveChangesAsync();
 
@@ -119,7 +157,7 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"❌ Ошибка инициализации: {ex.Message}");
             }
         }
-        
+
         // Получение данных справочника      
         public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
         {
@@ -559,7 +597,7 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Error creating table {obj.TableName}: {ex.Message}");
             }
-        }      
+        }
 
         private async Task<int> GetNextOrderAsync()
         {
@@ -620,7 +658,7 @@ namespace BIS.ERP.Services
                 var existingDocuments = await _context.MetadataObjects
                     .Where(m => m.ObjectType == "Document")
                     .Select(m => m.Name)
-                    .ToListAsync();              
+                    .ToListAsync();
 
                 // Создаём  справочники
 
@@ -679,9 +717,9 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников : {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
             }
-        }   
-       
-      
+        }
+
+
         public async Task<Guid> CreateDynamicRecordAsync(Guid metadataId, Dictionary<string, object> data)
         {
             var metadata = await _context.MetadataObjects
@@ -725,7 +763,7 @@ namespace BIS.ERP.Services
 
             return recordId;
         }
-       
+
         public async Task UpdateDynamicRecordAsync(Guid metadataId, Guid recordId, Dictionary<string, object> data)
         {
             var metadata = await _context.MetadataObjects
@@ -762,7 +800,7 @@ namespace BIS.ERP.Services
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
         }
 
-       
+
         // Универсальное удаление записи      
         public async Task DeleteDynamicRecordAsync(Guid metadataId, Guid recordId)
         {
@@ -890,7 +928,7 @@ namespace BIS.ERP.Services
             }
         }
 
-     
+
         // Создание проводок по правилам       
         public async Task<List<Dictionary<string, object>>> GeneratePostingsAsync(Guid metadataId, Guid recordId)
         {
@@ -980,7 +1018,7 @@ namespace BIS.ERP.Services
             return result;
         }
 
-       // Обновление поля записи        
+        // Обновление поля записи        
         private async Task UpdateRecordFieldAsync(string tableName, Guid recordId, string fieldName, object value)
         {
             var formattedValue = FormatSqlValue(value, "Unknown");
@@ -1249,8 +1287,171 @@ namespace BIS.ERP.Services
                 await _context.SaveChangesAsync();
             }
         }
+
+
+        // Провести документ (ПКО или РКО)       
+        public async Task PostDocumentAsync(Guid documentId, Guid recordId)
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine($"=== PostDocumentAsync START ===");
+                System.Diagnostics.Debug.WriteLine($"DocumentId: {documentId}, RecordId: {recordId}");
+
+                // 1. Получаем данные документа
+                var document = await _context.MetadataObjects
+                    .Include(m => m.Fields)
+                    .FirstOrDefaultAsync(m => m.Id == documentId);
+
+                if (document == null) throw new Exception("Документ не найден");
+                System.Diagnostics.Debug.WriteLine($"Document: {document.Name}");
+
+                // 2. Получаем данные записи
+                var recordData = await GetRecordDataAsync(document.TableName, recordId);
+
+                System.Diagnostics.Debug.WriteLine("=== recordData keys ===");
+                foreach (var key in recordData.Keys)
+                {
+                    System.Diagnostics.Debug.WriteLine($"  {key} = {recordData[key]}");
+                }
+
+                // 3. Проверяем, не проведён ли уже документ
+                if (recordData.ContainsKey("is_posted") && recordData["is_posted"] is bool isPosted && isPosted)
+                {
+                    throw new Exception("Документ уже проведён!");
+                }
+
+                // 4. Определяем тип документа (ПКО или РКО)
+                bool isReceipt = document.Name.Contains("Приходный");
+                System.Diagnostics.Debug.WriteLine($"IsReceipt: {isReceipt}");
+
+                // 5. Получаем сумму
+                decimal amount = 0;
+                if (recordData.ContainsKey("amount") && recordData["amount"] != null)
+                {
+                    amount = Convert.ToDecimal(recordData["amount"]);
+                }
+                else if (recordData.ContainsKey("Сумма") && recordData["Сумма"] != null)
+                {
+                    amount = Convert.ToDecimal(recordData["Сумма"]);
+                }
+                else
+                {
+                    throw new Exception("Сумма не указана");
+                }
+                System.Diagnostics.Debug.WriteLine($"Amount: {amount}");
+
+                // 6. Получаем ID кассы
+                Guid cashDeskId = Guid.Empty;
+                if (recordData.ContainsKey("cash_desk_id") && recordData["cash_desk_id"] != null)
+                {
+                    cashDeskId = Guid.Parse(recordData["cash_desk_id"].ToString());
+                }
+                else if (recordData.ContainsKey("Касса") && recordData["Касса"] != null)
+                {
+                    cashDeskId = Guid.Parse(recordData["Касса"].ToString());
+                }
+
+                if (cashDeskId == Guid.Empty)
+                {
+                    throw new Exception("Касса не указана");
+                }
+                System.Diagnostics.Debug.WriteLine($"CashDeskId: {cashDeskId}");
+
+                // 7. Получаем корреспондирующий счёт
+                Guid corrAccountId = Guid.Empty;
+                if (recordData.ContainsKey("correspondent_account") && recordData["correspondent_account"] != null)
+                {
+                    corrAccountId = Guid.Parse(recordData["correspondent_account"].ToString());
+                }
+
+                // 8. Обновляем остаток в кассе
+                await UpdateCashDeskBalance(cashDeskId, amount, isReceipt);
+                System.Diagnostics.Debug.WriteLine("Cash desk balance updated");
+
+                // 9. Создаём проводку
+                var postingId = Guid.NewGuid();
+                var docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : "";
+                var postingDate = recordData.ContainsKey("doc_date") ? (DateTime)recordData["doc_date"] : DateTime.Now;
+                var description = recordData.ContainsKey("basis") ? recordData["basis"].ToString() :
+                                 (recordData.ContainsKey("Основание") ? recordData["Основание"].ToString() : "");
+
+                string debitAccount = "";
+                string creditAccount = "";
+
+                if (isReceipt)
+                {
+                    debitAccount = "3010"; // Счёт кассы
+                    creditAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : "";
+                }
+                else
+                {
+                    debitAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : "";
+                    creditAccount = "3010"; // Счёт кассы
+                }
+
+                var postingSql = $@"
+            INSERT INTO ""doc_postings"" 
+            (""Id"", ""posting_date"", ""doc_number"", ""debit_account"", ""credit_account"", 
+             ""amount_kgs"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+            VALUES (
+                '{postingId}',
+                '{postingDate:yyyy-MM-dd HH:mm:ss}',
+                '{docNumber.Replace("'", "''")}',
+                '{debitAccount}',
+                '{creditAccount}',
+                {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)},
+                '{description.Replace("'", "''")}',
+                true,
+                NOW(),
+                NOW()
+            )";
+                await _context.Database.ExecuteSqlRawAsync(postingSql);
+                System.Diagnostics.Debug.WriteLine("Posting saved");
+
+                // 10. Обновляем статус документа
+                var updateSql = $@"
+            UPDATE ""{document.TableName}"" 
+            SET ""is_posted"" = true, ""UpdatedAt"" = NOW() 
+            WHERE ""Id"" = '{recordId}'";
+                await _context.Database.ExecuteSqlRawAsync(updateSql);
+
+                System.Diagnostics.Debug.WriteLine($"=== PostDocumentAsync SUCCESS ===");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"=== PostDocumentAsync ERROR ===");
+                System.Diagnostics.Debug.WriteLine($"Message: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        private async Task UpdateCashDeskBalance(Guid cashDeskId, decimal amount, bool isIncrease)
+        {
+            var sql = $@"
+            UPDATE ""catalog_cash_desks"" 
+            SET ""current_balance"" = COALESCE(""current_balance"", 0) {(isIncrease ? "+" : "-")} {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)},
+                ""UpdatedAt"" = NOW()
+            WHERE ""Id"" = '{cashDeskId}'";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+        }
+
+        private async Task<string> GetAccountCodeById(Guid accountId)
+        {
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name.StartsWith("План счетов"));
+
+            if (catalog == null) return "";
+
+            var sql = $"SELECT \"code\" FROM \"{catalog.TableName}\" WHERE \"Id\" = '{accountId}'";
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            await _context.Database.OpenConnectionAsync();
+            var result = await command.ExecuteScalarAsync();
+            await _context.Database.CloseConnectionAsync();
+            return result?.ToString() ?? "";
+        }
+     
+
     }
-
-
 }
-

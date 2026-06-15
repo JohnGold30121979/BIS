@@ -16,6 +16,8 @@
                 <Button x:Name="AddButton" Content="➕ Добавить" Click="OnAddClick" 
                         Background="#4CAF50" Foreground="White" Padding="15,8" Margin="0,0,10,0"
                         Cursor="Hand" FontWeight="Bold"/>
+                <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
+                        Background="#27AE60" Foreground="White" Click="OnPostClick"/>
                 <Button x:Name="EditButton" Content="✏️ Редактировать" Click="OnEditClick" 
                         Background="#2196F3" Foreground="White" Padding="15,8" Margin="0,0,10,0"
                         Cursor="Hand"/>

@@ -1,7 +1,9 @@
 ﻿using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace BIS.ERP.Views
 {
@@ -14,36 +16,78 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             _accounts = accounts;
-            AccountsGrid.ItemsSource = accounts;
+
+            // Преобразуем в DataTable для лучшего отображения
+            var dataTable = ConvertToDataTable(accounts);
+            AccountsGrid.ItemsSource = dataTable.DefaultView;
         }
 
-        private void OnOkClick(object sender, RoutedEventArgs e)
+        private DataTable ConvertToDataTable(List<Dictionary<string, object>> data)
         {
-            SelectedAccount = AccountsGrid.SelectedItem as Dictionary<string, object>;
-            if (SelectedAccount != null)
+            if (data == null || data.Count == 0)
+                return new DataTable();
+
+            var dataTable = new DataTable();
+
+            // Добавляем колонки
+            dataTable.Columns.Add("Код", typeof(string));
+            dataTable.Columns.Add("Наименование", typeof(string));
+            dataTable.Columns.Add("Тип счета", typeof(string));
+            dataTable.Columns.Add("Активен", typeof(bool));
+            dataTable.Columns.Add("Id", typeof(string)); // скрытая колонка
+
+            // Заполняем строки
+            foreach (var row in data)
             {
-                DialogResult = true;
-                Close();
+                dataTable.Rows.Add(
+                    row.ContainsKey("Код") ? row["Код"].ToString() : "",
+                    row.ContainsKey("Наименование") ? row["Наименование"].ToString() : "",
+                    row.ContainsKey("Тип счета") ? row["Тип счета"].ToString() : "",
+                    row.ContainsKey("Активен") && row["Активен"] != null ? (bool)row["Активен"] : false,
+                    row.ContainsKey("Id") ? row["Id"].ToString() : ""
+                );
             }
-            else
-            {
-                MessageBox.Show("Выберите счет!", "Внимание", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
+
+            return dataTable;
         }
 
-        private void OnCancelClick(object sender, RoutedEventArgs e)
+        private void OkButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectCurrentAccount();
+        }
+
+        private void CancelButton_Click(object sender, RoutedEventArgs e)
         {
             DialogResult = false;
             Close();
         }
 
-        private void AccountsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        private void AccountsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            SelectedAccount = AccountsGrid.SelectedItem as Dictionary<string, object>;
-            if (SelectedAccount != null)
+            SelectCurrentAccount();
+        }
+
+        private void SelectCurrentAccount()
+        {
+            var selected = AccountsGrid.SelectedItem as DataRowView;
+            if (selected != null)
             {
+                // Восстанавливаем Dictionary из выбранной строки
+                SelectedAccount = new Dictionary<string, object>
+                {
+                    ["Код"] = selected["Код"].ToString(),
+                    ["Наименование"] = selected["Наименование"].ToString(),
+                    ["Тип счета"] = selected["Тип счета"].ToString(),
+                    ["Активен"] = selected["Активен"],
+                    ["Id"] = selected["Id"].ToString()
+                };
                 DialogResult = true;
                 Close();
+            }
+            else
+            {
+                MessageBox.Show("Выберите счет из списка!", "Внимание",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
     }

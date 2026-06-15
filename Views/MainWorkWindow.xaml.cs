@@ -164,15 +164,31 @@ namespace BIS.ERP
 
                 foreach (var doc in documents.OrderBy(d => d.Order).ThenBy(d => d.Name))
                 {
-                    docsGroup.Children.Add(new NavigationItem
+                    // Для кассовых ордеров используем кастомный тип
+                    if (doc.Name == "Приходный кассовый ордер" || doc.Name == "Расходный кассовый ордер")
                     {
-                        Id = doc.Id.ToString(),
-                        Name = doc.Name,
-                        Icon = doc.Icon,
-                        Type = "DynamicDocument",
-                        Tag = doc,
-                        Order = doc.Order
-                    });
+                        docsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = doc.Id.ToString(),
+                            Name = doc.Name,
+                            Icon = doc.Icon,
+                            Type = "CashOrder",
+                            Tag = doc,
+                            Order = doc.Order
+                        });
+                    }
+                    else
+                    {
+                        docsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = doc.Id.ToString(),
+                            Name = doc.Name,
+                            Icon = doc.Icon,
+                            Type = "DynamicDocument",
+                            Tag = doc,
+                            Order = doc.Order
+                        });
+                    }
                 }
                 dataSection.Children.Add(docsGroup);
             }
@@ -360,6 +376,14 @@ namespace BIS.ERP
                         }
                         break;
 
+                    case "CashOrder":
+                        if (item.Tag is MetadataObject document2)
+                        {
+                            // Используем кастомное окно для кассовых ордеров
+                            var cashOrderView = new CashOrderWorkView(document2, _metadataService);
+                            _navigation.NavigateTo(cashOrderView);
+                        }
+                        break;
                     case "Report":
                         if (item.Tag is Report report)
                         {
