@@ -177,6 +177,33 @@ namespace BIS.ERP
                             Order = doc.Order
                         });
                     }
+                    // Для платежных поручений используем кастомный тип
+                    else if (doc.Name == "Платежное поручение")
+                    {
+                        docsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = doc.Id.ToString(),
+                            Name = doc.Name,
+                            Icon = doc.Icon,
+                            Type = "PaymentOrder",
+                            Tag = doc,
+                            Order = doc.Order
+                        });
+                    }
+                    // Для документа "Проводки" используем кастомный тип
+                    else if (doc.Name == "Проводки")
+                    {
+                        docsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = doc.Id.ToString(),
+                            Name = doc.Name,
+                            Icon = doc.Icon,
+                            Type = "PostingsDocument",
+                            Tag = doc,
+                            Order = doc.Order
+                        });
+                    }
+                    // Для остальных документов - стандартный DynamicDocument
                     else
                     {
                         docsGroup.Children.Add(new NavigationItem
@@ -384,6 +411,15 @@ namespace BIS.ERP
                             _navigation.NavigateTo(cashOrderView);
                         }
                         break;
+
+                    case "PaymentOrder":
+                        if (item.Tag is MetadataObject document3)
+                        {
+                            var paymentView = new PaymentOrderWorkView(document3, _metadataService);
+                            _navigation.NavigateTo(paymentView);
+                        }
+                        break;
+
                     case "Report":
                         if (item.Tag is Report report)
                         {
