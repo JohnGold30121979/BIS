@@ -1,11 +1,13 @@
-﻿using System;
+﻿using BIS.ERP.Models;
+using BIS.ERP.Services;
+using DocumentFormat.OpenXml.Wordprocessing;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using BIS.ERP.Models;
-using BIS.ERP.Services;
+using System.Windows.Input;
 
 namespace BIS.ERP.Views
 {
@@ -15,6 +17,8 @@ namespace BIS.ERP.Views
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
         private Guid _selectedCorrAccountId;
+        private bool _isDataLoaded = false;
+        private bool _isLoading = false;
 
         public CashOrderDialog(MetadataObject document, MetadataService metadataService)
         {
@@ -23,9 +27,9 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _editId = null;
             DialogTitle.Text = $"Добавление: {document.Name}";
-            NumberBox.Text = Guid.NewGuid().ToString().Substring(0, 8);
             DatePicker.SelectedDate = DateTime.Today;
-            Loaded += async (s, e) => await LoadReferenceData();
+
+            this.ContentRendered += async (s, e) => await InitializeAsync();
         }
 
         public CashOrderDialog(MetadataObject document, MetadataService metadataService, Guid editId)
@@ -35,11 +39,84 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _editId = editId;
             DialogTitle.Text = $"Редактирование: {document.Name}";
-            Loaded += async (s, e) => await LoadData(editId);
+
+            this.ContentRendered += async (s, e) => await InitializeAsync(editId);
         }
 
-        private async Task LoadReferenceData()
+        private async Task InitializeAsync(Guid? editId = null)
         {
+            if (_isDataLoaded || _isLoading) return;
+            _isLoading = true;
+
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("=== InitializeAsync START ===");
+                this.Cursor = Cursors.Wait;             
+
+                // Загружаем данные в фоновом потоке
+                var data = await Task.Run(async () => await LoadAllDataAsync());
+
+                System.Diagnostics.Debug.WriteLine("2. LoadReferenceDataAsync завершён");
+
+                // Обновляем UI в основном потоке
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    System.Diagnostics.Debug.WriteLine("3. Обновление UI...");
+
+                    // Заполняем ComboBox
+                    if (data.CashDesks != null)
+                        CashDeskCombo.ItemsSource = data.CashDesks;
+                    if (data.Organizations != null)
+                        OrganizationCombo.ItemsSource = data.Organizations;
+                    if (data.Contractors != null)
+                        ContractorCombo.ItemsSource = data.Contractors;
+
+                    // Генерируем номер
+                    if (!editId.HasValue)
+                    {
+                        NumberBox.Text = data.DocumentNumber;
+                    }
+                    else if (data.Record != null)
+                    {
+                        // Заполняем данные для редактирования
+                        NumberBox.Text = data.Record.ContainsKey("Номер") ? data.Record["Номер"].ToString() :
+                                        (data.Record.ContainsKey("doc_number") ? data.Record["doc_number"].ToString() : "");
+
+                        if (data.Record.ContainsKey("Дата") && data.Record["Дата"] is DateTime dt)
+                            DatePicker.SelectedDate = dt;
+                        if (data.Record.ContainsKey("Сумма"))
+                            AmountBox.Text = data.Record["Сумма"].ToString();
+                        if (data.Record.ContainsKey("Основание"))
+                            BasisBox.Text = data.Record["Основание"].ToString();
+                        if (data.Record.ContainsKey("Примечание"))
+                            DescriptionBox.Text = data.Record["Примечание"].ToString();
+                    }
+
+                    System.Diagnostics.Debug.WriteLine("4. UI обновлён");
+                });
+
+                _isDataLoaded = true;               
+                System.Diagnostics.Debug.WriteLine("=== InitializeAsync COMPLETED ===");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"=== InitializeAsync ERROR: {ex.Message} ===");
+                System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");               
+                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                this.Cursor = null;
+                _isLoading = false;
+            }
+        }
+
+        private async Task<DialogData> LoadAllDataAsync()
+        {
+            System.Diagnostics.Debug.WriteLine("1. Начинаем LoadReferenceDataAsync...");
+
+            var result = new DialogData();
             var allCatalogs = await _metadataService.GetCatalogsAsync();
 
             // Загружаем кассы
@@ -47,11 +124,11 @@ namespace BIS.ERP.Views
             if (cashDesks != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(cashDesks.Id);
-                CashDeskCombo.ItemsSource = data.Select(d => new ReferenceItem
+                result.CashDesks = data.Select(d => new ReferenceItem
                 {
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = d["Наименование"].ToString()
-                });
+                }).ToList();
             }
 
             // Загружаем организации
@@ -59,11 +136,11 @@ namespace BIS.ERP.Views
             if (orgs != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(orgs.Id);
-                OrganizationCombo.ItemsSource = data.Select(d => new ReferenceItem
+                result.Organizations = data.Select(d => new ReferenceItem
                 {
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = d["Наименование"].ToString()
-                });
+                }).ToList();
             }
 
             // Загружаем контрагентов
@@ -71,74 +148,76 @@ namespace BIS.ERP.Views
             if (contractors != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(contractors.Id);
-                ContractorCombo.ItemsSource = data.Select(d => new ReferenceItem
+                result.Contractors = data.Select(d => new ReferenceItem
                 {
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = d["Наименование"].ToString()
-                });
+                }).ToList();
             }
+
+            // Генерируем номер
+            try
+            {
+                result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document.Name);
+            }
+            catch
+            {
+                result.DocumentNumber = $"Вр.{DateTime.Now:yyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+            }
+
+            // Если редактирование, загружаем запись
+            if (_editId.HasValue)
+            {
+                var data = await _metadataService.GetCatalogDataAsync(_document.Id);
+                result.Record = data.FirstOrDefault(r => r["Id"].ToString() == _editId.Value.ToString());
+            }
+
+            System.Diagnostics.Debug.WriteLine("2. LoadReferenceDataAsync завершён");
+            return result;
         }
 
-        private async Task LoadData(Guid id)
+        private class DialogData
         {
-            await LoadReferenceData();
-            var data = await _metadataService.GetCatalogDataAsync(_document.Id);
-            var record = data.FirstOrDefault(r => r["Id"].ToString() == id.ToString());
-            if (record != null)
-            {
-                NumberBox.Text = record.ContainsKey("Номер") ? record["Номер"].ToString() : "";
-                if (record.ContainsKey("Дата") && record["Дата"] is DateTime dt)
-                    DatePicker.SelectedDate = dt;
-                if (record.ContainsKey("Сумма"))
-                    AmountBox.Text = record["Сумма"].ToString();
-                if (record.ContainsKey("Основание"))
-                    BasisBox.Text = record["Основание"].ToString();
-                if (record.ContainsKey("Примечание"))
-                    DescriptionBox.Text = record["Примечание"].ToString();
-            }
+            public List<ReferenceItem> CashDesks { get; set; }
+            public List<ReferenceItem> Organizations { get; set; }
+            public List<ReferenceItem> Contractors { get; set; }
+            public string DocumentNumber { get; set; }
+            public Dictionary<string, object> Record { get; set; }
         }
 
         private async void SelectAccount_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                // Получаем все справочники
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                this.Cursor = Cursors.Wait;
 
-                // Ищем справочник "План счетов" (название может начинаться с "План счетов")
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var chartCatalog = allCatalogs.FirstOrDefault(c => c.Name.StartsWith("План счетов"));
 
                 if (chartCatalog == null)
                 {
-                    MessageBox.Show("План счетов не найден! Сначала создайте справочник 'План счетов'.",
-                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show("План счетов не найден!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-                // Получаем данные счетов
                 var accountsData = await _metadataService.GetCatalogDataAsync(chartCatalog.Id);
 
                 if (accountsData == null || accountsData.Count == 0)
                 {
-                    MessageBox.Show("В плане счетов нет данных! Добавьте счета в справочник 'План счетов'.",
-                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show("В плане счетов нет данных!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-                // Открываем диалог выбора счета
                 var dialog = new AccountSelectionDialog(accountsData);
                 dialog.Owner = this;
 
                 if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
                 {
-                    // Получаем код и наименование счета
                     var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
                     var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
 
-                    // Отображаем в текстовом поле
                     CorrAccountBox.Text = $"{accountCode} - {accountName}";
 
-                    // Сохраняем ID счета
                     if (dialog.SelectedAccount.ContainsKey("Id"))
                     {
                         _selectedCorrAccountId = Guid.Parse(dialog.SelectedAccount["Id"].ToString());
@@ -150,12 +229,18 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка при выборе счета: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            finally
+            {
+                this.Cursor = null;
+            }
         }
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
             try
             {
+                this.Cursor = Cursors.Wait;
+
                 var itemData = new Dictionary<string, object>
                 {
                     ["Номер"] = NumberBox.Text,
@@ -176,13 +261,9 @@ namespace BIS.ERP.Views
                     itemData["Корр. счет"] = _selectedCorrAccountId.ToString();
 
                 if (_editId.HasValue)
-                {
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
-                }
                 else
-                {
                     await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
-                }
 
                 DialogResult = true;
                 Close();
@@ -190,6 +271,10 @@ namespace BIS.ERP.Views
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка сохранения: {ex.Message}");
+            }
+            finally
+            {
+                this.Cursor = null;
             }
         }
 

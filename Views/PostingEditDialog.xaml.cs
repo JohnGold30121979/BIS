@@ -1,11 +1,12 @@
-﻿using System;
+﻿using BIS.ERP.Models;
+using BIS.ERP.Services;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using BIS.ERP.Models;
-using BIS.ERP.Services;
+using System.Windows.Input;
 
 namespace BIS.ERP.Views
 {
@@ -15,6 +16,9 @@ namespace BIS.ERP.Views
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
         private readonly Dictionary<string, Control> _fieldControls = new();
+        private bool _isDataLoaded = false;
+        private bool _isLoading = false;
+        private string _generatedNumber = string.Empty;
 
         // Конструктор для добавления
         public PostingEditDialog(MetadataObject document, MetadataService metadataService)
@@ -23,9 +27,10 @@ namespace BIS.ERP.Views
             _document = document;
             _metadataService = metadataService;
             _editId = null;
+            _generatedNumber = string.Empty;
 
             DialogTitle.Text = $"Добавление: {document.Name}";
-            Loaded += async (s, e) => await BuildFormFromMetadata();
+            this.ContentRendered += async (s, e) => await InitializeAsync();
         }
 
         // Конструктор для редактирования (принимает ID)
@@ -35,145 +40,231 @@ namespace BIS.ERP.Views
             _document = document;
             _metadataService = metadataService;
             _editId = editId;
+            _generatedNumber = string.Empty;
 
             DialogTitle.Text = $"Редактирование: {document.Name}";
-            Loaded += async (s, e) => await BuildFormFromMetadata();
+            this.ContentRendered += async (s, e) => await InitializeAsync(editId);
         }
 
-        private async Task<Dictionary<string, object>> LoadExistingDataAsync()
+        private async Task InitializeAsync(Guid? editId = null)
         {
-            if (!_editId.HasValue)
-                return null;
+            if (_isDataLoaded || _isLoading) return;
+            _isLoading = true;
 
             try
             {
-                var allData = await _metadataService.GetCatalogDataAsync(_document.Id);
-                return allData.FirstOrDefault(r => r.ContainsKey("Id") && r["Id"].ToString() == _editId.Value.ToString());
+                System.Diagnostics.Debug.WriteLine("=== PostingEditDialog InitializeAsync START ===");
+                this.Cursor = Cursors.Wait;
+                StatusText.Text = "Загрузка...";
+
+                // Загружаем данные в фоновом потоке
+                var dialogData = await Task.Run(async () => await LoadAllDataAsync(editId));
+
+                // Обновляем UI в основном потоке
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    System.Diagnostics.Debug.WriteLine("Обновление UI...");
+                    BuildFormFromData(dialogData, editId);
+                    System.Diagnostics.Debug.WriteLine("UI обновлён");
+                });
+
+                _isDataLoaded = true;
+                StatusText.Text = "Готово";
+                System.Diagnostics.Debug.WriteLine("=== PostingEditDialog InitializeAsync COMPLETED ===");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки данных: {ex.Message}");
-                return null;
+                System.Diagnostics.Debug.WriteLine($"=== PostingEditDialog ERROR: {ex.Message} ===");
+                StatusText.Text = $"Ошибка: {ex.Message}";
+                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                this.Cursor = null;
+                _isLoading = false;
             }
         }
 
-        private async Task BuildFormFromMetadata()
+        private class PostingDialogData
         {
-            try
+            public Dictionary<string, object>? ExistingData { get; set; }
+            public Dictionary<string, List<ReferenceItem>> ReferenceData { get; set; } = new();
+            public string DocumentNumber { get; set; } = string.Empty;
+        }
+
+        private async Task<PostingDialogData> LoadAllDataAsync(Guid? editId)
+        {
+            System.Diagnostics.Debug.WriteLine("1. Начинаем загрузку данных...");
+
+            var result = new PostingDialogData();
+
+            // Загружаем существующие данные для редактирования
+            if (editId.HasValue)
             {
-                var existingDataDict = await LoadExistingDataAsync();
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                var allData = await _metadataService.GetCatalogDataAsync(_document.Id);
+                result.ExistingData = allData.FirstOrDefault(r =>
+                    r.TryGetValue("Id", out var id) && id?.ToString() == editId.Value.ToString());
+            }
 
-                FieldsPanel.Children.Clear();
-                _fieldControls.Clear();
+            // Загружаем все справочники
+            var allCatalogs = await _metadataService.GetCatalogsAsync();
+            var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
 
-                foreach (var field in _document.Fields.OrderBy(f => f.Order))
+            // Загружаем данные для Reference полей
+            foreach (var field in _document.Fields.Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog)))
+            {
+                if (catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
                 {
-                    if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
-                        continue;
+                    var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
+                    var items = new List<ReferenceItem>();
 
-                    var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) };
-                    panel.Children.Add(new TextBlock
+                    foreach (var row in refData)
                     {
-                        Text = field.Name,
-                        FontWeight = FontWeights.Bold,
-                        Margin = new Thickness(0, 0, 0, 5)
-                    });
+                        if (!row.TryGetValue("Id", out var idObj) || idObj == null)
+                            continue;
 
-                    Control inputControl;
-                    object currentValue = existingDataDict?.ContainsKey(field.Name) == true ? existingDataDict[field.Name] : null;
+                        var id = Guid.Parse(idObj.ToString());
+                        var displayName = row.GetValueOrDefault("Наименование")?.ToString() ??
+                                          row.GetValueOrDefault("name")?.ToString() ??
+                                          row.GetValueOrDefault("Код")?.ToString() ??
+                                          "Без имени";
 
-                    // Reference поле
-                    if (field.FieldType == "Reference" && !string.IsNullOrEmpty(field.ReferenceCatalog))
+                        items.Add(new ReferenceItem { Id = id, DisplayName = displayName });
+                    }
+
+                    result.ReferenceData[field.Name] = items;
+                }
+            }
+
+            // Генерируем номер для нового документа
+            if (!editId.HasValue)
+            {
+                try
+                {
+                    result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document.Name) ??
+                                           $"ПР-{DateTime.Now:yyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+                }
+                catch
+                {
+                    result.DocumentNumber = $"ПР-{DateTime.Now:yyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+                }
+            }
+
+            System.Diagnostics.Debug.WriteLine($"2. Загружено Reference полей: {result.ReferenceData.Count}");
+            return result;
+        }
+
+        private void BuildFormFromData(PostingDialogData dialogData, Guid? editId)
+        {
+            FieldsPanel.Children.Clear();
+            _fieldControls.Clear();
+
+            foreach (var field in _document.Fields.OrderBy(f => f.Order))
+            {
+                if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
+                    continue;
+
+                var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+                panel.Children.Add(new TextBlock
+                {
+                    Text = field.Name,
+                    FontWeight = FontWeights.Bold,
+                    Margin = new Thickness(0, 0, 0, 3),
+                    FontSize = 13
+                });
+
+                Control inputControl = null!; // Инициализируем null с оператором подавления
+                object? currentValue = dialogData.ExistingData?.GetValueOrDefault(field.Name);
+
+                // Для поля "Тип документа" - устанавливаем значение "Ручная проводка"
+                if (field.Name == "Тип документа")
+                {
+                    var textBox = new TextBox
                     {
-                        var comboBox = new ComboBox
-                        {
-                            Height = 30,
-                            DisplayMemberPath = "DisplayName",
-                            SelectedValuePath = "Id",
-                            MinWidth = 200
-                        };
-
-                        if (catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
-                        {
-                            var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
-                            var items = new List<ReferenceItem>();
-
-                            foreach (var row in refData)
-                            {
-                                if (!row.ContainsKey("Id")) continue;
-
-                                var item = new ReferenceItem
-                                {
-                                    Id = Guid.Parse(row["Id"].ToString())
-                                };
-
-                                // Формируем отображаемое имя
-                                string displayName = "";
-                                if (row.ContainsKey("Наименование"))
-                                    displayName = row["Наименование"].ToString();
-                                else if (row.ContainsKey("name"))
-                                    displayName = row["name"].ToString();
-                                else if (row.ContainsKey("Код"))
-                                    displayName = row["Код"].ToString();
-                                else
-                                    displayName = "Без имени";
-
-                                item.DisplayName = displayName;
-                                items.Add(item);
-                            }
-
-                            comboBox.ItemsSource = items;
-
-                            // Выбираем текущее значение
-                            if (currentValue != null && Guid.TryParse(currentValue.ToString(), out var currentGuid))
-                            {
-                                var selectedItem = items.FirstOrDefault(i => i.Id == currentGuid);
-                                if (selectedItem != null)
-                                    comboBox.SelectedItem = selectedItem;
-                            }
-                        }
-                        else
-                        {
-                            comboBox.ItemsSource = new List<ReferenceItem>
-                    {
-                        new ReferenceItem { DisplayName = $"Справочник '{field.ReferenceCatalog}' не найден" }
+                        Height = 30,
+                        IsReadOnly = true,
+                        Background = System.Windows.Media.Brushes.LightGray,
+                        Text = "Ручная проводка"
                     };
-                        }
 
-                        inputControl = comboBox;
-                    }
-                    else if (field.FieldType == "DateTime")
+                    if (currentValue != null && !string.IsNullOrEmpty(currentValue.ToString()))
+                        textBox.Text = currentValue.ToString();
+
+                    inputControl = textBox;
+                }
+                else if (field.FieldType == "Reference" && !string.IsNullOrEmpty(field.ReferenceCatalog))
+                {
+                    var comboBox = new ComboBox
                     {
-                        var picker = new DatePicker { Height = 30 };
-                        if (currentValue != null && DateTime.TryParse(currentValue.ToString(), out DateTime dt))
-                            picker.SelectedDate = dt;
-                        inputControl = picker;
-                    }
-                    else if (field.FieldType == "Bool")
+                        Height = 30,
+                        DisplayMemberPath = "DisplayName",
+                        SelectedValuePath = "Id",
+                        MinWidth = 200
+                    };
+
+                    if (dialogData.ReferenceData.TryGetValue(field.Name, out var items))
                     {
-                        var checkBox = new CheckBox { Content = "Да", Height = 30 };
-                        if (currentValue != null && bool.TryParse(currentValue.ToString(), out bool b))
-                            checkBox.IsChecked = b;
-                        inputControl = checkBox;
+                        comboBox.ItemsSource = items;
+
+                        if (currentValue != null && Guid.TryParse(currentValue.ToString(), out var currentGuid))
+                        {
+                            var selectedItem = items.FirstOrDefault(i => i.Id == currentGuid);
+                            if (selectedItem != null)
+                                comboBox.SelectedItem = selectedItem;
+                        }
                     }
                     else
                     {
-                        var textBox = new TextBox { Height = 30 };
-                        if (currentValue != null)
-                            textBox.Text = currentValue.ToString();
-                        inputControl = textBox;
+                        comboBox.ItemsSource = new List<ReferenceItem>
+                {
+                    new ReferenceItem { DisplayName = $"Справочник '{field.ReferenceCatalog}' не найден" }
+                };
                     }
 
-                    panel.Children.Add(inputControl);
-                    FieldsPanel.Children.Add(panel);
-                    _fieldControls[field.Name] = inputControl;
+                    inputControl = comboBox;
                 }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка построения формы: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                else if (field.FieldType == "DateTime")
+                {
+                    var picker = new DatePicker { Height = 30 };
+                    if (currentValue is DateTime dt)
+                        picker.SelectedDate = dt;
+                    inputControl = picker;
+                }
+                else if (field.FieldType == "Bool")
+                {
+                    var checkBox = new CheckBox { Content = "Да", Height = 30 };
+                    if (currentValue is bool b)
+                        checkBox.IsChecked = b;
+                    inputControl = checkBox;
+                }
+                else
+                {
+                    var textBox = new TextBox { Height = 30 };
+
+                    // Для поля "Номер документа" - делаем ReadOnly
+                    if (field.Name == "Номер документа")
+                    {
+                        textBox.IsReadOnly = true;
+                        textBox.Background = System.Windows.Media.Brushes.LightGray;
+
+                        if (!string.IsNullOrEmpty(dialogData.DocumentNumber))
+                            textBox.Text = dialogData.DocumentNumber;
+                        else if (currentValue != null)
+                            textBox.Text = currentValue.ToString();
+                    }
+                    else
+                    {
+                        if (currentValue != null)
+                            textBox.Text = currentValue.ToString();
+                    }
+
+                    inputControl = textBox;
+                }
+
+                panel.Children.Add(inputControl);
+                FieldsPanel.Children.Add(panel);
+                _fieldControls[field.Name] = inputControl;
             }
         }
 
@@ -181,6 +272,8 @@ namespace BIS.ERP.Views
         {
             try
             {
+                this.Cursor = Cursors.Wait;
+
                 var itemData = new Dictionary<string, object>();
 
                 foreach (var field in _document.Fields.OrderBy(f => f.Order))
@@ -188,32 +281,36 @@ namespace BIS.ERP.Views
                     if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
                         continue;
 
-                    if (!_fieldControls.ContainsKey(field.Name)) continue;
+                    if (!_fieldControls.TryGetValue(field.Name, out var control))
+                        continue;
 
-                    var control = _fieldControls[field.Name];
-                    object value = null;
+                    object? value = null;
 
-                    if (control is ComboBox comboBox)
+                    switch (control)
                     {
-                        var selected = comboBox.SelectedItem as ReferenceItem;
-                        if (selected != null && selected.Id != Guid.Empty)
+                        case ComboBox comboBox when comboBox.SelectedItem is ReferenceItem selected && selected.Id != Guid.Empty:
                             value = selected.Id;
-                    }
-                    else if (control is DatePicker datePicker)
-                    {
-                        value = datePicker.SelectedDate;
-                    }
-                    else if (control is CheckBox checkBox)
-                    {
-                        value = checkBox.IsChecked ?? false;
-                    }
-                    else if (control is TextBox textBox)
-                    {
-                        value = textBox.Text;
+                            break;
+                        case DatePicker datePicker:
+                            value = datePicker.SelectedDate;
+                            break;
+                        case CheckBox checkBox:
+                            value = checkBox.IsChecked ?? false;
+                            break;
+                        case TextBox textBox:
+                            // Безопасное преобразование для числовых полей
+                            value = ParseFieldValue(textBox.Text, field.FieldType);
+                            break;
                     }
 
                     if (value != null)
                         itemData[field.Name] = value;
+                }
+
+                // Добавляем тип документа для ручных проводок
+                if (!itemData.ContainsKey("Тип документа"))
+                {
+                    itemData["Тип документа"] = "Ручная проводка";
                 }
 
                 if (_editId.HasValue)
@@ -231,6 +328,42 @@ namespace BIS.ERP.Views
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                this.Cursor = null;
+            }
+        }
+
+        private object? ParseFieldValue(string text, string fieldType)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return fieldType switch
+                {
+                    "Int" => 0,
+                    "Decimal" => 0m,
+                    _ => text
+                };
+            }
+
+            try
+            {
+                return fieldType switch
+                {
+                    "Int" => int.Parse(text),
+                    "Decimal" => decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture),
+                    _ => text
+                };
+            }
+            catch
+            {
+                return fieldType switch
+                {
+                    "Int" => 0,
+                    "Decimal" => 0m,
+                    _ => text
+                };
             }
         }
 

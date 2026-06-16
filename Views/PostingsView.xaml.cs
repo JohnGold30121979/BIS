@@ -42,7 +42,19 @@ namespace BIS.ERP.Views
                 var data = await _metadataService.GetCatalogDataAsync(_document.Id);
 
                 _postings.Clear();
-                foreach (var row in data.OrderByDescending(r => r.ContainsKey("Дата") ? r["Дата"] : null))
+
+                // Для отладки - выводим ключи
+                if (data.Any())
+                {
+                    var firstRow = data.First();
+                    System.Diagnostics.Debug.WriteLine("=== Ключи в данных ===");
+                    foreach (var key in firstRow.Keys)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"  {key}");
+                    }
+                }
+
+                foreach (var row in data.OrderByDescending(r => r.ContainsKey("posting_date") ? r["posting_date"] : null))
                 {
                     _postings.Add(row);
                 }

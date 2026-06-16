@@ -49,7 +49,7 @@ namespace BIS.ERP.Services
             SELECT 
                 posting_date as Date,
                 doc_number as DocumentNumber,
-                'Кассовый ордер' as DocumentType,
+                COALESCE(document_type, 'Проводка') as DocumentType, 
                 debit_account as DebitAccount,
                 credit_account as CreditAccount,
                 amount_kgs as Amount,

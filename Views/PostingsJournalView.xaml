@@ -1,6 +1,10 @@
 ﻿<UserControl x:Class="BIS.ERP.Views.PostingsJournalView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d" 
+             d:DesignHeight="600" d:DesignWidth="1000">
 
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -95,9 +99,9 @@
 
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="100"/>
-                <DataGridTextColumn Header="Документ" Binding="{Binding DocumentNumber}" Width="100"/>
-                <DataGridTextColumn Header="Тип" Binding="{Binding DocumentType}" Width="100"/>
-                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="120">
+                <DataGridTextColumn Header="Документ" Binding="{Binding DocumentNumber}" Width="120"/>
+                <DataGridTextColumn Header="Тип" Binding="{Binding DocumentType}" Width="180"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="100">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="#2980B9"/>
@@ -105,7 +109,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="120">
+                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="100">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="#C0392B"/>
@@ -127,6 +131,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
+                <DataGridTextColumn Header="Валюта" Binding="{Binding Currency}" Width="80"/>
                 <DataGridTextColumn Header="Организация" Binding="{Binding Organization}" Width="150"/>
                 <DataGridTextColumn Header="Сотрудник" Binding="{Binding Employee}" Width="120"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding Note}" Width="*" MinWidth="150"/>

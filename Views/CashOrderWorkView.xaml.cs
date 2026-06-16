@@ -13,8 +13,7 @@ namespace BIS.ERP.Views
     public partial class CashOrderWorkView : UserControl
     {
         private readonly MetadataObject _documentMetadata;
-        private readonly MetadataService _metadataService;
-        private DataTable _dataTable;
+        private readonly MetadataService _metadataService;        
         private bool _isLoading = false;
 
         public CashOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)

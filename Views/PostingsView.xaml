@@ -17,7 +17,7 @@
         <!-- Заголовок -->
         <StackPanel Grid.Row="0" Margin="0,0,0,10">
             <TextBlock Text="ПРОВОДКИ" FontSize="24" FontWeight="Bold" Foreground="#2C3E50"/>
-            <TextBlock Text="Журнал бухгалтерских проводок" FontSize="12" Foreground="Gray"/>
+            <TextBlock Text="Бухгалтерские проводоки" FontSize="12" Foreground="Gray"/>
         </StackPanel>
 
         <!-- Панель инструментов -->
@@ -36,18 +36,19 @@
 
         <!-- Таблица проводок -->
         <DataGrid x:Name="PostingsGrid" Grid.Row="2" AutoGenerateColumns="False" 
-                  IsReadOnly="True" SelectionChanged="PostingsGrid_SelectionChanged"
-                  AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1">
+          IsReadOnly="True" SelectionChanged="PostingsGrid_SelectionChanged"
+          AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Дата" Binding="{Binding Дата}" Width="100"/>
-                <DataGridTextColumn Header="Номер документа" Binding="{Binding Номер документа}" Width="120"/>
-                <DataGridTextColumn Header="Дебет" Binding="{Binding Дебет}" Width="200"/>
-                <DataGridTextColumn Header="Кредит" Binding="{Binding Кредит}" Width="200"/>
-                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding Сумма в сом}" Width="120"/>
-                <DataGridTextColumn Header="Сумма в валюте" Binding="{Binding Сумма в валюте}" Width="120"/>
-                <DataGridTextColumn Header="Валюта" Binding="{Binding Валюта}" Width="80"/>
-                <DataGridTextColumn Header="Организация" Binding="{Binding Организация}" Width="150"/>
-                <DataGridTextColumn Header="Примечание" Binding="{Binding Примечание}" Width="200"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="100"/>
+                <DataGridTextColumn Header="Номер документа" Binding="{Binding [Номер документа]}" Width="120"/>
+                <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="120"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
+                <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
+                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом]}" Width="120"/>
+                <DataGridTextColumn Header="Сумма в валюте" Binding="{Binding [Сумма в валюте]}" Width="120"/>
+                <DataGridTextColumn Header="Валюта" Binding="{Binding [Валюта]}" Width="80"/>
+                <DataGridTextColumn Header="Организация" Binding="{Binding [Организация]}" Width="150"/>
+                <DataGridTextColumn Header="Примечание" Binding="{Binding [Примечание]}" Width="200"/>
             </DataGrid.Columns>
         </DataGrid>
 

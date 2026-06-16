@@ -479,28 +479,51 @@ namespace BIS.ERP.Services
 
         private async Task AddInitialCashDeskData(MetadataObject catalog)
         {
-            // Получим валюту KGS
-            var currencyKgs = await _context.MetadataObjects
-                .Where(m => m.Name == "Справочник валют")
-                .SelectMany(m => _context.Database.SqlQueryRaw<(Guid Id, string Code)>(
-                    $"SELECT \"Id\", \"code\" FROM \"catalog_currencies\" WHERE \"code\" = 'KGS'"))
-                .FirstOrDefaultAsync();
-            if (currencyKgs.Id == Guid.Empty) return;
+            try
+            {
+                // Получим валюту KGS - используем простой SQL запрос
+                Guid currencyKgsId = Guid.Empty;
 
-            var sql = $@"
-            INSERT INTO ""{catalog.TableName}"" 
-            (""Id"", ""code"", ""name"", ""currency_id"", ""initial_balance"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-            VALUES (
-                '{Guid.NewGuid()}',
-                '1',
-                'Основная касса (сомы)',
-                '{currencyKgs.Id}',
-                0,
-                true,
-                NOW(),
-                NOW()
-            )";
-            await _context.Database.ExecuteSqlRawAsync(sql);
+                var sqlCurrency = "SELECT \"Id\" FROM \"catalog_currencies\" WHERE \"code\" = 'KGS' LIMIT 1";
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = sqlCurrency;
+
+                await _context.Database.OpenConnectionAsync();
+                var result = await command.ExecuteScalarAsync();
+                if (result != null && result != DBNull.Value)
+                {
+                    currencyKgsId = Guid.Parse(result.ToString());
+                }
+                await _context.Database.CloseConnectionAsync();
+
+                if (currencyKgsId == Guid.Empty)
+                {
+                    System.Diagnostics.Debug.WriteLine("Валюта KGS не найдена");
+                    return;
+                }
+
+                var insertSql = $@"
+                INSERT INTO ""{catalog.TableName}"" 
+                (""Id"", ""code"", ""name"", ""currency_id"", ""initial_balance"", ""current_balance"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+                VALUES (
+                    '{Guid.NewGuid()}',
+                    '1',
+                    'Основная касса (сомы)',
+                    '{currencyKgsId}',
+                    0,
+                    0,
+                    true,
+                    NOW(),
+                    NOW()
+                )";
+                await _context.Database.ExecuteSqlRawAsync(insertSql);
+
+                System.Diagnostics.Debug.WriteLine("Начальные данные для кассы добавлены");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка добавления начальных данных для кассы: {ex.Message}");
+            }
         }
     }
 }

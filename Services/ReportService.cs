@@ -210,10 +210,8 @@ namespace BIS.ERP.Services
         {
             var html = new StringBuilder();
 
-            // Простые настройки
-            string headerColor = "#2C3E50";
-            bool showGridLines = true;
-            bool alternateRowColor = true;
+            // Простые настройки           
+            bool showGridLines = true;          
 
             html.AppendLine("<!DOCTYPE html>");
             html.AppendLine("<html>");

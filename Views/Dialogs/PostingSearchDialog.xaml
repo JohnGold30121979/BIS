@@ -18,9 +18,18 @@
                     Background="#F39C12" Foreground="White"/>
         </StackPanel>
 
-        <DataGrid x:Name="SearchResultsGrid" Grid.Row="1" AutoGenerateColumns="True" 
+        <DataGrid x:Name="SearchResultsGrid" Grid.Row="1" AutoGenerateColumns="False" 
                   IsReadOnly="True" MouseDoubleClick="SearchResultsGrid_MouseDoubleClick"
-                  AlternatingRowBackground="#F5F5F5"/>
+                  AlternatingRowBackground="#F5F5F5">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="100"/>
+                <DataGridTextColumn Header="Номер" Binding="{Binding [Номер документа]}" Width="120"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
+                <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
+                <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма в сом]}" Width="120"/>
+                <DataGridTextColumn Header="Примечание" Binding="{Binding [Примечание]}" Width="200"/>
+            </DataGrid.Columns>
+        </DataGrid>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <TextBlock x:Name="StatusText" Text="Готово" VerticalAlignment="Center" Margin="0,0,15,0"/>

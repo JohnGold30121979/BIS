@@ -1245,8 +1245,20 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Номер документа",        // ← с пробелом, как в БД
+            Name = "Номер документа",
             DbColumnName = "doc_number",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        { 
+            Id = Guid.NewGuid(),
+            Name = "Тип документа",
+            DbColumnName = "document_type",
             FieldType = "String",
             Length = 50,
             IsRequired = true,
@@ -1281,7 +1293,7 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Сумма в сом",            // ← с пробелом, как в БД
+            Name = "Сумма в сом",
             DbColumnName = "amount_kgs",
             FieldType = "Decimal",
             Precision = 18,
@@ -1294,7 +1306,7 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Сумма в валюте",         // ← с пробелом, как в БД
+            Name = "Сумма в валюте",
             DbColumnName = "amount_currency",
             FieldType = "Decimal",
             Precision = 18,
@@ -1482,7 +1494,7 @@ public partial class MetadataService
             DbColumnName = "is_active",
             FieldType = "Bool",
             IsRequired = true,
-            Order = 5,
+            Order = 6,
             MetadataObjectId = metadataObjectId
         }
     };
@@ -1803,7 +1815,7 @@ public partial class MetadataService
             Name = "Тип",
             DbColumnName = "order_type",
             FieldType = "String",
-            Length = 20,
+            Length = 100,
             IsRequired = true,
             IsUnique = false,
             Order = 3,

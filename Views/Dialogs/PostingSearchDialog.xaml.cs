@@ -23,14 +23,17 @@ namespace BIS.ERP.Views
             if (string.IsNullOrWhiteSpace(searchText))
             {
                 SearchResultsGrid.ItemsSource = _postings;
+                StatusText.Text = "Готово";
                 return;
             }
 
             var results = _postings.Where(p =>
+                (p.ContainsKey("Номер документа") && p["Номер документа"]?.ToString().ToLower().Contains(searchText) == true) ||
                 (p.ContainsKey("Дебет") && p["Дебет"]?.ToString().ToLower().Contains(searchText) == true) ||
                 (p.ContainsKey("Кредит") && p["Кредит"]?.ToString().ToLower().Contains(searchText) == true) ||
-                (p.ContainsKey("Номер документа") && p["Номер документа"]?.ToString().ToLower().Contains(searchText) == true) ||
-                (p.ContainsKey("Примечание") && p["Примечание"]?.ToString().ToLower().Contains(searchText) == true)
+                (p.ContainsKey("Сумма в сом") && p["Сумма в сом"]?.ToString().ToLower().Contains(searchText) == true) ||
+                (p.ContainsKey("Примечание") && p["Примечание"]?.ToString().ToLower().Contains(searchText) == true) ||
+                (p.ContainsKey("Организация") && p["Организация"]?.ToString().ToLower().Contains(searchText) == true)
             ).ToList();
 
             SearchResultsGrid.ItemsSource = results;

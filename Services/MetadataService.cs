@@ -15,6 +15,7 @@ namespace BIS.ERP.Services
     public partial class MetadataService
     {
         private readonly AppDbContext _context;
+        private readonly object _numberLock = new object();
 
         public MetadataService(AppDbContext context)
         {
@@ -115,7 +116,6 @@ namespace BIS.ERP.Services
                 cashReceiptdoc.Fields = GetCashReceiptFields(cashReceiptdoc.Id);
                 documents.Add(cashReceiptdoc);
 
-
                 var cashPaymentdoc = new MetadataObject
                 {
                     Id = Guid.NewGuid(),
@@ -131,7 +131,6 @@ namespace BIS.ERP.Services
                 };
                 cashPaymentdoc.Fields = GetCashPaymentFields(cashPaymentdoc.Id);
                 documents.Add(cashPaymentdoc);
-
          
                 var paymentOrderdocument = new MetadataObject
                 {
@@ -156,6 +155,9 @@ namespace BIS.ERP.Services
                 {
                     await CreateTableForCatalogAsync(doc);
                 }
+
+                // Создаём таблицу нумерации документов
+                await CreateDocumentNumberingTableAsync();
 
                 config.IsInitialized = true;
                 await _context.SaveChangesAsync();
@@ -1404,14 +1406,16 @@ namespace BIS.ERP.Services
             await UpdateCashDeskBalance(cashDeskId, amount, isReceipt);
             System.Diagnostics.Debug.WriteLine("Cash desk balance updated");
 
-            // Создаём проводку
-            var docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : "";
-            var postingDate = recordData.ContainsKey("doc_date") ? (DateTime)recordData["doc_date"] : DateTime.Now;
-            var description = recordData.ContainsKey("basis") ? recordData["basis"].ToString() :
-                             (recordData.ContainsKey("Основание") ? recordData["Основание"].ToString() : "");
+            // Получаем данные документа
+            string? docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");
+            DateTime postingDate = recordData.ContainsKey("doc_date") ? (DateTime)recordData["doc_date"] :
+                                  (recordData.ContainsKey("Дата") ? (DateTime)recordData["Дата"] : DateTime.Now);
+            string? description = recordData.ContainsKey("basis") ? recordData["basis"].ToString() : (recordData.ContainsKey("Основание") ? recordData["Основание"].ToString() : "");
+
 
             string debitAccount = "";
             string creditAccount = "";
+            string documentType = isReceipt ? "Приходный кассовый ордер" : "Расходный кассовый ордер";
 
             if (isReceipt)
             {
@@ -1424,7 +1428,8 @@ namespace BIS.ERP.Services
                 creditAccount = "3010"; // Счёт кассы
             }
 
-            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description);
+            // Создаём проводку с указанием типа документа
+            await CreatePosting(docNumber!, postingDate, debitAccount, creditAccount, amount, description!, documentType);            
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
@@ -1434,29 +1439,96 @@ namespace BIS.ERP.Services
         {
             System.Diagnostics.Debug.WriteLine("Processing PaymentOrder");
 
-            // Определяем тип платежа (исходящее/входящее)
-            string orderType = recordData.ContainsKey("Тип") ? recordData["Тип"].ToString() : "";
-            bool isOutgoing = orderType.Contains("Исходящее");
-            System.Diagnostics.Debug.WriteLine($"IsOutgoing: {isOutgoing}");
+            // Определяем тип платежа - используем правильный ключ!
+            string orderType = recordData.ContainsKey("order_type") ? recordData["order_type"].ToString() :
+                               (recordData.ContainsKey("Тип") ? recordData["Тип"].ToString() : "");
 
-            // Получаем счёт кассы/банка (наш счёт)
-            string ourAccountCode = "3010"; // счёт по умолчанию
-            if (recordData.ContainsKey("Наш счет") && recordData["Наш счет"] != null && Guid.TryParse(recordData["Наш счет"].ToString(), out var ourAccountId))
+            bool isOutgoing = orderType.Contains("Исходящее");
+            string documentType = isOutgoing ? "Исходящее платежное поручение" : "Входящее платежное поручение";
+
+            System.Diagnostics.Debug.WriteLine($"orderType: {orderType}");
+            System.Diagnostics.Debug.WriteLine($"isOutgoing: {isOutgoing}");
+            System.Diagnostics.Debug.WriteLine($"documentType: {documentType}");
+
+            // Получаем номер документа
+            string docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() :
+                               (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");
+            if (string.IsNullOrEmpty(docNumber))
+                docNumber = recordId.ToString().Substring(0, 8);
+
+            // Получаем дату
+            DateTime postingDate = recordData.ContainsKey("doc_date") && recordData["doc_date"] != null ?
+                                  (DateTime)recordData["doc_date"] :
+                                  (recordData.ContainsKey("Дата") && recordData["Дата"] != null ? (DateTime)recordData["Дата"] : DateTime.Now);
+
+            // Получаем описание
+            string? description = recordData.ContainsKey("purpose") ? recordData["purpose"].ToString() :
+                                  (recordData.ContainsKey("Назначение платежа") ? recordData["Назначение платежа"].ToString() : "");
+            if (string.IsNullOrEmpty(description) && recordData.ContainsKey("description"))
+                description = recordData["description"].ToString();
+            if (string.IsNullOrEmpty(description) && recordData.ContainsKey("Примечание"))
+                description = recordData["Примечание"].ToString();
+
+            // Получаем код нашего счёта
+            string ourAccountCode = "3010";
+            if (recordData.ContainsKey("our_account_id") && recordData["our_account_id"] != null)
             {
-                ourAccountCode = await GetAccountCodeById(ourAccountId);
-                if (string.IsNullOrEmpty(ourAccountCode))
-                    ourAccountCode = "3010";
-                System.Diagnostics.Debug.WriteLine($"OurAccountCode: {ourAccountCode}");
+                if (Guid.TryParse(recordData["our_account_id"].ToString(), out var ourAccountId))
+                {
+                    ourAccountCode = await GetAccountCodeById(ourAccountId);
+                    if (string.IsNullOrEmpty(ourAccountCode))
+                        ourAccountCode = "3010";
+                }
+                else
+                {
+                    ourAccountCode = recordData["our_account_id"].ToString();
+                }
+            }
+            else if (recordData.ContainsKey("Наш счет") && recordData["Наш счет"] != null)
+            {
+                if (Guid.TryParse(recordData["Наш счет"].ToString(), out var ourAccountId))
+                {
+                    ourAccountCode = await GetAccountCodeById(ourAccountId);
+                    if (string.IsNullOrEmpty(ourAccountCode))
+                        ourAccountCode = "3010";
+                }
+                else
+                {
+                    ourAccountCode = recordData["Наш счет"].ToString();
+                }
             }
 
             // Получаем корреспондирующий счёт
             string corrAccountCode = "";
-            if (recordData.ContainsKey("Корр. счет") && recordData["Корр. счет"] != null && Guid.TryParse(recordData["Корр. счет"].ToString(), out var corrAccountId))
+            if (recordData.ContainsKey("correspondent_account") && recordData["correspondent_account"] != null)
             {
-                corrAccountCode = await GetAccountCodeById(corrAccountId);
-                System.Diagnostics.Debug.WriteLine($"CorrAccountCode: {corrAccountCode}");
+                if (Guid.TryParse(recordData["correspondent_account"].ToString(), out var corrAccountId))
+                {
+                    corrAccountCode = await GetAccountCodeById(corrAccountId);
+                }
+                else
+                {
+                    corrAccountCode = recordData["correspondent_account"].ToString();
+                }
+            }
+            else if (recordData.ContainsKey("Корр. счет") && recordData["Корр. счет"] != null)
+            {
+                if (Guid.TryParse(recordData["Корр. счет"].ToString(), out var corrAccountId))
+                {
+                    corrAccountCode = await GetAccountCodeById(corrAccountId);
+                }
+                else
+                {
+                    corrAccountCode = recordData["Корр. счет"].ToString();
+                }
             }
 
+            if (string.IsNullOrEmpty(corrAccountCode))
+            {
+                corrAccountCode = isOutgoing ? "4010" : "6010";
+            }
+
+            // Определяем счета для проводки
             string debitAccount, creditAccount;
             if (isOutgoing)
             {
@@ -1471,44 +1543,60 @@ namespace BIS.ERP.Services
                 creditAccount = corrAccountCode;
             }
 
-            // Если корреспондирующий счёт не указан, используем счёт по умолчанию
-            if (string.IsNullOrEmpty(debitAccount))
-                debitAccount = isOutgoing ? "4010" : "3010";
-            if (string.IsNullOrEmpty(creditAccount))
-                creditAccount = isOutgoing ? "3010" : "4010";
+            System.Diagnostics.Debug.WriteLine($"debitAccount: {debitAccount}, creditAccount: {creditAccount}");
 
-            var docNumber = recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "";
-            var postingDate = recordData.ContainsKey("Дата") && recordData["Дата"] != null ? (DateTime)recordData["Дата"] : DateTime.Now;
-            var description = recordData.ContainsKey("Назначение платежа") ? recordData["Назначение платежа"].ToString() :
-                             (recordData.ContainsKey("Примечание") ? recordData["Примечание"].ToString() : "");
-
-            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description);
+            // Создаём проводку с указанием типа документа
+            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description, documentType);
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
         }
 
-        private async Task CreatePosting(string docNumber, DateTime postingDate, string debitAccount, string creditAccount, decimal amount, string description)
+        private async Task CreatePosting(string docNumber, DateTime postingDate, string debitAccount, string creditAccount, decimal amount, string? description, string documentType = "")
         {
-            var postingId = Guid.NewGuid();
-            var postingSql = $@"
-        INSERT INTO ""doc_postings"" 
-        (""Id"", ""posting_date"", ""doc_number"", ""debit_account"", ""credit_account"", 
-         ""amount_kgs"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-        VALUES (
-            '{postingId}',
-            '{postingDate:yyyy-MM-dd HH:mm:ss}',
-            '{docNumber.Replace("'", "''")}',
-            '{debitAccount}',
-            '{creditAccount}',
-            {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)},
-            '{description.Replace("'", "''")}',
-            true,
-            NOW(),
-            NOW()
-        )";
-            await _context.Database.ExecuteSqlRawAsync(postingSql);
-            System.Diagnostics.Debug.WriteLine("Posting saved");
+            try
+            {
+                var postingId = Guid.NewGuid();
+
+                if (string.IsNullOrEmpty(documentType))
+                {
+                    // Автоопределение типа
+                    if (debitAccount == "3010" && creditAccount != "3010")
+                        documentType = "Расходный кассовый ордер";
+                    else if (creditAccount == "3010" && debitAccount != "3010")
+                        documentType = "Приходный кассовый ордер";
+                    else if (debitAccount == "3010" || creditAccount == "3010")
+                        documentType = "Кассовая операция";
+                    else
+                        documentType = "Банковская операция";
+                }
+
+                    var sql = $@"
+                    INSERT INTO doc_postings 
+                    (""Id"", posting_date, doc_number, debit_account, credit_account, 
+                     amount_kgs, description, document_type, is_active, ""CreatedAt"", ""UpdatedAt"") 
+                    VALUES (
+                        '{postingId}',
+                        '{postingDate:yyyy-MM-dd HH:mm:ss}',
+                        '{docNumber.Replace("'", "''")}',
+                        '{debitAccount}',
+                        '{creditAccount}',
+                        {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)},
+                        '{description?.Replace("'", "''") ?? ""}',
+                        '{documentType.Replace("'", "''")}',
+                        true,
+                        NOW(),
+                        NOW()
+                    )";
+
+                await _context.Database.ExecuteSqlRawAsync(sql);
+                System.Diagnostics.Debug.WriteLine($"✅ Проводка создана: {documentType} | {docNumber} | {amount}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ Ошибка CreatePosting: {ex.Message}");
+                throw;
+            }
         }
 
         private async Task UpdateDocumentPostedStatus(string tableName, Guid recordId)
@@ -1545,7 +1633,164 @@ namespace BIS.ERP.Services
             await _context.Database.CloseConnectionAsync();
             return result?.ToString() ?? "";
         }
-     
+
+
+        private async Task CreateDocumentNumberingTableAsync()
+        {
+            try
+            {
+                // Проверяем существование таблицы
+                var checkSql = @"
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = 'doc_numbering'";
+
+                using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
+                checkCommand.CommandText = checkSql;
+                await _context.Database.OpenConnectionAsync();
+                var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+                await _context.Database.CloseConnectionAsync();
+
+                if (exists > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine("Таблица doc_numbering уже существует");
+                    return;
+                }
+
+                // Создаём таблицу
+                var createSql = @"
+                CREATE TABLE IF NOT EXISTS doc_numbering (
+                    Id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    document_type VARCHAR(100) NOT NULL,
+                    current_number INTEGER DEFAULT 1,
+                    prefix VARCHAR(20) DEFAULT '',
+                    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            
+                -- Создаём уникальный индекс для document_type
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_numbering_type 
+                ON doc_numbering (document_type);";
+
+                await _context.Database.ExecuteSqlRawAsync(createSql);
+                System.Diagnostics.Debug.WriteLine("Таблица doc_numbering создана");
+
+                // Добавляем начальные записи
+                await AddDefaultNumberingRecordsAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания таблицы doc_numbering: {ex.Message}");
+            }
+        }
+
+        private async Task AddDefaultNumberingRecordsAsync()
+        {
+            var records = new[]
+            {
+            new { document_type = "Приходный кассовый ордер", prefix = "ПКО-" },
+            new { document_type = "Расходный кассовый ордер", prefix = "РКО-" },
+            new { document_type = "Платежное поручение", prefix = "ПП-" },
+            new { document_type = "Проводки", prefix = "ПР-" }
+            };
+
+            foreach (var record in records)
+            {
+                // Проверяем, есть ли уже запись
+                var checkSql = $@"
+                SELECT COUNT(*) FROM doc_numbering 
+                WHERE document_type = '{record.document_type}'";
+
+                using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
+                checkCommand.CommandText = checkSql;
+                await _context.Database.OpenConnectionAsync();
+                var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+                await _context.Database.CloseConnectionAsync();
+
+                if (exists == 0)
+                {
+                    var insertSql = $@"
+                INSERT INTO doc_numbering (document_type, current_number, prefix) 
+                VALUES ('{record.document_type}', 1, '{record.prefix}')";
+                    await _context.Database.ExecuteSqlRawAsync(insertSql);
+                    System.Diagnostics.Debug.WriteLine($"Добавлена нумерация для {record.document_type}");
+                }
+            }
+        }       
+
+        public async Task<string> GetNextDocumentNumberAsync(string documentName)
+        {
+            lock (_numberLock)
+            {
+                return GetNextDocumentNumberAsyncInternal(documentName).Result;
+            }
+        }
+
+        private async Task<string> GetNextDocumentNumberAsyncInternal(string documentName)
+        {
+            try
+            {
+                // Получаем префикс и текущий номер
+                var sql = $@"
+            SELECT prefix, current_number FROM doc_numbering 
+            WHERE document_type = '{documentName.Replace("'", "''")}'";
+
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = sql;
+                await _context.Database.OpenConnectionAsync();
+
+                using var reader = await command.ExecuteReaderAsync();
+                string prefix = "";
+                int currentNumber = 1;
+
+                if (await reader.ReadAsync())
+                {
+                    prefix = reader.GetString(0);
+                    currentNumber = reader.GetInt32(1);
+                }
+                else
+                {
+                    // Если записи нет, создаём с префиксом по умолчанию
+                    await _context.Database.CloseConnectionAsync();
+                    await AddDefaultNumberingForDocumentAsync(documentName);
+                    return await GetNextDocumentNumberAsyncInternal(documentName);
+                }
+
+                await _context.Database.CloseConnectionAsync();
+
+                // Обновляем номер
+                var updateSql = $@"
+                UPDATE doc_numbering 
+                SET current_number = {currentNumber + 1}, UpdatedAt = NOW()
+                WHERE document_type = '{documentName.Replace("'", "''")}'";
+                await _context.Database.ExecuteSqlRawAsync(updateSql);
+
+                return $"{prefix}{currentNumber}";
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка получения номера документа: {ex.Message}");
+                // Возвращаем временный номер на основе GUID
+                return $"TMP-{Guid.NewGuid().ToString().Substring(0, 8)}";
+            }
+        }
+
+        private async Task AddDefaultNumberingForDocumentAsync(string documentType)
+        {
+            string prefix = documentType switch
+            {
+                "Приходный кассовый ордер" => "ПКО-",
+                "Расходный кассовый ордер" => "РКО-",
+                "Платежное поручение" => "ПП-",
+                "Проводки" => "ПР-",
+                _ => ""
+            };
+
+            var sql = $@"
+        INSERT INTO doc_numbering (document_type, current_number, prefix) 
+        VALUES ('{documentType.Replace("'", "''")}', 1, '{prefix}')";
+            await _context.Database.ExecuteSqlRawAsync(sql);
+        }
+
 
     }
 }

@@ -94,7 +94,9 @@ namespace BIS.ERP.Views
                     p.DebitAccount.ToLower().Contains(searchText) ||
                     p.CreditAccount.ToLower().Contains(searchText) ||
                     p.DocumentNumber.ToLower().Contains(searchText) ||
-                    (p.Note?.ToLower().Contains(searchText) ?? false));
+                    (p.Note?.ToLower().Contains(searchText) ?? false) ||
+                    (p.Organization?.ToLower().Contains(searchText) ?? false) ||
+                    (p.Employee?.ToLower().Contains(searchText) ?? false));
             }
 
             _filteredPostings.Clear();
@@ -122,7 +124,7 @@ namespace BIS.ERP.Views
             ApplyFilters();
         }
 
-        private async void OnTurnoversClick(object sender, RoutedEventArgs e)
+        private void OnTurnoversClick(object sender, RoutedEventArgs e)
         {
             var selected = PostingsGrid.SelectedItem as PostingViewModel;
             if (selected == null)
@@ -131,24 +133,13 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-
-            var startDate = dpStartDate.SelectedDate ?? DateTime.Now.AddMonths(-1);
-            var endDate = dpEndDate.SelectedDate ?? DateTime.Now;
-
-            var turnovers = await _postingService.GetTurnoversByAccountAsync(selected.DebitAccount, startDate, endDate);
-
-            // TODO: Открыть окно с результатами
-            MessageBox.Show($"Обороты по счету {selected.DebitAccount} за период", "Информация");
+            // TODO: Открыть диалог оборотов
+            MessageBox.Show($"Обороты по счету {selected.DebitAccount}", "Информация");
         }
 
-        private async void OnSummaryClick(object sender, RoutedEventArgs e)
+        private void OnSummaryClick(object sender, RoutedEventArgs e)
         {
-            var startDate = dpStartDate.SelectedDate ?? DateTime.Now.AddMonths(-1);
-            var endDate = dpEndDate.SelectedDate ?? DateTime.Now;
-
-            var summary = await _postingService.GetSummaryTurnoversAsync(startDate, endDate);
-
-            // TODO: Открыть окно с результатами
+            // TODO: Открыть диалог сводных оборотов
             MessageBox.Show("Сводные обороты", "Информация");
         }
     }
