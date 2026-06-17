@@ -8,116 +8,232 @@ namespace BIS.ERP.Services
         // План счетов бухгалтерского учета КР (основные счета)
         public static List<ChartOfAccount> GetChartOfAccounts()
         {
-            return new List<ChartOfAccount>
-            {
-                // Раздел 1. Внеоборотные активы (100)
-                new ChartOfAccount { Code = "101", Name = "Основные средства", AccountType = "Active", Level = 1, Order = 1,
-                    Description = "Учет основных средств предприятия" },
-                new ChartOfAccount { Code = "102", Name = "Нематериальные активы", AccountType = "Active", Level = 1, Order = 2,
-                    Description = "Учет нематериальных активов" },
-                new ChartOfAccount { Code = "103", Name = "Незавершенное строительство", AccountType = "Active", Level = 1, Order = 3,
-                    Description = "Учет затрат на строительство" },
-                new ChartOfAccount { Code = "104", Name = "Долгосрочные инвестиции", AccountType = "Active", Level = 1, Order = 4,
-                    Description = "Учет долгосрочных финансовых вложений" },
-                new ChartOfAccount { Code = "105", Name = "Амортизация основных средств", AccountType = "Passive", Level = 1, Order = 5,
-                    Description = "Учет накопленной амортизации ОС" },
-                new ChartOfAccount { Code = "106", Name = "Амортизация НМА", AccountType = "Passive", Level = 1, Order = 6,
-                    Description = "Учет накопленной амортизации НМА" },
+            var accounts = new List<ChartOfAccount>();
 
-                // Раздел 2. Запасы (200)
-                new ChartOfAccount { Code = "201", Name = "Сырье и материалы", AccountType = "Active", Level = 1, Order = 10,
-                    Description = "Учет сырья и материалов" },
-                new ChartOfAccount { Code = "202", Name = "Товары", AccountType = "Active", Level = 1, Order = 11,
-                    Description = "Учет товаров для перепродажи" },
-                new ChartOfAccount { Code = "203", Name = "Готовая продукция", AccountType = "Active", Level = 1, Order = 12,
-                    Description = "Учет готовой продукции" },
-                new ChartOfAccount { Code = "204", Name = "Незавершенное производство", AccountType = "Active", Level = 1, Order = 13,
-                    Description = "Учет затрат в незавершенном производстве" },
-                new ChartOfAccount { Code = "205", Name = "Тара и тарные материалы", AccountType = "Active", Level = 1, Order = 14,
-                    Description = "Учет тары" },
-                new ChartOfAccount { Code = "206", Name = "Резерв под снижение стоимости запасов", AccountType = "Passive", Level = 1, Order = 15,
-                    Description = "Резерв под обесценение запасов" },
+            // ==================== РАЗДЕЛ 1000: ОБОРОТНЫЕ АКТИВЫ ====================
+            accounts.Add(new ChartOfAccount { Code = "11100000", Name = "Денежные средства в национальной валюте", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11200000", Name = "Денежные средства в иностранной валюте", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11300000", Name = "Денежные документы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11600000", Name = "Денежные средства в терминалах ПО", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "12100000", Name = "Счета в национальной валюте", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "12200000", Name = "Счета в иностранной валюте в местных банках", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "12300000", Name = "Счета в зарубежных банках", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "12400000", Name = "Денежные средства в банках, ограниченные к использованию", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "12500000", Name = "Денежные средства в пути", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "13300000", Name = "Займы выданные", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "13400000", Name = "Депозитные вклады в национальной валюте", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "13600000", Name = "Депозитные вклады в иностранной валюте", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "13700000", Name = "Краткосрочные инвестиции в дочерние компании", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "13900000", Name = "Прочие краткосрочные инвестиции", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "14100000", Name = "Счета к получению за товары и услуги", AccountType = "ActivePassive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "14910000", Name = "Резерв на безнадежные долги по счетам к получению", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15200000", Name = "Дебиторская задолженность сотрудников и директоров", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15300000", Name = "Налоги, оплаченные авансом", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15400000", Name = "Налоги, подлежащие возмещению", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15500000", Name = "Проценты к получению", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15600000", Name = "Дивиденды к получению", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15700000", Name = "Дебиторская задолженность агентов", AccountType = "ActivePassive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15800000", Name = "Текущая часть долгосрочной дебиторской задолженности", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "15900000", Name = "Прочая дебиторская задолженность", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "16100000", Name = "Товары", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "16910000", Name = "Нереализованная торговая наценка", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "16200000", Name = "Запасы сырья и основных материалов", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "16300000", Name = "Незавершенное производство", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "16400000", Name = "Готовая продукция", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "17100000", Name = "Топливо", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "17200000", Name = "Запасные части", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "17400000", Name = "Прочие материалы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "17500000", Name = "Малоценные и быстроизнашивающиеся предметы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "17950000", Name = "МБП в эксплуатации", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "18100000", Name = "Запасы, оплаченные авансом", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "18200000", Name = "Услуги, оплаченные авансом", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "18300000", Name = "Аренда, оплаченная авансом", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "18400000", Name = "Предоплаты поставщикам товаров/услуг", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "18900000", Name = "Прочие виды авансированных платежей", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "19200000", Name = "Задолженность лиц, подписавшихся на акции второй эмиссии", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "19300000", Name = "Задолженность покупателей при продаже выкупленных акций", AccountType = "Active", Level = 1 });
 
-                // Раздел 3. Денежные средства (300)
-                new ChartOfAccount { Code = "301", Name = "Касса в национальной валюте", AccountType = "Active", Level = 1, Order = 20,
-                    Description = "Учет наличных денежных средств в кассе" },
-                new ChartOfAccount { Code = "302", Name = "Касса в иностранной валюте", AccountType = "Active", Level = 1, Order = 21,
-                    Description = "Учет наличных денежных средств в кассе (валюта)" },
-                new ChartOfAccount { Code = "303", Name = "Расчетный счет", AccountType = "Active", Level = 1, Order = 22,
-                    Description = "Учет денежных средств на расчетном счете" },
-                new ChartOfAccount { Code = "304", Name = "Валютный счет", AccountType = "Active", Level = 1, Order = 23,
-                    Description = "Учет денежных средств на валютном счете" },
-                new ChartOfAccount { Code = "305", Name = "Денежные документы", AccountType = "Active", Level = 1, Order = 24,
-                    Description = "Учет денежных документов" },
-                new ChartOfAccount { Code = "306", Name = "Переводы в пути", AccountType = "Active", Level = 1, Order = 25,
-                    Description = "Учет переводов в пути" },
-                new ChartOfAccount { Code = "307", Name = "Специальные счета в банках", AccountType = "Active", Level = 1, Order = 26,
-                    Description = "Учет средств на специальных счетах" },
-                new ChartOfAccount { Code = "308", Name = "Депозиты", AccountType = "Active", Level = 1, Order = 27,
-                    Description = "Учет депозитных вкладов" },
+            // ==================== РАЗДЕЛ 2000: ВНЕОБОРОТНЫЕ АКТИВЫ ====================
+            accounts.Add(new ChartOfAccount { Code = "21100000", Name = "Земля", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21200000", Name = "Право пользования арендованным ОС", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21920000", Name = "Накопленная амортизация - право пользования", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21300000", Name = "Здания, сооружения", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21930000", Name = "Накопленная амортизация – здания", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21400000", Name = "Оборудование", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21940000", Name = "Накопленная амортизация – оборудование", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21500000", Name = "Конторское оборудование", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21950000", Name = "Накопленная амортизация – конторское", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21600000", Name = "Мебель и принадлежности", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21960000", Name = "Накопленная амортизация – мебель", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21700000", Name = "Транспортные средства", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21970000", Name = "Накопленная амортизация – транспорт", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21800000", Name = "Благоустройство арендованной собственности", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21980000", Name = "Накопленная амортизация – благоустройство аренды", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21900000", Name = "Благоустройство земельных участков", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21990000", Name = "Накопленная амортизация – благоустройство земли", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "21910000", Name = "Незавершенное строительство", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "24000000", Name = "Отсроченные налоговые требования", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "25000000", Name = "Денежные средства, ограниченные к использованию", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "27200000", Name = "Долгосрочная дебиторская задолженность покупателей", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "27800000", Name = "Долгосрочные отсроченные расходы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "27900000", Name = "Прочая долгосрочная дебиторская задолженность", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "28200000", Name = "Долгосрочные предоставленные займы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "28300000", Name = "Долгосрочные инвестиции в дочерние компании", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "28900000", Name = "Прочие долгосрочные инвестиции", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29100000", Name = "Франшиза", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29910000", Name = "Накопленная амортизация – франшиза", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29300000", Name = "Патенты", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29930000", Name = "Накопленная амортизация – патенты", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29400000", Name = "Торговые марки", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29940000", Name = "Накопленная амортизация – торговые марки", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29500000", Name = "Авторские права", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29950000", Name = "Накопленная амортизация – авторские права", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29600000", Name = "Программное обеспечение", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29960000", Name = "Накопленная амортизация – ПО", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29700000", Name = "Лицензионное соглашение", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29970000", Name = "Накопленная амортизация – лицензия", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29800000", Name = "Прочие активы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29980000", Name = "Накопленная амортизация – прочие активы", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "29900000", Name = "Незавершенные разработки", AccountType = "Active", Level = 1 });
 
-                // Раздел 4. Расчеты (400)
-                new ChartOfAccount { Code = "401", Name = "Расчеты с поставщиками", AccountType = "ActivePassive", Level = 1, Order = 30,
-                    Description = "Учет расчетов с поставщиками и подрядчиками" },
-                new ChartOfAccount { Code = "402", Name = "Расчеты с покупателями", AccountType = "ActivePassive", Level = 1, Order = 31,
-                    Description = "Учет расчетов с покупателями и заказчиками" },
-                new ChartOfAccount { Code = "403", Name = "Расчеты по авансам выданным", AccountType = "Active", Level = 1, Order = 32,
-                    Description = "Учет выданных авансов" },
-                new ChartOfAccount { Code = "404", Name = "Расчеты по авансам полученным", AccountType = "Passive", Level = 1, Order = 33,
-                    Description = "Учет полученных авансов" },
-                new ChartOfAccount { Code = "405", Name = "Расчеты с подотчетными лицами", AccountType = "ActivePassive", Level = 1, Order = 34,
-                    Description = "Учет расчетов с подотчетными лицами" },
-                new ChartOfAccount { Code = "406", Name = "Расчеты с персоналом по оплате труда", AccountType = "Passive", Level = 1, Order = 35,
-                    Description = "Учет заработной платы" },
-                new ChartOfAccount { Code = "407", Name = "Расчеты с бюджетом", AccountType = "Passive", Level = 1, Order = 36,
-                    Description = "Учет расчетов по налогам и сборам" },
-                new ChartOfAccount { Code = "408", Name = "Расчеты по социальному страхованию", AccountType = "Passive", Level = 1, Order = 37,
-                    Description = "Учет расчетов по соцстраху" },
-                new ChartOfAccount { Code = "409", Name = "Расчеты с учредителями", AccountType = "ActivePassive", Level = 1, Order = 38,
-                    Description = "Учет расчетов с учредителями" },
-                new ChartOfAccount { Code = "410", Name = "Расчеты по кредитам и займам", AccountType = "Passive", Level = 1, Order = 39,
-                    Description = "Учет кредитов и займов" },
-                new ChartOfAccount { Code = "411", Name = "Расчеты с разными дебиторами", AccountType = "Active", Level = 1, Order = 40,
-                    Description = "Учет прочих дебиторов" },
-                new ChartOfAccount { Code = "412", Name = "Расчеты с разными кредиторами", AccountType = "Passive", Level = 1, Order = 41,
-                    Description = "Учет прочих кредиторов" },
-                new ChartOfAccount { Code = "413", Name = "Резерв по сомнительным долгам", AccountType = "Passive", Level = 1, Order = 42,
-                    Description = "Резерв под обесценение дебиторской задолженности" },
+            // ==================== РАЗДЕЛ 3000: КРАТКОСРОЧНЫЕ ОБЯЗАТЕЛЬСТВА ====================
+            accounts.Add(new ChartOfAccount { Code = "31100000", Name = "Счета к оплате за товары и услуги по хоз.деятельности", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "31900000", Name = "Прочие счета к оплате", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "32100000", Name = "Авансы покупателей и заказчиков", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "32200000", Name = "Авансовые платежи агентов ПО", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "33100000", Name = "Банковские кредиты, займы", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "33200000", Name = "Прочие кредиты, займы", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "33300000", Name = "Текущая часть долгосрочных долговых обязательств", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "33900000", Name = "Прочие краткосрочные долговые обязательства", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "34100000", Name = "Налог на прибыль к оплате", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "34200000", Name = "Подоходный налог на доходы физ.лиц", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "34300000", Name = "НДС к оплате", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "34900000", Name = "Прочие налоги к оплате", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "35100000", Name = "Начисленные обязательства по оплате товаров и услуг", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "35200000", Name = "Начисленная заработная плата", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "35300000", Name = "Начисленные взносы на социальное страхование", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "35400000", Name = "Дивиденды к выплате", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "35500000", Name = "Начисленные проценты по долговым обязательствам", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "35900000", Name = "Прочие начисленные расходы", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "36100000", Name = "Счета к оплате за принятые платежи в пользу поставщиков", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "37100000", Name = "Резерв на гарантийное обслуживание", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "37200000", Name = "Резерв на оплату судебных исков", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "37300000", Name = "Прочие резервы", AccountType = "Passive", Level = 1 });
 
-                // Раздел 5. Капитал и резервы (500)
-                new ChartOfAccount { Code = "501", Name = "Уставный капитал", AccountType = "Passive", Level = 1, Order = 50,
-                    Description = "Учет уставного капитала" },
-                new ChartOfAccount { Code = "502", Name = "Добавочный капитал", AccountType = "Passive", Level = 1, Order = 51,
-                    Description = "Учет добавочного капитала" },
-                new ChartOfAccount { Code = "503", Name = "Резервный капитал", AccountType = "Passive", Level = 1, Order = 52,
-                    Description = "Учет резервного капитала" },
-                new ChartOfAccount { Code = "504", Name = "Нераспределенная прибыль (непокрытый убыток)", AccountType = "Passive", Level = 1, Order = 53,
-                    Description = "Учет нераспределенной прибыли" },
-                new ChartOfAccount { Code = "505", Name = "Целевое финансирование", AccountType = "Passive", Level = 1, Order = 54,
-                    Description = "Учет целевых средств" },
+            // ==================== РАЗДЕЛ 4000: ДОЛГОСРОЧНЫЕ ОБЯЗАТЕЛЬСТВА ====================
+            accounts.Add(new ChartOfAccount { Code = "41200000", Name = "Банковские кредиты, займы (долгосрочные)", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "41300000", Name = "Прочие кредиты, займы (долгосрочные)", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "41500000", Name = "Обязательства по аренде", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "41900000", Name = "Прочие долгосрочные обязательства", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "42000000", Name = "Отсроченные доходы", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "43000000", Name = "Отсроченные налоговые обязательства", AccountType = "Passive", Level = 1 });
 
-                // Раздел 6. Доходы (600)
-                new ChartOfAccount { Code = "601", Name = "Доходы от реализации", AccountType = "Passive", Level = 1, Order = 60,
-                    Description = "Учет доходов от основной деятельности" },
-                new ChartOfAccount { Code = "602", Name = "Прочие доходы", AccountType = "Passive", Level = 1, Order = 61,
-                    Description = "Учет прочих доходов" },
-                new ChartOfAccount { Code = "603", Name = "Доходы от финансовой деятельности", AccountType = "Passive", Level = 1, Order = 62,
-                    Description = "Учет доходов от финансовых операций" },
+            // ==================== РАЗДЕЛ 5000: СОБСТВЕННЫЙ КАПИТАЛ ====================
+            accounts.Add(new ChartOfAccount { Code = "51100000", Name = "Простые акции", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "51200000", Name = "Привилегированные акции", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "51300000", Name = "Прочий уставный капитал", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "51910000", Name = "Выкупленные собственные акции", AccountType = "Passive", Level = 1 }); // контрпассив
+            accounts.Add(new ChartOfAccount { Code = "52100000", Name = "Дополнительно оплаченный капитал", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "52400000", Name = "Капитал, авансированный собственником", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "53000000", Name = "Нераспределенная прибыль (убыток) прошлых лет", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "54000000", Name = "Резервный капитал", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "55000000", Name = "Прибыль (убытки) последнего отчетного года", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "59990000", Name = "Свод доходов и расходов", AccountType = "Passive", Level = 1 });
 
-                // Раздел 7. Расходы (700)
-                new ChartOfAccount { Code = "701", Name = "Себестоимость реализованной продукции", AccountType = "Active", Level = 1, Order = 70,
-                    Description = "Учет себестоимости" },
-                new ChartOfAccount { Code = "702", Name = "Расходы по реализации", AccountType = "Active", Level = 1, Order = 71,
-                    Description = "Учет коммерческих расходов" },
-                new ChartOfAccount { Code = "703", Name = "Общие и административные расходы", AccountType = "Active", Level = 1, Order = 72,
-                    Description = "Учет управленческих расходов" },
-                new ChartOfAccount { Code = "704", Name = "Прочие расходы", AccountType = "Active", Level = 1, Order = 73,
-                    Description = "Учет прочих расходов" },
-                new ChartOfAccount { Code = "705", Name = "Расходы по финансовой деятельности", AccountType = "Active", Level = 1, Order = 74,
-                    Description = "Учет расходов от финансовых операций" },
-                new ChartOfAccount { Code = "706", Name = "Расходы по налогам", AccountType = "Active", Level = 1, Order = 75,
-                    Description = "Учет налоговых расходов" }
-            };
+            // ==================== РАЗДЕЛ 6000: ДОХОДЫ ОТ ОПЕРАЦИОННОЙ ДЕЯТЕЛЬНОСТИ ====================
+            accounts.Add(new ChartOfAccount { Code = "61100000", Name = "Выручка от реализации товаров и услуг", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "61200000", Name = "Возврат проданных товаров и скидки", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "61300000", Name = "Выручка от обмена товаров и услуг", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "61500000", Name = "Выручка от использования активов", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "61600000", Name = "Выручка от процессинга и клиринга", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "61700000", Name = "Выручка от технической поддержки", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "62100000", Name = "Доход от аренды", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "62500000", Name = "Возврат списанных безнадежных долгов", AccountType = "Passive", Level = 1 });
+
+            // ==================== РАЗДЕЛ 7000: ОПЕРАЦИОННЫЕ РАСХОДЫ (прямые и косвенные) ====================
+            // Прямые расходы (7100)
+            accounts.Add(new ChartOfAccount { Code = "71100000", Name = "Затраты на приобретение товаров, сырья, материалов (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71200000", Name = "Затраты по оплате труда и соц.отчислениям (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71300000", Name = "Финансовые/процентные расходы по аренде (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71400000", Name = "Затраты на коммунальные услуги, связь (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71500000", Name = "Амортизация ОС (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71600000", Name = "Ремонт и обслуживание ОС, техподдержка (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71700000", Name = "Использование запасов для собственных нужд (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71800000", Name = "Амортизация НМА (прямые)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "71900000", Name = "Корректировки стоимости запасов (прямые)", AccountType = "Active", Level = 1 });
+            // Косвенные расходы (7200)
+            accounts.Add(new ChartOfAccount { Code = "72100000", Name = "Затраты на приобретение (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72200000", Name = "Затраты по оплате труда и соц.отчислениям (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72300000", Name = "Финансовые/процентные расходы по аренде (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72400000", Name = "Затраты на коммунальные услуги, связь (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72500000", Name = "Амортизация ОС (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72600000", Name = "Ремонт и обслуживание ОС, техподдержка (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72700000", Name = "Использование запасов для собственных нужд (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72800000", Name = "Амортизация НМА (косвенные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "72900000", Name = "Корректировки стоимости запасов (косвенные)", AccountType = "Active", Level = 1 });
+            // Расходы, связанные с реализацией (7500)
+            accounts.Add(new ChartOfAccount { Code = "75100000", Name = "Расходы на рекламу и содействие продаже", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75200000", Name = "Расходы по оплате труда (реализация)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75300000", Name = "Расходы по соц.отчислениям (реализация)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75400000", Name = "Расходы по хранению и транспорту", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75500000", Name = "Расходы по безнадежным долгам (реализация)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75600000", Name = "Расходы по гарантийному обслуживанию", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75700000", Name = "Прочие торговые издержки", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75800000", Name = "Амортизация ОС (реализация)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "75900000", Name = "Расходы на премиальные продажи", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "76000000", Name = "Прочие производственные расходы", AccountType = "Active", Level = 1 });
+
+            // ==================== РАЗДЕЛ 8000: ОБЩИЕ И АДМИНИСТРАТИВНЫЕ РАСХОДЫ ====================
+            accounts.Add(new ChartOfAccount { Code = "80100000", Name = "Расходы по оплате труда (административные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80200000", Name = "Расходы по соц.отчислениям (административные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80300000", Name = "Расходы по оплате аренды", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80400000", Name = "Расходы по оплате услуг", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80500000", Name = "Налог на имущество", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80600000", Name = "Расходы на канцелярские принадлежности", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80700000", Name = "Расходы на коммуникации", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80800000", Name = "Расходы по оплате страховок", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "80900000", Name = "Расходы по приобретению лицензий", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81000000", Name = "Расходы по НДС, не принимаемому к зачету", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81100000", Name = "Ремонт и тех.обслуживание ОС (административные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81200000", Name = "Расходы по компьютерному обеспечению", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81300000", Name = "Представительские расходы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81400000", Name = "Вознаграждение аудиторам", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81500000", Name = "Вознаграждение юристам", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81600000", Name = "Расходы по обучению", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81700000", Name = "Расходы по консультациям", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81800000", Name = "Расходы по связям с общественностью", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "81900000", Name = "Расходы по прочим налогам", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "82000000", Name = "Командировочные расходы (местные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "82100000", Name = "Командировочные расходы (международные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "82200000", Name = "Расходы по коммунальным услугам", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "82300000", Name = "Штрафы, пени, неустойки в бюджет", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "82400000", Name = "Штрафы, пени, неустойки по хоз.договорам", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "84700000", Name = "Амортизация ОС (административные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "84800000", Name = "Амортизация НМА (административные)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "84900000", Name = "Прочие общие и административные расходы", AccountType = "Active", Level = 1 });
+
+            // ==================== РАЗДЕЛ 9000: ДОХОДЫ И РАСХОДЫ ОТ НЕОПЕРАЦИОННОЙ ДЕЯТЕЛЬНОСТИ ====================
+            accounts.Add(new ChartOfAccount { Code = "91100000", Name = "Доход в виде процентов", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "91200000", Name = "Доход от ассоциированных, дочерних компаний", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "91300000", Name = "Доход от дивидендов", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "91400000", Name = "Доход от курсовых разниц по операциям в ин.валюте", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "91900000", Name = "Прочие неоперационные доходы", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "95100000", Name = "Расходы в виде процентов", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "95200000", Name = "Убытки от курсовых разниц по операциям в ин.валюте", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "95300000", Name = "Расходы по безнадежным долгам", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "95900000", Name = "Прочие неоперационные расходы", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "99100000", Name = "Расходы (доходы) по налогу на прибыль", AccountType = "Active", Level = 1 });
+
+            // ==================== ЗАБАЛАНСОВЫЕ СЧЕТА ====================
+            accounts.Add(new ChartOfAccount { Code = "11010000", Name = "Арендованные основные средства", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11011000", Name = "Амортизация арендованных основных средств", AccountType = "Passive", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11020000", Name = "МБП (забаланс)", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11030000", Name = "Бланки строгой отчетности", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11040000", Name = "Товары на хранении", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11050000", Name = "ТМЦ, принятые на ответственное хранение", AccountType = "Active", Level = 1 });
+            accounts.Add(new ChartOfAccount { Code = "11060000", Name = "Списанная задолженность неплатежеспособных дебиторов", AccountType = "Active", Level = 1 });
+
+            return accounts;
         }
 
         // Банки Кыргызстана
