@@ -1,9 +1,7 @@
-﻿using System;
+using System;
 using System.Windows;
 using Npgsql;
 using BIS.ERP.Services;
-using System.IO;
-using System.Text.Json;
 
 namespace BIS.ERP.Views
 {
@@ -13,7 +11,6 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
 
-            // Загружаем сохраненные настройки
             var settings = AppSettings.Instance;
             HostBox.Text = settings.Host;
             PortBox.Text = settings.Port.ToString();
@@ -61,29 +58,15 @@ namespace BIS.ERP.Views
                 var username = UsernameBox.Text;
                 var password = PasswordBox.Password;
 
-                // Создаем объект настроек
-                var settings = new AppSettings
-                {
-                    Host = host,
-                    Port = port,
-                    DatabaseName = "bis_master",
-                    Username = username,
-                    Password = password
-                };
+                var settings = AppSettings.Instance;
+                settings.Host = host;
+                settings.Port = port;
+                settings.DatabaseName = "bis_master";
+                settings.Username = username;
+                settings.Password = password;
+                settings.Save();
 
-                // Сохраняем в файл напрямую
-                string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
-                var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(configPath, json);
-
-                // Обновляем статический экземпляр
-                var instance = AppSettings.Instance;
-                instance.Host = host;
-                instance.Port = port;
-                instance.Username = username;
-                instance.Password = password;
-
-                MessageBox.Show($"Настройки сохранены!\nФайл: {configPath}\nПароль: '{password}'",
+                MessageBox.Show("Настройки сохранены.",
                     "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
 
                 DialogResult = true;

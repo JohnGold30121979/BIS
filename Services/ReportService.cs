@@ -7,6 +7,7 @@ using BIS.ERP.Models;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using System;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -63,11 +64,23 @@ namespace BIS.ERP.Services
                     using var command = _context.Database.GetDbConnection().CreateCommand();
                     command.CommandText = sql;
                     command.CommandTimeout = 30;
+                    var connectionOpened = false;
 
-                    await _context.Database.OpenConnectionAsync();
-                    using var reader = await command.ExecuteReaderAsync();
-                    dataTable.Load(reader);
-                    await _context.Database.CloseConnectionAsync();
+                    try
+                    {
+                        await _context.Database.OpenConnectionAsync();
+                        connectionOpened = true;
+
+                        using var reader = await command.ExecuteReaderAsync();
+                        dataTable.Load(reader);
+                    }
+                    finally
+                    {
+                        if (connectionOpened)
+                        {
+                            await _context.Database.CloseConnectionAsync();
+                        }
+                    }
                 }
             } catch (PostgresException ex) 
             {
@@ -217,7 +230,7 @@ namespace BIS.ERP.Services
             html.AppendLine("<html>");
             html.AppendLine("<head>");
             html.AppendLine($"<meta charset='UTF-8'>");
-            html.AppendLine($"<title>{report.Name}</title>");
+            html.AppendLine($"<title>{EncodeHtml(report.Name)}</title>");
             html.AppendLine(@"
         <style>
             body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; margin: 20mm; }
@@ -239,8 +252,8 @@ namespace BIS.ERP.Services
             // Шапка
             html.AppendLine($@"
         <div class='report-header'>
-            <div class='report-title'>{report.Name}</div>
-            <div class='report-subtitle'>{report.Description}</div>
+            <div class='report-title'>{EncodeHtml(report.Name)}</div>
+            <div class='report-subtitle'>{EncodeHtml(report.Description)}</div>
             <div class='report-date'>Дата: {DateTime.Now:dd.MM.yyyy HH:mm:ss}</div>
         </div>
     ");
@@ -252,7 +265,7 @@ namespace BIS.ERP.Services
                 html.AppendLine("<thead><tr>");
                 foreach (DataColumn column in dataTable.Columns)
                 {
-                    html.AppendLine($"<th>{column.ColumnName}</th>");
+                    html.AppendLine($"<th>{EncodeHtml(column.ColumnName)}</th>");
                 }
                 html.AppendLine("</tr></thead>");
 
@@ -264,7 +277,7 @@ namespace BIS.ERP.Services
                     foreach (DataColumn column in dataTable.Columns)
                     {
                         var value = row[column];
-                        html.AppendLine($"<td>{value}浏览");
+                        html.AppendLine($"<td>{EncodeHtml(value)}</td>");
 
                         if (column.DataType == typeof(decimal) || column.DataType == typeof(int))
                         {
@@ -301,6 +314,12 @@ namespace BIS.ERP.Services
 
             return html.ToString();
         }
+
+        private static string EncodeHtml(object? value)
+        {
+            return WebUtility.HtmlEncode(value?.ToString() ?? string.Empty);
+        }
+
         public string ExportToHtml(DataTable dataTable, Report report)
         {
             return GenerateReportHtml(dataTable, report);

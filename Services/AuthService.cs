@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -13,7 +13,6 @@ namespace BIS.ERP.Services
 
         public AuthService()
         {
-            // Инициализация тестовых пользователей
             if (!_users.Any())
             {
                 _users.Add(new User
@@ -48,80 +47,93 @@ namespace BIS.ERP.Services
 
         private string HashPassword(string password)
         {
-            // Для простоты используем простой хэш, в реальном проекте используйте BCrypt
-            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(password));
+            return global::BCrypt.Net.BCrypt.HashPassword(password);
         }
 
         private bool VerifyPassword(string password, string hash)
         {
-            return HashPassword(password) == hash;
+            if (string.IsNullOrWhiteSpace(hash))
+                return false;
+
+            return IsBcryptHash(hash)
+                ? global::BCrypt.Net.BCrypt.Verify(password, hash)
+                : LegacyHashPassword(password) == hash;
         }
 
-        public async Task<AuthResult> LoginAsync(string login, string password)
+        private static bool IsBcryptHash(string hash)
         {
-            return await Task.Run(() =>
-            {
-                var user = _users.FirstOrDefault(u => u.Login == login);
-
-                if (user == null)
-                {
-                    return new AuthResult
-                    {
-                        Success = false,
-                        ErrorMessage = "Неверный логин или пароль"
-                    };
-                }
-
-                if (!VerifyPassword(password, user.PasswordHash))
-                {
-                    return new AuthResult
-                    {
-                        Success = false,
-                        ErrorMessage = "Неверный логин или пароль"
-                    };
-                }
-
-                if (!user.IsActive)
-                {
-                    return new AuthResult
-                    {
-                        Success = false,
-                        ErrorMessage = "Пользователь заблокирован"
-                    };
-                }
-
-                _currentUser = user;
-                user.LastLoginDate = DateTime.Now;
-
-                return new AuthResult
-                {
-                    Success = true,
-                    User = user
-                };
-            });
+            return hash.StartsWith("$2", StringComparison.Ordinal);
         }
 
-        public async Task<bool> RegisterAsync(string login, string password, string fullName, string email)
+        private static string LegacyHashPassword(string password)
         {
-            return await Task.Run(() =>
-            {
-                if (_users.Any(u => u.Login == login))
-                    return false;
+            return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(password));
+        }
 
-                _users.Add(new User
+        public Task<AuthResult> LoginAsync(string login, string password)
+        {
+            var user = _users.FirstOrDefault(u => u.Login == login);
+
+            if (user == null)
+            {
+                return Task.FromResult(new AuthResult
                 {
-                    Id = _users.Count + 1,
-                    Login = login,
-                    Email = email,
-                    FullName = fullName,
-                    PasswordHash = HashPassword(password),
-                    Role = UserRole.User,
-                    IsActive = true,
-                    CreatedAt = DateTime.UtcNow
+                    Success = false,
+                    ErrorMessage = "Неверный логин или пароль"
                 });
+            }
 
-                return true;
+            if (!VerifyPassword(password, user.PasswordHash))
+            {
+                return Task.FromResult(new AuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Неверный логин или пароль"
+                });
+            }
+
+            if (!user.IsActive)
+            {
+                return Task.FromResult(new AuthResult
+                {
+                    Success = false,
+                    ErrorMessage = "Пользователь заблокирован"
+                });
+            }
+
+            if (!IsBcryptHash(user.PasswordHash))
+            {
+                user.PasswordHash = HashPassword(password);
+            }
+
+            _currentUser = user;
+            user.LastLoginDate = DateTime.UtcNow;
+
+            return Task.FromResult(new AuthResult
+            {
+                Success = true,
+                User = user
             });
+        }
+
+        public Task<bool> RegisterAsync(string login, string password, string fullName, string email)
+        {
+            if (_users.Any(u => u.Login == login))
+                return Task.FromResult(false);
+
+            _users.Add(new User
+            {
+                Id = _users.Count + 1,
+                Login = login,
+                Email = email,
+                FullName = fullName,
+                PasswordHash = HashPassword(password),
+                Role = UserRole.User,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            });
+
+            return Task.FromResult(true);
         }
 
         public void Logout()

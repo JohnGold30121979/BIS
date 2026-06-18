@@ -586,7 +586,7 @@ namespace BIS.ERP
                 var reportService = new ReportService(context);
                 var data = await reportService.GetReportDataAsync(report);
 
-                var preview = new ReportPreviewWindow(data, report);
+                var preview = new ReportPreviewWindow(data, report, reportService);
                 preview.Owner = this;
                 preview.ShowDialog();
             }

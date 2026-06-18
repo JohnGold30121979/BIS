@@ -1,4 +1,5 @@
-﻿using BIS.ERP.Services;
+using BIS.ERP.Behaviors;
+using BIS.ERP.Services;
 using BIS.ERP.Views;
 using System.Text;
 using System.Windows;
@@ -10,6 +11,8 @@ namespace BIS.ERP
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            EnterKeyNavigationBehavior.Initialize();
+
             // Регистрируем кодировки для поддержки CP866 (DOS кириллица)
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
@@ -43,7 +46,7 @@ namespace BIS.ERP
                     return;
                 }
             }
-        
+
             var infoBaseWindow = new InfoBaseSelectionWindow();
             infoBaseWindow.Show();
         }

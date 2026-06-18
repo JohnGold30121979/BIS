@@ -318,7 +318,7 @@ namespace BIS.ERP.Views
 
                 var data = await _reportService.GetReportDataAsync(tempReport);
 
-                var previewWindow = new ReportPreviewWindow(data, tempReport);
+                var previewWindow = new ReportPreviewWindow(data, tempReport, _reportService);
                 previewWindow.Owner = this;
                 previewWindow.ShowDialog();
             }

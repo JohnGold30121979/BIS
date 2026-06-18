@@ -275,32 +275,19 @@ namespace BIS.ERP.Services
             }
         }
 
-        // Получение всех строк с расшифрованными данными
-        public List<Dictionary<string, object>> GetAllRowsData(Guid documentId)
-        {
-            var document = GetDocumentByIdAsync(documentId).Result;
-            if (document == null) return new List<Dictionary<string, object>>();
-
-            return document.Rows.OrderBy(r => r.RowNumber)
-                .Select(r => GetRowData(r))
-                .ToList();
-        }
-
-        // Получение списка всех полей из документа
-        public List<string> GetAllFieldNames(Guid documentId)
+        public Task<List<string>> GetAllFieldNamesAsync(DynamicDocument document)
         {
             var allFields = new HashSet<string>();
-            var rowsData = GetAllRowsData(documentId);
 
-            foreach (var row in rowsData)
+            foreach (var row in document.Rows.OrderBy(r => r.RowNumber))
             {
-                foreach (var key in row.Keys)
+                foreach (var key in GetRowData(row).Keys)
                 {
                     allFields.Add(key);
                 }
             }
 
-            return allFields.OrderBy(f => f).ToList();
+            return Task.FromResult(allFields.OrderBy(f => f).ToList());
         }
 
         // Обновление документа
@@ -345,8 +332,8 @@ namespace BIS.ERP.Services
 
             try
             {
-                return await Task.Run(() => JsonSerializer.Deserialize<Dictionary<string, object>>(row.Data))
-                       ?? new Dictionary<string, object>();
+                return await Task.FromResult(JsonSerializer.Deserialize<Dictionary<string, object>>(row.Data)
+                       ?? new Dictionary<string, object>());
             }
             catch (Exception ex)
             {

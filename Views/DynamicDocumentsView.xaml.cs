@@ -15,7 +15,7 @@ namespace BIS.ERP.Views
     public partial class DynamicDocumentsView : UserControl
     {
         private readonly DocumentService _documentService;
-        private List<DynamicDocument> _documents;
+        private List<DynamicDocument> _documents = new();
         private bool _isLoading = false;
 
         public DynamicDocumentsView(DocumentService documentService)
@@ -40,7 +40,7 @@ namespace BIS.ERP.Views
                 Mouse.OverrideCursor = Cursors.Wait;
                 StatusText.Text = "Загрузка списка документов...";
 
-                _documents = await Task.Run(() => _documentService.GetDocumentsAsync().Result);
+                _documents = await _documentService.GetDocumentsAsync();
                 DocumentsList.ItemsSource = _documents;
 
                 UpdateButtonsState();
@@ -97,14 +97,12 @@ namespace BIS.ERP.Views
                     DetailsInfo.Text = "Загрузка данных...";
                 });
 
-                var fullDocument = await Task.Run(async () => {
-                    return await _documentService.GetDocumentByIdAsync(document.Id);
-                });
+                var fullDocument = await _documentService.GetDocumentByIdAsync(document.Id);
 
                 if (fullDocument == null) return;
 
                 // Получаем все поля
-                var allFields = await Task.Run(() => _documentService.GetAllFieldNames(fullDocument.Id));
+                var allFields = await _documentService.GetAllFieldNamesAsync(fullDocument);
 
                 // СОЗДАЕМ DATATABLE
                 var dataTable = new DataTable();
@@ -123,7 +121,7 @@ namespace BIS.ERP.Views
 
                 foreach (var row in rows)
                 {
-                    var rowData = await Task.Run(() => _documentService.GetRowData(row));
+                    var rowData = await _documentService.GetRowDataAsync(row);
 
                     // Создаем новую строку DataTable
                     var dataRow = dataTable.NewRow();
@@ -136,7 +134,7 @@ namespace BIS.ERP.Views
                     {
                         if (rowData.ContainsKey(field) && rowData[field] != null)
                         {
-                            var value = rowData[field].ToString();
+                            var value = rowData[field].ToString() ?? string.Empty;
                             // Ограничиваем длину для отображения
                             dataRow[field] = value.Length > 200 ? value.Substring(0, 200) + "..." : value;
                         }
@@ -216,7 +214,7 @@ namespace BIS.ERP.Views
                         Mouse.OverrideCursor = Cursors.Wait;
                         StatusText.Text = $"Удаление документа {document.Number}...";
 
-                        await Task.Run(() => _documentService.DeleteDocumentAsync(document.Id));
+                        await _documentService.DeleteDocumentAsync(document.Id);
                         await LoadDocuments();
 
                         StatusText.Text = $"Документ {document.Number} удален";
@@ -253,9 +251,7 @@ namespace BIS.ERP.Views
                         Mouse.OverrideCursor = Cursors.Wait;
                         StatusText.Text = $"Экспорт документа {document.Number}...";
 
-                        var fullDocument = await Task.Run(async () => {
-                            return await _documentService.GetDocumentByIdAsync(document.Id);
-                        });
+                        var fullDocument = await _documentService.GetDocumentByIdAsync(document.Id);
 
                         var exportData = new
                         {

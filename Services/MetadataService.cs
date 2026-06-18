@@ -15,7 +15,6 @@ namespace BIS.ERP.Services
     public partial class MetadataService
     {
         private readonly AppDbContext _context;
-        private readonly object _numberLock = new object();
 
         public MetadataService(AppDbContext context)
         {
@@ -1010,23 +1009,42 @@ namespace BIS.ERP.Services
         private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId)
         {
             var result = new Dictionary<string, object>();
-            var sql = $"SELECT * FROM \"{tableName}\" WHERE \"Id\" = '{recordId}'";
+            var safeTableName = QuoteIdentifier(tableName);
+            var sql = $"SELECT * FROM {safeTableName} WHERE \"Id\" = @recordId";
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@recordId";
+            parameter.Value = recordId;
+            command.Parameters.Add(parameter);
 
-            await _context.Database.OpenConnectionAsync();
-            using var reader = await command.ExecuteReaderAsync();
-
-            if (await reader.ReadAsync())
+            var connectionOpened = false;
+            try
             {
-                for (int i = 0; i < reader.FieldCount; i++)
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
                 {
-                    result[reader.GetName(i)] = reader.GetValue(i);
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        result[reader.GetName(i)] = reader.GetValue(i);
+                    }
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                {
+                    await _context.Database.CloseConnectionAsync();
                 }
             }
 
-            await _context.Database.CloseConnectionAsync();
             return result;
         }
 
@@ -1304,6 +1322,8 @@ namespace BIS.ERP.Services
         // Провести документ (ПКО или РКО)       
         public async Task PostDocumentAsync(Guid documentId, Guid recordId)
         {
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
             try
             {
                 System.Diagnostics.Debug.WriteLine($"=== PostDocumentAsync START ===");
@@ -1362,10 +1382,12 @@ namespace BIS.ERP.Services
                     throw new Exception($"Неизвестный тип документа: {document.Name}");
                 }
 
+                await transaction.CommitAsync();
                 System.Diagnostics.Debug.WriteLine($"=== PostDocumentAsync SUCCESS ===");
             }
             catch (Exception ex)
             {
+                await transaction.RollbackAsync();
                 System.Diagnostics.Debug.WriteLine($"=== PostDocumentAsync ERROR ===");
                 System.Diagnostics.Debug.WriteLine($"Message: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
@@ -1571,25 +1593,35 @@ namespace BIS.ERP.Services
                         documentType = "Банковская операция";
                 }
 
-                    var sql = $@"
+                var sql = @"
                     INSERT INTO doc_postings 
                     (""Id"", posting_date, doc_number, debit_account, credit_account, 
                      amount_kgs, description, document_type, is_active, ""CreatedAt"", ""UpdatedAt"") 
                     VALUES (
-                        '{postingId}',
-                        '{postingDate:yyyy-MM-dd HH:mm:ss}',
-                        '{docNumber.Replace("'", "''")}',
-                        '{debitAccount}',
-                        '{creditAccount}',
-                        {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)},
-                        '{description?.Replace("'", "''") ?? ""}',
-                        '{documentType.Replace("'", "''")}',
-                        true,
+                        @id,
+                        @postingDate,
+                        @docNumber,
+                        @debitAccount,
+                        @creditAccount,
+                        @amount,
+                        @description,
+                        @documentType,
+                        @isActive,
                         NOW(),
                         NOW()
                     )";
 
-                await _context.Database.ExecuteSqlRawAsync(sql);
+                await _context.Database.ExecuteSqlRawAsync(
+                    sql,
+                    new NpgsqlParameter("@id", postingId),
+                    new NpgsqlParameter("@postingDate", postingDate),
+                    new NpgsqlParameter("@docNumber", docNumber),
+                    new NpgsqlParameter("@debitAccount", debitAccount),
+                    new NpgsqlParameter("@creditAccount", creditAccount),
+                    new NpgsqlParameter("@amount", amount),
+                    new NpgsqlParameter("@description", (object?)description ?? DBNull.Value),
+                    new NpgsqlParameter("@documentType", documentType),
+                    new NpgsqlParameter("@isActive", true));
                 System.Diagnostics.Debug.WriteLine($"✅ Проводка создана: {documentType} | {docNumber} | {amount}");
             }
             catch (Exception ex)
@@ -1601,21 +1633,26 @@ namespace BIS.ERP.Services
 
         private async Task UpdateDocumentPostedStatus(string tableName, Guid recordId)
         {
+            var safeTableName = QuoteIdentifier(tableName);
             var updateSql = $@"
-        UPDATE ""{tableName}"" 
+        UPDATE {safeTableName} 
         SET ""is_posted"" = true, ""UpdatedAt"" = NOW() 
-        WHERE ""Id"" = '{recordId}'";
-            await _context.Database.ExecuteSqlRawAsync(updateSql);
+        WHERE ""Id"" = @recordId";
+            await _context.Database.ExecuteSqlRawAsync(updateSql, new NpgsqlParameter("@recordId", recordId));
         }
 
         private async Task UpdateCashDeskBalance(Guid cashDeskId, decimal amount, bool isIncrease)
         {
             var sql = $@"
             UPDATE ""catalog_cash_desks"" 
-            SET ""current_balance"" = COALESCE(""current_balance"", 0) {(isIncrease ? "+" : "-")} {amount.ToString(System.Globalization.CultureInfo.InvariantCulture)},
+            SET ""current_balance"" = COALESCE(""current_balance"", 0) {(isIncrease ? "+" : "-")} @amount,
                 ""UpdatedAt"" = NOW()
-            WHERE ""Id"" = '{cashDeskId}'";
-                await _context.Database.ExecuteSqlRawAsync(sql);
+            WHERE ""Id"" = @cashDeskId";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                sql,
+                new NpgsqlParameter("@amount", amount),
+                new NpgsqlParameter("@cashDeskId", cashDeskId));
         }
 
         private async Task<string> GetAccountCodeById(Guid accountId)
@@ -1625,13 +1662,35 @@ namespace BIS.ERP.Services
 
             if (catalog == null) return "";
 
-            var sql = $"SELECT \"code\" FROM \"{catalog.TableName}\" WHERE \"Id\" = '{accountId}'";
+            var safeTableName = QuoteIdentifier(catalog.TableName);
+            var sql = $"SELECT \"code\" FROM {safeTableName} WHERE \"Id\" = @accountId";
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
-            await _context.Database.OpenConnectionAsync();
-            var result = await command.ExecuteScalarAsync();
-            await _context.Database.CloseConnectionAsync();
-            return result?.ToString() ?? "";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@accountId";
+            parameter.Value = accountId;
+            command.Parameters.Add(parameter);
+
+            var connectionOpened = false;
+
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                var result = await command.ExecuteScalarAsync();
+                return result?.ToString() ?? "";
+            }
+            finally
+            {
+                if (connectionOpened)
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
         }
 
 
@@ -1719,64 +1778,67 @@ namespace BIS.ERP.Services
 
         public async Task<string> GetNextDocumentNumberAsync(string documentName)
         {
-            lock (_numberLock)
-            {
-                return GetNextDocumentNumberAsyncInternal(documentName).Result;
-            }
-        }
-
-        private async Task<string> GetNextDocumentNumberAsyncInternal(string documentName)
-        {
             try
             {
-                // Получаем префикс и текущий номер
-                var sql = $@"
-            SELECT prefix, current_number FROM doc_numbering 
-            WHERE document_type = '{documentName.Replace("'", "''")}'";
+                var defaultPrefix = GetDefaultDocumentPrefix(documentName);
+
+                const string insertSql = @"
+                INSERT INTO doc_numbering (document_type, current_number, prefix)
+                VALUES (@documentType, 1, @prefix)
+                ON CONFLICT (document_type) DO NOTHING";
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    insertSql,
+                    new NpgsqlParameter("@documentType", documentName),
+                    new NpgsqlParameter("@prefix", defaultPrefix));
 
                 using var command = _context.Database.GetDbConnection().CreateCommand();
-                command.CommandText = sql;
-                await _context.Database.OpenConnectionAsync();
+                command.CommandText = @"
+                UPDATE doc_numbering
+                SET current_number = current_number + 1, UpdatedAt = NOW()
+                WHERE document_type = @documentType
+                RETURNING prefix, current_number - 1";
 
-                using var reader = await command.ExecuteReaderAsync();
-                string prefix = "";
-                int currentNumber = 1;
+                var documentTypeParameter = command.CreateParameter();
+                documentTypeParameter.ParameterName = "@documentType";
+                documentTypeParameter.Value = documentName;
+                command.Parameters.Add(documentTypeParameter);
 
-                if (await reader.ReadAsync())
+                var connectionOpened = false;
+
+                try
                 {
-                    prefix = reader.GetString(0);
-                    currentNumber = reader.GetInt32(1);
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+
+                    using var reader = await command.ExecuteReaderAsync();
+                    if (await reader.ReadAsync())
+                    {
+                        var prefix = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+                        var currentNumber = reader.GetInt32(1);
+                        return $"{prefix}{currentNumber}";
+                    }
                 }
-                else
+                finally
                 {
-                    // Если записи нет, создаём с префиксом по умолчанию
-                    await _context.Database.CloseConnectionAsync();
-                    await AddDefaultNumberingForDocumentAsync(documentName);
-                    return await GetNextDocumentNumberAsyncInternal(documentName);
+                    if (connectionOpened)
+                    {
+                        await _context.Database.CloseConnectionAsync();
+                    }
                 }
 
-                await _context.Database.CloseConnectionAsync();
-
-                // Обновляем номер
-                var updateSql = $@"
-                UPDATE doc_numbering 
-                SET current_number = {currentNumber + 1}, UpdatedAt = NOW()
-                WHERE document_type = '{documentName.Replace("'", "''")}'";
-                await _context.Database.ExecuteSqlRawAsync(updateSql);
-
-                return $"{prefix}{currentNumber}";
+                throw new Exception("Не удалось получить следующий номер документа");
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка получения номера документа: {ex.Message}");
-                // Возвращаем временный номер на основе GUID
                 return $"TMP-{Guid.NewGuid().ToString().Substring(0, 8)}";
             }
         }
 
-        private async Task AddDefaultNumberingForDocumentAsync(string documentType)
+        private static string GetDefaultDocumentPrefix(string documentType)
         {
-            string prefix = documentType switch
+            return documentType switch
             {
                 "Приходный кассовый ордер" => "ПКО-",
                 "Расходный кассовый ордер" => "РКО-",
@@ -1784,11 +1846,16 @@ namespace BIS.ERP.Services
                 "Проводки" => "ПР-",
                 _ => ""
             };
+        }
 
-            var sql = $@"
-        INSERT INTO doc_numbering (document_type, current_number, prefix) 
-        VALUES ('{documentType.Replace("'", "''")}', 1, '{prefix}')";
-            await _context.Database.ExecuteSqlRawAsync(sql);
+        private static string QuoteIdentifier(string identifier)
+        {
+            if (string.IsNullOrWhiteSpace(identifier) || identifier.Any(c => !(char.IsLetterOrDigit(c) || c == '_')))
+            {
+                throw new ArgumentException("Некорректный SQL идентификатор", nameof(identifier));
+            }
+
+            return $"\"{identifier}\"";
         }
 
 
