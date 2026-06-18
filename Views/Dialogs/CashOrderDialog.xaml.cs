@@ -79,8 +79,9 @@ namespace BIS.ERP.Views
                     else if (data.Record != null)
                     {
                         // Заполняем данные для редактирования
-                        NumberBox.Text = data.Record.ContainsKey("Номер") ? data.Record["Номер"].ToString() :
-                                        (data.Record.ContainsKey("doc_number") ? data.Record["doc_number"].ToString() : "");
+                        var rawNumber = data.Record.ContainsKey("Номер") ? data.Record["Номер"]?.ToString() :
+                                       (data.Record.ContainsKey("doc_number") ? data.Record["doc_number"]?.ToString() : "");
+                        NumberBox.Text = MetadataService.NormalizeLegacyDocumentNumber(rawNumber);
 
                         if (data.Record.ContainsKey("Дата") && data.Record["Дата"] is DateTime dt)
                             DatePicker.SelectedDate = dt;
@@ -162,7 +163,7 @@ namespace BIS.ERP.Views
             }
             catch
             {
-                result.DocumentNumber = $"Вр.{DateTime.Now:yyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+                result.DocumentNumber = MetadataService.GenerateFallbackDocumentNumber();
             }
 
             // Если редактирование, загружаем запись
@@ -241,9 +242,20 @@ namespace BIS.ERP.Views
             {
                 this.Cursor = Cursors.Wait;
 
+                var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(NumberBox.Text);
+                if (string.IsNullOrWhiteSpace(documentNumber) || documentNumber.Any(c => !char.IsDigit(c)))
+                {
+                    MessageBox.Show("Номер документа должен содержать только цифры.", "Проверка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    NumberBox.Focus();
+                    return;
+                }
+
+                NumberBox.Text = documentNumber;
+
                 var itemData = new Dictionary<string, object>
                 {
-                    ["Номер"] = NumberBox.Text,
+                    ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
                     ["Сумма"] = decimal.TryParse(AmountBox.Text, out var amount) ? amount : 0,
                     ["Основание"] = BasisBox.Text,

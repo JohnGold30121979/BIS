@@ -90,6 +90,24 @@ namespace BIS.ERP.Views.Dialogs
                     };
                 }
 
+                if (_metadata.ObjectType == "Document" &&
+                    MetadataService.IsDocumentNumberFieldName(field.Name) &&
+                    inputControl is TextBox numberTextBox &&
+                    !_editId.HasValue)
+                {
+                    numberTextBox.IsReadOnly = true;
+                    numberTextBox.Background = Brushes.LightGray;
+
+                    try
+                    {
+                        numberTextBox.Text = await _metadataService.GetNextDocumentNumberAsync(_metadata.Name);
+                    }
+                    catch
+                    {
+                        numberTextBox.Text = MetadataService.GenerateFallbackDocumentNumber();
+                    }
+                }
+
                 panel.Children.Add(inputControl);
                 FieldsPanel.Children.Add(panel);
                 _fieldControls[field.Name] = inputControl;
@@ -137,6 +155,20 @@ namespace BIS.ERP.Views.Dialogs
                             "Bool" => (control as CheckBox)?.IsChecked ?? false,
                             _ => (control as TextBox)?.Text ?? ""
                         };
+
+                        if (_metadata.ObjectType == "Document" &&
+                            MetadataService.IsDocumentNumberFieldName(field.Name))
+                        {
+                            var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(value?.ToString());
+                            if (string.IsNullOrWhiteSpace(documentNumber) || documentNumber.Any(c => !char.IsDigit(c)))
+                            {
+                                MessageBox.Show("Номер документа должен содержать только цифры.", "Проверка",
+                                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                                return;
+                            }
+
+                            value = documentNumber;
+                        }
                     }
 
                     ItemData[field.Name] = value;

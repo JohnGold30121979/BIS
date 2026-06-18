@@ -72,7 +72,16 @@ namespace BIS.ERP.Views
                 {
                     // Генерируем номер в фоновом потоке
                     var number = await Task.Run(async () =>
-                        await _metadataService.GetNextDocumentNumberAsync(_document.Name));
+                    {
+                        try
+                        {
+                            return await _metadataService.GetNextDocumentNumberAsync(_document.Name);
+                        }
+                        catch
+                        {
+                            return MetadataService.GenerateFallbackDocumentNumber();
+                        }
+                    });
                     NumberBox.Text = number;
                 }
 
@@ -196,8 +205,9 @@ namespace BIS.ERP.Views
             {
                 Dispatcher.Invoke(() =>
                 {
-                    NumberBox.Text = record.ContainsKey("Номер") ? record["Номер"].ToString() :
-                                    (record.ContainsKey("doc_number") ? record["doc_number"].ToString() : "");
+                    var rawNumber = record.ContainsKey("Номер") ? record["Номер"]?.ToString() :
+                                   (record.ContainsKey("doc_number") ? record["doc_number"]?.ToString() : "");
+                    NumberBox.Text = MetadataService.NormalizeLegacyDocumentNumber(rawNumber);
 
                     if (record.ContainsKey("Дата") && record["Дата"] is DateTime dt) DatePicker.SelectedDate = dt;
                     if (record.ContainsKey("Сумма")) AmountBox.Text = record["Сумма"].ToString();
@@ -258,6 +268,16 @@ namespace BIS.ERP.Views
             try
             {
                 this.Cursor = Cursors.Wait;
+                var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(NumberBox.Text);
+                if (string.IsNullOrWhiteSpace(documentNumber) || documentNumber.Any(c => !char.IsDigit(c)))
+                {
+                    MessageBox.Show("Номер документа должен содержать только цифры.", "Проверка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    NumberBox.Focus();
+                    return;
+                }
+
+                NumberBox.Text = documentNumber;
 
                 // Определяем тип платежа
                 string orderType = ((ComboBoxItem)TypeCombo.SelectedItem)?.Content?.ToString() ?? "Исходящее";
@@ -268,7 +288,7 @@ namespace BIS.ERP.Views
 
                 var itemData = new Dictionary<string, object>
                 {
-                    ["Номер"] = NumberBox.Text,
+                    ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
                     ["Тип"] = documentType,  
                     ["Сумма"] = decimal.TryParse(AmountBox.Text, out var amount) ? amount : 0,

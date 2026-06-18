@@ -15,6 +15,7 @@ namespace BIS.ERP.Services
     public partial class MetadataService
     {
         private readonly AppDbContext _context;
+        private const string GlobalDocumentNumberingKey = "Все документы";
 
         public MetadataService(AppDbContext context)
         {
@@ -178,6 +179,20 @@ namespace BIS.ERP.Services
 
             if (catalog == null) return new List<Dictionary<string, object>>();
 
+            if (catalog.ObjectType == "Document")
+            {
+                try
+                {
+                    await EnsureGlobalDocumentNumberConfigurationAsync();
+                    await NormalizeDocumentTableNumbersAsync(catalog);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Ошибка синхронизации нумерации для {catalog.Name}: {ex.Message}");
+                }
+            }
+
             var result = new List<Dictionary<string, object>>();
             var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
 
@@ -213,7 +228,17 @@ namespace BIS.ERP.Services
                     {
                         var dbName = reader.GetName(i);
                         var displayName = fieldMapping.TryGetValue(dbName, out var name) ? name : dbName;
-                        row[displayName] = reader.GetValue(i);
+                        var value = reader.GetValue(i);
+
+                        if (catalog.ObjectType == "Document" &&
+                            IsDocumentNumberFieldName(displayName))
+                        {
+                            row[displayName] = NormalizeLegacyDocumentNumber(value?.ToString());
+                        }
+                        else
+                        {
+                            row[displayName] = value;
+                        }
                     }
                     result.Add(row);
                 }
@@ -529,6 +554,28 @@ namespace BIS.ERP.Services
 
         public async Task<List<MetadataObject>> GetDocumentsAsync()
         {
+            var documents = await LoadDocumentMetadataAsync();
+
+            try
+            {
+                await EnsureGlobalDocumentNumberConfigurationAsync(documents);
+
+                foreach (var document in documents.Where(IsManagedDocument))
+                {
+                    await NormalizeDocumentTableNumbersAsync(document);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка синхронизации общей нумерации документов: {ex.Message}");
+            }
+
+            return documents;
+        }
+
+        private async Task<List<MetadataObject>> LoadDocumentMetadataAsync()
+        {
             return await _context.Set<MetadataObject>()
                 .Where(m => m.ObjectType == "Document")
                 .Include(m => m.Fields)
@@ -739,6 +786,9 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            NormalizeDocumentNumberData(metadata, data);
+            await EnsureDocumentNumberIsUniqueAsync(metadata, data);
+
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
 
@@ -783,6 +833,9 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            NormalizeDocumentNumberData(metadata, data);
+            await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);
+
             var setClauses = new List<string>();
 
             foreach (var field in metadata.Fields)
@@ -809,6 +862,127 @@ namespace BIS.ERP.Services
 
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
+        }
+
+        private static void NormalizeDocumentNumberData(MetadataObject metadata, Dictionary<string, object> data)
+        {
+            if (!IsManagedDocument(metadata))
+            {
+                return;
+            }
+
+            foreach (var fieldName in new[] { "Номер", "Номер документа", "doc_number", "number" })
+            {
+                if (data.TryGetValue(fieldName, out var value) && value != null)
+                {
+                    var normalizedNumber = NormalizeLegacyDocumentNumber(value.ToString());
+                    if (string.IsNullOrWhiteSpace(normalizedNumber) || normalizedNumber.Any(c => !char.IsDigit(c)))
+                    {
+                        throw new Exception("Номер документа должен содержать только цифры");
+                    }
+
+                    data[fieldName] = normalizedNumber;
+                }
+            }
+        }
+
+        private async Task EnsureDocumentNumberIsUniqueAsync(
+            MetadataObject metadata,
+            Dictionary<string, object> data,
+            Guid? currentRecordId = null)
+        {
+            if (!IsManagedDocument(metadata))
+            {
+                return;
+            }
+
+            var documentNumber = GetDocumentNumberFromData(data);
+            if (string.IsNullOrWhiteSpace(documentNumber))
+            {
+                return;
+            }
+
+            var documents = await LoadDocumentMetadataAsync();
+            var connection = _context.Database.GetDbConnection();
+            var connectionOpened = false;
+
+            try
+            {
+                if (connection.State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                foreach (var document in documents.Where(IsManagedDocument))
+                {
+                    var numberField = FindDocumentNumberField(document);
+                    if (numberField == null)
+                    {
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(document.TableName) ||
+                        string.IsNullOrWhiteSpace(numberField.DbColumnName))
+                    {
+                        continue;
+                    }
+
+                    var quotedTableName = DelimitIdentifier(document.TableName);
+                    var quotedColumnName = DelimitIdentifier(numberField.DbColumnName);
+
+                    using var command = connection.CreateCommand();
+                    command.CommandText = $@"
+                        SELECT COUNT(*)
+                        FROM {quotedTableName}
+                        WHERE REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g') = @documentNumber";
+
+                    var documentNumberParameter = command.CreateParameter();
+                    documentNumberParameter.ParameterName = "@documentNumber";
+                    documentNumberParameter.Value = documentNumber;
+                    command.Parameters.Add(documentNumberParameter);
+
+                    if (currentRecordId.HasValue && document.Id == metadata.Id)
+                    {
+                        command.CommandText += @" AND ""Id"" <> @recordId";
+
+                        var recordIdParameter = command.CreateParameter();
+                        recordIdParameter.ParameterName = "@recordId";
+                        recordIdParameter.Value = currentRecordId.Value;
+                        command.Parameters.Add(recordIdParameter);
+                    }
+
+                    var matches = Convert.ToInt32(await command.ExecuteScalarAsync());
+                    if (matches > 0)
+                    {
+                        throw new Exception($"Номер документа {documentNumber} уже используется.");
+                    }
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
+        }
+
+        private static string? GetDocumentNumberFromData(Dictionary<string, object> data)
+        {
+            foreach (var fieldName in new[] { "Номер", "Номер документа", "doc_number", "number" })
+            {
+                if (data.TryGetValue(fieldName, out var value) && value != null)
+                {
+                    var documentNumber = value.ToString();
+                    if (!string.IsNullOrWhiteSpace(documentNumber))
+                    {
+                        return documentNumber;
+                    }
+                }
+            }
+
+            return null;
         }
 
 
@@ -1430,6 +1604,7 @@ namespace BIS.ERP.Services
 
             // Получаем данные документа
             string? docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");
+            docNumber = NormalizeLegacyDocumentNumber(docNumber);
             DateTime postingDate = recordData.ContainsKey("doc_date") ? (DateTime)recordData["doc_date"] :
                                   (recordData.ContainsKey("Дата") ? (DateTime)recordData["Дата"] : DateTime.Now);
             string? description = recordData.ContainsKey("basis") ? recordData["basis"].ToString() : (recordData.ContainsKey("Основание") ? recordData["Основание"].ToString() : "");
@@ -1475,6 +1650,7 @@ namespace BIS.ERP.Services
             // Получаем номер документа
             string docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() :
                                (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");
+            docNumber = NormalizeLegacyDocumentNumber(docNumber);
             if (string.IsNullOrEmpty(docNumber))
                 docNumber = recordId.ToString().Substring(0, 8);
 
@@ -1744,64 +1920,32 @@ namespace BIS.ERP.Services
 
         private async Task AddDefaultNumberingRecordsAsync()
         {
-            var records = new[]
-            {
-            new { document_type = "Приходный кассовый ордер", prefix = "ПКО-" },
-            new { document_type = "Расходный кассовый ордер", prefix = "РКО-" },
-            new { document_type = "Платежное поручение", prefix = "ПП-" },
-            new { document_type = "Проводки", prefix = "ПР-" }
-            };
-
-            foreach (var record in records)
-            {
-                // Проверяем, есть ли уже запись
-                var checkSql = $@"
-                SELECT COUNT(*) FROM doc_numbering 
-                WHERE document_type = '{record.document_type}'";
-
-                using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
-                checkCommand.CommandText = checkSql;
-                await _context.Database.OpenConnectionAsync();
-                var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
-                await _context.Database.CloseConnectionAsync();
-
-                if (exists == 0)
-                {
-                    var insertSql = $@"
+            const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix) 
-                VALUES ('{record.document_type}', 1, '{record.prefix}')";
-                    await _context.Database.ExecuteSqlRawAsync(insertSql);
-                    System.Diagnostics.Debug.WriteLine($"Добавлена нумерация для {record.document_type}");
-                }
-            }
+                VALUES (@documentType, 1, '')
+                ON CONFLICT (document_type) DO NOTHING";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                insertSql,
+                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey));
         }       
 
         public async Task<string> GetNextDocumentNumberAsync(string documentName)
         {
             try
             {
-                var defaultPrefix = GetDefaultDocumentPrefix(documentName);
-
-                const string insertSql = @"
-                INSERT INTO doc_numbering (document_type, current_number, prefix)
-                VALUES (@documentType, 1, @prefix)
-                ON CONFLICT (document_type) DO NOTHING";
-
-                await _context.Database.ExecuteSqlRawAsync(
-                    insertSql,
-                    new NpgsqlParameter("@documentType", documentName),
-                    new NpgsqlParameter("@prefix", defaultPrefix));
+                await EnsureGlobalDocumentNumberConfigurationAsync();
 
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = @"
                 UPDATE doc_numbering
                 SET current_number = current_number + 1, UpdatedAt = NOW()
                 WHERE document_type = @documentType
-                RETURNING prefix, current_number - 1";
+                RETURNING current_number - 1";
 
                 var documentTypeParameter = command.CreateParameter();
                 documentTypeParameter.ParameterName = "@documentType";
-                documentTypeParameter.Value = documentName;
+                documentTypeParameter.Value = GlobalDocumentNumberingKey;
                 command.Parameters.Add(documentTypeParameter);
 
                 var connectionOpened = false;
@@ -1814,9 +1958,7 @@ namespace BIS.ERP.Services
                     using var reader = await command.ExecuteReaderAsync();
                     if (await reader.ReadAsync())
                     {
-                        var prefix = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
-                        var currentNumber = reader.GetInt32(1);
-                        return $"{prefix}{currentNumber}";
+                        return reader.GetInt32(0).ToString();
                     }
                 }
                 finally
@@ -1832,20 +1974,187 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка получения номера документа: {ex.Message}");
-                return $"TMP-{Guid.NewGuid().ToString().Substring(0, 8)}";
+                return GenerateFallbackDocumentNumber();
             }
         }
 
-        private static string GetDefaultDocumentPrefix(string documentType)
+        private async Task EnsureGlobalDocumentNumberConfigurationAsync(List<MetadataObject>? documents = null)
         {
-            return documentType switch
+            await CreateDocumentNumberingTableAsync();
+            documents ??= await LoadDocumentMetadataAsync();
+            var nextNumber = await GetSuggestedNextGlobalDocumentNumberAsync(documents);
+
+            const string insertSql = @"
+                INSERT INTO doc_numbering (document_type, current_number, prefix)
+                VALUES (@documentType, @currentNumber, '')
+                ON CONFLICT (document_type) DO NOTHING";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                insertSql,
+                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey),
+                new NpgsqlParameter("@currentNumber", nextNumber));
+
+            const string updateSql = @"
+                UPDATE doc_numbering
+                SET prefix = '', current_number = GREATEST(current_number, @currentNumber), UpdatedAt = NOW()
+                WHERE document_type = @documentType
+                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                updateSql,
+                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey),
+                new NpgsqlParameter("@currentNumber", nextNumber));
+
+            const string cleanupSql = @"
+                DELETE FROM doc_numbering
+                WHERE document_type <> @documentType";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                cleanupSql,
+                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey));
+        }
+
+        private async Task<int> GetSuggestedNextGlobalDocumentNumberAsync(IEnumerable<MetadataObject> documents)
+        {
+            long maxDocumentNumber = 0;
+            long maxCounterNumber = 1;
+            var connectionOpened = false;
+            var connection = _context.Database.GetDbConnection();
+
+            try
             {
-                "Приходный кассовый ордер" => "ПКО-",
-                "Расходный кассовый ордер" => "РКО-",
-                "Платежное поручение" => "ПП-",
-                "Проводки" => "ПР-",
-                _ => ""
-            };
+                if (connection.State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                foreach (var document in documents.Where(IsManagedDocument))
+                {
+                    var numberField = FindDocumentNumberField(document);
+                    if (numberField == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(document.TableName) ||
+                            string.IsNullOrWhiteSpace(numberField.DbColumnName))
+                        {
+                            continue;
+                        }
+
+                        var quotedTableName = DelimitIdentifier(document.TableName);
+                        var quotedColumnName = DelimitIdentifier(numberField.DbColumnName);
+
+                        using var maxCommand = connection.CreateCommand();
+                        maxCommand.CommandText = $@"
+                            SELECT COALESCE(
+                                MAX(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), ''), '0')::BIGINT),
+                                0)
+                            FROM {quotedTableName}";
+
+                        var maxValue = await maxCommand.ExecuteScalarAsync();
+                        if (maxValue != null && maxValue != DBNull.Value)
+                        {
+                            maxDocumentNumber = Math.Max(maxDocumentNumber, Convert.ToInt64(maxValue));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Ошибка расчета номера для {document.Name}: {ex.Message}");
+                    }
+                }
+
+                using var counterCommand = connection.CreateCommand();
+                counterCommand.CommandText = "SELECT COALESCE(MAX(current_number), 1) FROM doc_numbering";
+                var counterValue = await counterCommand.ExecuteScalarAsync();
+                if (counterValue != null && counterValue != DBNull.Value)
+                {
+                    maxCounterNumber = Convert.ToInt64(counterValue);
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
+
+            var nextNumber = Math.Max(maxCounterNumber, maxDocumentNumber + 1);
+            return nextNumber > int.MaxValue ? int.MaxValue : (int)nextNumber;
+        }
+
+        private async Task NormalizeDocumentTableNumbersAsync(MetadataObject document)
+        {
+            if (!IsManagedDocument(document))
+            {
+                return;
+            }
+
+            var numberField = FindDocumentNumberField(document);
+            if (numberField == null)
+            {
+                return;
+            }
+
+            var quotedTableName = DelimitIdentifier(document.TableName);
+            var quotedColumnName = DelimitIdentifier(numberField.DbColumnName);
+            var normalizeSql = $@"
+                UPDATE {quotedTableName}
+                SET {quotedColumnName} = REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g')
+                WHERE COALESCE({quotedColumnName}::text, '') <> ''
+                  AND COALESCE({quotedColumnName}::text, '') ~ '[^0-9]';";
+
+            await _context.Database.ExecuteSqlRawAsync(normalizeSql);
+        }
+
+        private static bool IsManagedDocument(MetadataObject metadata)
+        {
+            return metadata.ObjectType == "Document" && FindDocumentNumberField(metadata) != null;
+        }
+
+        private static MetadataField? FindDocumentNumberField(MetadataObject metadata)
+        {
+            return metadata.Fields.FirstOrDefault(field =>
+                IsDocumentNumberFieldName(field.Name) || IsDocumentNumberColumnName(field.DbColumnName));
+        }
+
+        internal static bool IsDocumentNumberFieldName(string? fieldName)
+        {
+            return fieldName is "Номер" or "Номер документа" or "doc_number" or "number";
+        }
+
+        private static bool IsDocumentNumberColumnName(string? columnName)
+        {
+            return string.Equals(columnName, "doc_number", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(columnName, "number", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string DelimitIdentifier(string identifier)
+        {
+            return QuoteIdentifier(identifier);
+        }
+
+        internal static string NormalizeLegacyDocumentNumber(string? documentNumber)
+        {
+            if (string.IsNullOrWhiteSpace(documentNumber))
+            {
+                return string.Empty;
+            }
+
+            var normalizedNumber = documentNumber.Trim();
+
+            var digitsOnly = new string(normalizedNumber.Where(char.IsDigit).ToArray());
+            return string.IsNullOrEmpty(digitsOnly) ? normalizedNumber : digitsOnly;
+        }
+
+        internal static string GenerateFallbackDocumentNumber()
+        {
+            return DateTime.Now.ToString("yyyyMMddHHmmssfff");
         }
 
         private static string QuoteIdentifier(string identifier)

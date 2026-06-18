@@ -75,7 +75,7 @@ namespace BIS.ERP.Services
                     {
                         Id = row.Id,
                         Date = row.Date,
-                        DocumentNumber = row.DocumentNumber,
+                        DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(row.DocumentNumber),
                         DocumentType = row.DocumentType,
                         DebitAccount = row.DebitAccount,
                         CreditAccount = row.CreditAccount,

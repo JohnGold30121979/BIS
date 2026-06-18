@@ -142,12 +142,11 @@ namespace BIS.ERP.Views
             {
                 try
                 {
-                    result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document.Name) ??
-                                           $"ПР-{DateTime.Now:yyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+                    result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document.Name);
                 }
                 catch
                 {
-                    result.DocumentNumber = $"ПР-{DateTime.Now:yyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4)}";
+                    result.DocumentNumber = MetadataService.GenerateFallbackDocumentNumber();
                 }
             }
 
@@ -251,7 +250,7 @@ namespace BIS.ERP.Views
                         if (!string.IsNullOrEmpty(dialogData.DocumentNumber))
                             textBox.Text = dialogData.DocumentNumber;
                         else if (currentValue != null)
-                            textBox.Text = currentValue.ToString();
+                            textBox.Text = MetadataService.NormalizeLegacyDocumentNumber(currentValue.ToString());
                     }
                     else
                     {
