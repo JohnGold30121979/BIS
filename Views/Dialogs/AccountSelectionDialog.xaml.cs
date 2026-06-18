@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System;
 using System.Data;
 using System.Linq;
 using System.Windows;
@@ -33,7 +34,7 @@ namespace BIS.ERP.Views
             dataTable.Columns.Add("Код", typeof(string));
             dataTable.Columns.Add("Наименование", typeof(string));
             dataTable.Columns.Add("Тип счета", typeof(string));
-            dataTable.Columns.Add("Активен", typeof(bool));
+            dataTable.Columns.Add("Активен", typeof(string));
             dataTable.Columns.Add("Id", typeof(string)); // скрытая колонка
 
             // Заполняем строки
@@ -42,8 +43,8 @@ namespace BIS.ERP.Views
                 dataTable.Rows.Add(
                     row.ContainsKey("Код") ? row["Код"].ToString() : "",
                     row.ContainsKey("Наименование") ? row["Наименование"].ToString() : "",
-                    row.ContainsKey("Тип счета") ? row["Тип счета"].ToString() : "",
-                    row.ContainsKey("Активен") && row["Активен"] != null ? (bool)row["Активен"] : false,
+                    FormatAccountType(row.ContainsKey("Тип счета") ? row["Тип счета"]?.ToString() : ""),
+                    FormatActiveValue(row.ContainsKey("Активен") ? row["Активен"] : null),
                     row.ContainsKey("Id") ? row["Id"].ToString() : ""
                 );
             }
@@ -72,15 +73,19 @@ namespace BIS.ERP.Views
             var selected = AccountsGrid.SelectedItem as DataRowView;
             if (selected != null)
             {
-                // Восстанавливаем Dictionary из выбранной строки
-                SelectedAccount = new Dictionary<string, object>
+                var selectedId = selected["Id"]?.ToString();
+                var originalAccount = _accounts.FirstOrDefault(account =>
+                    string.Equals(account.TryGetValue("Id", out var idValue) ? idValue?.ToString() : null,
+                        selectedId, StringComparison.OrdinalIgnoreCase));
+
+                if (originalAccount == null)
                 {
-                    ["Код"] = selected["Код"].ToString(),
-                    ["Наименование"] = selected["Наименование"].ToString(),
-                    ["Тип счета"] = selected["Тип счета"].ToString(),
-                    ["Активен"] = selected["Активен"],
-                    ["Id"] = selected["Id"].ToString()
-                };
+                    MessageBox.Show("Не удалось определить выбранный счет. Попробуйте выбрать его снова.", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                SelectedAccount = new Dictionary<string, object>(originalAccount);
                 DialogResult = true;
                 Close();
             }
@@ -89,6 +94,27 @@ namespace BIS.ERP.Views
                 MessageBox.Show("Выберите счет из списка!", "Внимание",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+        }
+
+        private static string FormatAccountType(string? accountType)
+        {
+            return accountType switch
+            {
+                "Active" => "Активный",
+                "Passive" => "Пассивный",
+                "ActivePassive" => "Активно-пассивный",
+                _ => accountType ?? string.Empty
+            };
+        }
+
+        private static string FormatActiveValue(object? value)
+        {
+            return value switch
+            {
+                true => "Да",
+                false => "Нет",
+                _ => "Нет"
+            };
         }
     }
 }

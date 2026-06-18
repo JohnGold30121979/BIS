@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using ClosedXML.Excel;
 using Microsoft.Win32;
 using BIS.ERP.Models;
@@ -19,6 +21,8 @@ namespace BIS.ERP.Views
         private DataTable _dataTable;
         private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
         private Dictionary<string, MetadataObject> _catalogsDict;
+        private static readonly IValueConverter AccountTypeConverter = new AccountTypeDisplayConverter();
+        private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
 
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
@@ -29,7 +33,11 @@ namespace BIS.ERP.Views
 
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
+            SearchPanel.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        private bool IsChartOfAccountsCatalog =>
+            string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase);
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
@@ -114,7 +122,7 @@ namespace BIS.ERP.Views
                     DataGrid.Columns.Add(new DataGridTextColumn
                     {
                         Header = field.Name,
-                        Binding = new System.Windows.Data.Binding(field.Name),
+                        Binding = CreateColumnBinding(field),
                         Width = new DataGridLength(1, DataGridLengthUnitType.Star),
                         MinWidth = 100
                     });
@@ -140,6 +148,7 @@ namespace BIS.ERP.Views
                 ProgressText.Text = "";
                 EditButton.IsEnabled = false;
                 DeleteButton.IsEnabled = false;
+                ApplySearchFilter();
             }
             catch (Exception ex)
             {
@@ -262,6 +271,65 @@ namespace BIS.ERP.Views
                 "Bool" => typeof(bool),
                 _ => typeof(string)
             };
+        }
+
+        private Binding CreateColumnBinding(MetadataField field)
+        {
+            var binding = new Binding(field.Name);
+
+            if (!IsChartOfAccountsCatalog)
+                return binding;
+
+            if (field.Name == "Тип счета")
+            {
+                binding.Converter = AccountTypeConverter;
+            }
+            else if (field.Name == "Активен")
+            {
+                binding.Converter = YesNoConverter;
+            }
+
+            return binding;
+        }
+
+        private void SearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            ApplySearchFilter();
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ApplySearchFilter();
+        }
+
+        private void ApplySearchFilter()
+        {
+            if (!IsChartOfAccountsCatalog || _dataTable?.DefaultView == null)
+                return;
+
+            var searchText = SearchBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                _dataTable.DefaultView.RowFilter = string.Empty;
+                StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
+                return;
+            }
+
+            var escapedValue = EscapeRowFilterValue(searchText);
+            _dataTable.DefaultView.RowFilter =
+                $"[Код] LIKE '%{escapedValue}%' OR [Наименование] LIKE '%{escapedValue}%'";
+
+            StatusText.Text = $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}";
+        }
+
+        private static string EscapeRowFilterValue(string value)
+        {
+            return value
+                .Replace("'", "''")
+                .Replace("[", "[[]")
+                .Replace("]", "[]]")
+                .Replace("%", "[%]")
+                .Replace("*", "[*]");
         }
 
         private async void OnAddClick(object sender, RoutedEventArgs e)
@@ -450,6 +518,44 @@ namespace BIS.ERP.Views
             worksheet.Columns().AdjustToContents();
 
             workbook.SaveAs(filePath);
+        }
+
+        private sealed class AccountTypeDisplayConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                var accountType = value?.ToString();
+                return accountType switch
+                {
+                    "Active" => "Активный",
+                    "Passive" => "Пассивный",
+                    "ActivePassive" => "Активно-пассивный",
+                    _ => accountType ?? string.Empty
+                };
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        private sealed class BooleanYesNoDisplayConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return value switch
+                {
+                    true => "Да",
+                    false => "Нет",
+                    _ => string.Empty
+                };
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                throw new NotSupportedException();
+            }
         }
     }
 }
