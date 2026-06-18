@@ -209,12 +209,10 @@ namespace BIS.ERP.Services
                     Fields = new List<MetadataField>()
                 };
 
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Код", DbColumnName = "code", FieldType = "String", Length = 20, IsRequired = true, IsUnique = true, Order = 1 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 2 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Тип счета", DbColumnName = "account_type", FieldType = "String", Length = 20, Order = 3 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Описание", DbColumnName = "description", FieldType = "String", Length = 500, Order = 4 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Уровень", DbColumnName = "level", FieldType = "Int", Order = 5 });
-                catalog.Fields.Add(new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 6 });
+                foreach (var field in GetChartOfAccountsFields(catalog.Id))
+                {
+                    catalog.Fields.Add(field);
+                }
 
                 await _context.MetadataObjects.AddAsync(catalog);
                 await _context.SaveChangesAsync();
@@ -227,6 +225,36 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'План счетов': {ex.Message}");
             }
+        }
+
+        private async Task EnsureChartOfAccountsCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "План счетов");
+
+            if (catalog == null)
+                return;
+
+            var existingNames = catalog.Fields.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingColumns = catalog.Fields.Select(f => f.DbColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetChartOfAccountsAnalyticFields(catalog.Id))
+            {
+                if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+
+                existingNames.Add(field.Name);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         // Сотрудники

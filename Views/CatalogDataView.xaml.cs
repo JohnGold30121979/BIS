@@ -23,6 +23,7 @@ namespace BIS.ERP.Views
         private Dictionary<string, MetadataObject> _catalogsDict;
         private static readonly IValueConverter AccountTypeConverter = new AccountTypeDisplayConverter();
         private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
+        private static readonly IValueConverter LinkFlagConverter = new BooleanPlusDisplayConverter();
 
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
@@ -119,27 +120,23 @@ namespace BIS.ERP.Views
 
                 foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
                 {
-                    DataGrid.Columns.Add(new DataGridTextColumn
-                    {
-                        Header = field.Name,
-                        Binding = CreateColumnBinding(field),
-                        Width = new DataGridLength(1, DataGridLengthUnitType.Star),
-                        MinWidth = 100
-                    });
+                    DataGrid.Columns.Add(CreateDataGridColumn(field));
                 }
 
                 DataGrid.Columns.Add(new DataGridTextColumn
                 {
-                    Header = "Дата создания",
+                    Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
-                    Width = 150
+                    Width = IsChartOfAccountsCatalog ? 125 : 150,
+                    ElementStyle = CreateCellTextStyle()
                 });
 
                 DataGrid.Columns.Add(new DataGridTextColumn
                 {
-                    Header = "Дата изменения",
+                    Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
-                    Width = 150
+                    Width = IsChartOfAccountsCatalog ? 125 : 150,
+                    ElementStyle = CreateCellTextStyle()
                 });
 
                 DataGrid.ItemsSource = _dataTable.DefaultView;
@@ -273,6 +270,121 @@ namespace BIS.ERP.Views
             };
         }
 
+        private DataGridTextColumn CreateDataGridColumn(MetadataField field)
+        {
+            return new DataGridTextColumn
+            {
+                Header = CreateColumnHeader(field.Name),
+                Binding = CreateColumnBinding(field),
+                Width = GetColumnWidth(field),
+                MinWidth = GetColumnMinWidth(field),
+                ElementStyle = CreateCellTextStyle(GetColumnTextAlignment(field))
+            };
+        }
+
+        private object CreateColumnHeader(string fieldName)
+        {
+            if (!IsChartOfAccountsCatalog)
+                return fieldName;
+
+            return new TextBlock
+            {
+                Text = GetChartOfAccountsColumnHeader(fieldName),
+                ToolTip = fieldName,
+                TextAlignment = TextAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+        }
+
+        private DataGridLength GetColumnWidth(MetadataField field)
+        {
+            if (!IsChartOfAccountsCatalog)
+                return new DataGridLength(1, DataGridLengthUnitType.Star);
+
+            var width = field.Name switch
+            {
+                "Код" => 90,
+                "Наименование" => 230,
+                "Тип счета" => 120,
+                "Описание" => 190,
+                "Уровень" => 65,
+                "Активен" => 70,
+                "Закрывает АРМ" => 95,
+                "Группа аналитических статей" => 125,
+                "Признак печати" => 105,
+                "Сохранять остатки" => 110,
+                "Связь с организациями" => 65,
+                "Связь со списочным составом" => 65,
+                "Связь с валютами" => 65,
+                "Связь с лицевыми счетами" => 75,
+                "Связь с материалами" => 75,
+                "Связь с объектами строительства" => 85,
+                "Код налога" => 80,
+                "Валюта счета" => 125,
+                _ => field.FieldType == "Bool" ? 65 : 110
+            };
+
+            return new DataGridLength(width, DataGridLengthUnitType.Pixel);
+        }
+
+        private double GetColumnMinWidth(MetadataField field)
+        {
+            if (!IsChartOfAccountsCatalog)
+                return 100;
+
+            return field.Name switch
+            {
+                "Код" => 70,
+                "Наименование" => 140,
+                "Описание" => 120,
+                "Уровень" => 50,
+                "Активен" => 55,
+                _ => field.FieldType == "Bool" ? 45 : 60
+            };
+        }
+
+        private TextAlignment GetColumnTextAlignment(MetadataField field)
+        {
+            if (!IsChartOfAccountsCatalog)
+                return TextAlignment.Left;
+
+            return field.FieldType == "Bool" || field.Name == "Уровень"
+                ? TextAlignment.Center
+                : TextAlignment.Left;
+        }
+
+        private Style CreateCellTextStyle(TextAlignment textAlignment = TextAlignment.Left)
+        {
+            var style = new Style(typeof(TextBlock));
+            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            style.Setters.Add(new Setter(TextBlock.MarginProperty, new Thickness(4, 0, 4, 0)));
+            style.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+            style.Setters.Add(new Setter(TextBlock.TextAlignmentProperty, textAlignment));
+            return style;
+        }
+
+        private string GetChartOfAccountsColumnHeader(string fieldName)
+        {
+            return fieldName switch
+            {
+                "Закрывает АРМ" => "Закр. АРМ",
+                "Группа аналитических статей" => "Группа аналит.",
+                "Признак печати" => "Печать",
+                "Сохранять остатки" => "Сохр. остатки",
+                "Связь с организациями" => "Орг.",
+                "Связь со списочным составом" => "Таб. N",
+                "Связь с валютами" => "Валюта",
+                "Связь с лицевыми счетами" => "Лиц. счета",
+                "Связь с материалами" => "Материалы",
+                "Связь с объектами строительства" => "Объекты",
+                "Код налога" => "Код нал.",
+                "Валюта счета" => "Валюта сч.",
+                "Дата создания" => "Создан",
+                "Дата изменения" => "Изменен",
+                _ => fieldName
+            };
+        }
+
         private Binding CreateColumnBinding(MetadataField field)
         {
             var binding = new Binding(field.Name);
@@ -287,6 +399,10 @@ namespace BIS.ERP.Views
             else if (field.Name == "Активен")
             {
                 binding.Converter = YesNoConverter;
+            }
+            else if (field.FieldType == "Bool")
+            {
+                binding.Converter = LinkFlagConverter;
             }
 
             return binding;
@@ -531,6 +647,24 @@ namespace BIS.ERP.Views
                     "Passive" => "Пассивный",
                     "ActivePassive" => "Активно-пассивный",
                     _ => accountType ?? string.Empty
+                };
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        private sealed class BooleanPlusDisplayConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return value switch
+                {
+                    true => "+",
+                    false => string.Empty,
+                    _ => string.Empty
                 };
             }
 

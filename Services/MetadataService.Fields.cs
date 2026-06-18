@@ -115,6 +115,52 @@ public partial class MetadataService
             };
     }
 
+    private List<MetadataField> GetChartOfAccountsFields(Guid metadataObjectId)
+    {
+        var fields = new List<MetadataField>
+        {
+            new MetadataField { Id = Guid.NewGuid(), Name = "Код", DbColumnName = "code", FieldType = "String", Length = 20, IsRequired = true, IsUnique = true, Order = 1, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 2, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Тип счета", DbColumnName = "account_type", FieldType = "String", Length = 20, Order = 3, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Описание", DbColumnName = "description", FieldType = "String", Length = 500, Order = 4, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Уровень", DbColumnName = "level", FieldType = "Int", Order = 5, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", Order = 6, MetadataObjectId = metadataObjectId }
+        };
+
+        fields.AddRange(GetChartOfAccountsAnalyticFields(metadataObjectId));
+        return fields;
+    }
+
+    private List<MetadataField> GetChartOfAccountsAnalyticFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField { Id = Guid.NewGuid(), Name = "Закрывает АРМ", DbColumnName = "closing_arm", FieldType = "String", Length = 50, Order = 7, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Группа аналитических статей", DbColumnName = "analytic_group", FieldType = "String", Length = 100, Order = 8, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Признак печати", DbColumnName = "print_mode", FieldType = "String", Length = 50, Order = 9, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Сохранять остатки", DbColumnName = "balance_mode", FieldType = "String", Length = 50, Order = 10, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с организациями", DbColumnName = "link_organizations", FieldType = "Bool", Order = 11, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь со списочным составом", DbColumnName = "link_employees", FieldType = "Bool", Order = 12, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с валютами", DbColumnName = "link_currencies", FieldType = "Bool", Order = 13, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с лицевыми счетами", DbColumnName = "link_personal_accounts", FieldType = "Bool", Order = 14, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с материалами", DbColumnName = "link_materials", FieldType = "Bool", Order = 15, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с объектами строительства", DbColumnName = "link_construction_objects", FieldType = "Bool", Order = 16, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Код налога", DbColumnName = "tax_code", FieldType = "String", Length = 30, Order = 17, MetadataObjectId = metadataObjectId },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Валюта счета",
+                DbColumnName = "account_currency_id",
+                FieldType = "Reference",
+                ReferenceCatalog = "Справочник валют",
+                DisplayPattern = "{Код} - {Наименование}",
+                DisplayFields = "Код,Наименование",
+                Order = 18,
+                MetadataObjectId = metadataObjectId
+            }
+        };
+    }
+
     // Поля для справочника материалов
     private List<MetadataField> GetMaterialFields(Guid metadataObjectId)
     {

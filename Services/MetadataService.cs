@@ -545,6 +545,15 @@ namespace BIS.ERP.Services
 
         public async Task<List<MetadataObject>> GetCatalogsAsync()
         {
+            try
+            {
+                await EnsureChartOfAccountsCatalogStructureAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации полей плана счетов: {ex.Message}");
+            }
+
             return await _context.Set<MetadataObject>()
                 .Where(m => m.ObjectType == "Catalog")
                 .Include(m => m.Fields)
@@ -740,6 +749,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("План счетов"))
                     await CreateChartOfAccountsCatalog(config);
+                await EnsureChartOfAccountsCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Банки"))
                     await CreateBanksCatalog(config);

@@ -51,8 +51,12 @@ namespace BIS.ERP.Views
 
                     Control inputControl;
 
+                    if (TryCreateChartOfAccountsChoiceControl(field, existingData, out var choiceControl))
+                    {
+                        inputControl = choiceControl;
+                    }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
-                    if (!string.IsNullOrEmpty(field.ReferenceCatalog))
+                    else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
                     {
                         inputControl = await CreateReferenceControl(field, catalogsDict, existingData);
                     }
@@ -264,6 +268,57 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Создание обычного контрола (не Reference)
         /// </summary>
+        private bool TryCreateChartOfAccountsChoiceControl(
+            MetadataField field,
+            Dictionary<string, object> existingData,
+            out Control control)
+        {
+            control = null;
+
+            if (_catalog.Name != "План счетов")
+                return false;
+
+            var options = field.Name switch
+            {
+                "Тип счета" => new[] { "Активный", "Пассивный", "Активно-пассивный" },
+                "Признак печати" => new[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
+                "Сохранять остатки" => new[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
+                _ => null
+            };
+
+            if (options == null)
+                return false;
+
+            var comboBox = new ComboBox
+            {
+                Height = 35,
+                MinWidth = 200,
+                ItemsSource = options
+            };
+
+            var existingValue = existingData != null && existingData.ContainsKey(field.Name)
+                ? NormalizeChartOfAccountsChoice(field.Name, existingData[field.Name]?.ToString())
+                : string.Empty;
+
+            comboBox.SelectedItem = options.FirstOrDefault(option => option == existingValue) ?? options.FirstOrDefault();
+            control = comboBox;
+            return true;
+        }
+
+        private static string NormalizeChartOfAccountsChoice(string fieldName, string value)
+        {
+            if (fieldName != "Тип счета")
+                return value ?? string.Empty;
+
+            return value switch
+            {
+                "Active" => "Активный",
+                "Passive" => "Пассивный",
+                "ActivePassive" => "Активно-пассивный",
+                _ => value ?? string.Empty
+            };
+        }
+
         private Control CreateRegularControl(MetadataField field, Dictionary<string, object> existingData)
         {
             switch (field.FieldType)
@@ -377,8 +432,10 @@ namespace BIS.ERP.Views
 
                     if (control is ComboBox comboBox)
                     {
-                        var selectedItem = comboBox.SelectedItem as ReferenceItem;
-                        value = selectedItem?.Id.ToString() ?? "";
+                        if (comboBox.SelectedItem is ReferenceItem selectedItem)
+                            value = selectedItem.Id.ToString();
+                        else
+                            value = comboBox.SelectedItem?.ToString() ?? comboBox.Text ?? "";
                     }
                     else
                     {
