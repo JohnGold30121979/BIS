@@ -138,7 +138,6 @@ namespace BIS.ERP.Views
                         OrderType = row.ContainsKey("Тип") ? row["Тип"]?.ToString() : "",
                         Amount = row.ContainsKey("Сумма") && row["Сумма"] != null ? Convert.ToDecimal(row["Сумма"]) : 0,
                         Purpose = row.ContainsKey("Назначение платежа") ? row["Назначение платежа"]?.ToString() : "",
-                        CounterpartyAccount = row.ContainsKey("Счет контрагента") ? row["Счет контрагента"]?.ToString() : "",
                         Description = row.ContainsKey("Примечание") ? row["Примечание"]?.ToString() : "",
                         IsPosted = row.ContainsKey("Проведён") && row["Проведён"] != null ? (bool)row["Проведён"] : false,
                         CreatedAt = row.ContainsKey("CreatedAt") && row["CreatedAt"] != null ? (DateTime)row["CreatedAt"] : DateTime.Now,
@@ -148,10 +147,6 @@ namespace BIS.ERP.Views
                     // Организация
                     if (row.ContainsKey("Организация") && row["Организация"] != null && referenceCache.TryGetValue("Организация", out var orgDict) && Guid.TryParse(row["Организация"].ToString(), out var orgId))
                         newRow.OrganizationName = orgDict.ContainsKey(orgId) ? orgDict[orgId] : row["Организация"].ToString();
-
-                    // Контрагент
-                    if (row.ContainsKey("Контрагент") && row["Контрагент"] != null && referenceCache.TryGetValue("Контрагент", out var contDict) && Guid.TryParse(row["Контрагент"].ToString(), out var contId))
-                        newRow.ContractorName = contDict.ContainsKey(contId) ? contDict[contId] : row["Контрагент"].ToString();
 
                     // Банк
                     if (row.ContainsKey("Банк") && row["Банк"] != null && referenceCache.TryGetValue("Банк", out var bankDict) && Guid.TryParse(row["Банк"].ToString(), out var bankId))
@@ -164,6 +159,12 @@ namespace BIS.ERP.Views
                     // Валюта
                     if (row.ContainsKey("Валюта") && row["Валюта"] != null && referenceCache.TryGetValue("Валюта", out var currDict) && Guid.TryParse(row["Валюта"].ToString(), out var currId))
                         newRow.CurrencyName = currDict.ContainsKey(currId) ? currDict[currId] : row["Валюта"].ToString();
+
+                    if (row.ContainsKey("Сотрудник") && row["Сотрудник"] != null && referenceCache.TryGetValue("Сотрудник", out var employeeDict) && Guid.TryParse(row["Сотрудник"].ToString(), out var employeeId))
+                        newRow.EmployeeName = employeeDict.ContainsKey(employeeId) ? employeeDict[employeeId] : row["Сотрудник"].ToString();
+
+                    if (row.ContainsKey("Материал") && row["Материал"] != null && referenceCache.TryGetValue("Материал", out var materialDict) && Guid.TryParse(row["Материал"].ToString(), out var materialId))
+                        newRow.MaterialName = materialDict.ContainsKey(materialId) ? materialDict[materialId] : row["Материал"].ToString();
 
                     // Корр. счет
                     string corrValue = null;
@@ -258,14 +259,14 @@ namespace BIS.ERP.Views
         public DateTime DocDate { get; set; }
         public string OrderType { get; set; } = string.Empty;
         public string OrganizationName { get; set; } = string.Empty;
-        public string ContractorName { get; set; } = string.Empty;
         public string BankName { get; set; } = string.Empty;
         public string OurAccountName { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public string CurrencyName { get; set; } = string.Empty;
+        public string EmployeeName { get; set; } = string.Empty;
+        public string MaterialName { get; set; } = string.Empty;
         public string CorrespondentAccountName { get; set; } = string.Empty;
         public string Purpose { get; set; } = string.Empty;
-        public string CounterpartyAccount { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public bool IsPosted { get; set; }
         public DateTime CreatedAt { get; set; }

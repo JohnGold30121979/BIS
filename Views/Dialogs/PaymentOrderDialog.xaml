@@ -39,31 +39,54 @@
             <ComboBoxItem Content="Входящее (поступление)" Tag="Incoming"/>
         </ComboBox>
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"/>
+        <TextBlock x:Name="OrganizationLabel" Grid.Row="4" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"
+                   Visibility="Collapsed"/>
         <ComboBox x:Name="OrganizationCombo" Grid.Row="4" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                  Visibility="Collapsed"/>
 
-        <TextBlock Grid.Row="5" Grid.Column="0" Text="Контрагент:" VerticalAlignment="Center"/>
-        <ComboBox x:Name="ContractorCombo" Grid.Row="5" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+        <StackPanel Grid.Row="5" Grid.ColumnSpan="2">
+            <Grid x:Name="EmployeePanel" Visibility="Collapsed" Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="160"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Сотрудник:" VerticalAlignment="Center"/>
+                <ComboBox x:Name="EmployeeCombo" Grid.Column="1" Height="30"
+                          DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+            </Grid>
 
-        <TextBlock Grid.Row="6" Grid.Column="0" Text="Банк:" VerticalAlignment="Center"/>
+            <Grid x:Name="MaterialPanel" Visibility="Collapsed" Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="160"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="Материал:" VerticalAlignment="Center"/>
+                <ComboBox x:Name="MaterialCombo" Grid.Column="1" Height="30"
+                          DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+            </Grid>
+        </StackPanel>
+
+        <TextBlock x:Name="BankLabel" Grid.Row="6" Grid.Column="0" Text="Банк:" VerticalAlignment="Center"
+                   Visibility="Collapsed"/>
         <ComboBox x:Name="BankCombo" Grid.Row="6" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                  Visibility="Collapsed"/>
 
-        <TextBlock Grid.Row="7" Grid.Column="0" Text="Счет контрагента:" VerticalAlignment="Center"/>
-        <TextBox x:Name="CounterpartyAccountBox" Grid.Row="7" Grid.Column="1" Height="30"/>
-
-        <TextBlock Grid.Row="8" Grid.Column="0" Text="Наш счет:" VerticalAlignment="Center"/>
+        <TextBlock x:Name="OurAccountLabel" Grid.Row="8" Grid.Column="0" Text="Наш счет:" VerticalAlignment="Center"
+                   Visibility="Collapsed"/>
         <ComboBox x:Name="OurAccountCombo" Grid.Row="8" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                  Visibility="Collapsed"/>
 
         <TextBlock Grid.Row="9" Grid.Column="0" Text="Сумма:" VerticalAlignment="Center"/>
         <TextBox x:Name="AmountBox" Grid.Row="9" Grid.Column="1" Height="30"/>
 
-        <TextBlock Grid.Row="10" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center"/>
+        <TextBlock x:Name="CurrencyLabel" Grid.Row="10" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center"
+                   Visibility="Collapsed"/>
         <ComboBox x:Name="CurrencyCombo" Grid.Row="10" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                  Visibility="Collapsed"/>
 
         <TextBlock Grid.Row="11" Grid.Column="0" Text="Корр. счет:" VerticalAlignment="Center"/>
         <StackPanel Grid.Row="11" Grid.Column="1" Orientation="Horizontal">

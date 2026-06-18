@@ -41,9 +41,10 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Номер" Binding="{Binding DocNumber}" Width="100"/>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
-                <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="150"/>
                 <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" Width="150"/>
-                <DataGridTextColumn Header="Контрагент" Binding="{Binding ContractorName}" Width="150"/>
+                <DataGridTextColumn Header="Валюта" Binding="{Binding CurrencyName}" Width="90"/>
+                <DataGridTextColumn Header="Сотрудник" Binding="{Binding EmployeeName}" Width="150"/>
+                <DataGridTextColumn Header="Материал" Binding="{Binding MaterialName}" Width="150"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="100"/>
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="150"/>
                 <DataGridTextColumn Header="Корр. счет" Binding="{Binding CorrespondentAccountName}" Width="120"/>

@@ -45,7 +45,6 @@ public class AppDbContext : DbContext
     public DbSet<MetadataCalculation> MetadataCalculations { get; set; }
     public DbSet<MetadataPostingRule> MetadataPostingRules { get; set; }
     public DbSet<Organization> Organizations { get; set; }   
-    public DbSet<Counterparty> Counterparties { get; set; }
     public DbSet<Posting> Postings { get; set; }  
     
 
@@ -89,9 +88,6 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Document>().Property(d => d.DocumentType).HasMaxLength(20);
         modelBuilder.Entity<Document>().Property(d => d.OperationCode).HasMaxLength(50);
         modelBuilder.Entity<Document>().Property(d => d.OperationDescription).HasMaxLength(500);
-        modelBuilder.Entity<Document>().Property(d => d.KontragentCode).HasMaxLength(100);
-        modelBuilder.Entity<Document>().Property(d => d.KontragentName).HasMaxLength(200);
-
         // Индексы для документов
         modelBuilder.Entity<Document>().HasIndex(d => d.Number);
         modelBuilder.Entity<Document>().HasIndex(d => d.Date);

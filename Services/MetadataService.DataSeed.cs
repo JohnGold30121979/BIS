@@ -180,6 +180,32 @@ namespace BIS.ERP.Services
             System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
         }
 
+        private async Task EnsureAccountAnalyticsLinksDataAsync(MetadataObject catalog)
+        {
+            foreach (var link in AccountAnalyticsDefaultLinks.Items)
+            {
+                var sql = $@"
+                    INSERT INTO ""{catalog.TableName}""
+                    (""Id"", ""code"", ""name"", ""account_flag_field"", ""reference_catalog"", ""document_fields"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                    SELECT
+                        '{Guid.NewGuid()}',
+                        '{EscapeSql(link.Code)}',
+                        '{EscapeSql(link.Name)}',
+                        '{EscapeSql(link.AccountFlagField)}',
+                        '{EscapeSql(link.ReferenceCatalog)}',
+                        '{EscapeSql(link.DocumentFields)}',
+                        '{EscapeSql(link.Description)}',
+                        {link.IsActive.ToString().ToLower()},
+                        NOW(),
+                        NOW()
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM ""{catalog.TableName}"" WHERE ""code"" = '{EscapeSql(link.Code)}'
+                    )";
+
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+        }
+
         private async Task AddBanksDataToTable(MetadataObject catalog)
         {
             var banks = InitialDataProvider.GetBanks();
@@ -524,6 +550,11 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка добавления начальных данных для кассы: {ex.Message}");
             }
+        }
+
+        private static string EscapeSql(string value)
+        {
+            return (value ?? string.Empty).Replace("'", "''");
         }
     }
 }

@@ -156,11 +156,22 @@ namespace BIS.ERP.Views
                             newRow.OrganizationName = orgDict.ContainsKey(orgId) ? orgDict[orgId] : row["Организация"].ToString();
                     }
 
-                    // Контрагент
-                    if (row.ContainsKey("Контрагент") && row["Контрагент"] != null && referenceCache.TryGetValue("Контрагент", out var contDict))
+                    if (row.ContainsKey("Валюта") && row["Валюта"] != null && referenceCache.TryGetValue("Валюта", out var currencyDict))
                     {
-                        if (Guid.TryParse(row["Контрагент"].ToString(), out var contId))
-                            newRow.ContractorName = contDict.ContainsKey(contId) ? contDict[contId] : row["Контрагент"].ToString();
+                        if (Guid.TryParse(row["Валюта"].ToString(), out var currencyId))
+                            newRow.CurrencyName = currencyDict.ContainsKey(currencyId) ? currencyDict[currencyId] : row["Валюта"].ToString();
+                    }
+
+                    if (row.ContainsKey("Сотрудник") && row["Сотрудник"] != null && referenceCache.TryGetValue("Сотрудник", out var employeeDict))
+                    {
+                        if (Guid.TryParse(row["Сотрудник"].ToString(), out var employeeId))
+                            newRow.EmployeeName = employeeDict.ContainsKey(employeeId) ? employeeDict[employeeId] : row["Сотрудник"].ToString();
+                    }
+
+                    if (row.ContainsKey("Материал") && row["Материал"] != null && referenceCache.TryGetValue("Материал", out var materialDict))
+                    {
+                        if (Guid.TryParse(row["Материал"].ToString(), out var materialId))
+                            newRow.MaterialName = materialDict.ContainsKey(materialId) ? materialDict[materialId] : row["Материал"].ToString();
                     }
 
                     // Корреспондирующий счёт (пробуем разные возможные имена)
@@ -346,7 +357,9 @@ namespace BIS.ERP.Views
         public DateTime DocDate { get; set; }
         public string CashDeskName { get; set; } = string.Empty;
         public string OrganizationName { get; set; } = string.Empty;
-        public string ContractorName { get; set; } = string.Empty;
+        public string CurrencyName { get; set; } = string.Empty;
+        public string EmployeeName { get; set; } = string.Empty;
+        public string MaterialName { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public string Basis { get; set; } = string.Empty;
         public string CorrespondentAccountName { get; set; } = string.Empty;

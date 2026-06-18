@@ -257,6 +257,128 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task CreateAccountAnalyticsLinksCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = AccountAnalyticsCatalogNames.CatalogName,
+                    TableName = "catalog_account_analytics_links",
+                    ObjectType = "Catalog",
+                    Description = "Соответствие флагов плана счетов справочникам аналитики",
+                    Icon = "🔗",
+                    Order = 13,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = new List<MetadataField>()
+                };
+
+                foreach (var field in GetAccountAnalyticsLinkFields(catalog.Id))
+                {
+                    catalog.Fields.Add(field);
+                }
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await EnsureAccountAnalyticsLinksDataAsync(catalog);
+
+                System.Diagnostics.Debug.WriteLine($"Справочник '{AccountAnalyticsCatalogNames.CatalogName}' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка создания справочника '{AccountAnalyticsCatalogNames.CatalogName}': {ex.Message}");
+            }
+        }
+
+        private async Task EnsureAccountAnalyticsLinksCatalogAsync(MetadataConfiguration? config = null)
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m =>
+                    m.ObjectType == "Catalog" &&
+                    m.Name == AccountAnalyticsCatalogNames.CatalogName);
+
+            if (catalog == null)
+            {
+                config ??= await _context.MetadataConfigurations.FirstOrDefaultAsync();
+                if (config == null)
+                    return;
+
+                await CreateAccountAnalyticsLinksCatalog(config);
+                return;
+            }
+
+            var existingNames = catalog.Fields.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingColumns = catalog.Fields.Select(f => f.DbColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetAccountAnalyticsLinkFields(catalog.Id))
+            {
+                if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+
+                existingNames.Add(field.Name);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+            await EnsureAccountAnalyticsLinksDataAsync(catalog);
+        }
+
+        private async Task EnsureManagedDocumentAnalyticFieldsAsync(IEnumerable<MetadataObject> documents)
+        {
+            var targetDocumentNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Приходный кассовый ордер",
+                "Расходный кассовый ордер",
+                "Платежное поручение"
+            };
+
+            foreach (var document in documents.Where(document => targetDocumentNames.Contains(document.Name)))
+            {
+                var existingNames = document.Fields
+                    .Select(field => field.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var existingColumns = document.Fields
+                    .Select(field => field.DbColumnName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var nextOrder = document.Fields.Count == 0
+                    ? 1
+                    : document.Fields.Max(field => field.Order) + 1;
+
+                foreach (var field in GetDocumentAnalyticReferenceFields(document.Id, nextOrder))
+                {
+                    if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                    {
+                        nextOrder++;
+                        continue;
+                    }
+
+                    field.Id = Guid.NewGuid();
+                    field.MetadataObjectId = document.Id;
+                    field.Order = nextOrder++;
+
+                    await _context.MetadataFields.AddAsync(field);
+                    await AddColumnToTableAsync(document.TableName, field);
+
+                    document.Fields.Add(field);
+                    existingNames.Add(field.Name);
+                    existingColumns.Add(field.DbColumnName);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         // Сотрудники
         private async Task CreateEmployeesCatalog(MetadataConfiguration config)
         {
@@ -346,35 +468,6 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Государства': {ex.Message}");
             }
         }
-        // Контрагенты
-        private async Task CreateContractorsCatalog(MetadataConfiguration config)
-        {
-            try
-            {
-                var catalog = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Контрагенты",
-                    TableName = "catalog_contractors",
-                    ObjectType = "Catalog",
-                    Description = "Контрагенты (клиенты, поставщики)",
-                    Icon = "🤝",
-                    Order = 5,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-                    Fields = GetContractorFields(Guid.NewGuid())
-                };
-                await _context.MetadataObjects.AddAsync(catalog);
-                await _context.SaveChangesAsync();
-                await CreateTableForCatalogAsync(catalog);
-                System.Diagnostics.Debug.WriteLine("Справочник 'Контрагенты' создан");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Контрагенты': {ex.Message}");
-            }
-        }
-
         // Участки
         private async Task CreateSitesCatalog(MetadataConfiguration config)
         {

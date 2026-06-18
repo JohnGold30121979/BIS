@@ -17,7 +17,7 @@ namespace BIS.ERP.Views
         private readonly Guid? _editId;
         private readonly Dictionary<string, Control> _fieldControls = new();
         private readonly Dictionary<string, FrameworkElement> _fieldPanels = new();
-        private Dictionary<string, AccountAnalyticsSettings> _accountAnalyticsByCode = new();
+        private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
         private string _generatedNumber = string.Empty;
@@ -92,23 +92,8 @@ namespace BIS.ERP.Views
         {
             public Dictionary<string, object>? ExistingData { get; set; }
             public Dictionary<string, List<ReferenceItem>> ReferenceData { get; set; } = new();
-            public List<AccountItem> Accounts { get; set; } = new();
-            public Dictionary<string, AccountAnalyticsSettings> AccountAnalyticsByCode { get; set; } = new();
+            public AccountAnalyticsRegistry AccountAnalytics { get; set; } = new();
             public string DocumentNumber { get; set; } = string.Empty;
-        }
-
-        private class AccountItem
-        {
-            public string Code { get; set; } = string.Empty;
-            public string DisplayName { get; set; } = string.Empty;
-        }
-
-        private class AccountAnalyticsSettings
-        {
-            public bool Organizations { get; set; }
-            public bool Employees { get; set; }
-            public bool Currencies { get; set; }
-            public bool Materials { get; set; }
         }
 
         private async Task<PostingDialogData> LoadAllDataAsync(Guid? editId)
@@ -128,32 +113,7 @@ namespace BIS.ERP.Views
             // Загружаем все справочники
             var allCatalogs = await _metadataService.GetCatalogsAsync();
             var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
-
-            if (catalogsDict.TryGetValue("План счетов", out var chartOfAccountsCatalog))
-            {
-                var accountsData = await _metadataService.GetCatalogDataAsync(chartOfAccountsCatalog.Id);
-                foreach (var row in accountsData)
-                {
-                    var code = row.GetValueOrDefault("Код")?.ToString();
-                    if (string.IsNullOrWhiteSpace(code))
-                        continue;
-
-                    var name = row.GetValueOrDefault("Наименование")?.ToString() ?? string.Empty;
-                    result.Accounts.Add(new AccountItem
-                    {
-                        Code = code,
-                        DisplayName = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}"
-                    });
-
-                    result.AccountAnalyticsByCode[code] = new AccountAnalyticsSettings
-                    {
-                        Organizations = IsFlagEnabled(row.GetValueOrDefault("Связь с организациями")),
-                        Employees = IsFlagEnabled(row.GetValueOrDefault("Связь со списочным составом")),
-                        Currencies = IsFlagEnabled(row.GetValueOrDefault("Связь с валютами")),
-                        Materials = IsFlagEnabled(row.GetValueOrDefault("Связь с материалами"))
-                    };
-                }
-            }
+            result.AccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
             // Загружаем данные для Reference полей
             foreach (var field in _document.Fields.Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog)))
@@ -203,9 +163,9 @@ namespace BIS.ERP.Views
             FieldsPanel.Children.Clear();
             _fieldControls.Clear();
             _fieldPanels.Clear();
-            _accountAnalyticsByCode = dialogData.AccountAnalyticsByCode;
+            _accountAnalytics = dialogData.AccountAnalytics;
 
-            foreach (var field in _document.Fields.OrderBy(f => f.Order))
+            foreach (var field in _document.Fields.OrderBy(GetPostingFieldDisplayOrder).ThenBy(f => f.Order))
             {
                 if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
                     continue;
@@ -240,26 +200,7 @@ namespace BIS.ERP.Views
                 }
                 else if (field.Name == "Дебет" || field.Name == "Кредит")
                 {
-                    var comboBox = new ComboBox
-                    {
-                        Height = 30,
-                        DisplayMemberPath = "DisplayName",
-                        SelectedValuePath = "Code",
-                        MinWidth = 200,
-                        ItemsSource = dialogData.Accounts
-                    };
-
-                    if (currentValue != null)
-                    {
-                        var selectedAccount = dialogData.Accounts.FirstOrDefault(account =>
-                            string.Equals(account.Code, currentValue.ToString(), StringComparison.OrdinalIgnoreCase));
-
-                        if (selectedAccount != null)
-                            comboBox.SelectedItem = selectedAccount;
-                    }
-
-                    comboBox.SelectionChanged += (s, e) => UpdateAnalyticControlsVisibility();
-                    inputControl = comboBox;
+                    inputControl = CreateAccountPickerControl(field.Name, currentValue);
                 }
                 else if (field.FieldType == "Reference" && !string.IsNullOrEmpty(field.ReferenceCatalog))
                 {
@@ -297,6 +238,8 @@ namespace BIS.ERP.Views
                     var picker = new DatePicker { Height = 30 };
                     if (currentValue is DateTime dt)
                         picker.SelectedDate = dt;
+                    else if (!editId.HasValue)
+                        picker.SelectedDate = DateTime.Today;
                     inputControl = picker;
                 }
                 else if (field.FieldType == "Bool")
@@ -339,34 +282,140 @@ namespace BIS.ERP.Views
             UpdateAnalyticControlsVisibility();
         }
 
+        private UserControl CreateAccountPickerControl(string fieldName, object? currentValue)
+        {
+            var selectedAccount = _accountAnalytics.FindAccount(currentValue);
+            var textBox = new TextBox
+            {
+                Height = 30,
+                IsReadOnly = true,
+                Background = System.Windows.Media.Brushes.LightGray,
+                Text = selectedAccount?.DisplayName ?? currentValue?.ToString() ?? string.Empty
+            };
+
+            var button = new Button
+            {
+                Content = "?",
+                Width = 32,
+                Height = 30,
+                Margin = new Thickness(5, 0, 0, 0)
+            };
+
+            var panel = new DockPanel();
+            DockPanel.SetDock(button, Dock.Right);
+            panel.Children.Add(button);
+            panel.Children.Add(textBox);
+
+            var picker = new UserControl
+            {
+                Content = panel,
+                Tag = selectedAccount,
+                MinWidth = 200
+            };
+
+            button.Click += (s, e) =>
+            {
+                var accountsData = _accountAnalytics.Accounts
+                    .Select(account => new Dictionary<string, object>
+                    {
+                        ["Id"] = account.Id,
+                        ["Код"] = account.Code,
+                        ["Наименование"] = GetAccountName(account),
+                        ["Тип счета"] = string.Empty,
+                        ["Активен"] = true
+                    })
+                    .ToList();
+
+                var dialog = new AccountSelectionDialog(accountsData)
+                {
+                    Owner = this
+                };
+
+                if (dialog.ShowDialog() != true || dialog.SelectedAccount == null)
+                    return;
+
+                var selected = _accountAnalytics.FindAccount(dialog.SelectedAccount.GetValueOrDefault("Id"));
+                if (selected == null)
+                    return;
+
+                picker.Tag = selected;
+                textBox.Text = selected.DisplayName;
+                UpdateAnalyticControlsVisibility();
+            };
+
+            return picker;
+        }
+
+        private static string GetAccountName(AccountReferenceItem account)
+        {
+            var prefix = $"{account.Code} - ";
+            return account.DisplayName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? account.DisplayName[prefix.Length..]
+                : account.DisplayName;
+        }
+
         private void UpdateAnalyticControlsVisibility()
         {
             var debitSettings = GetSelectedAccountSettings("Дебет");
             var creditSettings = GetSelectedAccountSettings("Кредит");
-            var hasSelectedAccounts = debitSettings != null || creditSettings != null;
+            var selectedSettings = new[] { debitSettings, creditSettings };
+            var showCurrency = AccountAnalyticsRules.ShouldShowField(
+                "Валюта",
+                selectedSettings,
+                _accountAnalytics.Definitions,
+                "Справочник валют",
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
 
-            SetAnalyticFieldVisibility("Валюта", !hasSelectedAccounts ||
-                debitSettings?.Currencies == true || creditSettings?.Currencies == true);
-            SetAnalyticFieldVisibility("Организация", !hasSelectedAccounts ||
-                debitSettings?.Organizations == true || creditSettings?.Organizations == true);
-            SetAnalyticFieldVisibility("Сотрудник", !hasSelectedAccounts ||
-                debitSettings?.Employees == true || creditSettings?.Employees == true);
-            SetAnalyticFieldVisibility("Материал", !hasSelectedAccounts ||
-                debitSettings?.Materials == true || creditSettings?.Materials == true);
+            SetAnalyticFieldVisibility("Валюта", showCurrency);
+            SetAnalyticFieldVisibility("Сумма в валюте", showCurrency);
+            SetAnalyticFieldVisibility("Организация",
+                AccountAnalyticsRules.ShouldShowField(
+                    "Организация",
+                    selectedSettings,
+                    _accountAnalytics.Definitions,
+                    "Организации",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+            SetAnalyticFieldVisibility("Сотрудник",
+                AccountAnalyticsRules.ShouldShowField(
+                    "Сотрудник",
+                    selectedSettings,
+                    _accountAnalytics.Definitions,
+                    "Сотрудники (Списочный состав)",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+            SetAnalyticFieldVisibility("Материал",
+                AccountAnalyticsRules.ShouldShowField(
+                    "Материал",
+                    selectedSettings,
+                    _accountAnalytics.Definitions,
+                    "Справочник материалов",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+            SetAnalyticFieldVisibility("Договор", false);
+            SetAnalyticFieldVisibility("Статья", false);
         }
 
         private AccountAnalyticsSettings? GetSelectedAccountSettings(string fieldName)
         {
-            if (!_fieldControls.TryGetValue(fieldName, out var control) ||
-                control is not ComboBox comboBox ||
-                comboBox.SelectedItem is not AccountItem account)
+            if (!_fieldControls.TryGetValue(fieldName, out var control))
             {
                 return null;
             }
 
-            return _accountAnalyticsByCode.TryGetValue(account.Code, out var settings)
-                ? settings
-                : null;
+            var account = GetSelectedAccountFromControl(control);
+            return account == null ? null : _accountAnalytics.GetSettings(account);
+        }
+
+        private static AccountReferenceItem? GetSelectedAccountFromControl(Control control)
+        {
+            return control switch
+            {
+                UserControl { Tag: AccountReferenceItem account } => account,
+                ComboBox { SelectedItem: AccountReferenceItem account } => account,
+                _ => null
+            };
         }
 
         private void SetAnalyticFieldVisibility(string fieldName, bool isVisible)
@@ -401,7 +450,7 @@ namespace BIS.ERP.Views
 
                 var itemData = new Dictionary<string, object>();
 
-                foreach (var field in _document.Fields.OrderBy(f => f.Order))
+                foreach (var field in _document.Fields.OrderBy(GetPostingFieldDisplayOrder).ThenBy(f => f.Order))
                 {
                     if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
                         continue;
@@ -413,7 +462,10 @@ namespace BIS.ERP.Views
 
                     switch (control)
                     {
-                        case ComboBox comboBox when comboBox.SelectedItem is AccountItem account:
+                        case UserControl accountPicker when accountPicker.Tag is AccountReferenceItem account:
+                            value = account.Code;
+                            break;
+                        case ComboBox comboBox when comboBox.SelectedItem is AccountReferenceItem account:
                             value = account.Code;
                             break;
                         case ComboBox comboBox when comboBox.SelectedItem is ReferenceItem selected && selected.Id != Guid.Empty:
@@ -495,22 +547,20 @@ namespace BIS.ERP.Views
             }
         }
 
-        private static bool IsFlagEnabled(object? value)
-        {
-            return value switch
-            {
-                true => true,
-                string text => text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                               text.Equals("да", StringComparison.OrdinalIgnoreCase) ||
-                               text == "+",
-                _ => false
-            };
-        }
-
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
             DialogResult = false;
             Close();
+        }
+
+        private static int GetPostingFieldDisplayOrder(MetadataField field)
+        {
+            return field.Name switch
+            {
+                "Номер документа" => 1,
+                "Дата" => 2,
+                _ => 100 + field.Order
+            };
         }
     }
 }

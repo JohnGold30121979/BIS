@@ -305,7 +305,7 @@ namespace BIS.ERP.Services
             var values = new List<string>();
             var parameters = new Dictionary<string, object>();
 
-            foreach (var field in catalog.Fields)
+            foreach (var field in SelectFieldsForWrite(catalog, itemData))
             {
                 if (itemData.ContainsKey(field.Name) && itemData[field.Name] != null)
                 {
@@ -548,14 +548,15 @@ namespace BIS.ERP.Services
             try
             {
                 await EnsureChartOfAccountsCatalogStructureAsync();
+                await EnsureAccountAnalyticsLinksCatalogAsync();
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации полей плана счетов: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации служебных справочников: {ex.Message}");
             }
 
             return await _context.Set<MetadataObject>()
-                .Where(m => m.ObjectType == "Catalog")
+                .Where(m => m.ObjectType == "Catalog" && m.Name != "Контрагенты")
                 .Include(m => m.Fields)
                 .OrderBy(m => m.Order)
                 .ToListAsync();
@@ -567,6 +568,7 @@ namespace BIS.ERP.Services
 
             try
             {
+                await EnsureManagedDocumentAnalyticFieldsAsync(documents);
                 await EnsureGlobalDocumentNumberConfigurationAsync(documents);
 
                 foreach (var document in documents.Where(IsManagedDocument))
@@ -769,14 +771,13 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Справочник курсов валют"))
                     await CreateCurrencyRatesCatalog(config);
 
-                if (!existingCatalogs.Contains("Контрагенты"))
-                    await CreateContractorsCatalog(config);
-
                 if (!existingCatalogs.Contains("МОЛ"))
                     await CreateResponsiblePersonsCatalog(config);
 
                 if (!existingCatalogs.Contains("Кассы"))
                     await CreateCashDesksCatalog(config);
+
+                await EnsureAccountAnalyticsLinksCatalogAsync(config);
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }
@@ -802,7 +803,7 @@ namespace BIS.ERP.Services
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
 
-            foreach (var field in metadata.Fields)
+            foreach (var field in SelectFieldsForWrite(metadata, data))
             {
                 if (data.ContainsKey(field.Name) && data[field.Name] != null)
                 {
@@ -848,7 +849,7 @@ namespace BIS.ERP.Services
 
             var setClauses = new List<string>();
 
-            foreach (var field in metadata.Fields)
+            foreach (var field in SelectFieldsForWrite(metadata, data))
             {
                 if (data.ContainsKey(field.Name))
                 {
@@ -872,6 +873,35 @@ namespace BIS.ERP.Services
 
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
+        }
+
+        private static List<MetadataField> SelectFieldsForWrite(
+            MetadataObject metadata,
+            Dictionary<string, object> data)
+        {
+            var result = new List<MetadataField>();
+
+            foreach (var group in metadata.Fields
+                         .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                         .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase))
+            {
+                if (group.Count() > 1)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Дубликат колонки '{group.Key}' в метаданных '{metadata.Name}'. Для записи будет использован один реквизит.");
+                }
+
+                var fieldWithData = group
+                    .OrderBy(field => field.Order)
+                    .FirstOrDefault(field => data.ContainsKey(field.Name));
+                var requiredField = group
+                    .OrderBy(field => field.Order)
+                    .FirstOrDefault(field => field.IsRequired);
+
+                result.Add(fieldWithData ?? requiredField ?? group.OrderBy(field => field.Order).First());
+            }
+
+            return result;
         }
 
         private static void NormalizeDocumentNumberData(MetadataObject metadata, Dictionary<string, object> data)
@@ -1588,29 +1618,30 @@ namespace BIS.ERP.Services
             Guid cashDeskId = Guid.Empty;
             if (recordData.ContainsKey("cash_desk_id") && recordData["cash_desk_id"] != null)
             {
-                cashDeskId = Guid.Parse(recordData["cash_desk_id"].ToString());
+                Guid.TryParse(recordData["cash_desk_id"].ToString(), out cashDeskId);
             }
             else if (recordData.ContainsKey("Касса") && recordData["Касса"] != null)
             {
-                cashDeskId = Guid.Parse(recordData["Касса"].ToString());
+                Guid.TryParse(recordData["Касса"].ToString(), out cashDeskId);
             }
 
-            if (cashDeskId == Guid.Empty)
-            {
-                throw new Exception("Касса не указана");
-            }
-            System.Diagnostics.Debug.WriteLine($"CashDeskId: {cashDeskId}");
+            if (cashDeskId != Guid.Empty)
+                System.Diagnostics.Debug.WriteLine($"CashDeskId: {cashDeskId}");
 
             // Получаем корреспондирующий счёт
             Guid corrAccountId = Guid.Empty;
             if (recordData.ContainsKey("correspondent_account") && recordData["correspondent_account"] != null)
             {
-                corrAccountId = Guid.Parse(recordData["correspondent_account"].ToString());
+                Guid.TryParse(recordData["correspondent_account"].ToString(), out corrAccountId);
             }
 
-            // Обновляем остаток в кассе
-            await UpdateCashDeskBalance(cashDeskId, amount, isReceipt);
-            System.Diagnostics.Debug.WriteLine("Cash desk balance updated");
+            // Старые записи могут содержать конкретную кассу. Новые документы работают по счету,
+            // поэтому остаток справочника касс обновляем только когда касса явно указана.
+            if (cashDeskId != Guid.Empty)
+            {
+                await UpdateCashDeskBalance(cashDeskId, amount, isReceipt);
+                System.Diagnostics.Debug.WriteLine("Cash desk balance updated");
+            }
 
             // Получаем данные документа
             string? docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");

@@ -96,8 +96,10 @@ namespace BIS.ERP.Views
                         // Если поле ссылается на справочник - подставляем Name вместо GUID
                         if (referenceCatalogs.TryGetValue(field.Name, out var dict) && rawValue != DBNull.Value)
                         {
-                            var guid = Guid.Parse(rawValue.ToString());
-                            dataRow[field.Name] = dict.ContainsKey(guid) ? dict[guid] : rawValue.ToString();
+                            if (Guid.TryParse(rawValue?.ToString(), out var guid))
+                                dataRow[field.Name] = dict.ContainsKey(guid) ? dict[guid] : rawValue.ToString();
+                            else
+                                dataRow[field.Name] = string.Empty;
                         }
                         else
                         {
@@ -163,6 +165,7 @@ namespace BIS.ERP.Views
                 dialog.Owner = Window.GetWindow(this);
                 if (dialog.ShowDialog() == true)
                 {
+                    await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
                     MessageBox.Show("Запись добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
@@ -200,6 +203,7 @@ namespace BIS.ERP.Views
                 dialog.Owner = Window.GetWindow(this);
                 if (dialog.ShowDialog() == true)
                 {
+                    await _metadataService.UpdateDynamicRecordAsync(_documentMetadata.Id, id, dialog.ItemData);
                     await LoadData();
                     MessageBox.Show("Запись обновлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }

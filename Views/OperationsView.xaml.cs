@@ -41,8 +41,7 @@ namespace BIS.ERP.Views
                             RowNumber = row.RowNumber,
                             OperationCode = GetValueFromData(rowData, "KOD_STR"),
                             OperationDescription = GetValueFromData(rowData, "NAME_STR"),
-                            Amount = GetDecimalFromData(rowData, "SUMMA"),
-                            Kontragent = GetValueFromData(rowData, "NAME_STRKG")
+                            Amount = GetDecimalFromData(rowData, "SUMMA")
                         };
 
                         allRows.Add(displayRow);
@@ -83,6 +82,5 @@ namespace BIS.ERP.Views
         public string OperationCode { get; set; } = string.Empty;
         public string OperationDescription { get; set; } = string.Empty;
         public decimal Amount { get; set; }
-        public string Kontragent { get; set; } = string.Empty;
     }
 }

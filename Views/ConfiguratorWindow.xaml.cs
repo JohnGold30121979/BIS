@@ -536,7 +536,6 @@ namespace BIS.ERP.Views
 
             dataGrid.Columns.Add(new DataGridTextColumn { Header = "Номер", Binding = new System.Windows.Data.Binding("Number"), Width = 120 });
             dataGrid.Columns.Add(new DataGridTextColumn { Header = "Дата", Binding = new System.Windows.Data.Binding("Date"), Width = 120 });
-            dataGrid.Columns.Add(new DataGridTextColumn { Header = "Контрагент", Binding = new System.Windows.Data.Binding("KontragentName"), Width = 200 });
             dataGrid.Columns.Add(new DataGridTextColumn { Header = "Сумма", Binding = new System.Windows.Data.Binding("TotalAmount"), Width = 100 });
             dataGrid.Columns.Add(new DataGridTextColumn { Header = "Статус", Binding = new System.Windows.Data.Binding("IsPosted"), Width = 80 });
 

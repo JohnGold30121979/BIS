@@ -43,11 +43,10 @@
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Тип" Binding="{Binding OrderType}" Width="120"/>
                 <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" Width="150"/>
-                <DataGridTextColumn Header="Контрагент" Binding="{Binding ContractorName}" Width="150"/>
-                <DataGridTextColumn Header="Банк" Binding="{Binding BankName}" Width="150"/>
-                <DataGridTextColumn Header="Наш счет" Binding="{Binding OurAccountName}" Width="150"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="100"/>
                 <DataGridTextColumn Header="Валюта" Binding="{Binding CurrencyName}" Width="80"/>
+                <DataGridTextColumn Header="Сотрудник" Binding="{Binding EmployeeName}" Width="150"/>
+                <DataGridTextColumn Header="Материал" Binding="{Binding MaterialName}" Width="150"/>
                 <DataGridTextColumn Header="Корр. счет" Binding="{Binding CorrespondentAccountName}" Width="120"/>
                 <DataGridTextColumn Header="Назначение" Binding="{Binding Purpose}" Width="200"/>
                 <DataGridTextColumn Header="Проведён" Binding="{Binding IsPosted}" Width="80"/>

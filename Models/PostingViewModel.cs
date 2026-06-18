@@ -15,7 +15,6 @@ namespace BIS.ERP.Models
         public string Currency { get; set; } = string.Empty;
         public string Note { get; set; } = string.Empty;
         public string Organization { get; set; } = string.Empty;
-        public string Counterparty { get; set; } = string.Empty;
         public string Employee { get; set; } = string.Empty;
         public string Site { get; set; } = string.Empty;
         public string ResponsiblePerson { get; set; } = string.Empty;

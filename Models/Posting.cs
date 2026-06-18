@@ -36,7 +36,6 @@ namespace BIS.ERP.Models
 
         // Внешние ключи
         public Guid? OrganizationId { get; set; }
-        public Guid? CounterpartyId { get; set; }
         public Guid? EmployeeId { get; set; }
         public Guid? MaterialId { get; set; }
 
@@ -48,9 +47,6 @@ namespace BIS.ERP.Models
         // Навигационные свойства
         [ForeignKey("OrganizationId")]
         public virtual Organization? Organization { get; set; }
-
-        [ForeignKey("CounterpartyId")]
-        public virtual Counterparty? Counterparty { get; set; }
 
         [ForeignKey("EmployeeId")]
         public virtual Employee? Employee { get; set; }

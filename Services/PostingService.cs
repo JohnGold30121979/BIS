@@ -85,7 +85,6 @@ namespace BIS.ERP.Services
                         Note = row.Note,
                         Organization = row.Organization,
                         Employee = row.Employee,
-                        Counterparty = "",
                         Site = "",
                         ResponsiblePerson = "",
                         DocumentId = null
@@ -157,7 +156,6 @@ namespace BIS.ERP.Services
                                 Organization = organization ?? "",
                                 Employee = employee ?? "",
                                 Currency = rowData.ContainsKey("Currency") ? rowData["Currency"]?.ToString() : "KGS",
-                                Counterparty = "",
                                 Site = "",
                                 ResponsiblePerson = "",
                                 DocumentId = doc.Id

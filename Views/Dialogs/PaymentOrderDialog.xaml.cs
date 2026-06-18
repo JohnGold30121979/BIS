@@ -1,6 +1,5 @@
 ﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
-using DocumentFormat.OpenXml.Wordprocessing;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,10 +17,12 @@ namespace BIS.ERP.Views
         private readonly Guid? _editId;
         private Guid _selectedCorrAccountId;
         private List<ReferenceItem> _organizations;
-        private List<ReferenceItem> _contractors;
         private List<ReferenceItem> _banks;
         private List<ReferenceItem> _ourAccounts;
         private List<ReferenceItem> _currencies;
+        private List<ReferenceItem> _employees;
+        private List<ReferenceItem> _materials;
+        private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
 
@@ -85,6 +86,7 @@ namespace BIS.ERP.Views
                     NumberBox.Text = number;
                 }
 
+                UpdateAccountControlledFieldsVisibility();
                 _isDataLoaded = true;
                
             }
@@ -104,6 +106,7 @@ namespace BIS.ERP.Views
         private async Task LoadReferenceDataAsync()
         {
             var allCatalogs = await _metadataService.GetCatalogsAsync();
+            _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
             // Загружаем организации
             var orgCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Организации");
@@ -118,19 +121,6 @@ namespace BIS.ERP.Views
 
                 // Обновляем UI в UI потоке
                 Dispatcher.Invoke(() => OrganizationCombo.ItemsSource = _organizations);
-            }
-
-            // Загружаем контрагентов
-            var contractorCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Контрагенты");
-            if (contractorCatalog != null)
-            {
-                var data = await _metadataService.GetCatalogDataAsync(contractorCatalog.Id);
-                _contractors = data.Select(d => new ReferenceItem
-                {
-                    Id = Guid.Parse(d["Id"].ToString()),
-                    DisplayName = d.ContainsKey("Наименование") ? d["Наименование"].ToString() : d["name"].ToString()
-                }).ToList();
-                Dispatcher.Invoke(() => ContractorCombo.ItemsSource = _contractors);
             }
 
             // Загружаем банки
@@ -194,6 +184,12 @@ namespace BIS.ERP.Views
                 }).ToList();
                 Dispatcher.Invoke(() => CurrencyCombo.ItemsSource = _currencies);
             }
+
+            _employees = await LoadReferenceItemsAsync(allCatalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
+            Dispatcher.Invoke(() => EmployeeCombo.ItemsSource = _employees);
+
+            _materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
+            Dispatcher.Invoke(() => MaterialCombo.ItemsSource = _materials);
         }
 
         private async Task LoadDataAsync(Guid id)
@@ -213,7 +209,13 @@ namespace BIS.ERP.Views
                     if (record.ContainsKey("Сумма")) AmountBox.Text = record["Сумма"].ToString();
                     if (record.ContainsKey("Назначение платежа")) PurposeBox.Text = record["Назначение платежа"].ToString();
                     if (record.ContainsKey("Примечание")) DescriptionBox.Text = record["Примечание"].ToString();
-                    if (record.ContainsKey("Счет контрагента")) CounterpartyAccountBox.Text = record["Счет контрагента"].ToString();
+                    if (record.TryGetValue("Корр. счет", out var accountValue))
+                        ApplySelectedCorrAccount(accountValue);
+
+                    SelectComboByRecordValue(OrganizationCombo, record, "Организация");
+                    SelectComboByRecordValue(CurrencyCombo, record, "Валюта");
+                    SelectComboByRecordValue(EmployeeCombo, record, "Сотрудник");
+                    SelectComboByRecordValue(MaterialCombo, record, "Материал");
 
                     if (record.ContainsKey("Тип"))
                     {
@@ -251,6 +253,7 @@ namespace BIS.ERP.Views
                     var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
                     CorrAccountBox.Text = $"{accountCode} - {accountName}";
                     _selectedCorrAccountId = Guid.Parse(dialog.SelectedAccount["Id"].ToString());
+                    UpdateAccountControlledFieldsVisibility();
                 }
             }
             catch (Exception ex)
@@ -293,17 +296,33 @@ namespace BIS.ERP.Views
                     ["Тип"] = documentType,  
                     ["Сумма"] = decimal.TryParse(AmountBox.Text, out var amount) ? amount : 0,
                     ["Назначение платежа"] = PurposeBox.Text,
-                    ["Счет контрагента"] = CounterpartyAccountBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
                     ["Проведён"] = false
                 };
 
-                if (OrganizationCombo.SelectedItem is ReferenceItem org) itemData["Организация"] = org.Id;
-                if (ContractorCombo.SelectedItem is ReferenceItem contractor) itemData["Контрагент"] = contractor.Id;
-                if (BankCombo.SelectedItem is ReferenceItem bank) itemData["Банк"] = bank.Id;
-                if (OurAccountCombo.SelectedItem is ReferenceItem account) itemData["Наш счет"] = account.Id;
-                if (CurrencyCombo.SelectedItem is ReferenceItem currency) itemData["Валюта"] = currency.Id;
-                if (_selectedCorrAccountId != Guid.Empty) itemData["Корр. счет"] = _selectedCorrAccountId;
+                SetFieldValueIfExists(itemData, "Организация",
+                    OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem org
+                        ? org.Id
+                        : string.Empty);
+                SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
+                SetFieldValueIfExists(itemData, "Банк", string.Empty);
+                SetFieldValueIfExists(itemData, "Наш счет", string.Empty);
+                SetFieldValueIfExists(itemData, "Расчетный счет контрагента", string.Empty);
+                SetFieldValueIfExists(itemData, "Счет контрагента", string.Empty);
+                SetFieldValueIfExists(itemData, "Валюта",
+                    CurrencyCombo.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem is ReferenceItem currency
+                        ? currency.Id
+                        : string.Empty);
+                SetFieldValueIfExists(itemData, "Сотрудник",
+                    EmployeePanel.Visibility == Visibility.Visible && EmployeeCombo.SelectedItem is ReferenceItem employee
+                        ? employee.Id
+                        : string.Empty);
+                SetFieldValueIfExists(itemData, "Материал",
+                    MaterialPanel.Visibility == Visibility.Visible && MaterialCombo.SelectedItem is ReferenceItem material
+                        ? material.Id
+                        : string.Empty);
+                SetFieldValueIfExists(itemData, "Корр. счет",
+                    _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
 
                 if (_editId.HasValue)
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
@@ -327,6 +346,150 @@ namespace BIS.ERP.Views
         {
             DialogResult = false;
             Close();
+        }
+
+        private void ApplySelectedCorrAccount(object accountValue)
+        {
+            var account = _accountAnalytics.FindAccount(accountValue);
+            if (account == null)
+                return;
+
+            _selectedCorrAccountId = account.Id;
+            CorrAccountBox.Text = account.DisplayName;
+        }
+
+        private void UpdateAccountControlledFieldsVisibility()
+        {
+            var settings = _selectedCorrAccountId == Guid.Empty
+                ? null
+                : _accountAnalytics.GetSettingsById(_selectedCorrAccountId);
+
+            SetAccountControlledFieldVisibility(
+                OrganizationLabel,
+                OrganizationCombo,
+                AccountAnalyticsRules.ShouldShowField(
+                    "Организация",
+                    new[] { settings },
+                    _accountAnalytics.Definitions,
+                    "Организации",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+
+            SetAccountControlledFieldVisibility(
+                CurrencyLabel,
+                CurrencyCombo,
+                AccountAnalyticsRules.ShouldShowField(
+                    "Валюта",
+                    new[] { settings },
+                    _accountAnalytics.Definitions,
+                    "Справочник валют",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+
+            SetAccountControlledPanelVisibility(
+                EmployeePanel,
+                EmployeeCombo,
+                AccountAnalyticsRules.ShouldShowField(
+                    "Сотрудник",
+                    new[] { settings },
+                    _accountAnalytics.Definitions,
+                    "Сотрудники (Списочный состав)",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+
+            SetAccountControlledPanelVisibility(
+                MaterialPanel,
+                MaterialCombo,
+                AccountAnalyticsRules.ShouldShowField(
+                    "Материал",
+                    new[] { settings },
+                    _accountAnalytics.Definitions,
+                    "Справочник материалов",
+                    showWhenNoAccountSelected: false,
+                    showUnmappedFields: false));
+        }
+
+        private void SetFieldValueIfExists(Dictionary<string, object> itemData, string fieldName, object value)
+        {
+            if (_document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
+                itemData[fieldName] = value;
+        }
+
+        private async Task<List<ReferenceItem>> LoadReferenceItemsAsync(
+            List<MetadataObject> catalogs,
+            string catalogName,
+            string firstDisplayField,
+            string secondDisplayField)
+        {
+            var catalog = catalogs.FirstOrDefault(c => c.Name == catalogName);
+            if (catalog == null)
+                return new List<ReferenceItem>();
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            return rows
+                .Where(row => row.ContainsKey("Id") && Guid.TryParse(row["Id"]?.ToString(), out _))
+                .Select(row => new ReferenceItem
+                {
+                    Id = Guid.Parse(row["Id"].ToString()),
+                    DisplayName = BuildDisplayName(row, firstDisplayField, secondDisplayField)
+                })
+                .ToList();
+        }
+
+        private static string BuildDisplayName(Dictionary<string, object> row, string firstField, string secondField)
+        {
+            var first = row.GetValueOrDefault(firstField)?.ToString() ??
+                        row.GetValueOrDefault(firstField.Replace(" ", "_"))?.ToString() ??
+                        string.Empty;
+            var second = row.GetValueOrDefault(secondField)?.ToString() ??
+                         row.GetValueOrDefault(secondField.Replace(" ", "_"))?.ToString() ??
+                         string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(first) && !string.IsNullOrWhiteSpace(second))
+                return $"{first} - {second}";
+
+            return first.Length > 0
+                ? first
+                : second.Length > 0
+                    ? second
+                    : row.GetValueOrDefault("Наименование")?.ToString() ??
+                      row.GetValueOrDefault("name")?.ToString() ??
+                      row.GetValueOrDefault("Id")?.ToString() ??
+                      string.Empty;
+        }
+
+        private static void SelectComboByRecordValue(ComboBox comboBox, Dictionary<string, object> record, string fieldName)
+        {
+            if (!record.TryGetValue(fieldName, out var value) || !Guid.TryParse(value?.ToString(), out var id))
+                return;
+
+            comboBox.SelectedItem = comboBox.Items
+                .OfType<ReferenceItem>()
+                .FirstOrDefault(item => item.Id == id);
+        }
+
+        private static void SetAccountControlledFieldVisibility(
+            FrameworkElement label,
+            ComboBox comboBox,
+            bool isVisible)
+        {
+            var visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+            label.Visibility = visibility;
+            comboBox.Visibility = visibility;
+
+            if (!isVisible)
+                comboBox.SelectedItem = null;
+        }
+
+        private static void SetAccountControlledPanelVisibility(
+            FrameworkElement panel,
+            ComboBox comboBox,
+            bool isVisible)
+        {
+            panel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!isVisible)
+                comboBox.SelectedItem = null;
         }
     }
 }

@@ -29,12 +29,6 @@ namespace BIS.ERP.Models
         [MaxLength(500)]
         public string OperationDescription { get; set; } = string.Empty;
 
-        [MaxLength(100)]
-        public string KontragentCode { get; set; } = string.Empty;
-
-        [MaxLength(200)]
-        public string KontragentName { get; set; } = string.Empty;
-
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? UpdatedAt { get; set; }
 

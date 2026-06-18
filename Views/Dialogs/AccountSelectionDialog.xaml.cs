@@ -12,6 +12,7 @@ namespace BIS.ERP.Views
     {
         public Dictionary<string, object> SelectedAccount { get; private set; }
         private List<Dictionary<string, object>> _accounts;
+        private DataTable _accountsTable = new();
 
         public AccountSelectionDialog(List<Dictionary<string, object>> accounts)
         {
@@ -19,8 +20,8 @@ namespace BIS.ERP.Views
             _accounts = accounts;
 
             // Преобразуем в DataTable для лучшего отображения
-            var dataTable = ConvertToDataTable(accounts);
-            AccountsGrid.ItemsSource = dataTable.DefaultView;
+            _accountsTable = ConvertToDataTable(accounts);
+            AccountsGrid.ItemsSource = _accountsTable.DefaultView;
         }
 
         private DataTable ConvertToDataTable(List<Dictionary<string, object>> data)
@@ -66,6 +67,24 @@ namespace BIS.ERP.Views
         private void AccountsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             SelectCurrentAccount();
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var view = _accountsTable.DefaultView;
+            var searchText = SearchBox.Text?.Trim().Replace("'", "''") ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                view.RowFilter = string.Empty;
+                return;
+            }
+
+            view.RowFilter =
+                $"[Код] LIKE '%{searchText}%' OR [Наименование] LIKE '%{searchText}%' OR [Тип счета] LIKE '%{searchText}%'";
+
+            if (view.Count > 0)
+                AccountsGrid.SelectedIndex = 0;
         }
 
         private void SelectCurrentAccount()
