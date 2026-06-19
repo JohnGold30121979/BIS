@@ -104,7 +104,7 @@ namespace BIS.ERP.Views
             {
                 if (!addedFieldNames.Contains(field.Name))
                 {
-                    fields.Add(new FieldDef { Name = field.Name, Type = field.FieldType });
+                    fields.Add(new FieldDef { Name = field.Name, DbColumnName = field.DbColumnName, Type = field.FieldType });
                 }
             }
 
@@ -124,7 +124,7 @@ namespace BIS.ERP.Views
                 _reportFields.Add(new ReportField
                 {
                     Id = Guid.NewGuid(),
-                    FieldName = field.Name,
+                    FieldName = field.DbColumnName,
                     DisplayName = field.Name,
                     Order = _reportFields.Count + 1,
                     IsVisible = true,
@@ -211,6 +211,7 @@ namespace BIS.ERP.Views
             ShowGridLinesCheck.IsChecked = report.ShowGridLines;
             ShowGrandTotalCheck.IsChecked = report.ShowGrandTotal;
             ShowPageNumbersCheck.IsChecked = report.ShowPageNumbers;
+            ReportTypeCombo.SelectedIndex = report.ReportType == "InvoiceMaterialsKg" ? 3 : 0;
 
             // Выбор источника
             if (report.DataSourceId.HasValue)
@@ -304,6 +305,7 @@ namespace BIS.ERP.Views
                     SummaryText = SummaryTextBox.Text,
                     DataSourceType = "Catalog",
                     DataSourceId = catalog.Id,
+                    ReportType = GetSelectedReportType(),
                     Fields = _reportFields.ToList(),
                     Filters = _reportFilters.ToList(),
                     PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait",
@@ -362,7 +364,7 @@ namespace BIS.ERP.Views
                 _currentReport.SummaryText = SummaryTextBox.Text;
                 _currentReport.DataSourceType = "Catalog";
                 _currentReport.DataSourceId = catalog.Id;
-                _currentReport.ReportType = "Table";
+                _currentReport.ReportType = GetSelectedReportType();
                 _currentReport.Icon = "📊";
                 _currentReport.UpdatedAt = DateTime.UtcNow;
 
@@ -433,6 +435,11 @@ namespace BIS.ERP.Views
             return "#2C3E50";
         }
 
+        private string GetSelectedReportType()
+        {
+            return ReportTypeCombo.SelectedIndex == 3 ? "InvoiceMaterialsKg" : "Table";
+        }
+
         private void SelectColorInCombo(ComboBox combo, string colorHex)
         {
             if (string.IsNullOrEmpty(colorHex)) return;
@@ -458,6 +465,7 @@ namespace BIS.ERP.Views
     public class FieldDef
     {
         public string Name { get; set; } = string.Empty;
+        public string DbColumnName { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
     }
 }

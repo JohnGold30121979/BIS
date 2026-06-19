@@ -552,6 +552,82 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task AddPrimaryOrganizationDataToTable(MetadataObject catalog)
+        {
+            var insertSql = $@"
+                INSERT INTO ""{catalog.TableName}""
+                (""Id"", ""code"", ""name"", ""is_primary"", ""full_name"", ""legal_form"", ""inn"", ""okpo"",
+                 ""registration_number"", ""legal_address"", ""actual_address"", ""phone"", ""email"",
+                 ""bank_name"", ""bank_account"", ""bic"", ""director"", ""chief_accountant"",
+                 ""group_code"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                VALUES (
+                    '{Guid.NewGuid()}',
+                    '0001',
+                    'Основное предприятие',
+                    true,
+                    'Основное предприятие',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    'OWN',
+                    'Первичная организация. Заполните реквизиты предприятия для печатных форм.',
+                    true,
+                    NOW(),
+                    NOW()
+                )";
+
+            await _context.Database.ExecuteSqlRawAsync(insertSql);
+        }
+
+        private async Task EnsurePrimaryOrganizationDataAsync(MetadataObject catalog)
+        {
+            try
+            {
+                var checkSql = $@"SELECT COUNT(*) FROM ""{catalog.TableName}""";
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = checkSql;
+
+                await _context.Database.OpenConnectionAsync();
+                var count = Convert.ToInt32(await command.ExecuteScalarAsync());
+                await _context.Database.CloseConnectionAsync();
+
+                if (count == 0)
+                {
+                    await AddPrimaryOrganizationDataToTable(catalog);
+                    return;
+                }
+
+                var primarySql = $@"
+                    UPDATE ""{catalog.TableName}""
+                    SET ""is_primary"" = CASE
+                        WHEN ""Id"" = (
+                            SELECT ""Id""
+                            FROM ""{catalog.TableName}""
+                            ORDER BY COALESCE(""is_primary"", false) DESC, ""code"", ""CreatedAt""
+                            LIMIT 1
+                        ) THEN true
+                        ELSE false
+                    END,
+                    ""UpdatedAt"" = NOW()";
+
+                await _context.Database.ExecuteSqlRawAsync(primarySql);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка проверки первичной организации: {ex.Message}");
+            }
+        }
+
         private static string EscapeSql(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");

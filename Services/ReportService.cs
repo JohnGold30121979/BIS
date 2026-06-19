@@ -10,6 +10,9 @@ using System;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 
 namespace BIS.ERP.Services
 {
@@ -215,12 +218,111 @@ namespace BIS.ERP.Services
             return stream.ToArray();
         }
 
+        public byte[] ExportToPdf(DataTable dataTable, Report report)
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+
+            var organization = GetPrimaryOrganizationAsync().GetAwaiter().GetResult();
+            var generatedAt = DateTime.Now;
+
+            return QuestPDF.Fluent.Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(25);
+                    page.DefaultTextStyle(x => x.FontSize(9).FontFamily("Arial"));
+
+                    page.Header().Column(column =>
+                    {
+                        if (report.ReportType == "InvoiceMaterialsKg")
+                        {
+                            column.Item().AlignCenter().Text("СЧЕТ-ФАКТУРА").Bold().FontSize(16);
+                            column.Item().AlignCenter().Text("на материалы").FontSize(11);
+                        }
+                        else
+                        {
+                            column.Item().Text(report.Name).Bold().FontSize(16);
+                        }
+
+                        column.Item().PaddingTop(8).Text(organization.DisplayName).Bold();
+                        column.Item().Text($"ИНН: {organization.Inn}  ОКПО: {organization.Okpo}");
+                        column.Item().Text($"Адрес: {organization.Address}");
+                        column.Item().Text($"Банк: {organization.BankName}  Счет: {organization.BankAccount}  БИК: {organization.Bic}");
+                        column.Item().PaddingBottom(8).LineHorizontal(1);
+                    });
+
+                    page.Content().Column(column =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(report.Description))
+                            column.Item().PaddingBottom(8).Text(report.Description);
+
+                        column.Item().Table(table =>
+                        {
+                            var columns = dataTable.Columns.Cast<DataColumn>().ToList();
+                            table.ColumnsDefinition(definition =>
+                            {
+                                foreach (var _ in columns)
+                                    definition.RelativeColumn();
+                            });
+
+                            table.Header(header =>
+                            {
+                                foreach (var dataColumn in columns)
+                                {
+                                    header.Cell()
+                                        .Background(Colors.Grey.Lighten2)
+                                        .Border(1)
+                                        .Padding(4)
+                                        .Text(dataColumn.ColumnName)
+                                        .Bold();
+                                }
+                            });
+
+                            foreach (DataRow row in dataTable.Rows)
+                            {
+                                foreach (var dataColumn in columns)
+                                {
+                                    table.Cell()
+                                        .Border(1)
+                                        .Padding(4)
+                                        .Text(FormatReportValue(row[dataColumn]));
+                                }
+                            }
+                        });
+
+                        if (report.ReportType == "InvoiceMaterialsKg")
+                        {
+                            column.Item().PaddingTop(20).Row(row =>
+                            {
+                                row.RelativeItem().Text($"Руководитель: {organization.Director}");
+                                row.RelativeItem().Text($"Главный бухгалтер: {organization.ChiefAccountant}");
+                            });
+                        }
+                    });
+
+                    page.Footer().AlignRight().Text(text =>
+                    {
+                        text.Span($"Сформировано: {generatedAt:dd.MM.yyyy HH:mm}  Стр. ");
+                        text.CurrentPageNumber();
+                        text.Span(" из ");
+                        text.TotalPages();
+                    });
+                });
+            }).GeneratePdf();
+        }
+
         // Экспорт в HTML
 
         // Генерация HTML отчета с шапкой и подвалом
         // Генерация HTML отчета с шапкой и подвалом
         public string GenerateReportHtml(DataTable dataTable, Report report)
         {
+            if (report.ReportType == "InvoiceMaterialsKg")
+            {
+                return GenerateMaterialsInvoiceHtml(dataTable, report);
+            }
+
             var html = new StringBuilder();
 
             // Простые настройки           
@@ -323,6 +425,160 @@ namespace BIS.ERP.Services
         public string ExportToHtml(DataTable dataTable, Report report)
         {
             return GenerateReportHtml(dataTable, report);
+        }
+
+        private string GenerateMaterialsInvoiceHtml(DataTable dataTable, Report report)
+        {
+            var organization = GetPrimaryOrganizationAsync().GetAwaiter().GetResult();
+            var html = new StringBuilder();
+
+            html.AppendLine("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+            html.AppendLine($"<title>{EncodeHtml(report.Name)}</title>");
+            html.AppendLine(@"
+                <style>
+                    body { font-family: Arial, sans-serif; font-size: 10pt; margin: 18mm; color: #111; }
+                    .title { text-align: center; font-size: 18pt; font-weight: bold; margin-bottom: 3mm; }
+                    .subtitle { text-align: center; font-size: 11pt; margin-bottom: 8mm; }
+                    .org { margin-bottom: 6mm; line-height: 1.45; }
+                    table { border-collapse: collapse; width: 100%; }
+                    th, td { border: 1px solid #333; padding: 5px; vertical-align: top; }
+                    th { background: #f0f0f0; text-align: center; }
+                    .signatures { display: flex; justify-content: space-between; margin-top: 18mm; }
+                    .note { margin-top: 8mm; font-size: 8pt; color: #555; }
+                </style>");
+            html.AppendLine("</head><body>");
+            html.AppendLine("<div class='title'>СЧЕТ-ФАКТУРА</div>");
+            html.AppendLine("<div class='subtitle'>на материалы</div>");
+            html.AppendLine("<div class='org'>");
+            html.AppendLine($"<strong>Поставщик:</strong> {EncodeHtml(organization.DisplayName)}<br>");
+            html.AppendLine($"<strong>ИНН:</strong> {EncodeHtml(organization.Inn)} &nbsp; <strong>ОКПО:</strong> {EncodeHtml(organization.Okpo)}<br>");
+            html.AppendLine($"<strong>Адрес:</strong> {EncodeHtml(organization.Address)}<br>");
+            html.AppendLine($"<strong>Банк:</strong> {EncodeHtml(organization.BankName)} &nbsp; <strong>Счет:</strong> {EncodeHtml(organization.BankAccount)} &nbsp; <strong>БИК:</strong> {EncodeHtml(organization.Bic)}");
+            html.AppendLine("</div>");
+
+            html.AppendLine("<table><thead><tr>");
+            foreach (DataColumn column in dataTable.Columns)
+                html.AppendLine($"<th>{EncodeHtml(column.ColumnName)}</th>");
+            html.AppendLine("</tr></thead><tbody>");
+
+            foreach (DataRow row in dataTable.Rows)
+            {
+                html.AppendLine("<tr>");
+                foreach (DataColumn column in dataTable.Columns)
+                    html.AppendLine($"<td>{EncodeHtml(FormatReportValue(row[column]))}</td>");
+                html.AppendLine("</tr>");
+            }
+
+            html.AppendLine("</tbody></table>");
+            html.AppendLine("<div class='signatures'>");
+            html.AppendLine($"<div>Руководитель: {EncodeHtml(organization.Director)} __________________</div>");
+            html.AppendLine($"<div>Главный бухгалтер: {EncodeHtml(organization.ChiefAccountant)} __________________</div>");
+            html.AppendLine("</div>");
+            html.AppendLine("<div class='note'>Форма является настраиваемым шаблоном BIS ERP для печатных форм КР. Проверьте реквизиты организации перед печатью.</div>");
+            html.AppendLine("</body></html>");
+
+            return html.ToString();
+        }
+
+        private async Task<ReportOrganizationInfo> GetPrimaryOrganizationAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Организации");
+
+            if (catalog == null)
+                return ReportOrganizationInfo.Empty;
+
+            var sql = $@"
+                SELECT *
+                FROM ""{catalog.TableName}""
+                ORDER BY COALESCE(""is_primary"", false) DESC, ""code"", ""CreatedAt""
+                LIMIT 1";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            var opened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    opened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return ReportOrganizationInfo.Empty;
+
+                string GetString(string column)
+                {
+                    try
+                    {
+                        var ordinal = reader.GetOrdinal(column);
+                        return reader.IsDBNull(ordinal) ? string.Empty : reader.GetValue(ordinal)?.ToString() ?? string.Empty;
+                    }
+                    catch
+                    {
+                        return string.Empty;
+                    }
+                }
+
+                return new ReportOrganizationInfo
+                {
+                    Name = GetString("name"),
+                    FullName = GetString("full_name"),
+                    Inn = GetString("inn"),
+                    Okpo = GetString("okpo"),
+                    Address = !string.IsNullOrWhiteSpace(GetString("legal_address")) ? GetString("legal_address") : GetString("actual_address"),
+                    BankName = GetString("bank_name"),
+                    BankAccount = GetString("bank_account"),
+                    Bic = GetString("bic"),
+                    Director = GetString("director"),
+                    ChiefAccountant = GetString("chief_accountant")
+                };
+            }
+            finally
+            {
+                if (opened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private static string FormatReportValue(object value)
+        {
+            return value switch
+            {
+                null => string.Empty,
+                DBNull => string.Empty,
+                DateTime date => date.ToString("dd.MM.yyyy"),
+                decimal number => number.ToString("N2"),
+                double number => number.ToString("N2"),
+                float number => number.ToString("N2"),
+                _ => value.ToString() ?? string.Empty
+            };
+        }
+
+        private sealed class ReportOrganizationInfo
+        {
+            public static ReportOrganizationInfo Empty { get; } = new()
+            {
+                Name = "Основное предприятие",
+                FullName = "Основное предприятие"
+            };
+
+            public string Name { get; set; } = string.Empty;
+            public string FullName { get; set; } = string.Empty;
+            public string Inn { get; set; } = string.Empty;
+            public string Okpo { get; set; } = string.Empty;
+            public string Address { get; set; } = string.Empty;
+            public string BankName { get; set; } = string.Empty;
+            public string BankAccount { get; set; } = string.Empty;
+            public string Bic { get; set; } = string.Empty;
+            public string Director { get; set; } = string.Empty;
+            public string ChiefAccountant { get; set; } = string.Empty;
+
+            public string DisplayName => string.IsNullOrWhiteSpace(FullName) ? Name : FullName;
         }
 
         // Сохранение отчета      

@@ -194,7 +194,9 @@ namespace BIS.ERP.Services
             }
 
             var result = new List<Dictionary<string, object>>();
-            var sql = $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
+            var sql = catalog.Name == "Организации"
+                ? $"SELECT * FROM \"{catalog.TableName}\" ORDER BY COALESCE(\"is_primary\", false) DESC, \"code\", \"CreatedAt\""
+                : $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
@@ -548,6 +550,7 @@ namespace BIS.ERP.Services
             try
             {
                 await EnsureChartOfAccountsCatalogStructureAsync();
+                await EnsureOrganizationsCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
             }
             catch (Exception ex)
@@ -745,6 +748,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Организации"))
                     await CreateOrganizationsCatalog(config);
+                await EnsureOrganizationsCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Расчетные счета организаций"))
                     await CreateBankAccountsCatalog(config);
@@ -778,6 +782,7 @@ namespace BIS.ERP.Services
                     await CreateCashDesksCatalog(config);
 
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
+                await EnsureStandardReportTemplatesAsync(config);
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }
@@ -1664,6 +1669,11 @@ namespace BIS.ERP.Services
             {
                 debitAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : "";
                 creditAccount = "3010"; // Счёт кассы
+            }
+
+            if (string.IsNullOrWhiteSpace(debitAccount) || string.IsNullOrWhiteSpace(creditAccount))
+            {
+                throw new Exception("Для проведения кассового документа укажите корреспондирующий счет. Приход увеличивает кассу: Дт 3010 / Кт корр.счет; расход уменьшает кассу: Дт корр.счет / Кт 3010.");
             }
 
             // Создаём проводку с указанием типа документа

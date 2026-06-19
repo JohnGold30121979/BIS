@@ -4,6 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);CS0108;CS1998;CS4014;CS8600;CS8601;CS8602;CS8603;CS8604;CS8612;CS8618;CS8625;EF1002</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
   </PropertyGroup>
@@ -23,6 +24,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" />
+    <PackageReference Include="QuestPDF" Version="2024.7.3" />
   </ItemGroup>
 
   <ItemGroup>

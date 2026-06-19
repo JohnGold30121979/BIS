@@ -105,6 +105,34 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void OnExportPdfClick(object sender, RoutedEventArgs e)
+        {
+            var saveDialog = new SaveFileDialog
+            {
+                Title = "Сохранить PDF файл",
+                Filter = "PDF файлы (*.pdf)|*.pdf",
+                DefaultExt = "pdf",
+                FileName = $"{_report.Name}_{DateTime.Now:yyyyMMdd_HHmmss}"
+            };
+
+            if (saveDialog.ShowDialog() == true)
+            {
+                try
+                {
+                    var data = _reportService.ExportToPdf(_data, _report);
+                    File.WriteAllBytes(saveDialog.FileName, data);
+
+                    MessageBox.Show($"PDF сохранен: {saveDialog.FileName}", "Успех",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка сохранения PDF: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
         private void OnPrintClick(object sender, RoutedEventArgs e)
         {
             try

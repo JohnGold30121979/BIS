@@ -547,13 +547,45 @@ namespace BIS.ERP.Services
                 await _context.MetadataObjects.AddAsync(catalog);
                 await _context.SaveChangesAsync();
                 await CreateTableForCatalogAsync(catalog);
-                // НЕ вызываем AddCurrencyDataToTable - это для валют!
+                await AddPrimaryOrganizationDataToTable(catalog);
                 System.Diagnostics.Debug.WriteLine("Справочник 'Организации' создан");
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Организации': {ex.Message}");
             }
+        }
+
+        private async Task EnsureOrganizationsCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Организации");
+
+            if (catalog == null)
+                return;
+
+            var existingNames = catalog.Fields.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingColumns = catalog.Fields.Select(f => f.DbColumnName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetOrganizationFields(catalog.Id))
+            {
+                if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+
+                catalog.Fields.Add(field);
+                existingNames.Add(field.Name);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+            await EnsurePrimaryOrganizationDataAsync(catalog);
         }
 
         private async Task CreateBankAccountsCatalog(MetadataConfiguration config)
@@ -615,6 +647,72 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Кассы': {ex.Message}");
             }
         }      
+
+        private async Task EnsureStandardReportTemplatesAsync(MetadataConfiguration config)
+        {
+            var hasInvoice = await _context.Reports
+                .AnyAsync(r => r.ReportType == "InvoiceMaterialsKg" || r.Name == "Счет-фактура на материалы (КР)");
+
+            if (hasInvoice)
+                return;
+
+            var materialsCatalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Справочник материалов");
+
+            if (materialsCatalog == null)
+                return;
+
+            var report = new Report
+            {
+                Id = Guid.NewGuid(),
+                Name = "Счет-фактура на материалы (КР)",
+                Description = "Печатная форма счет-фактуры на материалы с реквизитами первичной организации.",
+                DataSourceType = "Catalog",
+                DataSourceId = materialsCatalog.Id,
+                ReportType = "InvoiceMaterialsKg",
+                Icon = "📄",
+                Order = 1,
+                TitleText = "Счет-фактура",
+                SubtitleText = "на материалы",
+                PageOrientation = "Portrait",
+                FontName = "Arial",
+                FontSize = 9,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            var fieldMap = new[]
+            {
+                ("code", "Код"),
+                ("name", "Наименование материала"),
+                ("unit", "Ед. изм."),
+                ("article", "Номенклатурный номер"),
+                ("storage_account", "Счет учета")
+            };
+
+            var order = 1;
+            foreach (var (fieldName, displayName) in fieldMap)
+            {
+                if (materialsCatalog.Fields.All(f => !string.Equals(f.DbColumnName, fieldName, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                report.Fields.Add(new ReportField
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = report.Id,
+                    FieldName = fieldName,
+                    DisplayName = displayName,
+                    Order = order++,
+                    Width = 120,
+                    IsVisible = true,
+                    Alignment = "Left"
+                });
+            }
+
+            await _context.Reports.AddAsync(report);
+            await _context.SaveChangesAsync();
+        }
 
 
     }

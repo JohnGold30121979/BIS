@@ -71,6 +71,7 @@
                                 <ComboBoxItem>Таблица</ComboBoxItem>
                                 <ComboBoxItem>Список</ComboBoxItem>
                                 <ComboBoxItem>Карточка</ComboBoxItem>
+                                <ComboBoxItem>Счет-фактура на материалы (КР)</ComboBoxItem>
                             </ComboBox>
 
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Заголовок:" VerticalAlignment="Center" FontWeight="Bold"/>

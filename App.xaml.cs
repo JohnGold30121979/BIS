@@ -18,6 +18,7 @@ namespace BIS.ERP
 
             // Загружаем настройки
             var settings = AppSettings.Instance;
+            ThemeService.Apply(settings.Theme);
 
             // Проверяем подключение
             bool needSetup = string.IsNullOrEmpty(settings.Password) || !settings.TestConnection();

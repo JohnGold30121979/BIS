@@ -17,6 +17,7 @@ namespace BIS.ERP.Services
         public string DatabaseName { get; set; } = "bis_master";
         public string Username { get; set; } = "postgres";
         public string Password { get; set; } = "";
+        public string Theme { get; set; } = "Default";
 
         public static AppSettings Instance
         {

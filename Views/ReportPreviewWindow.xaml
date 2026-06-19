@@ -22,6 +22,8 @@
                         Background="#27AE60" Foreground="White" Click="OnExportExcelClick"/>
                 <Button x:Name="ExportHtmlButton" Content="🌐 HTML" Width="100" Height="35" Margin="5"
                         Background="#9B59B6" Foreground="White" Click="OnExportHtmlClick"/>
+                <Button x:Name="ExportPdfButton" Content="📄 PDF" Width="100" Height="35" Margin="5"
+                        Background="#34495E" Foreground="White" Click="OnExportPdfClick"/>
                 <Button x:Name="CloseButton" Content="✖ Закрыть" Width="100" Height="35" Margin="5"
                         Background="#E74C3C" Foreground="White" Click="OnCloseClick"/>
 

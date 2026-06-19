@@ -7,7 +7,7 @@ namespace BIS.ERP.Views.Dialogs
     public partial class CreateDynamicObjectDialog : Window
     {
         public string ObjectName => txtName.Text;
-        public string Icon => txtIcon.Text;
+        public string ObjectIcon => txtIcon.Text;
         public string Description => txtDescription.Text;
         public bool UsePostings => chkPostings.IsChecked ?? false;
         public bool UseBalances => chkBalances.IsChecked ?? false;

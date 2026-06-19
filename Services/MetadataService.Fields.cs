@@ -486,7 +486,8 @@ public partial class MetadataService
     }
 
   
-    //Поля справочника Организации
+    // Поля справочника "Организации".
+    // Первая запись с is_primary=true используется как реквизиты нашего предприятия для печатных форм.
     private List<MetadataField> GetOrganizationFields(Guid metadataObjectId)
     {
         return new List<MetadataField>
@@ -517,12 +518,33 @@ public partial class MetadataService
       new MetadataField
       {
           Id = Guid.NewGuid(),
+          Name = "Первичная организация",
+          DbColumnName = "is_primary",
+          FieldType = "Bool",
+          IsRequired = true,
+          Order = 3,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
           Name = "Полное наименование",
           DbColumnName = "full_name",
           FieldType = "String",
           Length = 500,
           IsRequired = false,
-          Order = 3,
+          Order = 4,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Организационно-правовая форма",
+          DbColumnName = "legal_form",
+          FieldType = "String",
+          Length = 100,
+          IsRequired = false,
+          Order = 5,
           MetadataObjectId = metadataObjectId
       },
       new MetadataField
@@ -533,13 +555,35 @@ public partial class MetadataService
           FieldType = "String",
           Length = 50,
           IsRequired = false,
-          Order = 4,
+          Order = 6,
           MetadataObjectId = metadataObjectId
       },
       new MetadataField
       {
           Id = Guid.NewGuid(),
-          Name = "Государство",           // ← Теперь Reference!
+          Name = "ОКПО",
+          DbColumnName = "okpo",
+          FieldType = "String",
+          Length = 50,
+          IsRequired = false,
+          Order = 7,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Регистрационный номер",
+          DbColumnName = "registration_number",
+          FieldType = "String",
+          Length = 100,
+          IsRequired = false,
+          Order = 8,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Государство",
           DbColumnName = "country_id",
           FieldType = "Reference",
           ReferenceCatalog = "Государства",
@@ -547,7 +591,106 @@ public partial class MetadataService
           DisplayFields = "Наименование",
           IsRequired = false,
           IsUnique = false,
-          Order = 5,
+          Order = 9,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Юридический адрес",
+          DbColumnName = "legal_address",
+          FieldType = "String",
+          Length = 500,
+          IsRequired = false,
+          Order = 10,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Фактический адрес",
+          DbColumnName = "actual_address",
+          FieldType = "String",
+          Length = 500,
+          IsRequired = false,
+          Order = 11,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Телефон",
+          DbColumnName = "phone",
+          FieldType = "String",
+          Length = 50,
+          IsRequired = false,
+          Order = 12,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Email",
+          DbColumnName = "email",
+          FieldType = "String",
+          Length = 150,
+          IsRequired = false,
+          Order = 13,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Банк",
+          DbColumnName = "bank_name",
+          FieldType = "String",
+          Length = 250,
+          IsRequired = false,
+          Order = 14,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Расчетный счет",
+          DbColumnName = "bank_account",
+          FieldType = "String",
+          Length = 100,
+          IsRequired = false,
+          Order = 15,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "БИК",
+          DbColumnName = "bic",
+          FieldType = "String",
+          Length = 50,
+          IsRequired = false,
+          Order = 16,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Руководитель",
+          DbColumnName = "director",
+          FieldType = "String",
+          Length = 200,
+          IsRequired = false,
+          Order = 17,
+          MetadataObjectId = metadataObjectId
+      },
+      new MetadataField
+      {
+          Id = Guid.NewGuid(),
+          Name = "Главный бухгалтер",
+          DbColumnName = "chief_accountant",
+          FieldType = "String",
+          Length = 200,
+          IsRequired = false,
+          Order = 18,
           MetadataObjectId = metadataObjectId
       },
       new MetadataField
@@ -558,7 +701,7 @@ public partial class MetadataService
           FieldType = "String",
           Length = 20,
           IsRequired = false,
-          Order = 6,
+          Order = 19,
           MetadataObjectId = metadataObjectId
       },
       new MetadataField
@@ -569,7 +712,7 @@ public partial class MetadataService
           FieldType = "String",
           Length = 500,
           IsRequired = false,
-          Order = 7,
+          Order = 20,
           MetadataObjectId = metadataObjectId
       },
       new MetadataField
@@ -579,7 +722,7 @@ public partial class MetadataService
           DbColumnName = "is_active",
           FieldType = "Bool",
           IsRequired = true,
-          Order = 8,
+          Order = 21,
           MetadataObjectId = metadataObjectId
       }
      };
