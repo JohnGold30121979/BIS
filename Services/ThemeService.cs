@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
-using System.Windows.Media;
 
 namespace BIS.ERP.Services
 {
@@ -9,38 +9,58 @@ namespace BIS.ERP.Services
         public const string DefaultTheme = "Default";
         public const string DarkTheme = "Dark";
 
-        public static void Apply(string theme)
+        private static readonly Dictionary<string, Uri> ThemeUris = new()
         {
-            var normalizedTheme = string.Equals(theme, DarkTheme, StringComparison.OrdinalIgnoreCase)
-                ? DarkTheme
-                : DefaultTheme;
+            { DefaultTheme, new Uri("/Themes/Default.xaml", UriKind.Relative) },
+            { DarkTheme, new Uri("/Themes/Dark.xaml", UriKind.Relative) }
+        };
 
-            var resources = Application.Current.Resources;
+        private static string _currentTheme = DefaultTheme;
 
-            if (normalizedTheme == DarkTheme)
+        public static void Apply(string themeName)
+        {
+            try
             {
-                resources["AppWindowBackgroundBrush"] = Brush("#1F2933");
-                resources["AppPanelBackgroundBrush"] = Brush("#2C3E50");
-                resources["AppCardBackgroundBrush"] = Brush("#34495E");
-                resources["AppPrimaryTextBrush"] = Brushes.White;
-                resources["AppSecondaryTextBrush"] = Brush("#BDC3C7");
-                resources["AppInputBackgroundBrush"] = Brush("#F8F9FA");
-                resources["AppInputForegroundBrush"] = Brush("#1F2933");
-                return;
+                if (string.IsNullOrWhiteSpace(themeName) || !ThemeUris.ContainsKey(themeName))
+                {
+                    themeName = DefaultTheme;
+                }
+
+                _currentTheme = themeName;
+                var uri = ThemeUris[themeName];
+
+                // Загружаем новую тему
+                var newTheme = new ResourceDictionary { Source = uri };
+
+                // ✅ Очищаем и применяем новую тему
+                var app = Application.Current;
+                if (app != null)
+                {
+                    app.Resources.MergedDictionaries.Clear();
+                    app.Resources.MergedDictionaries.Add(newTheme);
+                }
+
+                System.Diagnostics.Debug.WriteLine($"✅ Применена тема: {themeName}");
             }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ Ошибка применения темы: {ex.Message}");
 
-            resources["AppWindowBackgroundBrush"] = Brushes.White;
-            resources["AppPanelBackgroundBrush"] = Brush("#2C3E50");
-            resources["AppCardBackgroundBrush"] = Brushes.White;
-            resources["AppPrimaryTextBrush"] = Brush("#2C3E50");
-            resources["AppSecondaryTextBrush"] = Brush("#666666");
-            resources["AppInputBackgroundBrush"] = Brushes.White;
-            resources["AppInputForegroundBrush"] = Brush("#333333");
+                // Fallback: пробуем загрузить Default
+                try
+                {
+                    var defaultUri = new Uri("/Themes/Default.xaml", UriKind.Relative);
+                    var defaultTheme = new ResourceDictionary { Source = defaultUri };
+                    Application.Current.Resources.MergedDictionaries.Clear();
+                    Application.Current.Resources.MergedDictionaries.Add(defaultTheme);
+                }
+                catch
+                {
+                    // Игнорируем
+                }
+            }
         }
 
-        private static SolidColorBrush Brush(string color)
-        {
-            return (SolidColorBrush)new BrushConverter().ConvertFromString(color);
-        }
+        public static string GetCurrentTheme() => _currentTheme;
     }
 }

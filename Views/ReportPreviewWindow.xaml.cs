@@ -29,18 +29,118 @@ namespace BIS.ERP.Views
         {
             try
             {
-                if (_data == null)
+                // ✅ ПРОВЕРКА: Есть ли данные?
+                if (_data == null || _data.Rows.Count == 0)
                 {
+                    // Скрываем таблицу
+                    PreviewGrid.Visibility = Visibility.Collapsed;
+
+                    // Скрываем шапку и подвал
+                    HeaderPanel.Visibility = Visibility.Collapsed;
+                    FooterPanel.Visibility = Visibility.Collapsed;
+
+                    // ✅ ПОКАЗЫВАЕМ СООБЩЕНИЕ ОБ ОТСУТСТВИИ ДАННЫХ
+                    // Очищаем контейнер ReportContainer (это Border)
+                    ReportContainer.Child = null;
+
+                    // Создаем сообщение
+                    var noDataPanel = new StackPanel
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(20)
+                    };
+
+                    noDataPanel.Children.Add(new TextBlock
+                    {
+                        Text = "📭",
+                        FontSize = 48,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 0, 0, 15)
+                    });
+
+                    noDataPanel.Children.Add(new TextBlock
+                    {
+                        Text = "Нет данных для отображения",
+                        FontSize = 18,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = System.Windows.Media.Brushes.Gray,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 0, 0, 10)
+                    });
+
+                    noDataPanel.Children.Add(new TextBlock
+                    {
+                        Text = "Проверьте:\n• Наличие материалов в базе\n• Правильность фильтров\n• Период отчета",
+                        FontSize = 13,
+                        Foreground = System.Windows.Media.Brushes.DarkGray,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        TextAlignment = TextAlignment.Center
+                    });
+
+                    // Устанавливаем сообщение в контейнер
+                    ReportContainer.Child = noDataPanel;
+
+                    Title = $"Предпросмотр: {_report.Name} (нет данных)";
+                    StatusText.Text = "Нет данных";
                     return;
                 }
+
+                // ✅ ПРОВЕРКА: Есть ли колонки?
+                if (_data.Columns.Count == 0)
+                {
+                    PreviewGrid.Visibility = Visibility.Collapsed;
+                    HeaderPanel.Visibility = Visibility.Collapsed;
+                    FooterPanel.Visibility = Visibility.Collapsed;
+
+                    ReportContainer.Child = null;
+
+                    var noColumnsPanel = new StackPanel
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+
+                    noColumnsPanel.Children.Add(new TextBlock
+                    {
+                        Text = "⚠️",
+                        FontSize = 48,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 0, 0, 15)
+                    });
+
+                    noColumnsPanel.Children.Add(new TextBlock
+                    {
+                        Text = "Нет колонок для отображения",
+                        FontSize = 18,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = System.Windows.Media.Brushes.Orange,
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    });
+
+                    ReportContainer.Child = noColumnsPanel;
+
+                    Title = $"Предпросмотр: {_report.Name} (нет колонок)";
+                    StatusText.Text = "Нет колонок";
+                    return;
+                }
+
+                // ✅ ЕСТЬ ДАННЫЕ - отображаем
+                PreviewGrid.Visibility = Visibility.Visible;
+                HeaderPanel.Visibility = Visibility.Visible;
+                FooterPanel.Visibility = Visibility.Visible;
 
                 PreviewGrid.ItemsSource = _data.DefaultView;
                 Title = $"Предпросмотр: {_report.Name}";
 
+                // Настраиваем колонки
                 foreach (var column in PreviewGrid.Columns)
                 {
                     column.Width = new DataGridLength(1, DataGridLengthUnitType.Star);
                 }
+
+                // Обновляем статус
+                StatusText.Text = $"Записей: {_data.Rows.Count}";
             }
             catch (Exception ex)
             {

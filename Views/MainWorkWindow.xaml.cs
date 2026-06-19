@@ -76,12 +76,19 @@ namespace BIS.ERP
                     CurrentInfoBaseText.Text = _currentInfoBase.Name;
                     this.Title = $"BIS ERP - {_currentInfoBase.Name}";
 
+                    // ✅ Устанавливаем иконку кнопки темы при загрузке
+                    var settings = AppSettings.Instance;
+                    if (ThemeToggleButton != null)
+                    {
+                        ThemeToggleButton.Content = settings.Theme == "Dark" ? "🌞" : "🌙";
+                        ThemeToggleButton.ToolTip = settings.Theme == "Dark" ? "Светлая тема" : "Темная тема";
+                    }
+
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context);
                     _documentService = new DocumentService(context);
 
-                    // await _metadataService.InitializePredefinedCatalogsAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
                     await BuildNavigationTree();
                 }
@@ -295,6 +302,15 @@ namespace BIS.ERP
                 Type = "Profile"
             });
 
+            // ПУНКТ "НАСТРОЙКИ"
+            adminSection.Children.Add(new NavigationItem
+            {
+                Id = "Settings",
+                Name = "Настройки",
+                Icon = "⚙️",
+                Type = "Settings"
+            });
+
             adminSection.Children.Add(new NavigationItem
             {
                 Id = "SwitchMode",
@@ -431,6 +447,10 @@ namespace BIS.ERP
                         OnProfileClick(null, null);
                         break;
 
+                    case "Settings":
+                        OpenSettingsWindow();
+                        break;
+
                     case "SwitchMode":
                         OnSwitchModeClick(null, null);
                         break;
@@ -443,6 +463,27 @@ namespace BIS.ERP
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+      
+        // Открытие окна настроек      
+        private void OpenSettingsWindow()
+        {
+            try
+            {
+                // Создаем окно настроек
+                var settingsWindow = new SettingsWindow();
+                settingsWindow.Owner = this;
+                settingsWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                settingsWindow.ShowDialog();
+
+                // После закрытия окна настроек - обновляем интерфейс
+                // (тема уже применена в SettingsWindow)
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия настроек: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -640,6 +681,42 @@ namespace BIS.ERP
                 var modeWindow = new InfoBaseSelectionWindow();
                 modeWindow.Show();
                 this.Close();
+            }
+        }
+
+        /// <summary>
+        /// Переключение темы по кнопке в шапке
+        /// </summary>
+        private void OnThemeToggleClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var settings = AppSettings.Instance;
+
+                // Переключаем тему
+                var newTheme = settings.Theme == "Dark" ? "Default" : "Dark";
+
+                // Сохраняем в настройках
+                settings.Theme = newTheme;
+                settings.Save();
+
+                // Применяем тему
+                ThemeService.Apply(newTheme);
+
+                // Обновляем иконку кнопки
+                if (ThemeToggleButton != null)
+                {
+                    ThemeToggleButton.Content = newTheme == "Dark" ? "🌞" : "🌙";
+                    ThemeToggleButton.ToolTip = newTheme == "Dark" ? "Светлая тема" : "Темная тема";
+                }
+
+                // Показываем уведомление (опционально)
+                System.Diagnostics.Debug.WriteLine($"✅ Тема изменена на: {newTheme}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка смены темы: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }

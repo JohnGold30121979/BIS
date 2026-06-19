@@ -44,11 +44,15 @@ namespace BIS.ERP.ViewModels
         {
             _settings = settings;
             _dialogService = dialogService;
+
+            // ✅ ИСПРАВЛЕНО: Используем ThemeService.DefaultTheme
             host = settings.Host;
             port = settings.Port.ToString();
             username = settings.Username;
             password = settings.Password;
-            theme = string.IsNullOrWhiteSpace(settings.Theme) ? ThemeService.DefaultTheme : settings.Theme;
+            theme = string.IsNullOrWhiteSpace(settings.Theme)
+                ? ThemeService.DefaultTheme
+                : settings.Theme;
         }
 
         partial void OnTestResultChanged(string value)
@@ -91,10 +95,14 @@ namespace BIS.ERP.ViewModels
             {
                 _settings.Host = Host;
                 _settings.Port = int.Parse(Port);
-                _settings.DatabaseName = "bis_master";
                 _settings.Username = Username;
                 _settings.Password = Password;
-                _settings.Theme = string.IsNullOrWhiteSpace(Theme) ? ThemeService.DefaultTheme : Theme;
+
+                // ✅ ИСПРАВЛЕНО: Используем ThemeService.DefaultTheme
+                _settings.Theme = string.IsNullOrWhiteSpace(Theme)
+                    ? ThemeService.DefaultTheme
+                    : Theme;
+
                 _settings.Save();
                 ThemeService.Apply(_settings.Theme);
 

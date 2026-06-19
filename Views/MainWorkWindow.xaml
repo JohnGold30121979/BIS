@@ -6,7 +6,8 @@
         Height="720" Width="1280"
         WindowStartupLocation="CenterScreen"
         WindowState="Maximized"
-        AllowDrop="True">
+        AllowDrop="True"
+        Background="{DynamicResource AppWindowBackgroundBrush}">
 
     <Window.Resources>
         <local:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -19,43 +20,64 @@
         </Grid.ColumnDefinitions>
 
         <!-- Левая панель - НАВИГАЦИЯ -->
-        <Border Grid.Column="0" Background="#2C3E50">
+        <Border Grid.Column="0" Background="{DynamicResource AppSidebarBackgroundBrush}">
             <DockPanel>
                 <!-- Шапка -->
-                <Border DockPanel.Dock="Top" Background="#1A252F" Padding="15">
+                <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBackgroundBrush}" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="BIS ERP" FontSize="22" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"/>
+                        <!-- Верхняя часть с заголовком и кнопкой -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="BIS ERP" FontSize="22" FontWeight="Bold" 
+                                       Foreground="{DynamicResource AppPrimaryTextBrush}" HorizontalAlignment="Center"/>
+
+                            <!-- Кнопка смены темы -->
+                            <Button Grid.Column="1" x:Name="ThemeToggleButton" 
+                                    Content="🌙" FontSize="20" 
+                                    Background="Transparent" BorderThickness="0"
+                                    Foreground="{DynamicResource AppPrimaryTextBrush}" Cursor="Hand"
+                                    Click="OnThemeToggleClick"
+                                    ToolTip="Сменить тему"/>
+                        </Grid>
+
+                        <!-- Информация об информационной базе -->
                         <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
-                                   FontSize="11" Foreground="#7F8C8D" 
+                                   FontSize="11" Foreground="{DynamicResource AppSecondaryTextBrush}" 
                                    HorizontalAlignment="Center" Margin="0,5,0,0"/>
                     </StackPanel>
                 </Border>
 
                 <!-- Дерево навигации -->
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" 
+                              Background="{DynamicResource AppSidebarBackgroundBrush}">
                     <TreeView x:Name="NavigationTree" 
-                              Background="#2C3E50" 
+                              Background="{DynamicResource AppSidebarBackgroundBrush}" 
                               BorderThickness="0"
                               AllowDrop="True"
                               DragOver="NavigationTree_DragOver"
                               Drop="NavigationTree_Drop"
                               PreviewMouseMove="NavigationTree_PreviewMouseMove">
                         <TreeView.Resources>
-                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#34495E"/>
+                            <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" 
+                                             Color="{DynamicResource AppHighlightColor}"/>
                         </TreeView.Resources>
 
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="TreeViewItem">
-                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AppPrimaryTextBrush}"/>
                                 <Setter Property="FontSize" Value="13"/>
                                 <Setter Property="Padding" Value="5,8"/>
                                 <Setter Property="Cursor" Value="Hand"/>
                                 <Style.Triggers>
                                     <Trigger Property="IsSelected" Value="True">
-                                        <Setter Property="Background" Value="#34495E"/>
+                                        <Setter Property="Background" Value="{DynamicResource AppHighlightBrush}"/>
                                     </Trigger>
                                     <Trigger Property="IsMouseOver" Value="True">
-                                        <Setter Property="Background" Value="#34495E"/>
+                                        <Setter Property="Background" Value="{DynamicResource AppHighlightBrush}"/>
                                     </Trigger>
                                 </Style.Triggers>
                             </Style>
@@ -66,20 +88,20 @@
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="{Binding Icon}" FontSize="16" Margin="0,0,10,0"/>
                                     <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding Badge}" FontSize="11" Foreground="#7F8C8D" Margin="10,0,0,0" 
+                                    <TextBlock Text="{Binding Badge}" FontSize="11" 
+                                               Foreground="{DynamicResource AppSecondaryTextBrush}" 
+                                               Margin="10,0,0,0" 
                                                Visibility="{Binding HasBadge, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                 </StackPanel>
                             </HierarchicalDataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
                 </ScrollViewer>
-
-               
             </DockPanel>
         </Border>
 
         <!-- Правая панель - контент -->
-        <Border Grid.Column="1" Background="#F5F6FA">
+        <Border Grid.Column="1" Background="{DynamicResource AppContentBackgroundBrush}">
             <ContentControl x:Name="ContentArea" Margin="20"/>
         </Border>
     </Grid>
