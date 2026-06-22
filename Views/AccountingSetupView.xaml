@@ -1,0 +1,75 @@
+<UserControl x:Class="BIS.ERP.Views.AccountingSetupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,12">
+            <TextBlock Text="Настройка бухгалтерского учета" FontSize="24" FontWeight="Bold"/>
+            <TextBlock Text="Начальные остатки и состав строк финансовой отчетности"
+                       Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+        </StackPanel>
+
+        <TabControl Grid.Row="1">
+            <TabItem Header="Начальные остатки">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Добавить счет" Width="115" Height="32" Click="OnAddOpeningClick"/>
+                        <Button Content="Удалить" Width="90" Height="32" Margin="8,0,0,0" Click="OnDeleteOpeningClick"/>
+                        <Button Content="Сохранить" Width="100" Height="32" Margin="8,0,0,0"
+                                Background="#27AE60" Foreground="White" Click="OnSaveOpeningsClick"/>
+                    </StackPanel>
+                    <DataGrid x:Name="OpeningGrid" Grid.Row="1" AutoGenerateColumns="False"
+                              CanUserAddRows="False" SelectionMode="Single">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Дата остатка" Binding="{Binding BalanceDate, StringFormat=dd.MM.yyyy}" Width="120"/>
+                            <DataGridTextColumn Header="Счет" Binding="{Binding AccountCode}" IsReadOnly="True" Width="120"/>
+                            <DataGridTextColumn Header="Наименование" Binding="{Binding AccountName}" IsReadOnly="True" Width="*"/>
+                            <DataGridTextColumn Header="Дебет" Binding="{Binding Debit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                            <DataGridTextColumn Header="Кредит" Binding="{Binding Credit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Строки отчетности">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <WrapPanel Margin="0,0,0,8">
+                        <TextBlock Text="Форма:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox x:Name="ReportCodeCombo" Width="230" Height="32" SelectedIndex="0"
+                                  SelectionChanged="OnReportCodeChanged">
+                            <ComboBoxItem Content="Баланс предприятия" Tag="Balance"/>
+                            <ComboBoxItem Content="Финансовые результаты" Tag="ProfitLoss"/>
+                        </ComboBox>
+                        <Button Content="Добавить строку" Width="120" Height="32" Margin="12,0,0,0" Click="OnAddLineClick"/>
+                        <Button Content="Удалить" Width="90" Height="32" Margin="8,0,0,0" Click="OnDeleteLineClick"/>
+                        <Button Content="Сохранить" Width="100" Height="32" Margin="8,0,0,0"
+                                Background="#27AE60" Foreground="White" Click="OnSaveLinesClick"/>
+                    </WrapPanel>
+                    <DataGrid x:Name="ReportLinesGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Код" Binding="{Binding LineCode}" Width="90"/>
+                            <DataGridTextColumn Header="Раздел" Binding="{Binding SectionCode}" Width="130"/>
+                            <DataGridTextColumn Header="Наименование строки" Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="Порядок" Binding="{Binding SortOrder}" Width="80"/>
+                            <DataGridTextColumn Header="Знак" Binding="{Binding Sign}" Width="60"/>
+                            <DataGridCheckBoxColumn Header="Итог" Binding="{Binding IsTotal}" Width="60"/>
+                            <DataGridTextColumn Header="Счета (через запятую)" Binding="{Binding AccountCodes}" Width="240"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+        <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+    </Grid>
+</UserControl>

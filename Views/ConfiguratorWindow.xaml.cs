@@ -10,6 +10,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using BIS.ERP.Data;
+using Microsoft.EntityFrameworkCore;
+using System.Collections.ObjectModel;
+using System.Windows.Data;
 
 namespace BIS.ERP.Views
 {
@@ -21,6 +25,7 @@ namespace BIS.ERP.Views
         private List<MetadataObject> _documents;
         private List<Report> _reports;
         private bool _isLoading = false;
+        private AppDbContext _context;
 
         public ConfiguratorWindow()
         {
@@ -37,9 +42,10 @@ namespace BIS.ERP.Views
             {
                 Mouse.OverrideCursor = Cursors.Wait;
 
-                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                _metadataService = new MetadataService(context);
-                _reportService = new ReportService(context);
+                _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                _metadataService = new MetadataService(_context);
+                _reportService = new ReportService(_context);
+                await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
 
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Order).ToList();
@@ -146,7 +152,83 @@ namespace BIS.ERP.Views
             rootItem.Items.Add(catalogsItem);
             rootItem.Items.Add(documentsItem);
             rootItem.Items.Add(reportsItem);
+            var translationsItem = new TreeViewItem
+            {
+                Header = "🌐 Переводы интерфейса",
+                Foreground = Brushes.White
+            };
+            translationsItem.Selected += (s, e) => ShowTranslationsEditor();
+            rootItem.Items.Add(translationsItem);
             MetadataTree.Items.Add(rootItem);
+        }
+
+        private async void ShowTranslationsEditor()
+        {
+            if (_context == null)
+                return;
+
+            EditorTitle.Text = "🌐 Переводы интерфейса";
+            EditorDescription.Text = "Единый словарь подписей и системных значений";
+            var entries = new ObservableCollection<LocalizationEntry>(await _context.LocalizationEntries
+                .OrderBy(entry => entry.Culture).ThenBy(entry => entry.Category).ThenBy(entry => entry.Key)
+                .ToListAsync());
+            var grid = new DataGrid
+            {
+                ItemsSource = entries,
+                AutoGenerateColumns = false,
+                CanUserAddRows = true,
+                MinHeight = 500,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            grid.Columns.Add(new DataGridTextColumn { Header = "Язык", Binding = new Binding(nameof(LocalizationEntry.Culture)), Width = 85 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Ключ", Binding = new Binding(nameof(LocalizationEntry.Key)), Width = 220 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Перевод", Binding = new Binding(nameof(LocalizationEntry.Value)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Категория", Binding = new Binding(nameof(LocalizationEntry.Category)), Width = 120 });
+            grid.Columns.Add(new DataGridCheckBoxColumn { Header = "Активен", Binding = new Binding(nameof(LocalizationEntry.IsActive)), Width = 75 });
+
+            var saveButton = new Button { Content = "Сохранить переводы", Width = 160, Height = 34 };
+            saveButton.Click += async (_, _) =>
+            {
+                try
+                {
+                    foreach (var entry in entries)
+                    {
+                        if (string.IsNullOrWhiteSpace(entry.Culture) || string.IsNullOrWhiteSpace(entry.Key))
+                            throw new InvalidOperationException("Язык и ключ перевода обязательны.");
+                        if (_context.Entry(entry).State == EntityState.Detached)
+                            await _context.LocalizationEntries.AddAsync(entry);
+                        entry.UpdatedAt = DateTime.UtcNow;
+                    }
+                    await _context.SaveChangesAsync();
+                    if (LocalizationService.Current != null)
+                        await LocalizationService.Current.SetCultureAsync(AppSettings.Instance.Language);
+                    MessageBox.Show("Переводы сохранены.", "Локализация", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Локализация", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            };
+
+            var deleteButton = new Button { Content = "Удалить строку", Width = 130, Height = 34, Margin = new Thickness(8, 0, 0, 0) };
+            deleteButton.Click += async (_, _) =>
+            {
+                if (grid.SelectedItem is not LocalizationEntry selected)
+                    return;
+                entries.Remove(selected);
+                if (_context.Entry(selected).State != EntityState.Detached)
+                {
+                    _context.LocalizationEntries.Remove(selected);
+                    await _context.SaveChangesAsync();
+                }
+            };
+
+            var toolbar = new StackPanel { Orientation = Orientation.Horizontal };
+            toolbar.Children.Add(saveButton);
+            toolbar.Children.Add(deleteButton);
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(toolbar);
+            PropertiesPanel.Children.Add(grid);
         }
 
         // ДИНАМИЧЕСКИЕ МЕТОДЫ СОЗДАНИЯ

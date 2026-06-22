@@ -280,9 +280,14 @@ namespace BIS.ERP.Views
 
             var options = field.Name switch
             {
-                "Тип счета" => new[] { "Активный", "Пассивный", "Активно-пассивный" },
-                "Признак печати" => new[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
-                "Сохранять остатки" => new[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
+                "Тип счета" => new object[]
+                {
+                    new ChoiceItem("Active", LocalizationService.DisplayValue("Active")),
+                    new ChoiceItem("Passive", LocalizationService.DisplayValue("Passive")),
+                    new ChoiceItem("ActivePassive", LocalizationService.DisplayValue("ActivePassive"))
+                },
+                "Признак печати" => new object[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
+                "Сохранять остатки" => new object[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
                 _ => null
             };
 
@@ -300,7 +305,10 @@ namespace BIS.ERP.Views
                 ? NormalizeChartOfAccountsChoice(field.Name, existingData[field.Name]?.ToString())
                 : string.Empty;
 
-            comboBox.SelectedItem = options.FirstOrDefault(option => option == existingValue) ?? options.FirstOrDefault();
+            comboBox.SelectedItem = field.Name == "Тип счета"
+                ? options.OfType<ChoiceItem>().FirstOrDefault(option => option.Code == NormalizeAccountTypeCode(existingData?.GetValueOrDefault(field.Name)?.ToString()))
+                : options.FirstOrDefault(option => option?.ToString() == existingValue);
+            comboBox.SelectedItem ??= options.FirstOrDefault();
             control = comboBox;
             return true;
         }
@@ -310,14 +318,16 @@ namespace BIS.ERP.Views
             if (fieldName != "Тип счета")
                 return value ?? string.Empty;
 
-            return value switch
-            {
-                "Active" => "Активный",
-                "Passive" => "Пассивный",
-                "ActivePassive" => "Активно-пассивный",
-                _ => value ?? string.Empty
-            };
+            return LocalizationService.DisplayValue(value);
         }
+
+        private static string NormalizeAccountTypeCode(string? value) => value switch
+        {
+            "Активный" => "Active",
+            "Пассивный" => "Passive",
+            "Активно-пассивный" => "ActivePassive",
+            _ => value ?? "Active"
+        };
 
         private Control CreateRegularControl(MetadataField field, Dictionary<string, object> existingData)
         {
@@ -434,6 +444,8 @@ namespace BIS.ERP.Views
                     {
                         if (comboBox.SelectedItem is ReferenceItem selectedItem)
                             value = selectedItem.Id.ToString();
+                        else if (comboBox.SelectedItem is ChoiceItem choiceItem)
+                            value = choiceItem.Code;
                         else
                             value = comboBox.SelectedItem?.ToString() ?? comboBox.Text ?? "";
                     }
@@ -452,6 +464,11 @@ namespace BIS.ERP.Views
             {
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private sealed record ChoiceItem(string Code, string Display)
+        {
+            public override string ToString() => Display;
         }
 
         private object GetValueFromControl(Control control, MetadataField field)

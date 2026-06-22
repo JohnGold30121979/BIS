@@ -49,7 +49,7 @@
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="150"/>
                 <DataGridTextColumn Header="Корр. счет" Binding="{Binding CorrespondentAccountName}" Width="120"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding Description}" Width="150"/>
-                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPosted}" Width="80"/>
+                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150"/>
                 <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150"/>
             </DataGrid.Columns>

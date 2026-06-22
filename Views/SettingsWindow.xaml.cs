@@ -24,7 +24,20 @@ namespace BIS.ERP.Views
                 ThemeComboBox.SelectedIndex = 0;
             }
 
+            LanguageComboBox.SelectedValue = _settings.Language;
+
             UpdateCurrentThemeText();
+        }
+
+        private async void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (LanguageComboBox.SelectedItem is not ComboBoxItem item)
+                return;
+
+            _settings.Language = item.Tag?.ToString() ?? "ru-RU";
+            _settings.Save();
+            if (LocalizationService.Current != null)
+                await LocalizationService.Current.SetCultureAsync(_settings.Language);
         }
 
         /// <summary>

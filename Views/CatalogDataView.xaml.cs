@@ -389,18 +389,15 @@ namespace BIS.ERP.Views
         {
             var binding = new Binding(field.Name);
 
-            if (!IsChartOfAccountsCatalog)
-                return binding;
-
-            if (field.Name == "Тип счета")
+            if (IsChartOfAccountsCatalog && field.Name == "Тип счета")
             {
                 binding.Converter = AccountTypeConverter;
             }
-            else if (field.Name == "Активен")
+            else if (field.FieldType == "Bool" && (!IsChartOfAccountsCatalog || field.Name == "Активен"))
             {
                 binding.Converter = YesNoConverter;
             }
-            else if (field.FieldType == "Bool")
+            else if (IsChartOfAccountsCatalog && field.FieldType == "Bool")
             {
                 binding.Converter = LinkFlagConverter;
             }
@@ -640,14 +637,7 @@ namespace BIS.ERP.Views
         {
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
-                var accountType = value?.ToString();
-                return accountType switch
-                {
-                    "Active" => "Активный",
-                    "Passive" => "Пассивный",
-                    "ActivePassive" => "Активно-пассивный",
-                    _ => accountType ?? string.Empty
-                };
+                return LocalizationService.DisplayValue(value);
             }
 
             public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
@@ -678,12 +668,7 @@ namespace BIS.ERP.Views
         {
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
-                return value switch
-                {
-                    true => "Да",
-                    false => "Нет",
-                    _ => string.Empty
-                };
+                return LocalizationService.DisplayValue(value);
             }
 
             public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

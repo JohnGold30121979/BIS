@@ -304,6 +304,7 @@ namespace BIS.ERP.Views
         public string Purpose { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public bool IsPosted { get; set; }
+        public string IsPostedDisplay => LocalizationService.DisplayValue(IsPosted);
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

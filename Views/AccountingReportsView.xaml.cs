@@ -9,6 +9,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using BIS.ERP.Views.Dialogs;
+using Microsoft.EntityFrameworkCore;
 
 namespace BIS.ERP.Views
 {
@@ -17,8 +20,11 @@ namespace BIS.ERP.Views
         private readonly AppDbContext _context;
         private readonly BalanceService _balanceService;
         private readonly ReportService _reportService;
+        private readonly AccountingPeriodService _periodService;
+        private readonly PostingService _postingService;
         private DataTable? _currentData;
         private Report? _currentReport;
+        private AccountingPeriod? _currentPeriod;
 
         public AccountingReportsView(AppDbContext context)
         {
@@ -26,6 +32,8 @@ namespace BIS.ERP.Views
             _context = context;
             _balanceService = new BalanceService(context);
             _reportService = new ReportService(context);
+            _periodService = new AccountingPeriodService(context);
+            _postingService = new PostingService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
         }
@@ -42,6 +50,8 @@ namespace BIS.ERP.Views
                 if (end < start)
                     throw new Exception("Дата окончания периода не может быть раньше даты начала");
 
+                await _periodService.EnsureSchemaAsync();
+
                 (_currentData, _currentReport) = reportType switch
                 {
                     "GeneralLedger" => await BuildGeneralLedgerAsync(start.Year),
@@ -53,7 +63,9 @@ namespace BIS.ERP.Views
                 };
 
                 ReportGrid.ItemsSource = _currentData.DefaultView;
+                SearchBox.Clear();
                 ExportPdfButton.IsEnabled = _currentData.Columns.Count > 0;
+                await UpdatePeriodStateAsync(start, end);
                 StatusText.Text = $"Сформировано строк: {_currentData.Rows.Count}";
             }
             catch (Exception ex)
@@ -68,12 +80,102 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnCollectPeriodClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var (start, end) = GetPeriod();
+                _currentPeriod = await _periodService.CollectAsync(start, end);
+                await UpdatePeriodStateAsync(start, end);
+                StatusText.Text = "Информация за период собрана и контрольные остатки сохранены";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Сбор периода", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private async void OnTogglePeriodClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var (start, end) = GetPeriod();
+                _currentPeriod = await _periodService.FindAsync(start, end);
+                if (_currentPeriod == null)
+                    throw new InvalidOperationException("Сначала выполните сбор информации за период.");
+
+                if (_currentPeriod.IsLocked)
+                {
+                    if (MessageBox.Show("Открыть период для изменения документов?", "Учетный период",
+                            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                        return;
+                    await _periodService.ReopenAsync(_currentPeriod.Id);
+                }
+                else
+                {
+                    if (MessageBox.Show("Закрыть период? Документы с датами этого периода нельзя будет изменять.",
+                            "Учетный период", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                        return;
+                    await _periodService.CloseAsync(_currentPeriod.Id);
+                }
+                await UpdatePeriodStateAsync(start, end);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Учетный период", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private async Task UpdatePeriodStateAsync(DateTime start, DateTime end)
+        {
+            _currentPeriod = await _periodService.FindAsync(start, end);
+            PeriodStatusText.Text = _currentPeriod == null
+                ? "Период не собран"
+                : $"Статус: {LocalizationService.DisplayValue(_currentPeriod.Status)}";
+            PeriodStateButton.Content = _currentPeriod?.IsLocked == true ? "Открыть период" : "Закрыть период";
+        }
+
+        private (DateTime Start, DateTime End) GetPeriod()
+        {
+            var start = StartDatePicker.SelectedDate ?? new DateTime(DateTime.Today.Year, 1, 1);
+            var end = EndDatePicker.SelectedDate ?? DateTime.Today;
+            if (end < start)
+                throw new InvalidOperationException("Дата окончания периода не может быть раньше даты начала");
+            return (start, end);
+        }
+
+        private void OnSearchChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_currentData == null)
+                return;
+            var search = SearchBox.Text.Trim().Replace("'", "''").Replace("[", "[[]");
+            _currentData.DefaultView.RowFilter = string.IsNullOrWhiteSpace(search)
+                ? string.Empty
+                : string.Join(" OR ", _currentData.Columns.Cast<DataColumn>()
+                    .Where(column => column.DataType == typeof(string))
+                    .Select(column => $"CONVERT([{column.ColumnName}], 'System.String') LIKE '%{search}%'"));
+        }
+
+        private void OnReportGridDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (ReportGrid.SelectedItem is not DataRowView row || !row.Row.Table.Columns.Contains("Счет"))
+                return;
+            var code = row["Счет"]?.ToString();
+            if (string.IsNullOrWhiteSpace(code) || code == "ИТОГО")
+                return;
+            var name = row.Row.Table.Columns.Contains("Наименование") ? row["Наименование"]?.ToString() ?? code : code;
+            var (start, end) = GetPeriod();
+            new TurnoversDialog(code, name, start, end, _postingService) { Owner = Window.GetWindow(this) }.ShowDialog();
+        }
+
         private async Task<(DataTable, Report)> BuildTrialBalanceAsync(DateTime start, DateTime end)
         {
             var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
             var table = new DataTable("Оборотно-сальдовая ведомость");
             table.Columns.Add("Счет", typeof(string));
             table.Columns.Add("Наименование", typeof(string));
+            table.Columns.Add("Сальдо нач. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо нач. Кт", typeof(decimal));
             foreach (var name in new[] { "Сальдо нач. Дт", "Сальдо нач. Кт", "Оборот Дт", "Оборот Кт", "Сальдо кон. Дт", "Сальдо кон. Кт" })
                 table.Columns.Add(name, typeof(decimal));
 
@@ -98,19 +200,25 @@ namespace BIS.ERP.Views
             }
             table.Columns.Add("Год Дт", typeof(decimal));
             table.Columns.Add("Год Кт", typeof(decimal));
+            table.Columns.Add("Сальдо кон. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо кон. Кт", typeof(decimal));
 
             foreach (var item in ledger)
             {
-                var values = new object[28];
+                var values = new object[32];
                 values[0] = item.AccountCode;
                 values[1] = item.AccountName;
+                values[2] = item.OpeningDebit;
+                values[3] = item.OpeningCredit;
                 for (var month = 1; month <= 12; month++)
                 {
-                    values[month * 2] = item.MonthlyTurnoverDebit[month];
-                    values[month * 2 + 1] = item.MonthlyTurnoverCredit[month];
+                    values[2 + month * 2] = item.MonthlyTurnoverDebit[month];
+                    values[3 + month * 2] = item.MonthlyTurnoverCredit[month];
                 }
-                values[26] = item.YearTurnoverDebit;
-                values[27] = item.YearTurnoverCredit;
+                values[28] = item.YearTurnoverDebit;
+                values[29] = item.YearTurnoverCredit;
+                values[30] = item.ClosingDebit;
+                values[31] = item.ClosingCredit;
                 table.Rows.Add(values);
             }
 
@@ -170,24 +278,43 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
         {
             var entries = await _balanceService.GetPurchaseSalesJournalAsync(start, end);
+            var utcStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
+            var utcEnd = DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc);
+            var savedEntries = await _context.TaxJournalRecords.AsNoTracking()
+                .Where(record => record.Date >= utcStart && record.Date < utcEnd)
+                .OrderBy(record => record.Date).ThenBy(record => record.DocumentNumber).ToListAsync();
             var table = new DataTable("Журнал закупок и продаж");
             table.Columns.Add("Раздел", typeof(string));
             table.Columns.Add("Дата", typeof(DateTime));
             table.Columns.Add("Номер", typeof(string));
             table.Columns.Add("Документ", typeof(string));
             table.Columns.Add("Организация", typeof(string));
-            table.Columns.Add("Сумма", typeof(decimal));
-            table.Columns.Add("Проведен", typeof(bool));
+            table.Columns.Add("Ставка налога", typeof(string));
+            table.Columns.Add("Сумма без налога", typeof(decimal));
+            table.Columns.Add("Налог", typeof(decimal));
+            table.Columns.Add("Всего", typeof(decimal));
+            table.Columns.Add("Проведен", typeof(string));
             table.Columns.Add("Примечание", typeof(string));
 
-            foreach (var entry in entries)
-                table.Rows.Add(entry.Section, entry.Date, entry.DocumentNumber, entry.DocumentType,
-                    entry.Organization, entry.Amount, entry.IsPosted, entry.Note);
+            if (savedEntries.Count > 0)
+            {
+                foreach (var entry in savedEntries)
+                    table.Rows.Add(LocalizationService.DisplayValue(entry.JournalType), entry.Date,
+                        entry.DocumentNumber, entry.DocumentType, entry.Organization, entry.TaxType,
+                        entry.AmountWithoutTax, entry.TaxAmount, entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
+            }
+            else
+            {
+                foreach (var entry in entries)
+                    table.Rows.Add(entry.Section, entry.Date, entry.DocumentNumber, entry.DocumentType,
+                        entry.Organization, entry.TaxType, entry.AmountWithoutTax, entry.TaxAmount, entry.Amount,
+                        LocalizationService.DisplayValue(entry.IsPosted), entry.Note);
+            }
 
             var report = CreateReport(table,
                 $"Журнал закупок и продаж за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
             report.ShowGrandTotal = true;
-            var amountField = report.Fields.First(field => field.FieldName == "Сумма");
+            var amountField = report.Fields.First(field => field.FieldName == "Всего");
             amountField.AggregateType = "Sum";
             return (table, report);
         }
@@ -195,24 +322,38 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildPeriodCollectionAsync(DateTime start, DateTime end)
         {
             var collection = await _balanceService.CollectPeriodInformationAsync(start, end);
+            var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
             var table = new DataTable("Сбор информации за период");
-            table.Columns.Add("Документ", typeof(string));
+            table.Columns.Add("Показатель", typeof(string));
             table.Columns.Add("Всего", typeof(int));
             table.Columns.Add("Проведено", typeof(int));
             table.Columns.Add("Не проведено", typeof(int));
-            table.Columns.Add("Сумма", typeof(decimal));
+            table.Columns.Add("Сумма документов", typeof(decimal));
+            table.Columns.Add("Дебет", typeof(decimal));
+            table.Columns.Add("Кредит", typeof(decimal));
+            table.Columns.Add("Разница", typeof(decimal));
 
             foreach (var item in collection.Documents)
-                table.Rows.Add(item.DocumentType, item.DocumentCount, item.PostedCount, item.UnpostedCount, item.Amount);
+                table.Rows.Add(item.DocumentType, item.DocumentCount, item.PostedCount, item.UnpostedCount, item.Amount, 0m, 0m, 0m);
+            var openingDebit = balances.Sum(item => item.OpeningDebit);
+            var openingCredit = balances.Sum(item => item.OpeningCredit);
+            var closingDebit = balances.Sum(item => item.ClosingDebit);
+            var closingCredit = balances.Sum(item => item.ClosingCredit);
+            table.Rows.Add("КОНТРОЛЬ НАЧАЛЬНОГО САЛЬДО", 0, 0, 0, 0m,
+                openingDebit, openingCredit, openingDebit - openingCredit);
             table.Rows.Add("БУХГАЛТЕРСКИЕ ПРОВОДКИ", collection.PostingCount,
-                collection.PostingCount, 0, collection.DebitTurnover);
-            table.Rows.Add("КОНТРОЛЬ ДЕБЕТ/КРЕДИТ", 0, 0, 0, collection.Difference);
+                collection.PostingCount, 0, collection.DebitTurnover,
+                collection.DebitTurnover, collection.CreditTurnover, collection.Difference);
+            table.Rows.Add("КОНТРОЛЬ КОНЕЧНОГО САЛЬДО", 0, 0, 0, 0m,
+                closingDebit, closingCredit, closingDebit - closingCredit);
 
             var report = CreateReport(table,
                 $"Сбор информации за период {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
-            report.SummaryText = collection.IsBalanced
-                ? "Контроль пройден: обороты по дебету и кредиту равны."
-                : $"Обнаружено расхождение дебета и кредита: {collection.Difference:N2}";
+            var isBalanced = collection.IsBalanced && Math.Abs(openingDebit - openingCredit) < 0.01m &&
+                             Math.Abs(closingDebit - closingCredit) < 0.01m;
+            report.SummaryText = isBalanced
+                ? "Контроль пройден: начальное сальдо, обороты и конечное сальдо сбалансированы."
+                : "Контроль не пройден: обнаружено расхождение дебета и кредита.";
             return (table, report);
         }
 

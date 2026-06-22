@@ -46,6 +46,13 @@ public class AppDbContext : DbContext
     public DbSet<MetadataPostingRule> MetadataPostingRules { get; set; }
     public DbSet<Organization> Organizations { get; set; }   
     public DbSet<Posting> Postings { get; set; }  
+    public DbSet<AccountingPeriod> AccountingPeriods { get; set; }
+    public DbSet<AccountOpeningBalance> AccountOpeningBalances { get; set; }
+    public DbSet<AccountTurnoverSnapshot> AccountTurnoverSnapshots { get; set; }
+    public DbSet<FinancialReportLine> FinancialReportLines { get; set; }
+    public DbSet<FinancialReportLineAccount> FinancialReportLineAccounts { get; set; }
+    public DbSet<TaxJournalRecord> TaxJournalRecords { get; set; }
+    public DbSet<LocalizationEntry> LocalizationEntries { get; set; }
     
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -150,6 +157,13 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TotalRecords).IsRequired();
             entity.Property(e => e.ImportedAt).IsRequired();
         });
+
+        modelBuilder.Entity<AccountingPeriod>().HasIndex(period => new { period.StartDate, period.EndDate }).IsUnique();
+        modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => new { balance.BalanceDate, balance.AccountCode }).IsUnique();
+        modelBuilder.Entity<AccountTurnoverSnapshot>().HasIndex(snapshot => new { snapshot.PeriodId, snapshot.AccountCode }).IsUnique();
+        modelBuilder.Entity<FinancialReportLine>().HasIndex(line => new { line.ReportCode, line.LineCode }).IsUnique();
+        modelBuilder.Entity<FinancialReportLineAccount>().HasIndex(link => new { link.LineId, link.AccountCode }).IsUnique();
+        modelBuilder.Entity<LocalizationEntry>().HasIndex(entry => new { entry.Culture, entry.Key }).IsUnique();
     }
 
 

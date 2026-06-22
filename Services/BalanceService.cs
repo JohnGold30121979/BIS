@@ -24,9 +24,17 @@ namespace BIS.ERP.Services
             var postings = await new PostingService(_context)
                 .GetAllPostingsAsync(null, periodEndExclusive.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
+            var utcStart = DateTime.SpecifyKind(periodStart, DateTimeKind.Utc);
+            var openingBalances = (await _context.AccountOpeningBalances.AsNoTracking()
+                    .Where(balance => balance.BalanceDate <= utcStart)
+                    .ToListAsync())
+                .GroupBy(balance => balance.AccountCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(item => item.BalanceDate).First(),
+                    StringComparer.OrdinalIgnoreCase);
 
             var accountCodes = accounts.Keys
                 .Union(postings.SelectMany(posting => new[] { posting.DebitAccount, posting.CreditAccount }))
+                .Union(openingBalances.Keys)
                 .Where(code => !string.IsNullOrWhiteSpace(code))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(code => code)
@@ -34,11 +42,13 @@ namespace BIS.ERP.Services
 
             return accountCodes.Select(code =>
             {
-                var openingDebit = postings
-                    .Where(posting => posting.Date < periodStart && posting.DebitAccount == code)
+                openingBalances.TryGetValue(code, out var initialBalance);
+                var openingFrom = initialBalance?.BalanceDate.Date ?? DateTime.MinValue;
+                var openingDebit = (initialBalance?.Debit ?? 0) + postings
+                    .Where(posting => posting.Date >= openingFrom && posting.Date < periodStart && posting.DebitAccount == code)
                     .Sum(posting => posting.Amount);
-                var openingCredit = postings
-                    .Where(posting => posting.Date < periodStart && posting.CreditAccount == code)
+                var openingCredit = (initialBalance?.Credit ?? 0) + postings
+                    .Where(posting => posting.Date >= openingFrom && posting.Date < periodStart && posting.CreditAccount == code)
                     .Sum(posting => posting.Amount);
                 var turnoverDebit = postings
                     .Where(posting => posting.Date >= periodStart && posting.Date < periodEndExclusive && posting.DebitAccount == code)
@@ -69,8 +79,11 @@ namespace BIS.ERP.Services
             var end = start.AddYears(1);
             var postings = await new PostingService(_context).GetAllPostingsAsync(start, end.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
+            var annualBalances = (await GetTurnoverBalanceAsync(start, end.AddDays(-1)))
+                .ToDictionary(balance => balance.AccountCode, StringComparer.OrdinalIgnoreCase);
             var accountCodes = postings
                 .SelectMany(posting => new[] { posting.DebitAccount, posting.CreditAccount })
+                .Union(annualBalances.Keys)
                 .Where(code => !string.IsNullOrWhiteSpace(code))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(code => code);
@@ -88,14 +101,19 @@ namespace BIS.ERP.Services
                             posting.Date.Month == month && posting.CreditAccount == code)
                         .Sum(posting => posting.Amount));
 
+                annualBalances.TryGetValue(code, out var balance);
                 return new GeneralLedger
                 {
                     AccountCode = code,
                     AccountName = accounts.TryGetValue(code, out var account) ? account.Name : code,
+                    OpeningDebit = balance?.OpeningDebit ?? 0,
+                    OpeningCredit = balance?.OpeningCredit ?? 0,
                     MonthlyTurnoverDebit = debitByMonth,
                     MonthlyTurnoverCredit = creditByMonth,
                     YearTurnoverDebit = debitByMonth.Values.Sum(),
-                    YearTurnoverCredit = creditByMonth.Values.Sum()
+                    YearTurnoverCredit = creditByMonth.Values.Sum(),
+                    ClosingDebit = balance?.ClosingDebit ?? 0,
+                    ClosingCredit = balance?.ClosingCredit ?? 0
                 };
             }).ToList();
         }
@@ -105,19 +123,40 @@ namespace BIS.ERP.Services
             var postings = await new PostingService(_context).GetAllPostingsAsync(null, date.Date.AddDays(1).AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var result = new EnterpriseBalance();
+            var configuredLines = await LoadConfiguredLinesAsync("Balance");
+            var closingBalances = await GetTurnoverBalanceAsync(date.Date, date.Date);
 
-            foreach (var (code, account) in accounts.OrderBy(pair => pair.Key))
+            if (configuredLines.Any(line => line.AccountCodes.Count > 0))
             {
-                var debit = postings.Where(posting => posting.DebitAccount == code).Sum(posting => posting.Amount);
-                var credit = postings.Where(posting => posting.CreditAccount == code).Sum(posting => posting.Amount);
-                var netDebit = debit - credit;
+                foreach (var line in configuredLines.Where(line => !line.IsTotal && line.AccountCodes.Count > 0))
+                {
+                    var amount = closingBalances.Where(balance => line.AccountCodes.Any(code => balance.AccountCode.StartsWith(code)))
+                        .Sum(balance => balance.ClosingDebit - balance.ClosingCredit) * line.Sign;
+                    var item = new BalanceItem { AccountCode = line.LineCode, AccountName = line.Name, Amount = amount };
+                    if (line.SectionCode.Equals("Assets", StringComparison.OrdinalIgnoreCase) || line.SectionCode.Equals("Активы", StringComparison.OrdinalIgnoreCase))
+                        result.Assets.Add(item);
+                    else if (line.SectionCode.Equals("Equity", StringComparison.OrdinalIgnoreCase) || line.SectionCode.Equals("Капитал", StringComparison.OrdinalIgnoreCase))
+                        result.Equity.Add(item);
+                    else
+                        result.Liabilities.Add(item);
+                }
+                result.TotalAssets = result.Assets.Sum(item => item.Amount);
+                result.TotalLiabilities = result.Liabilities.Sum(item => item.Amount);
+                result.TotalEquity = result.Equity.Sum(item => item.Amount);
+                return result;
+            }
+
+            foreach (var balance in closingBalances.OrderBy(item => item.AccountCode))
+            {
+                var code = balance.AccountCode;
+                var netDebit = balance.ClosingDebit - balance.ClosingCredit;
                 if (netDebit == 0 || string.IsNullOrWhiteSpace(code))
                     continue;
 
                 var item = new BalanceItem
                 {
                     AccountCode = code,
-                    AccountName = account.Name,
+                    AccountName = balance.AccountName,
                     Amount = netDebit
                 };
 
@@ -163,6 +202,27 @@ namespace BIS.ERP.Services
                 .GetAllPostingsAsync(startDate.Date, endExclusive.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var result = new FinancialResults();
+            var configuredLines = await LoadConfiguredLinesAsync("ProfitLoss");
+
+            if (configuredLines.Any(line => line.AccountCodes.Count > 0))
+            {
+                foreach (var line in configuredLines.Where(line => !line.IsTotal && line.AccountCodes.Count > 0))
+                {
+                    var matchingAccounts = accounts.Where(pair => line.AccountCodes.Any(code => pair.Key.StartsWith(code)));
+                    var amount = matchingAccounts.Sum(pair =>
+                    {
+                        var debit = postings.Where(posting => posting.DebitAccount == pair.Key).Sum(posting => posting.Amount);
+                        var credit = postings.Where(posting => posting.CreditAccount == pair.Key).Sum(posting => posting.Amount);
+                        return IsPassiveType(pair.Value.Type) ? credit - debit : debit - credit;
+                    }) * line.Sign;
+                    var item = new BalanceItem { AccountCode = line.LineCode, AccountName = line.Name, Amount = amount };
+                    if (line.SectionCode.Equals("Income", StringComparison.OrdinalIgnoreCase) || line.SectionCode.Equals("Доходы", StringComparison.OrdinalIgnoreCase))
+                        result.Income.Add(item);
+                    else
+                        result.Expenses.Add(item);
+                }
+                return result;
+            }
 
             foreach (var (code, account) in accounts
                          .Where(pair => pair.Key.Length > 0 && pair.Key[0] >= '6')
@@ -173,7 +233,7 @@ namespace BIS.ERP.Services
                 if (debit == 0 && credit == 0)
                     continue;
 
-                var isIncome = account.Type.Equals("Passive", StringComparison.OrdinalIgnoreCase);
+                var isIncome = IsPassiveType(account.Type);
                 var amount = isIncome ? credit - debit : debit - credit;
                 var item = new BalanceItem
                 {
@@ -214,6 +274,8 @@ namespace BIS.ERP.Services
 
                     var isPurchase = document.Name.Contains("Приход", StringComparison.OrdinalIgnoreCase) ||
                                      document.Name.Contains("получ", StringComparison.OrdinalIgnoreCase);
+                    var amount = GetDecimal(row, "Сумма", "Сумма в сом");
+                    var taxAmount = GetDecimal(row, "Сумма НДС", "vat_amount");
                     result.Add(new PurchaseSaleJournalEntry
                     {
                         Section = isPurchase ? "Закупки" : "Продажи",
@@ -221,7 +283,10 @@ namespace BIS.ERP.Services
                         DocumentNumber = GetString(row, "Номер", "Номер документа", "doc_number"),
                         DocumentType = document.Name,
                         Organization = GetString(row, "Организация"),
-                        Amount = GetDecimal(row, "Сумма", "Сумма в сом"),
+                        Amount = amount,
+                        AmountWithoutTax = amount - taxAmount,
+                        TaxAmount = taxAmount,
+                        TaxType = GetString(row, "Ставка НДС", "vat_rate"),
                         IsPosted = GetBoolean(row, "Проведён", "Проведен", "is_posted"),
                         Note = GetString(row, "Примечание", "Описание")
                     });
@@ -276,7 +341,7 @@ namespace BIS.ERP.Services
             {
                 var debit = postings.Where(posting => posting.DebitAccount == code).Sum(posting => posting.Amount);
                 var credit = postings.Where(posting => posting.CreditAccount == code).Sum(posting => posting.Amount);
-                result += account.Type.Equals("Passive", StringComparison.OrdinalIgnoreCase)
+                result += IsPassiveType(account.Type)
                     ? credit - debit
                     : -(debit - credit);
             }
@@ -303,6 +368,25 @@ namespace BIS.ERP.Services
                 .Where(account => !string.IsNullOrWhiteSpace(account.Code))
                 .GroupBy(account => account.Code, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private async Task<List<ConfiguredLine>> LoadConfiguredLinesAsync(string reportCode)
+        {
+            var lines = await _context.FinancialReportLines.AsNoTracking()
+                .Where(line => line.ReportCode == reportCode && line.IsActive)
+                .OrderBy(line => line.SortOrder).ToListAsync();
+            var lineIds = lines.Select(line => line.Id).ToList();
+            var links = await _context.FinancialReportLineAccounts.AsNoTracking()
+                .Where(link => lineIds.Contains(link.LineId)).ToListAsync();
+            return lines.Select(line => new ConfiguredLine
+            {
+                LineCode = line.LineCode,
+                SectionCode = line.SectionCode,
+                Name = line.Name,
+                Sign = line.Sign,
+                IsTotal = line.IsTotal,
+                AccountCodes = links.Where(link => link.LineId == line.Id).Select(link => link.AccountCode).ToList()
+            }).ToList();
         }
 
         private static bool TryGetDate(Dictionary<string, object> row, out DateTime date)
@@ -359,6 +443,20 @@ namespace BIS.ERP.Services
             public string Code { get; init; } = string.Empty;
             public string Name { get; init; } = string.Empty;
             public string Type { get; init; } = string.Empty;
+        }
+
+        private static bool IsPassiveType(string value) =>
+            value.Equals("Passive", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("Пассивный", StringComparison.OrdinalIgnoreCase);
+
+        private sealed class ConfiguredLine
+        {
+            public string LineCode { get; init; } = string.Empty;
+            public string SectionCode { get; init; } = string.Empty;
+            public string Name { get; init; } = string.Empty;
+            public int Sign { get; init; }
+            public bool IsTotal { get; init; }
+            public List<string> AccountCodes { get; init; } = new();
         }
     }
 }

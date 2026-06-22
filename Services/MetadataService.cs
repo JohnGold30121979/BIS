@@ -804,6 +804,8 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
+
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
 
@@ -850,6 +852,8 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(m => m.Id == metadataId);
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
+
+            await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);
@@ -909,6 +913,23 @@ namespace BIS.ERP.Services
             }
 
             return result;
+        }
+
+        private async Task EnsureDocumentDateCanBeModifiedAsync(
+            MetadataObject metadata,
+            Dictionary<string, object> data)
+        {
+            if (metadata.ObjectType != "Document")
+                return;
+
+            foreach (var name in new[] { "Дата", "Дата документа", "doc_date", "posting_date", "date" })
+            {
+                if (!data.TryGetValue(name, out var value) || value == null)
+                    continue;
+                if (value is DateTime date || DateTime.TryParse(value.ToString(), out date))
+                    await new AccountingPeriodService(_context).EnsureDateCanBeModifiedAsync(date);
+                return;
+            }
         }
 
         private static void NormalizeDocumentNumberData(MetadataObject metadata, Dictionary<string, object> data)
@@ -1040,6 +1061,12 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(m => m.Id == metadataId);
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
+
+            if (metadata.ObjectType == "Document")
+            {
+                var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
+                await EnsureDocumentDateCanBeModifiedAsync(metadata, recordData);
+            }
 
             var sql = $"DELETE FROM \"{metadata.TableName}\" WHERE \"Id\" = '{recordId}'";
 
@@ -1561,6 +1588,7 @@ namespace BIS.ERP.Services
 
                 // 2. Получаем данные записи
                 var recordData = await GetRecordDataAsync(document.TableName, recordId);
+                await EnsureDocumentDateCanBeModifiedAsync(document, recordData);
 
                 System.Diagnostics.Debug.WriteLine("=== recordData keys ===");
                 foreach (var key in recordData.Keys)

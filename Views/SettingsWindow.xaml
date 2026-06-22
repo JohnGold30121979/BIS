@@ -2,13 +2,14 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Настройки приложения"
-        Height="350" Width="450"
+        Height="440" Width="450"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="{DynamicResource AppWindowBackgroundBrush}">
 
     <Grid Margin="25">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -21,7 +22,7 @@
         <!-- Заголовок -->
         <TextBlock Grid.Row="0" Text="⚙️ Настройки приложения" 
                    FontSize="20" FontWeight="Bold" 
-                   Foreground="{DynamicResource AppPrimaryTextBrush}"
+                   Foreground="{DynamicResource AppBodyTextBrush}"
                    Margin="0,0,0,20"/>
 
         <Border Grid.Row="1" Height="1" Background="#E0E0E0" Margin="0,0,0,20"/>
@@ -30,7 +31,7 @@
         <StackPanel Grid.Row="2" Margin="0,0,0,20">
             <TextBlock Text="🎨 Тема оформления" 
                        FontSize="14" FontWeight="SemiBold"
-                       Foreground="{DynamicResource AppPrimaryTextBrush}"
+                       Foreground="{DynamicResource AppBodyTextBrush}"
                        Margin="0,0,0,8"/>
 
             <ComboBox x:Name="ThemeComboBox" Height="35" 
@@ -48,12 +49,24 @@
                        Margin="0,5,0,0"/>
         </StackPanel>
 
+        <StackPanel Grid.Row="3" Margin="0,0,0,20">
+            <TextBlock Text="Язык интерфейса" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,8"/>
+            <ComboBox x:Name="LanguageComboBox" Height="35" SelectedValuePath="Tag"
+                      SelectionChanged="OnLanguageChanged"
+                      Background="{DynamicResource AppInputBackgroundBrush}"
+                      Foreground="{DynamicResource AppInputForegroundBrush}">
+                <ComboBoxItem Content="Русский" Tag="ru-RU"/>
+                <ComboBoxItem Content="English" Tag="en-US"/>
+            </ComboBox>
+        </StackPanel>
+
         <!-- Предпросмотр -->
-        <Border Grid.Row="3" Background="{DynamicResource AppInputBackgroundBrush}" 
+        <Border Grid.Row="4" Background="{DynamicResource AppInputBackgroundBrush}"
                 CornerRadius="5" Padding="15" Margin="0,0,0,20">
             <StackPanel>
                 <TextBlock Text="🔍 Предпросмотр" 
-                           Foreground="{DynamicResource AppPrimaryTextBrush}"
+                           Foreground="{DynamicResource AppBodyTextBrush}"
                            FontWeight="SemiBold"/>
                 <TextBlock Text="Пример текста для предпросмотра темы" 
                            Foreground="{DynamicResource AppSecondaryTextBrush}"
@@ -65,7 +78,7 @@
         </Border>
 
         <!-- Кнопки -->
-        <StackPanel Grid.Row="6" Orientation="Horizontal" 
+        <StackPanel Grid.Row="7" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="Закрыть" Width="100" Height="35"
                     Background="{DynamicResource AppAccentBrush}" 

@@ -48,6 +48,8 @@ namespace BIS.ERP
         private MetadataService _metadataService;
         private ReportService _reportService;
         private DocumentService _documentService;
+        private LocalizationService _localizationService;
+        private AccountingPeriodService _accountingPeriodService;
         private InfoBase _currentInfoBase;
         private bool _isLoadingReport = false;
         private Point _dragStartPoint;
@@ -85,10 +87,14 @@ namespace BIS.ERP
                     }
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
+                    _accountingPeriodService = new AccountingPeriodService(context);
+                    _localizationService = new LocalizationService(context, settings.Language);
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context);
                     _documentService = new DocumentService(context);
 
+                    await _accountingPeriodService.EnsureSchemaAsync();
+                    await _localizationService.InitializeAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
                     await BuildNavigationTree();
                 }
@@ -271,6 +277,13 @@ namespace BIS.ERP
                 Name = "Бухгалтерские отчеты",
                 Icon = "📈",
                 Type = "AccountingReports"
+            });
+            accountingSection.Children.Add(new NavigationItem
+            {
+                Id = "AccountingSetup",
+                Name = "Настройка учета",
+                Icon = "⚙",
+                Type = "AccountingSetup"
             });
             NavigationItems.Add(accountingSection);
 
@@ -462,6 +475,11 @@ namespace BIS.ERP
                     case "AccountingReports":
                         var accountingContext = await _infoBaseManager.GetCurrentDbContextAsync();
                         _navigation.NavigateTo(new AccountingReportsView(accountingContext));
+                        break;
+
+                    case "AccountingSetup":
+                        var setupContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        _navigation.NavigateTo(new AccountingSetupView(setupContext));
                         break;
 
                     case "Profile":

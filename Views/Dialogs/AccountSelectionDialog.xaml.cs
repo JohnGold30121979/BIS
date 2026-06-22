@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
 {
@@ -117,23 +118,12 @@ namespace BIS.ERP.Views
 
         private static string FormatAccountType(string? accountType)
         {
-            return accountType switch
-            {
-                "Active" => "Активный",
-                "Passive" => "Пассивный",
-                "ActivePassive" => "Активно-пассивный",
-                _ => accountType ?? string.Empty
-            };
+            return LocalizationService.DisplayValue(accountType);
         }
 
         private static string FormatActiveValue(object? value)
         {
-            return value switch
-            {
-                true => "Да",
-                false => "Нет",
-                _ => "Нет"
-            };
+            return LocalizationService.DisplayValue(value);
         }
     }
 }

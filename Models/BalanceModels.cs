@@ -22,10 +22,14 @@
     {
         public string AccountCode { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
+        public decimal OpeningDebit { get; set; }
+        public decimal OpeningCredit { get; set; }
         public Dictionary<int, decimal> MonthlyTurnoverDebit { get; set; } = new();
         public Dictionary<int, decimal> MonthlyTurnoverCredit { get; set; } = new();
         public decimal YearTurnoverDebit { get; set; }
         public decimal YearTurnoverCredit { get; set; }
+        public decimal ClosingDebit { get; set; }
+        public decimal ClosingCredit { get; set; }
     }
 
     /// <summary>
@@ -68,6 +72,9 @@
         public string DocumentType { get; set; } = string.Empty;
         public string Organization { get; set; } = string.Empty;
         public decimal Amount { get; set; }
+        public decimal AmountWithoutTax { get; set; }
+        public decimal TaxAmount { get; set; }
+        public string TaxType { get; set; } = string.Empty;
         public bool IsPosted { get; set; }
         public string Note { get; set; } = string.Empty;
     }
