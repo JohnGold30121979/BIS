@@ -97,8 +97,11 @@ namespace BIS.ERP.Services
         {
             ApplyThemeResources(root);
 
-            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
-                ApplyToVisualTree(VisualTreeHelper.GetChild(root, index));
+            foreach (var child in LogicalTreeHelper.GetChildren(root))
+            {
+                if (child is DependencyObject dependencyObject)
+                    ApplyToVisualTree(dependencyObject);
+            }
         }
 
         private static void ApplyThemeResources(DependencyObject element)
@@ -142,26 +145,32 @@ namespace BIS.ERP.Services
                 return;
             }
 
-            if (element is TextBlock textBlock && IsNeutralTextBrush(textBlock.Foreground))
+            if (element is TextBlock textBlock &&
+                IsHardcodedNeutralBrush(textBlock, TextBlock.ForegroundProperty, textBlock.Foreground))
             {
                 textBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
                 return;
             }
 
-            if (element is Label label && IsNeutralTextBrush(label.Foreground))
+            if (element is Label label &&
+                IsHardcodedNeutralBrush(label, Control.ForegroundProperty, label.Foreground))
             {
                 label.SetResourceReference(Control.ForegroundProperty, "AppBodyTextBrush");
                 return;
             }
 
-            if (element is Border border && TryGetThemeBackground(border.Background, out var borderResource))
+            if (element is Border border &&
+                IsHardcodedBrush(border, Border.BackgroundProperty) &&
+                TryGetThemeBackground(border.Background, out var borderResource))
             {
                 border.SetResourceReference(Border.BackgroundProperty, borderResource);
                 border.SetResourceReference(Border.BorderBrushProperty, "AppBorderBrush");
                 return;
             }
 
-            if (element is Panel panel && TryGetThemeBackground(panel.Background, out var panelResource))
+            if (element is Panel panel &&
+                IsHardcodedBrush(panel, Panel.BackgroundProperty) &&
+                TryGetThemeBackground(panel.Background, out var panelResource))
                 panel.SetResourceReference(Panel.BackgroundProperty, panelResource);
         }
 
@@ -175,12 +184,6 @@ namespace BIS.ERP.Services
             if (color == Colors.Transparent)
                 return false;
 
-            if (color.R <= 60 && color.G <= 80 && color.B <= 100)
-            {
-                resourceName = "AppHeaderBackgroundBrush";
-                return true;
-            }
-
             if (color.R >= 225 && color.G >= 225 && color.B >= 225)
             {
                 resourceName = "AppSurfaceBrush";
@@ -190,10 +193,18 @@ namespace BIS.ERP.Services
             return false;
         }
 
-        private static bool IsNeutralTextBrush(Brush? brush)
+        private static bool IsHardcodedBrush(DependencyObject element, DependencyProperty property)
         {
-            if (brush == null)
-                return true;
+            return element.ReadLocalValue(property) is SolidColorBrush;
+        }
+
+        private static bool IsHardcodedNeutralBrush(
+            DependencyObject element,
+            DependencyProperty property,
+            Brush? brush)
+        {
+            if (!IsHardcodedBrush(element, property))
+                return false;
 
             if (brush is not SolidColorBrush solid || solid.Color == Colors.White)
                 return false;

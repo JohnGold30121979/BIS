@@ -268,7 +268,7 @@ namespace BIS.ERP
             accountingSection.Children.Add(new NavigationItem
             {
                 Id = "AccountingReports",
-                Name = "Баланс и главная книга",
+                Name = "Бухгалтерские отчеты",
                 Icon = "📈",
                 Type = "AccountingReports"
             });

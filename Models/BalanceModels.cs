@@ -50,4 +50,44 @@
         public string AccountName { get; set; } = string.Empty;
         public decimal Amount { get; set; }
     }
+
+    public class FinancialResults
+    {
+        public List<BalanceItem> Income { get; set; } = new();
+        public List<BalanceItem> Expenses { get; set; } = new();
+        public decimal TotalIncome => Income.Sum(item => item.Amount);
+        public decimal TotalExpenses => Expenses.Sum(item => item.Amount);
+        public decimal ProfitOrLoss => TotalIncome - TotalExpenses;
+    }
+
+    public class PurchaseSaleJournalEntry
+    {
+        public string Section { get; set; } = string.Empty;
+        public DateTime Date { get; set; }
+        public string DocumentNumber { get; set; } = string.Empty;
+        public string DocumentType { get; set; } = string.Empty;
+        public string Organization { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public bool IsPosted { get; set; }
+        public string Note { get; set; } = string.Empty;
+    }
+
+    public class PeriodDocumentSummary
+    {
+        public string DocumentType { get; set; } = string.Empty;
+        public int DocumentCount { get; set; }
+        public int PostedCount { get; set; }
+        public int UnpostedCount => DocumentCount - PostedCount;
+        public decimal Amount { get; set; }
+    }
+
+    public class PeriodCollectionResult
+    {
+        public List<PeriodDocumentSummary> Documents { get; set; } = new();
+        public int PostingCount { get; set; }
+        public decimal DebitTurnover { get; set; }
+        public decimal CreditTurnover { get; set; }
+        public decimal Difference => DebitTurnover - CreditTurnover;
+        public bool IsBalanced => Math.Abs(Difference) < 0.01m;
+    }
 }

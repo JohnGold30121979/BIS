@@ -46,6 +46,9 @@ namespace BIS.ERP.Views
                 {
                     "GeneralLedger" => await BuildGeneralLedgerAsync(start.Year),
                     "FinancialPosition" => await BuildFinancialPositionAsync(end),
+                    "FinancialResults" => await BuildFinancialResultsAsync(start, end),
+                    "PurchaseSalesJournal" => await BuildPurchaseSalesJournalAsync(start, end),
+                    "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
 
@@ -139,6 +142,77 @@ namespace BIS.ERP.Views
             report.SummaryText = balance.IsBalanced
                 ? "Контроль пройден: активы равны обязательствам и капиталу."
                 : $"Контроль не пройден. Расхождение: {balance.Difference:N2}";
+            return (table, report);
+        }
+
+        private async Task<(DataTable, Report)> BuildFinancialResultsAsync(DateTime start, DateTime end)
+        {
+            var results = await _balanceService.GetFinancialResultsAsync(start, end);
+            var table = new DataTable("Финансовые результаты");
+            table.Columns.Add("Раздел", typeof(string));
+            table.Columns.Add("Счет", typeof(string));
+            table.Columns.Add("Наименование", typeof(string));
+            table.Columns.Add("Сумма", typeof(decimal));
+
+            foreach (var item in results.Income)
+                table.Rows.Add("Доходы", item.AccountCode, item.AccountName, item.Amount);
+            table.Rows.Add("Доходы", string.Empty, "Итого доходы", results.TotalIncome);
+            foreach (var item in results.Expenses)
+                table.Rows.Add("Расходы", item.AccountCode, item.AccountName, item.Amount);
+            table.Rows.Add("Расходы", string.Empty, "Итого расходы", results.TotalExpenses);
+            table.Rows.Add("Результат", string.Empty,
+                results.ProfitOrLoss >= 0 ? "Прибыль" : "Убыток", results.ProfitOrLoss);
+
+            return (table, CreateReport(table,
+                $"Финансовые результаты за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false));
+        }
+
+        private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
+        {
+            var entries = await _balanceService.GetPurchaseSalesJournalAsync(start, end);
+            var table = new DataTable("Журнал закупок и продаж");
+            table.Columns.Add("Раздел", typeof(string));
+            table.Columns.Add("Дата", typeof(DateTime));
+            table.Columns.Add("Номер", typeof(string));
+            table.Columns.Add("Документ", typeof(string));
+            table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Сумма", typeof(decimal));
+            table.Columns.Add("Проведен", typeof(bool));
+            table.Columns.Add("Примечание", typeof(string));
+
+            foreach (var entry in entries)
+                table.Rows.Add(entry.Section, entry.Date, entry.DocumentNumber, entry.DocumentType,
+                    entry.Organization, entry.Amount, entry.IsPosted, entry.Note);
+
+            var report = CreateReport(table,
+                $"Журнал закупок и продаж за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+            report.ShowGrandTotal = true;
+            var amountField = report.Fields.First(field => field.FieldName == "Сумма");
+            amountField.AggregateType = "Sum";
+            return (table, report);
+        }
+
+        private async Task<(DataTable, Report)> BuildPeriodCollectionAsync(DateTime start, DateTime end)
+        {
+            var collection = await _balanceService.CollectPeriodInformationAsync(start, end);
+            var table = new DataTable("Сбор информации за период");
+            table.Columns.Add("Документ", typeof(string));
+            table.Columns.Add("Всего", typeof(int));
+            table.Columns.Add("Проведено", typeof(int));
+            table.Columns.Add("Не проведено", typeof(int));
+            table.Columns.Add("Сумма", typeof(decimal));
+
+            foreach (var item in collection.Documents)
+                table.Rows.Add(item.DocumentType, item.DocumentCount, item.PostedCount, item.UnpostedCount, item.Amount);
+            table.Rows.Add("БУХГАЛТЕРСКИЕ ПРОВОДКИ", collection.PostingCount,
+                collection.PostingCount, 0, collection.DebitTurnover);
+            table.Rows.Add("КОНТРОЛЬ ДЕБЕТ/КРЕДИТ", 0, 0, 0, collection.Difference);
+
+            var report = CreateReport(table,
+                $"Сбор информации за период {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
+            report.SummaryText = collection.IsBalanced
+                ? "Контроль пройден: обороты по дебету и кредиту равны."
+                : $"Обнаружено расхождение дебета и кредита: {collection.Difference:N2}";
             return (table, report);
         }
 

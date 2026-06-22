@@ -156,6 +156,117 @@ namespace BIS.ERP.Services
             return result;
         }
 
+        public async Task<FinancialResults> GetFinancialResultsAsync(DateTime startDate, DateTime endDate)
+        {
+            var endExclusive = endDate.Date.AddDays(1);
+            var postings = await new PostingService(_context)
+                .GetAllPostingsAsync(startDate.Date, endExclusive.AddTicks(-1));
+            var accounts = await LoadAccountsAsync();
+            var result = new FinancialResults();
+
+            foreach (var (code, account) in accounts
+                         .Where(pair => pair.Key.Length > 0 && pair.Key[0] >= '6')
+                         .OrderBy(pair => pair.Key))
+            {
+                var debit = postings.Where(posting => posting.DebitAccount == code).Sum(posting => posting.Amount);
+                var credit = postings.Where(posting => posting.CreditAccount == code).Sum(posting => posting.Amount);
+                if (debit == 0 && credit == 0)
+                    continue;
+
+                var isIncome = account.Type.Equals("Passive", StringComparison.OrdinalIgnoreCase);
+                var amount = isIncome ? credit - debit : debit - credit;
+                var item = new BalanceItem
+                {
+                    AccountCode = code,
+                    AccountName = account.Name,
+                    Amount = amount
+                };
+
+                if (isIncome)
+                    result.Income.Add(item);
+                else
+                    result.Expenses.Add(item);
+            }
+
+            return result;
+        }
+
+        public async Task<List<PurchaseSaleJournalEntry>> GetPurchaseSalesJournalAsync(
+            DateTime startDate,
+            DateTime endDate)
+        {
+            var metadataService = new MetadataService(_context);
+            var documents = await metadataService.GetDocumentsAsync();
+            var result = new List<PurchaseSaleJournalEntry>();
+
+            foreach (var document in documents.Where(document =>
+                         document.Name.Equals("Приход товаров", StringComparison.OrdinalIgnoreCase) ||
+                         document.Name.Equals("Расход товаров", StringComparison.OrdinalIgnoreCase) ||
+                         document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase)))
+            {
+                var rows = await metadataService.GetCatalogDataAsync(document.Id);
+                var maps = await ReferenceDisplayHelper.LoadMapsAsync(document, metadataService);
+                var displayRows = ReferenceDisplayHelper.ResolveRows(rows, maps);
+                foreach (var row in displayRows)
+                {
+                    if (!TryGetDate(row, out var date) || date.Date < startDate.Date || date.Date > endDate.Date)
+                        continue;
+
+                    var isPurchase = document.Name.Contains("Приход", StringComparison.OrdinalIgnoreCase) ||
+                                     document.Name.Contains("получ", StringComparison.OrdinalIgnoreCase);
+                    result.Add(new PurchaseSaleJournalEntry
+                    {
+                        Section = isPurchase ? "Закупки" : "Продажи",
+                        Date = date,
+                        DocumentNumber = GetString(row, "Номер", "Номер документа", "doc_number"),
+                        DocumentType = document.Name,
+                        Organization = GetString(row, "Организация"),
+                        Amount = GetDecimal(row, "Сумма", "Сумма в сом"),
+                        IsPosted = GetBoolean(row, "Проведён", "Проведен", "is_posted"),
+                        Note = GetString(row, "Примечание", "Описание")
+                    });
+                }
+            }
+
+            return result.OrderBy(entry => entry.Date).ThenBy(entry => entry.DocumentNumber).ToList();
+        }
+
+        public async Task<PeriodCollectionResult> CollectPeriodInformationAsync(
+            DateTime startDate,
+            DateTime endDate)
+        {
+            var result = new PeriodCollectionResult();
+            var metadataService = new MetadataService(_context);
+            var documents = await metadataService.GetDocumentsAsync();
+
+            foreach (var document in documents.Where(document =>
+                         !document.Name.Equals("Проводки", StringComparison.OrdinalIgnoreCase)))
+            {
+                var rows = await metadataService.GetCatalogDataAsync(document.Id);
+                var periodRows = rows.Where(row =>
+                    TryGetDate(row, out var date) &&
+                    date.Date >= startDate.Date &&
+                    date.Date <= endDate.Date).ToList();
+                if (periodRows.Count == 0)
+                    continue;
+
+                result.Documents.Add(new PeriodDocumentSummary
+                {
+                    DocumentType = document.Name,
+                    DocumentCount = periodRows.Count,
+                    PostedCount = periodRows.Count(row =>
+                        GetBoolean(row, "Проведён", "Проведен", "is_posted")),
+                    Amount = periodRows.Sum(row => GetDecimal(row, "Сумма", "Сумма в сом"))
+                });
+            }
+
+            var postings = await new PostingService(_context).GetAllPostingsAsync(startDate.Date, endDate.Date.AddDays(1).AddTicks(-1));
+            result.PostingCount = postings.Count;
+            result.DebitTurnover = postings.Sum(posting => posting.Amount);
+            result.CreditTurnover = postings.Sum(posting => posting.Amount);
+            return result;
+        }
+
         private static decimal CalculateCurrentFinancialResult(
             IEnumerable<PostingViewModel> postings,
             IReadOnlyDictionary<string, AccountInfo> accounts)
@@ -192,6 +303,55 @@ namespace BIS.ERP.Services
                 .Where(account => !string.IsNullOrWhiteSpace(account.Code))
                 .GroupBy(account => account.Code, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool TryGetDate(Dictionary<string, object> row, out DateTime date)
+        {
+            foreach (var name in new[] { "Дата", "posting_date", "date" })
+            {
+                if (!row.TryGetValue(name, out var value) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is DateTime existingDate)
+                {
+                    date = existingDate;
+                    return true;
+                }
+                if (DateTime.TryParse(value.ToString(), out date))
+                    return true;
+            }
+
+            date = default;
+            return false;
+        }
+
+        private static string GetString(Dictionary<string, object> row, params string[] names)
+        {
+            return names.Select(name => row.GetValueOrDefault(name)?.ToString())
+                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+        }
+
+        private static decimal GetDecimal(Dictionary<string, object> row, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (row.TryGetValue(name, out var value) && decimal.TryParse(value?.ToString(), out var amount))
+                    return amount;
+            }
+            return 0;
+        }
+
+        private static bool GetBoolean(Dictionary<string, object> row, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!row.TryGetValue(name, out var value))
+                    continue;
+                if (value is bool boolean)
+                    return boolean;
+                if (bool.TryParse(value?.ToString(), out boolean))
+                    return boolean;
+            }
+            return false;
         }
 
         private sealed class AccountInfo
