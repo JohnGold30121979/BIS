@@ -53,11 +53,11 @@ namespace BIS.ERP.Services
                 debit_account as DebitAccount,
                 credit_account as CreditAccount,
                 amount_kgs as Amount,
-                0 as AmountCurrency,
-                '' as Currency,
+                COALESCE(amount_currency, 0) as AmountCurrency,
+                COALESCE(CAST(currency_id AS text), '') as Currency,
                 description as Note,
-                '' as Organization,
-                '' as Employee,
+                COALESCE(CAST(organization_id AS text), '') as Organization,
+                COALESCE(CAST(employee_id AS text), '') as Employee,
                 ""Id"" as Id
             FROM doc_postings
             WHERE is_active = true";

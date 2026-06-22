@@ -404,6 +404,51 @@ public partial class MetadataService
       };
     } 
 
+    private List<MetadataField> GetFixedAssetFields(Guid metadataObjectId)
+    {
+        var fields = new List<MetadataField>();
+
+        void Add(string name, string column, string type, int order, bool required = false,
+            string? referenceCatalog = null, int length = 0, int scale = 2)
+        {
+            fields.Add(new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = name,
+                DbColumnName = column,
+                FieldType = type,
+                Order = order,
+                IsRequired = required,
+                Length = length,
+                Precision = 18,
+                Scale = scale,
+                ReferenceCatalog = referenceCatalog,
+                MetadataObjectId = metadataObjectId
+            });
+        }
+
+        Add("Код", "code", "String", 1, true, length: 50);
+        Add("Инвентарный номер", "inventory_number", "String", 2, true, length: 50);
+        Add("Наименование", "name", "String", 3, true, length: 300);
+        Add("Группа ОС", "asset_group", "String", 4, length: 100);
+        Add("Дата приобретения", "acquisition_date", "DateTime", 5);
+        Add("Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 6);
+        Add("Первоначальная стоимость", "initial_cost", "Decimal", 7);
+        Add("Накопленная амортизация", "accumulated_depreciation", "Decimal", 8);
+        Add("Остаточная стоимость", "carrying_amount", "Decimal", 9);
+        Add("Срок полезного использования, мес.", "useful_life_months", "Int", 10);
+        Add("Метод амортизации", "depreciation_method", "String", 11, length: 50);
+        Add("Счет учета", "asset_account", "String", 12, length: 50);
+        Add("Счет амортизации", "depreciation_account", "String", 13, length: 50);
+        Add("Организация", "organization_id", "Reference", 14, referenceCatalog: "Организации");
+        Add("МОЛ", "responsible_person_id", "Reference", 15, referenceCatalog: "МОЛ");
+        Add("Участок", "site_id", "Reference", 16, referenceCatalog: "Участки");
+        Add("Статус", "status", "String", 17, length: 50);
+        Add("Активен", "is_active", "Bool", 18, true);
+        Add("Описание", "description", "String", 19, length: 500);
+        return fields;
+    }
+
     private List<MetadataField> GetCurrencyRateFields(Guid metadataObjectId)
     {
         return new List<MetadataField>
@@ -1352,6 +1397,22 @@ public partial class MetadataService
                     MetadataObjectId = metadataObjectId
                 }
             };
+    }
+
+    private List<MetadataField> GetInventoryDocumentFields(Guid metadataObjectId, int startOrder)
+    {
+        return new List<MetadataField>
+        {
+            new() { Id = Guid.NewGuid(), Name = "Материал", DbColumnName = "material_id", FieldType = "Reference", ReferenceCatalog = "Справочник материалов", DisplayPattern = "{Код} - {Наименование материала}", DisplayFields = "Код,Наименование материала", IsRequired = true, Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Количество", DbColumnName = "quantity", FieldType = "Decimal", Precision = 18, Scale = 6, IsRequired = true, Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Цена", DbColumnName = "price", FieldType = "Decimal", Precision = 18, Scale = 6, IsRequired = true, Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Дебет", DbColumnName = "debit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", IsRequired = true, Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Кредит", DbColumnName = "credit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", IsRequired = true, Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Организация", DbColumnName = "organization_id", FieldType = "Reference", ReferenceCatalog = "Организации", Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "МОЛ", DbColumnName = "responsible_person_id", FieldType = "Reference", ReferenceCatalog = "МОЛ", Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Участок", DbColumnName = "site_id", FieldType = "Reference", ReferenceCatalog = "Участки", Order = startOrder++, MetadataObjectId = metadataObjectId },
+            new() { Id = Guid.NewGuid(), Name = "Проведён", DbColumnName = "is_posted", FieldType = "Bool", IsRequired = true, Order = startOrder, MetadataObjectId = metadataObjectId }
+        };
     }
 
     private List<MetadataField> GetResponsiblePersonFields(Guid metadataObjectId)

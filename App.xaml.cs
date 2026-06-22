@@ -26,7 +26,7 @@ namespace BIS.ERP
                 // Загружаем настройки
                 var settings = AppSettings.Instance;
 
-                // ✅ Применяем тему с проверкой на null
+                ThemeService.Initialize();
                 ThemeService.Apply(settings?.Theme ?? ThemeService.DefaultTheme);
 
                 // Проверяем подключение

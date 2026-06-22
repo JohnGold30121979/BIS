@@ -33,7 +33,7 @@ namespace BIS.ERP.Services
 
             try
             {
-                if (report?.DataSourceType == "Catalog" && report.DataSourceId.HasValue)
+                if (report?.DataSourceId.HasValue == true)
                 {
                     var catalog = await _context.MetadataObjects
                         .Include(c => c.Fields)
@@ -44,28 +44,38 @@ namespace BIS.ERP.Services
                         throw new Exception($"Справочник не найден");
                     }
 
-                    // Формируем SELECT
-                    var selectedFields = report.Fields.Where(f => f.IsVisible).ToList();
+                    var selectedFields = report.Fields
+                        .Where(field => field.IsVisible)
+                        .OrderBy(field => field.Order)
+                        .ToList();
                     var selectColumns = new List<string>();
 
                     foreach (var field in selectedFields)
                     {
-                        // Здесь field.FieldName = "kod" (латиница)
-                        var dbColumnName = field.FieldName;
-                        var displayName = field.DisplayName ?? field.FieldName;
-                        selectColumns.Add($"\"{dbColumnName}\" AS \"{displayName}\"");
+                        var metadataField = FindMetadataField(catalog, field.FieldName);
+                        if (metadataField == null)
+                            throw new Exception($"Поле '{field.FieldName}' отсутствует в источнике '{catalog.Name}'");
+
+                        var source = QuoteIdentifier(metadataField.DbColumnName);
+                        if (metadataField.FieldType == "Reference")
+                            source = $"CAST({source} AS text)";
+
+                        var displayName = string.IsNullOrWhiteSpace(field.DisplayName)
+                            ? metadataField.Name
+                            : field.DisplayName;
+                        selectColumns.Add($"{source} AS {QuoteIdentifier(displayName)}");
                     }
 
-                    string fieldsSql = selectColumns.Any() ? string.Join(", ", selectColumns) : "*";
-                    var sql = $"SELECT {fieldsSql} FROM \"{catalog.TableName}\" LIMIT 5000";
-
-                    // ОТЛАДКА - выводим SQL в окно Output
-                    System.Diagnostics.Debug.WriteLine("=== SQL QUERY ===");
-                    System.Diagnostics.Debug.WriteLine(sql);
-                    System.Diagnostics.Debug.WriteLine("================");
+                    if (selectColumns.Count == 0)
+                        throw new Exception("В отчете не выбрано ни одного видимого поля");
 
                     using var command = _context.Database.GetDbConnection().CreateCommand();
-                    command.CommandText = sql;
+                    var whereClauses = BuildFilterClauses(command, catalog, report.Filters);
+                    var whereSql = whereClauses.Count == 0
+                        ? string.Empty
+                        : $" WHERE {string.Join(" AND ", whereClauses)}";
+                    command.CommandText =
+                        $"SELECT {string.Join(", ", selectColumns)} FROM {QuoteIdentifier(catalog.TableName)}{whereSql}";
                     command.CommandTimeout = 30;
                     var connectionOpened = false;
 
@@ -84,6 +94,8 @@ namespace BIS.ERP.Services
                             await _context.Database.CloseConnectionAsync();
                         }
                     }
+
+                    await ResolveReportReferencesAsync(dataTable, catalog, selectedFields);
                 }
             } catch (PostgresException ex) 
             {
@@ -99,6 +111,121 @@ namespace BIS.ERP.Services
             }
 
             return dataTable;
+        }
+
+        private static MetadataField? FindMetadataField(MetadataObject source, string fieldName)
+        {
+            return source.Fields.FirstOrDefault(field =>
+                field.DbColumnName.Equals(fieldName, StringComparison.OrdinalIgnoreCase) ||
+                field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string QuoteIdentifier(string identifier)
+        {
+            if (string.IsNullOrWhiteSpace(identifier))
+                throw new ArgumentException("Пустой идентификатор базы данных");
+
+            return $"\"{identifier.Replace("\"", "\"\"")}\"";
+        }
+
+        private static List<string> BuildFilterClauses(
+            System.Data.Common.DbCommand command,
+            MetadataObject source,
+            IEnumerable<ReportFilter> filters)
+        {
+            var clauses = new List<string>();
+            var index = 0;
+
+            foreach (var filter in filters
+                         .Where(filter => !string.IsNullOrWhiteSpace(filter.FieldName))
+                         .OrderBy(filter => filter.Order))
+            {
+                var field = FindMetadataField(source, filter.FieldName);
+                if (field == null)
+                    throw new Exception($"Поле фильтра '{filter.FieldName}' отсутствует в источнике '{source.Name}'");
+
+                var column = QuoteIdentifier(field.DbColumnName);
+                var operation = (filter.Operation ?? "=").Trim();
+                var parameterName = $"@filter{index++}";
+
+                if (operation.Equals("Like", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddParameter(command, parameterName, $"%{filter.Value}%");
+                    clauses.Add($"CAST({column} AS text) ILIKE {parameterName}");
+                    continue;
+                }
+
+                if (operation.Equals("Between", StringComparison.OrdinalIgnoreCase))
+                {
+                    var secondParameterName = $"@filter{index++}";
+                    AddParameter(command, parameterName, ConvertFilterValue(filter.Value, field.FieldType));
+                    AddParameter(command, secondParameterName, ConvertFilterValue(filter.Value2, field.FieldType));
+                    clauses.Add($"{column} BETWEEN {parameterName} AND {secondParameterName}");
+                    continue;
+                }
+
+                if (operation is not ("=" or "<" or ">" or "<=" or ">=" or "<>"))
+                    throw new Exception($"Операция фильтра '{operation}' не поддерживается");
+
+                AddParameter(command, parameterName, ConvertFilterValue(filter.Value, field.FieldType));
+                clauses.Add($"{column} {operation} {parameterName}");
+            }
+
+            return clauses;
+        }
+
+        private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            command.Parameters.Add(parameter);
+        }
+
+        private static object ConvertFilterValue(string value, string fieldType)
+        {
+            return fieldType switch
+            {
+                "Int" when int.TryParse(value, out var integer) => integer,
+                "Decimal" when decimal.TryParse(value, out var number) => number,
+                "DateTime" when DateTime.TryParse(value, out var date) => date,
+                "Bool" when bool.TryParse(value, out var boolean) => boolean,
+                _ => value ?? string.Empty
+            };
+        }
+
+        private async Task ResolveReportReferencesAsync(
+            DataTable table,
+            MetadataObject source,
+            IReadOnlyCollection<ReportField> reportFields)
+        {
+            var referenceFields = reportFields
+                .Select(reportField => new
+                {
+                    ReportField = reportField,
+                    MetadataField = FindMetadataField(source, reportField.FieldName)
+                })
+                .Where(item => item.MetadataField?.FieldType == "Reference")
+                .ToList();
+
+            if (referenceFields.Count == 0)
+                return;
+
+            var maps = await ReferenceDisplayHelper.LoadMapsAsync(source, new MetadataService(_context));
+            foreach (var item in referenceFields)
+            {
+                var columnName = string.IsNullOrWhiteSpace(item.ReportField.DisplayName)
+                    ? item.MetadataField!.Name
+                    : item.ReportField.DisplayName;
+                if (!table.Columns.Contains(columnName) || !maps.TryGetValue(item.MetadataField!.Name, out var map))
+                    continue;
+
+                foreach (DataRow row in table.Rows)
+                {
+                    if (Guid.TryParse(row[columnName]?.ToString(), out var id) && map.TryGetValue(id, out var displayValue))
+                        row[columnName] = displayValue;
+                }
+            }
         }
 
         // Вспомогательный метод проверки существования таблицы
@@ -222,35 +349,39 @@ namespace BIS.ERP.Services
         {
             QuestPDF.Settings.License = LicenseType.Community;
 
-            var organization = GetPrimaryOrganizationAsync().GetAwaiter().GetResult();
+            var organization = GetPrimaryOrganization();
             var generatedAt = DateTime.Now;
 
             return QuestPDF.Fluent.Document.Create(container =>
             {
                 container.Page(page =>
                 {
-                    page.Size(PageSizes.A4);
-                    page.Margin(25);
-                    page.DefaultTextStyle(x => x.FontSize(9).FontFamily("Arial"));
+                    page.Size(report.PageOrientation == "Landscape" ? PageSizes.A4.Landscape() : PageSizes.A4);
+                    page.Margin(Math.Max(8, report.LeftMargin), Unit.Millimetre);
+                    page.DefaultTextStyle(x => x
+                        .FontSize(report.FontSize > 0 ? report.FontSize : 9)
+                        .FontFamily(string.IsNullOrWhiteSpace(report.FontName) ? "Arial" : report.FontName));
 
-                    page.Header().Column(column =>
+                    if (report.ShowHeader)
                     {
-                        if (report.ReportType == "InvoiceMaterialsKg")
+                        page.Header().Column(column =>
                         {
-                            column.Item().AlignCenter().Text("СЧЕТ-ФАКТУРА").Bold().FontSize(16);
-                            column.Item().AlignCenter().Text("на материалы").FontSize(11);
-                        }
-                        else
-                        {
-                            column.Item().Text(report.Name).Bold().FontSize(16);
-                        }
+                            var title = report.ReportType == "InvoiceMaterialsKg"
+                                ? "СЧЕТ-ФАКТУРА"
+                                : string.IsNullOrWhiteSpace(report.TitleText) ? report.Name : report.TitleText;
+                            column.Item().Text(title).Bold().FontSize(16);
 
-                        column.Item().PaddingTop(8).Text(organization.DisplayName).Bold();
-                        column.Item().Text($"ИНН: {organization.Inn}  ОКПО: {organization.Okpo}");
-                        column.Item().Text($"Адрес: {organization.Address}");
-                        column.Item().Text($"Банк: {organization.BankName}  Счет: {organization.BankAccount}  БИК: {organization.Bic}");
-                        column.Item().PaddingBottom(8).LineHorizontal(1);
-                    });
+                            if (!string.IsNullOrWhiteSpace(report.SubtitleText))
+                                column.Item().Text(report.SubtitleText).FontSize(11);
+                            if (!string.IsNullOrWhiteSpace(report.HeaderText))
+                                column.Item().PaddingTop(4).Text(report.HeaderText);
+
+                            column.Item().PaddingTop(8).Text(organization.DisplayName).Bold();
+                            if (!string.IsNullOrWhiteSpace(organization.Inn) || !string.IsNullOrWhiteSpace(organization.Okpo))
+                                column.Item().Text($"ИНН: {organization.Inn}  ОКПО: {organization.Okpo}");
+                            column.Item().PaddingBottom(8).LineHorizontal(1).LineColor(report.HeaderColor);
+                        });
+                    }
 
                     page.Content().Column(column =>
                     {
@@ -262,8 +393,12 @@ namespace BIS.ERP.Services
                             var columns = dataTable.Columns.Cast<DataColumn>().ToList();
                             table.ColumnsDefinition(definition =>
                             {
-                                foreach (var _ in columns)
-                                    definition.RelativeColumn();
+                                foreach (var dataColumn in columns)
+                                {
+                                    var field = report.Fields.FirstOrDefault(reportField =>
+                                        reportField.DisplayName == dataColumn.ColumnName);
+                                    definition.RelativeColumn(Math.Max(40, field?.Width ?? 100));
+                                }
                             });
 
                             table.Header(header =>
@@ -271,25 +406,34 @@ namespace BIS.ERP.Services
                                 foreach (var dataColumn in columns)
                                 {
                                     header.Cell()
-                                        .Background(Colors.Grey.Lighten2)
-                                        .Border(1)
-                                        .Padding(4)
+                                        .Element(cell => ConfigurePdfCell(cell, report, true, false))
                                         .Text(dataColumn.ColumnName)
+                                        .FontColor(Colors.White)
                                         .Bold();
                                 }
                             });
 
-                            foreach (DataRow row in dataTable.Rows)
+                            for (var rowIndex = 0; rowIndex < dataTable.Rows.Count; rowIndex++)
                             {
+                                var row = dataTable.Rows[rowIndex];
                                 foreach (var dataColumn in columns)
                                 {
                                     table.Cell()
-                                        .Border(1)
-                                        .Padding(4)
+                                        .Element(cell => ConfigurePdfCell(
+                                            cell, report, false, report.AlternateRowColors && rowIndex % 2 == 1))
                                         .Text(FormatReportValue(row[dataColumn]));
                                 }
                             }
                         });
+
+                        if (report.ShowGrandTotal)
+                        {
+                            foreach (var total in CalculateReportTotals(dataTable, report))
+                                column.Item().AlignRight().PaddingTop(4).Text(total).Bold();
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(report.SummaryText))
+                            column.Item().PaddingTop(12).Text(report.SummaryText);
 
                         if (report.ReportType == "InvoiceMaterialsKg")
                         {
@@ -301,15 +445,76 @@ namespace BIS.ERP.Services
                         }
                     });
 
-                    page.Footer().AlignRight().Text(text =>
+                    if (report.ShowFooter || report.ShowPageNumbers)
                     {
-                        text.Span($"Сформировано: {generatedAt:dd.MM.yyyy HH:mm}  Стр. ");
-                        text.CurrentPageNumber();
-                        text.Span(" из ");
-                        text.TotalPages();
-                    });
+                        page.Footer().Row(row =>
+                        {
+                            row.RelativeItem().Text(report.FooterText ?? string.Empty);
+                            row.RelativeItem().AlignRight().Text(text =>
+                            {
+                                text.Span($"Сформировано: {generatedAt:dd.MM.yyyy HH:mm}");
+                                if (report.ShowPageNumbers)
+                                {
+                                    text.Span("  Стр. ");
+                                    text.CurrentPageNumber();
+                                    text.Span(" из ");
+                                    text.TotalPages();
+                                }
+                            });
+                        });
+                    }
                 });
             }).GeneratePdf();
+        }
+
+        private static IContainer ConfigurePdfCell(
+            IContainer container,
+            Report report,
+            bool isHeader,
+            bool isAlternate)
+        {
+            var result = container.Padding(4);
+            if (report.ShowGridLines)
+                result = result.Border(0.5f).BorderColor(Colors.Grey.Lighten1);
+            if (isHeader)
+                result = result.Background(report.HeaderColor);
+            else if (isAlternate)
+                result = result.Background(report.AlternateRowColor);
+            return result;
+        }
+
+        private static IEnumerable<string> CalculateReportTotals(DataTable table, Report report)
+        {
+            foreach (var field in report.Fields.Where(field =>
+                         field.IsVisible && !string.IsNullOrWhiteSpace(field.AggregateType)))
+            {
+                var columnName = string.IsNullOrWhiteSpace(field.DisplayName) ? field.FieldName : field.DisplayName;
+                if (!table.Columns.Contains(columnName))
+                    continue;
+
+                var values = table.Rows.Cast<DataRow>()
+                    .Select(row => row[columnName])
+                    .Where(value => value != null && value != DBNull.Value)
+                    .ToList();
+                var numericValues = values
+                    .Select(value => decimal.TryParse(value.ToString(), out var number) ? (decimal?)number : null)
+                    .Where(value => value.HasValue)
+                    .Select(value => value!.Value)
+                    .ToList();
+
+                var total = field.AggregateType switch
+                {
+                    "Count" => values.Count.ToString(),
+                    "Sum" when numericValues.Count > 0 => numericValues.Sum().ToString("N2"),
+                    "Average" when numericValues.Count > 0 => numericValues.Average().ToString("N2"),
+                    "Min" when numericValues.Count > 0 => numericValues.Min().ToString("N2"),
+                    "Max" when numericValues.Count > 0 => numericValues.Max().ToString("N2"),
+                    _ => string.Empty
+                };
+
+                if (!string.IsNullOrWhiteSpace(total))
+                    yield return $"{columnName} ({field.AggregateType}): {total}";
+            }
         }
 
         // Экспорт в HTML
@@ -429,7 +634,7 @@ namespace BIS.ERP.Services
 
         private string GenerateMaterialsInvoiceHtml(DataTable dataTable, Report report)
         {
-            var organization = GetPrimaryOrganizationAsync().GetAwaiter().GetResult();
+            var organization = GetPrimaryOrganization();
             var html = new StringBuilder();
 
             html.AppendLine("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
@@ -480,11 +685,11 @@ namespace BIS.ERP.Services
             return html.ToString();
         }
 
-        private async Task<ReportOrganizationInfo> GetPrimaryOrganizationAsync()
+        private ReportOrganizationInfo GetPrimaryOrganization()
         {
-            var catalog = await _context.MetadataObjects
+            var catalog = _context.MetadataObjects
                 .Include(m => m.Fields)
-                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Организации");
+                .FirstOrDefault(m => m.ObjectType == "Catalog" && m.Name == "Организации");
 
             if (catalog == null)
                 return ReportOrganizationInfo.Empty;
@@ -503,12 +708,12 @@ namespace BIS.ERP.Services
             {
                 if (_context.Database.GetDbConnection().State != ConnectionState.Open)
                 {
-                    await _context.Database.OpenConnectionAsync();
+                    _context.Database.OpenConnection();
                     opened = true;
                 }
 
-                using var reader = await command.ExecuteReaderAsync();
-                if (!await reader.ReadAsync())
+                using var reader = command.ExecuteReader();
+                if (!reader.Read())
                     return ReportOrganizationInfo.Empty;
 
                 string GetString(string column)
@@ -541,7 +746,7 @@ namespace BIS.ERP.Services
             finally
             {
                 if (opened)
-                    await _context.Database.CloseConnectionAsync();
+                    _context.Database.CloseConnection();
             }
         }
 
@@ -625,8 +830,10 @@ namespace BIS.ERP.Services
                         existingReport.Description = report.Description;
                         existingReport.DataSourceType = report.DataSourceType;
                         existingReport.DataSourceId = report.DataSourceId;
+                        existingReport.ReportType = report.ReportType;
                         existingReport.Icon = report.Icon;
                         existingReport.Order = report.Order;
+                        CopyReportLayout(report, existingReport);
                         existingReport.UpdatedAt = DateTime.UtcNow;
 
                         // Обновляем поля
@@ -697,7 +904,9 @@ namespace BIS.ERP.Services
                     existingReport.Icon = report.Icon;
                     existingReport.DataSourceType = report.DataSourceType;
                     existingReport.DataSourceId = report.DataSourceId;
+                    existingReport.ReportType = report.ReportType;
                     existingReport.Order = report.Order;
+                    CopyReportLayout(report, existingReport);
                     existingReport.UpdatedAt = DateTime.UtcNow;
 
                     _context.Reports.Update(existingReport);
@@ -712,6 +921,32 @@ namespace BIS.ERP.Services
             {
                 throw new Exception($"Ошибка обновления отчета: {ex.Message}");
             }
+        }
+
+        private static void CopyReportLayout(Report source, Report target)
+        {
+            target.TitleText = source.TitleText;
+            target.SubtitleText = source.SubtitleText;
+            target.HeaderText = source.HeaderText;
+            target.FooterText = source.FooterText;
+            target.SummaryText = source.SummaryText;
+            target.PageOrientation = source.PageOrientation;
+            target.PageWidth = source.PageWidth;
+            target.PageHeight = source.PageHeight;
+            target.LeftMargin = source.LeftMargin;
+            target.RightMargin = source.RightMargin;
+            target.TopMargin = source.TopMargin;
+            target.BottomMargin = source.BottomMargin;
+            target.FontName = source.FontName;
+            target.FontSize = source.FontSize;
+            target.ShowHeader = source.ShowHeader;
+            target.ShowFooter = source.ShowFooter;
+            target.ShowPageNumbers = source.ShowPageNumbers;
+            target.ShowGridLines = source.ShowGridLines;
+            target.AlternateRowColors = source.AlternateRowColors;
+            target.AlternateRowColor = source.AlternateRowColor;
+            target.ShowGrandTotal = source.ShowGrandTotal;
+            target.HeaderColor = source.HeaderColor;
         }
         // Удаление отчета
         // Удаление отчета

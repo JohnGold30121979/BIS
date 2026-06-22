@@ -8,6 +8,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Microsoft.Win32;
+using System.IO;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 
@@ -21,16 +23,19 @@ namespace BIS.ERP.Views
         private List<MetadataObject> _availableCatalogs;
         private ObservableCollection<ReportField> _reportFields;
         private ObservableCollection<ReportFilter> _reportFilters;
+        public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
 
         public ReportDesignerWindow(Report report = null)
         {
             InitializeComponent();
+            DataContext = this;
 
             _reportFields = new ObservableCollection<ReportField>();
             _reportFilters = new ObservableCollection<ReportFilter>();
 
             ReportFieldsGrid.ItemsSource = _reportFields;
             FiltersList.ItemsSource = _reportFilters;
+            ConfigureFieldColumns();
 
             _ = InitializeAsync(report);
         }
@@ -109,6 +114,34 @@ namespace BIS.ERP.Views
             }
 
             AvailableFields.ItemsSource = fields;
+            AvailableFilterFields.Clear();
+            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            {
+                AvailableFilterFields.Add(new FieldDef
+                {
+                    Name = field.Name,
+                    DbColumnName = field.DbColumnName,
+                    Type = field.FieldType
+                });
+            }
+        }
+
+        private void ConfigureFieldColumns()
+        {
+            var comboColumns = ReportFieldsGrid.Columns.OfType<DataGridComboBoxColumn>().ToList();
+            if (comboColumns.Count < 2)
+                return;
+
+            comboColumns[0].ItemsSource = new[] { "", "Sum", "Average", "Count", "Min", "Max" };
+            comboColumns[0].SelectedValueBinding = new System.Windows.Data.Binding(nameof(ReportField.AggregateType))
+            {
+                Mode = System.Windows.Data.BindingMode.TwoWay
+            };
+            comboColumns[1].ItemsSource = new[] { "Left", "Center", "Right" };
+            comboColumns[1].SelectedValueBinding = new System.Windows.Data.Binding(nameof(ReportField.Alignment))
+            {
+                Mode = System.Windows.Data.BindingMode.TwoWay
+            };
         }
 
         private void OnFieldDoubleClick(object sender, MouseButtonEventArgs e)
@@ -275,6 +308,38 @@ namespace BIS.ERP.Views
             await SaveReport();
         }
 
+        private async void OnExportPdfClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var report = BuildReportFromForm();
+                if (report == null)
+                    return;
+
+                var data = await _reportService.GetReportDataAsync(report);
+                var dialog = new SaveFileDialog
+                {
+                    Title = "Сохранить отчет в PDF",
+                    Filter = "PDF файлы (*.pdf)|*.pdf",
+                    DefaultExt = "pdf",
+                    FileName = $"{GetSafeFileName(report.Name)}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                File.WriteAllBytes(dialog.FileName, _reportService.ExportToPdf(data, report));
+                StatusText.Text = $"PDF сформирован: {dialog.FileName}";
+                MessageBox.Show("PDF-отчет успешно сформирован.", "Отчет",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка формирования PDF: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private async Task GenerateAndShowReport()
         {
             try
@@ -294,29 +359,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var tempReport = new Report
-                {
-                    Name = ReportNameBox.Text,
-                    Description = ReportDescBox.Text,
-                    TitleText = TitleTextBox.Text,
-                    SubtitleText = SubtitleTextBox.Text,
-                    HeaderText = HeaderTextBox.Text,
-                    FooterText = FooterTextBox.Text,
-                    SummaryText = SummaryTextBox.Text,
-                    DataSourceType = "Catalog",
-                    DataSourceId = catalog.Id,
-                    ReportType = GetSelectedReportType(),
-                    Fields = _reportFields.ToList(),
-                    Filters = _reportFilters.ToList(),
-                    PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait",
-                    FontName = FontCombo.Text,
-                    FontSize = int.Parse(FontSizeCombo.Text),
-                    HeaderColor = GetSelectedColor(HeaderColorCombo),
-                    AlternateRowColors = AlternateRowColorsCheck.IsChecked ?? true,
-                    ShowGridLines = ShowGridLinesCheck.IsChecked ?? true,
-                    ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true,
-                    ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true
-                };
+                var tempReport = BuildReportFromForm(catalog);
+                if (tempReport == null)
+                    return;
 
                 var data = await _reportService.GetReportDataAsync(tempReport);
 
@@ -362,7 +407,7 @@ namespace BIS.ERP.Views
                 _currentReport.HeaderText = HeaderTextBox.Text;
                 _currentReport.FooterText = FooterTextBox.Text;
                 _currentReport.SummaryText = SummaryTextBox.Text;
-                _currentReport.DataSourceType = "Catalog";
+                _currentReport.DataSourceType = catalog.ObjectType;
                 _currentReport.DataSourceId = catalog.Id;
                 _currentReport.ReportType = GetSelectedReportType();
                 _currentReport.Icon = "📊";
@@ -391,7 +436,9 @@ namespace BIS.ERP.Views
                         Order = field.Order,
                         Width = field.Width,
                         IsVisible = field.IsVisible,
-                        Alignment = field.Alignment
+                        Alignment = field.Alignment,
+                        AggregateType = field.AggregateType,
+                        Format = field.Format
                     });
                 }
 
@@ -406,6 +453,7 @@ namespace BIS.ERP.Views
                             FieldName = filter.FieldName,
                             Operation = filter.Operation,
                             Value = filter.Value,
+                            Value2 = filter.Value2,
                             Order = filter.Order
                         });
                     }
@@ -433,6 +481,54 @@ namespace BIS.ERP.Views
                 return colorTag;
             }
             return "#2C3E50";
+        }
+
+        private Report? BuildReportFromForm(MetadataObject? selectedCatalog = null)
+        {
+            selectedCatalog ??= (DataSourceCombo.SelectedItem as ComboBoxItem)?.Tag as MetadataObject;
+            if (selectedCatalog == null)
+            {
+                MessageBox.Show("Выберите источник данных", "Внимание",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+
+            if (!_reportFields.Any())
+            {
+                MessageBox.Show("Добавьте хотя бы одно поле в отчет", "Внимание",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+
+            return new Report
+            {
+                Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? "Новый отчет" : ReportNameBox.Text.Trim(),
+                Description = ReportDescBox.Text,
+                TitleText = TitleTextBox.Text,
+                SubtitleText = SubtitleTextBox.Text,
+                HeaderText = HeaderTextBox.Text,
+                FooterText = FooterTextBox.Text,
+                SummaryText = SummaryTextBox.Text,
+                DataSourceType = selectedCatalog.ObjectType,
+                DataSourceId = selectedCatalog.Id,
+                ReportType = GetSelectedReportType(),
+                Fields = _reportFields.OrderBy(field => field.Order).ToList(),
+                Filters = _reportFilters.Where(filter => !string.IsNullOrWhiteSpace(filter.FieldName)).ToList(),
+                PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait",
+                FontName = FontCombo.Text,
+                FontSize = int.TryParse(FontSizeCombo.Text, out var fontSize) ? fontSize : 10,
+                HeaderColor = GetSelectedColor(HeaderColorCombo),
+                AlternateRowColors = AlternateRowColorsCheck.IsChecked ?? true,
+                ShowGridLines = ShowGridLinesCheck.IsChecked ?? true,
+                ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true,
+                ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true
+            };
+        }
+
+        private static string GetSafeFileName(string name)
+        {
+            return string.Concat(name.Select(character =>
+                Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
         }
 
         private string GetSelectedReportType()

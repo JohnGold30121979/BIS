@@ -497,6 +497,19 @@ namespace BIS.ERP.Views
                     itemData["Тип документа"] = "Ручная проводка";
                 }
 
+                var debitAccount = itemData.GetValueOrDefault("Дебет")?.ToString();
+                var creditAccount = itemData.GetValueOrDefault("Кредит")?.ToString();
+                var amount = itemData.TryGetValue("Сумма в сом", out var amountValue)
+                    ? Convert.ToDecimal(amountValue)
+                    : 0m;
+
+                if (string.IsNullOrWhiteSpace(debitAccount) || string.IsNullOrWhiteSpace(creditAccount))
+                    throw new Exception("Укажите счета дебета и кредита");
+                if (debitAccount.Equals(creditAccount, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("Счета дебета и кредита должны отличаться");
+                if (amount <= 0)
+                    throw new Exception("Сумма проводки должна быть больше нуля");
+
                 if (_editId.HasValue)
                 {
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);

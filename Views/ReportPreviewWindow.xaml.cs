@@ -6,6 +6,7 @@ using System.Data;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace BIS.ERP.Views
 {
@@ -132,6 +133,7 @@ namespace BIS.ERP.Views
 
                 PreviewGrid.ItemsSource = _data.DefaultView;
                 Title = $"Предпросмотр: {_report.Name}";
+                ApplyReportAppearance();
 
                 // Настраиваем колонки
                 foreach (var column in PreviewGrid.Columns)
@@ -147,6 +149,40 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка отображения: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void ApplyReportAppearance()
+        {
+            HeaderTitle.Text = string.IsNullOrWhiteSpace(_report.TitleText)
+                ? _report.Name
+                : _report.TitleText;
+            HeaderSubtitle.Text = _report.SubtitleText ?? string.Empty;
+            HeaderPanel.Visibility = _report.ShowHeader ? Visibility.Visible : Visibility.Collapsed;
+            FooterPanel.Visibility = _report.ShowFooter || _report.ShowPageNumbers
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            FooterText.Text = _report.FooterText ?? string.Empty;
+            FooterSignature.Text = _report.FooterSignature ?? string.Empty;
+            PageNumber.Text = _report.ShowPageNumbers ? "Страница 1" : string.Empty;
+
+            try
+            {
+                HeaderPanel.Background = (Brush)new BrushConverter().ConvertFromString(_report.HeaderColor);
+                if (_report.AlternateRowColors)
+                    PreviewGrid.AlternatingRowBackground =
+                        (Brush)new BrushConverter().ConvertFromString(_report.AlternateRowColor);
+            }
+            catch
+            {
+                // Некорректный пользовательский цвет не должен мешать формированию отчета.
+            }
+
+            PreviewGrid.GridLinesVisibility = _report.ShowGridLines
+                ? DataGridGridLinesVisibility.All
+                : DataGridGridLinesVisibility.None;
+            PreviewGrid.FontFamily = new FontFamily(
+                string.IsNullOrWhiteSpace(_report.FontName) ? "Segoe UI" : _report.FontName);
+            PreviewGrid.FontSize = _report.FontSize > 0 ? _report.FontSize : 10;
         }
 
         private void OnExportExcelClick(object sender, RoutedEventArgs e)

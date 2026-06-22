@@ -572,6 +572,7 @@ namespace BIS.ERP.Services
             try
             {
                 await EnsureManagedDocumentAnalyticFieldsAsync(documents);
+                await EnsureInventoryDocumentStructureAsync(documents);
                 await EnsureGlobalDocumentNumberConfigurationAsync(documents);
 
                 foreach (var document in documents.Where(IsManagedDocument))
@@ -742,6 +743,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Основные средства"))
                     await CreateAssetsCatalog(config);
+                await EnsureAssetsCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Государства"))
                     await CreateCountriesCatalog(config);
@@ -1551,6 +1553,7 @@ namespace BIS.ERP.Services
                 // 1. Получаем данные документа
                 var document = await _context.MetadataObjects
                     .Include(m => m.Fields)
+                    .Include(m => m.PostingRules)
                     .FirstOrDefaultAsync(m => m.Id == documentId);
 
                 if (document == null) throw new Exception("Документ не найден");
@@ -1587,6 +1590,9 @@ namespace BIS.ERP.Services
                 }
                 System.Diagnostics.Debug.WriteLine($"Amount: {amount}");
 
+                if (amount <= 0)
+                    throw new Exception("Сумма проводимого документа должна быть больше нуля");
+
                 // 5. Определяем тип документа и обрабатываем
                 if (document.Name == "Приходный кассовый ордер" || document.Name == "Расходный кассовый ордер")
                 {
@@ -1595,6 +1601,10 @@ namespace BIS.ERP.Services
                 else if (document.Name == "Платежное поручение")
                 {
                     await ProcessPaymentOrderAsync(document, recordData, recordId, amount);
+                }
+                else if (document.PostingRules.Any())
+                {
+                    await ProcessDocumentByPostingRulesAsync(document, recordData, recordId, amount);
                 }
                 else
                 {
@@ -1612,6 +1622,63 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
                 throw;
             }
+        }
+
+        private async Task ProcessDocumentByPostingRulesAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            Guid recordId,
+            decimal documentAmount)
+        {
+            var postingDate = recordData.GetValueOrDefault("date") is DateTime date
+                ? date
+                : DateTime.Today;
+            var documentNumber = NormalizeLegacyDocumentNumber(
+                recordData.GetValueOrDefault("number")?.ToString() ??
+                recordData.GetValueOrDefault("doc_number")?.ToString());
+            var description = recordData.GetValueOrDefault("description")?.ToString() ?? string.Empty;
+
+            foreach (var rule in document.PostingRules.OrderBy(rule => rule.Order))
+            {
+                if (!string.IsNullOrWhiteSpace(rule.Condition) && !EvaluateCondition(rule.Condition, recordData))
+                    continue;
+
+                var debit = EvaluateExpression(rule.DebitAccountExpression, recordData).Trim();
+                var credit = EvaluateExpression(rule.CreditAccountExpression, recordData).Trim();
+                var amountText = EvaluateExpression(rule.AmountExpression, recordData);
+                var amount = decimal.TryParse(amountText, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var parsedAmount)
+                    ? parsedAmount
+                    : documentAmount;
+
+                if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit))
+                    throw new Exception($"Правило '{rule.Name}' не определило счета дебета и кредита");
+                if (debit.Equals(credit, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"Правило '{rule.Name}' сформировало одинаковые счета дебета и кредита");
+                if (amount <= 0)
+                    throw new Exception($"Правило '{rule.Name}' сформировало некорректную сумму");
+
+                const string sql = @"
+                    INSERT INTO ""doc_postings""
+                    (""Id"", ""posting_date"", ""doc_number"", ""document_type"",
+                     ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
+                     ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                    VALUES
+                    (@id, @date, @number, @type, @debit, @credit, @amount, 0,
+                     @description, true, NOW(), NOW())";
+
+                await _context.Database.ExecuteSqlRawAsync(sql,
+                    new NpgsqlParameter("@id", Guid.NewGuid()),
+                    new NpgsqlParameter("@date", postingDate),
+                    new NpgsqlParameter("@number", documentNumber),
+                    new NpgsqlParameter("@type", document.Name),
+                    new NpgsqlParameter("@debit", debit),
+                    new NpgsqlParameter("@credit", credit),
+                    new NpgsqlParameter("@amount", amount),
+                    new NpgsqlParameter("@description", description));
+            }
+
+            await UpdateDocumentPostedStatus(document.TableName, recordId);
         }
 
         private async Task ProcessCashOrderAsync(MetadataObject document, Dictionary<string, object> recordData, Guid recordId, decimal amount)

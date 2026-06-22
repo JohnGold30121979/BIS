@@ -1033,34 +1033,30 @@ namespace BIS.ERP.Views
             EditorDescription.Text = "";
             PropertiesPanel.Children.Clear();
 
-            var mainPanel = new StackPanel();
-
-            mainPanel.Children.Add(new TextBlock { Text = "Наименование:", FontWeight = FontWeights.Bold });
-            var nameBox = new TextBox { Text = report.Name, Margin = new Thickness(0, 5, 0, 15) };
-            mainPanel.Children.Add(nameBox);
-
-            mainPanel.Children.Add(new TextBlock { Text = "Описание:", FontWeight = FontWeights.Bold });
-            var descBox = new TextBox { Text = report.Description, Height = 60, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 15) };
-            mainPanel.Children.Add(descBox);
-
-            var saveButton = new Button
+            var mainPanel = new StackPanel { MaxWidth = 620 };
+            mainPanel.Children.Add(new TextBlock
             {
-                Content = "💾 Сохранить",
-                Height = 35,
-                Width = 120,
-                Background = (Brush)new BrushConverter().ConvertFrom("#27AE60"),
+                Text = report.Description,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 15)
+            });
+
+            var designerButton = new Button
+            {
+                Content = "Открыть профессиональный конструктор",
+                Height = 40,
+                MinWidth = 260,
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
                 Foreground = Brushes.White
             };
-            saveButton.Click += async (s, e) =>
+            designerButton.Click += async (s, e) =>
             {
-                report.Name = nameBox.Text;
-                report.Description = descBox.Text;
-                await _reportService.UpdateReportAsync(report);
-                await LoadMetadata();
-                MessageBox.Show("Сохранено!", "Успех");
+                var designer = new ReportDesignerWindow(report) { Owner = this };
+                if (designer.ShowDialog() == true)
+                    await LoadMetadata();
             };
 
-            mainPanel.Children.Add(saveButton);
+            mainPanel.Children.Add(designerButton);
             PropertiesPanel.Children.Add(mainPanel);
         }
 

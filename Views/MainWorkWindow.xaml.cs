@@ -258,6 +258,22 @@ namespace BIS.ERP
 
             NavigationItems.Add(dataSection);
 
+            var accountingSection = new NavigationItem
+            {
+                Id = "AccountingSection",
+                Name = "БУХГАЛТЕРСКАЯ ОТЧЕТНОСТЬ",
+                Icon = "📊",
+                Type = "Section"
+            };
+            accountingSection.Children.Add(new NavigationItem
+            {
+                Id = "AccountingReports",
+                Name = "Баланс и главная книга",
+                Icon = "📈",
+                Type = "AccountingReports"
+            });
+            NavigationItems.Add(accountingSection);
+
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
             if (reports.Any())
@@ -441,6 +457,11 @@ namespace BIS.ERP
                         {
                             await OpenReport(report);
                         }
+                        break;
+
+                    case "AccountingReports":
+                        var accountingContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        _navigation.NavigateTo(new AccountingReportsView(accountingContext));
                         break;
 
                     case "Profile":

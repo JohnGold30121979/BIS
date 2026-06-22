@@ -35,8 +35,13 @@
     {
         public List<BalanceItem> Assets { get; set; } = new();
         public List<BalanceItem> Liabilities { get; set; } = new();
+        public List<BalanceItem> Equity { get; set; } = new();
         public decimal TotalAssets { get; set; }
         public decimal TotalLiabilities { get; set; }
+        public decimal TotalEquity { get; set; }
+        public decimal TotalLiabilitiesAndEquity => TotalLiabilities + TotalEquity;
+        public decimal Difference => TotalAssets - TotalLiabilitiesAndEquity;
+        public bool IsBalanced => Math.Abs(Difference) < 0.01m;
     }
 
     public class BalanceItem

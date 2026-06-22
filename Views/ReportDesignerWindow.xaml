@@ -22,6 +22,9 @@
                 <Button x:Name="SaveButton" Content="💾 Сохранить" 
                         Width="110" Height="35" Margin="5"
                         Background="#27AE60" Foreground="White" Click="OnSaveClick"/>
+                <Button x:Name="PdfButton" Content="PDF" ToolTip="Сформировать отчет в PDF"
+                        Width="100" Height="35" Margin="5"
+                        Background="#34495E" Foreground="White" Click="OnExportPdfClick"/>
                 <Button x:Name="CancelButton" Content="❌ Отмена" 
                         Width="90" Height="35" Margin="5"
                         Background="#95A5A6" Foreground="White" Click="OnCancelClick"/>
@@ -282,8 +285,12 @@
                                             </Grid.ColumnDefinitions>
 
                                             <ComboBox x:Name="FilterField" Grid.Column="0" Height="30" Margin="5"
-                                                      DisplayMemberPath="Name"/>
-                                            <ComboBox x:Name="FilterOp" Grid.Column="1" Height="30" Margin="5" SelectedIndex="0">
+                                                      ItemsSource="{Binding DataContext.AvailableFilterFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      DisplayMemberPath="Name" SelectedValuePath="DbColumnName"
+                                                      SelectedValue="{Binding FieldName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <ComboBox x:Name="FilterOp" Grid.Column="1" Height="30" Margin="5"
+                                                      SelectedValuePath="Content"
+                                                      SelectedValue="{Binding Operation, Mode=TwoWay}">
                                                 <ComboBoxItem>=</ComboBoxItem>
                                                 <ComboBoxItem>&lt;</ComboBoxItem>
                                                 <ComboBoxItem>&gt;</ComboBoxItem>

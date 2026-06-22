@@ -6,6 +6,11 @@
     <SolidColorBrush x:Key="AppSidebarBackgroundBrush" Color="#2C3E50"/>
     <SolidColorBrush x:Key="AppHeaderBackgroundBrush" Color="#1A252F"/>
     <SolidColorBrush x:Key="AppContentBackgroundBrush" Color="#F5F6FA"/>
+    <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppAlternateRowBrush" Color="#F4F7F9"/>
+    <SolidColorBrush x:Key="AppBorderBrush" Color="#D7DEE5"/>
+    <SolidColorBrush x:Key="AppReadOnlyBackgroundBrush" Color="#E9EDF1"/>
+    <SolidColorBrush x:Key="AppBodyTextBrush" Color="#243447"/>
 
     <SolidColorBrush x:Key="AppPrimaryTextBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="AppSecondaryTextBrush" Color="#7F8C8D"/>
@@ -16,5 +21,27 @@
 
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#34495E"/>
     <Color x:Key="AppHighlightColor">#34495E</Color>
+
+    <Style TargetType="Window">
+        <Setter Property="Background" Value="{DynamicResource AppWindowBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+    </Style>
+    <Style TargetType="TextBox">
+        <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppInputForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+    </Style>
+    <Style TargetType="ComboBox">
+        <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppInputForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+    </Style>
+    <Style TargetType="DataGrid">
+        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+        <Setter Property="RowBackground" Value="{DynamicResource AppSurfaceBrush}"/>
+        <Setter Property="AlternatingRowBackground" Value="{DynamicResource AppAlternateRowBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+    </Style>
 
 </ResourceDictionary>

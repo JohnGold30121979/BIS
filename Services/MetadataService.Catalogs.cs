@@ -424,8 +424,10 @@ namespace BIS.ERP.Services
                     Order = 4,
                     IsSystem = true,
                     MetadataConfigId = config.Id,
-                    Fields = GetStandardCatalogFields(Guid.NewGuid())
+                    Fields = new List<MetadataField>()
                 };
+                foreach (var field in GetFixedAssetFields(catalog.Id))
+                    catalog.Fields.Add(field);
                 await _context.MetadataObjects.AddAsync(catalog);
                 await _context.SaveChangesAsync();
                 await CreateTableForCatalogAsync(catalog);
@@ -650,68 +652,184 @@ namespace BIS.ERP.Services
 
         private async Task EnsureStandardReportTemplatesAsync(MetadataConfiguration config)
         {
-            var hasInvoice = await _context.Reports
-                .AnyAsync(r => r.ReportType == "InvoiceMaterialsKg" || r.Name == "Счет-фактура на материалы (КР)");
+            await EnsureMetadataReportAsync(
+                "Счет-фактура на материалы (КР)",
+                "Печатная форма счет-фактуры на материалы с реквизитами первичной организации.",
+                "Справочник материалов",
+                "InvoiceMaterialsKg",
+                1,
+                new[] { "Код", "Наименование материала", "Ед изм", "Ном номер", "Счет хранения" });
+            await EnsureMetadataReportAsync(
+                "Ведомость основных средств",
+                "Перечень карточек основных средств предприятия.",
+                "Основные средства",
+                "Table",
+                10,
+                new[] { "Код", "Наименование", "Описание", "Активен" });
+            await EnsureMetadataReportAsync(
+                "Перечень материалов",
+                "Справочник материалов по коду, номенклатурному номеру и счету хранения.",
+                "Справочник материалов",
+                "Table",
+                20,
+                new[] { "Код", "Наименование материала", "Ед изм", "Ном номер", "Вид материала", "Счет хранения" });
+            await EnsureMetadataReportAsync(
+                "Журнал прихода товаров",
+                "Документы поступления товарно-материальных запасов.",
+                "Приход товаров",
+                "Table",
+                30,
+                new[] { "Номер", "Дата", "Сумма", "Примечание" });
+            await EnsureMetadataReportAsync(
+                "Журнал расхода товаров",
+                "Документы выбытия товарно-материальных запасов.",
+                "Расход товаров",
+                "Table",
+                31,
+                new[] { "Номер", "Дата", "Сумма", "Примечание" });
+            await EnsureMetadataReportAsync(
+                "Журнал бухгалтерских проводок",
+                "Единый журнал бухгалтерских проводок системы.",
+                "Проводки",
+                "Table",
+                40,
+                new[]
+                {
+                    "Дата", "Номер документа", "Тип документа", "Дебет", "Кредит",
+                    "Сумма в сом", "Сумма в валюте", "Валюта", "Организация", "Сотрудник", "Примечание"
+                });
+            await _context.SaveChangesAsync();
+        }
 
-            if (hasInvoice)
+        private async Task EnsureInventoryDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        {
+            var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Приход товаров", "Расход товаров"
+            };
+
+            foreach (var document in documents.Where(document => targetNames.Contains(document.Name)))
+            {
+                var columns = document.Fields.Select(field => field.DbColumnName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var nextOrder = document.Fields.Count == 0 ? 1 : document.Fields.Max(field => field.Order) + 1;
+                foreach (var field in GetInventoryDocumentFields(document.Id, nextOrder))
+                {
+                    if (columns.Contains(field.DbColumnName))
+                        continue;
+
+                    field.Id = Guid.NewGuid();
+                    field.MetadataObjectId = document.Id;
+                    await _context.MetadataFields.AddAsync(field);
+                    await AddColumnToTableAsync(document.TableName, field);
+                    document.Fields.Add(field);
+                    columns.Add(field.DbColumnName);
+                }
+
+                document.UsePostings = true;
+                if (!await _context.MetadataPostingRules.AnyAsync(rule => rule.MetadataObjectId == document.Id))
+                {
+                    await _context.MetadataPostingRules.AddAsync(new MetadataPostingRule
+                    {
+                        Id = Guid.NewGuid(),
+                        MetadataObjectId = document.Id,
+                        Name = $"Проводка документа {document.Name}",
+                        DebitAccountExpression = "{debit_account}",
+                        CreditAccountExpression = "{credit_account}",
+                        AmountExpression = "{amount}",
+                        Order = 1
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureAssetsCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(metadata => metadata.ObjectType == "Catalog" && metadata.Name == "Основные средства");
+            if (catalog == null)
                 return;
 
-            var materialsCatalog = await _context.MetadataObjects
-                .Include(m => m.Fields)
-                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Справочник материалов");
+            var columns = catalog.Fields.Select(field => field.DbColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var field in GetFixedAssetFields(catalog.Id))
+            {
+                if (columns.Contains(field.DbColumnName))
+                    continue;
 
-            if (materialsCatalog == null)
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+                columns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureMetadataReportAsync(
+            string name,
+            string description,
+            string sourceName,
+            string reportType,
+            int order,
+            IEnumerable<string> fieldNames)
+        {
+            if (await _context.Reports.AnyAsync(report => report.Name == name))
+                return;
+
+            var source = await _context.MetadataObjects
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(metadata => metadata.Name == sourceName);
+            if (source == null)
                 return;
 
             var report = new Report
             {
                 Id = Guid.NewGuid(),
-                Name = "Счет-фактура на материалы (КР)",
-                Description = "Печатная форма счет-фактуры на материалы с реквизитами первичной организации.",
-                DataSourceType = "Catalog",
-                DataSourceId = materialsCatalog.Id,
-                ReportType = "InvoiceMaterialsKg",
+                Name = name,
+                Description = description,
+                DataSourceType = source.ObjectType,
+                DataSourceId = source.Id,
+                ReportType = reportType,
                 Icon = "📄",
-                Order = 1,
-                TitleText = "Счет-фактура",
-                SubtitleText = "на материалы",
-                PageOrientation = "Portrait",
+                Order = order,
+                TitleText = name,
+                PageOrientation = source.Name == "Проводки" ? "Landscape" : "Portrait",
                 FontName = "Arial",
                 FontSize = 9,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
 
-            var fieldMap = new[]
+            var fieldOrder = 1;
+            foreach (var fieldName in fieldNames)
             {
-                ("code", "Код"),
-                ("name", "Наименование материала"),
-                ("unit", "Ед. изм."),
-                ("article", "Номенклатурный номер"),
-                ("storage_account", "Счет учета")
-            };
-
-            var order = 1;
-            foreach (var (fieldName, displayName) in fieldMap)
-            {
-                if (materialsCatalog.Fields.All(f => !string.Equals(f.DbColumnName, fieldName, StringComparison.OrdinalIgnoreCase)))
+                var field = source.Fields.FirstOrDefault(metadataField =>
+                    metadataField.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase) ||
+                    metadataField.DbColumnName.Equals(fieldName, StringComparison.OrdinalIgnoreCase));
+                if (field == null)
                     continue;
 
                 report.Fields.Add(new ReportField
                 {
                     Id = Guid.NewGuid(),
                     ReportId = report.Id,
-                    FieldName = fieldName,
-                    DisplayName = displayName,
-                    Order = order++,
-                    Width = 120,
+                    FieldName = field.DbColumnName,
+                    DisplayName = field.Name,
+                    Order = fieldOrder++,
+                    Width = field.FieldType == "String" ? 150 : 100,
                     IsVisible = true,
-                    Alignment = "Left"
+                    Alignment = field.FieldType == "Decimal" ? "Right" : "Left",
+                    AggregateType = field.FieldType == "Decimal" ? "Sum" : string.Empty
                 });
             }
 
-            await _context.Reports.AddAsync(report);
-            await _context.SaveChangesAsync();
+            if (report.Fields.Count > 0)
+                await _context.Reports.AddAsync(report);
         }
 
 
