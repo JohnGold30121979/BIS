@@ -53,6 +53,7 @@ namespace BIS.ERP.Views
 
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
                 // Кэш для Reference полей
                 var referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
@@ -67,10 +68,7 @@ namespace BIS.ERP.Views
                         {
                             if (item.ContainsKey("Id") && Guid.TryParse(item["Id"].ToString(), out var id))
                             {
-                                string displayName = item.ContainsKey("Наименование") ? item["Наименование"].ToString() :
-                                                    (item.ContainsKey("name") ? item["name"].ToString() :
-                                                    (item.ContainsKey("Код") ? item["Код"].ToString() : id.ToString().Substring(0, 8)));
-                                dict[id] = displayName;
+                                dict[id] = ReferenceDisplayHelper.BuildDisplayValue(item, field);
                             }
                         }
                         referenceCache[field.Name] = dict;
@@ -180,10 +178,15 @@ namespace BIS.ERP.Views
                     if (!string.IsNullOrEmpty(corrValue) && referenceCache.TryGetValue("correspondent_account", out var corrDict) && Guid.TryParse(corrValue, out var corrId))
                         newRow.CorrespondentAccountName = corrDict.ContainsKey(corrId) ? corrDict[corrId] : corrValue;
 
+                    var corrAccount = accountAnalytics.FindAccount(corrValue);
+                    if (corrAccount != null)
+                        newRow.CorrespondentAccountName = corrAccount.DisplayName;
+
                     _rows.Add(newRow);
                 }
 
                 DataGrid.ItemsSource = _rows;
+                UpdateAnalyticColumns(data, accountAnalytics);
                 StatusText.Text = $"📊 Загружено записей: {_rows.Count}";
                 UpdateButtonsState();
             }
@@ -196,6 +199,38 @@ namespace BIS.ERP.Views
             {
                 _isLoading = false;
             }
+        }
+
+        private void UpdateAnalyticColumns(
+            List<Dictionary<string, object>> rows,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            var accountFields = new[]
+            {
+                "correspondent_account", "Корр. счет", "Корр счет", "Коррсчет"
+            };
+
+            OrganizationColumn.Visibility = GetAnalyticColumnVisibility(
+                "Организация", "Организации", rows, accountFields, accountAnalytics);
+            CurrencyColumn.Visibility = GetAnalyticColumnVisibility(
+                "Валюта", "Справочник валют", rows, accountFields, accountAnalytics);
+            EmployeeColumn.Visibility = GetAnalyticColumnVisibility(
+                "Сотрудник", "Сотрудники (Списочный состав)", rows, accountFields, accountAnalytics);
+            MaterialColumn.Visibility = GetAnalyticColumnVisibility(
+                "Материал", "Справочник материалов", rows, accountFields, accountAnalytics);
+        }
+
+        private static Visibility GetAnalyticColumnVisibility(
+            string fieldName,
+            string referenceCatalog,
+            List<Dictionary<string, object>> rows,
+            IEnumerable<string> accountFields,
+            AccountAnalyticsRegistry registry)
+        {
+            return AccountAnalyticsRules.ShouldShowFieldForRows(
+                    fieldName, rows, accountFields, registry, referenceCatalog)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         private async void OnAddClick(object sender, RoutedEventArgs e)

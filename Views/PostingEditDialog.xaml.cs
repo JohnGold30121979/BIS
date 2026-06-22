@@ -251,7 +251,11 @@ namespace BIS.ERP.Views
                 }
                 else
                 {
-                    var textBox = new TextBox { Height = 30 };
+                    var textBox = new TextBox
+                    {
+                        Height = 30,
+                        Text = !editId.HasValue && field.FieldType == "Decimal" ? "0" : string.Empty
+                    };
 
                     // Для поля "Номер документа" - делаем ReadOnly
                     if (field.Name == "Номер документа")

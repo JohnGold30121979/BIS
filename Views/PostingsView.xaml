@@ -45,9 +45,11 @@
                 <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
                 <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом]}" Width="120"/>
-                <DataGridTextColumn Header="Сумма в валюте" Binding="{Binding [Сумма в валюте]}" Width="120"/>
-                <DataGridTextColumn Header="Валюта" Binding="{Binding [Валюта]}" Width="80"/>
-                <DataGridTextColumn Header="Организация" Binding="{Binding [Организация]}" Width="150"/>
+                <DataGridTextColumn x:Name="AmountCurrencyColumn" Header="Сумма в валюте" Binding="{Binding [Сумма в валюте]}" Width="120" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="CurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="110" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="OrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="180" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding [Сотрудник]}" Width="180" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="MaterialColumn" Header="Материал" Binding="{Binding [Материал]}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding [Примечание]}" Width="200"/>
             </DataGrid.Columns>
         </DataGrid>

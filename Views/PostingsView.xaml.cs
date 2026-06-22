@@ -40,13 +40,16 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "Загрузка...";
                 var data = await _metadataService.GetCatalogDataAsync(_document.Id);
+                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(_document, _metadataService);
+                var displayData = ReferenceDisplayHelper.ResolveRows(data, referenceMaps);
 
                 _postings.Clear();
 
                 // Для отладки - выводим ключи
-                if (data.Any())
+                if (displayData.Any())
                 {
-                    var firstRow = data.First();
+                    var firstRow = displayData.First();
                     System.Diagnostics.Debug.WriteLine("=== Ключи в данных ===");
                     foreach (var key in firstRow.Keys)
                     {
@@ -54,10 +57,12 @@ namespace BIS.ERP.Views
                     }
                 }
 
-                foreach (var row in data.OrderByDescending(r => r.ContainsKey("posting_date") ? r["posting_date"] : null))
+                foreach (var row in displayData.OrderByDescending(r => r.GetValueOrDefault("Дата")))
                 {
                     _postings.Add(row);
                 }
+
+                UpdateAnalyticColumns(data, accountAnalytics);
 
                 StatusText.Text = $"📊 Загружено проводок: {_postings.Count}";
             }
@@ -66,6 +71,37 @@ namespace BIS.ERP.Views
                 StatusText.Text = $"❌ Ошибка: {ex.Message}";
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private void UpdateAnalyticColumns(
+            List<Dictionary<string, object>> rawRows,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            var accountFields = new[] { "Дебет", "Кредит" };
+            var showCurrency = AccountAnalyticsRules.ShouldShowFieldForRows(
+                "Валюта", rawRows, accountFields, accountAnalytics, "Справочник валют");
+
+            AmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            CurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            OrganizationColumn.Visibility = GetAnalyticColumnVisibility(
+                "Организация", "Организации", rawRows, accountFields, accountAnalytics);
+            EmployeeColumn.Visibility = GetAnalyticColumnVisibility(
+                "Сотрудник", "Сотрудники (Списочный состав)", rawRows, accountFields, accountAnalytics);
+            MaterialColumn.Visibility = GetAnalyticColumnVisibility(
+                "Материал", "Справочник материалов", rawRows, accountFields, accountAnalytics);
+        }
+
+        private static Visibility GetAnalyticColumnVisibility(
+            string fieldName,
+            string referenceCatalog,
+            List<Dictionary<string, object>> rows,
+            IEnumerable<string> accountFields,
+            AccountAnalyticsRegistry registry)
+        {
+            return AccountAnalyticsRules.ShouldShowFieldForRows(
+                    fieldName, rows, accountFields, registry, referenceCatalog)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         private void PostingsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)

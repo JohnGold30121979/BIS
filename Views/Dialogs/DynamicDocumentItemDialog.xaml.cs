@@ -220,7 +220,8 @@ namespace BIS.ERP.Views.Dialogs
                     {
                         Height = 30,
                         Name = safeName,
-                        Text = currentValue?.ToString() ?? string.Empty
+                        Text = currentValue?.ToString() ??
+                               (!_editId.HasValue && field.FieldType == "Decimal" ? "0" : string.Empty)
                     };
             }
         }

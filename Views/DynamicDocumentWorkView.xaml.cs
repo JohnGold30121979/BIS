@@ -48,6 +48,8 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "Загрузка данных...";
                 var data = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
                 _dataTable = new DataTable();
                 _dataTable.TableName = _documentMetadata.Name;
@@ -66,7 +68,7 @@ namespace BIS.ERP.Views
                 var referenceCatalogs = new Dictionary<string, Dictionary<Guid, string>>();
                 foreach (var field in _documentMetadata.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
                 {
-                    var catalog = (await _metadataService.GetCatalogsAsync()).FirstOrDefault(c => c.Name == field.ReferenceCatalog);
+                    var catalog = allCatalogs.FirstOrDefault(c => c.Name == field.ReferenceCatalog);
                     if (catalog != null)
                     {
                         var catalogData = await _metadataService.GetCatalogDataAsync(catalog.Id);
@@ -74,10 +76,8 @@ namespace BIS.ERP.Views
                         foreach (var item in catalogData)
                         {
                             var id = item.ContainsKey("Id") ? Guid.Parse(item["Id"].ToString()) : Guid.Empty;
-                            var name = item.ContainsKey("Наименование") ? item["Наименование"].ToString() :
-                                      (item.ContainsKey("name") ? item["name"].ToString() : "");
                             if (id != Guid.Empty)
-                                dict[id] = name;
+                                dict[id] = ReferenceDisplayHelper.BuildDisplayValue(item, field);
                         }
                         referenceCatalogs[field.Name] = dict;
                     }
@@ -124,6 +124,8 @@ namespace BIS.ERP.Views
                         column.Width = new DataGridLength(1, DataGridLengthUnitType.Star);
                 }
 
+                UpdateAnalyticColumns(data, accountAnalytics);
+
                 StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
             }
             catch (Exception ex)
@@ -131,6 +133,32 @@ namespace BIS.ERP.Views
                 StatusText.Text = $"❌ Ошибка: {ex.Message}";
                 MessageBox.Show($"Ошибка загрузки данных: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void UpdateAnalyticColumns(
+            List<Dictionary<string, object>> rows,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            var accountFields = _documentMetadata.Fields
+                .Where(AccountAnalyticsRules.IsAccountSelectorField)
+                .Select(field => field.Name)
+                .ToList();
+
+            foreach (var field in _documentMetadata.Fields.Where(field =>
+                         AccountAnalyticsRules.IsAccountControlledField(field, accountAnalytics.Definitions)))
+            {
+                var isVisible = AccountAnalyticsRules.ShouldShowFieldForRows(
+                    field.Name,
+                    rows,
+                    accountFields,
+                    accountAnalytics,
+                    field.ReferenceCatalog);
+
+                var column = DataGrid.Columns.FirstOrDefault(dataGridColumn =>
+                    string.Equals(dataGridColumn.Header?.ToString(), field.Name, StringComparison.OrdinalIgnoreCase));
+                if (column != null)
+                    column.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 

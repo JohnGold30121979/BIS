@@ -80,7 +80,7 @@
                   Visibility="Collapsed"/>
 
         <TextBlock Grid.Row="9" Grid.Column="0" Text="Сумма:" VerticalAlignment="Center"/>
-        <TextBox x:Name="AmountBox" Grid.Row="9" Grid.Column="1" Height="30"/>
+        <TextBox x:Name="AmountBox" Grid.Row="9" Grid.Column="1" Height="30" Text="0"/>
 
         <TextBlock x:Name="CurrencyLabel" Grid.Row="10" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center"
                    Visibility="Collapsed"/>

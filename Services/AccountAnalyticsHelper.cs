@@ -332,6 +332,31 @@ namespace BIS.ERP.Services
 
     public static class AccountAnalyticsRules
     {
+        public static bool ShouldShowFieldForRows(
+            string fieldName,
+            IEnumerable<Dictionary<string, object>> rows,
+            IEnumerable<string> accountFieldNames,
+            AccountAnalyticsRegistry registry,
+            string? referenceCatalog = null)
+        {
+            var accountNames = accountFieldNames.ToList();
+            var settings = rows
+                .SelectMany(row => accountNames
+                    .Where(row.ContainsKey)
+                    .Select(name => registry.GetSettingsFromValue(row[name])))
+                .Where(setting => setting != null)
+                .Distinct()
+                .ToList();
+
+            return ShouldShowField(
+                fieldName,
+                settings,
+                registry.Definitions,
+                referenceCatalog,
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
+        }
+
         public static bool IsAccountSelectorField(MetadataField field)
         {
             if (field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true)
