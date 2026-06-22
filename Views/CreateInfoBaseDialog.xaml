@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Создание информационной базы"
         Width="500" 
-        Height="380"
+        Height="600"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -33,6 +33,13 @@
                 <!-- Основное содержимое -->
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
+                        <TextBlock Text="Режим подключения" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                        <ComboBox x:Name="ModeCombo" Height="35" SelectedIndex="0" Margin="0,0,0,15"
+                                  SelectionChanged="OnModeChanged">
+                            <ComboBoxItem Content="Создать новую базу" Tag="Create"/>
+                            <ComboBoxItem Content="Подключить существующую базу" Tag="Attach"/>
+                        </ComboBox>
+
                         <!-- Название базы -->
                         <TextBlock Text="Название базы" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
                         <TextBox x:Name="NameBox" Height="35" Padding="10" FontSize="13" 
@@ -41,7 +48,7 @@
                                  Foreground="#2C3E50" FontWeight="Normal"/>
 
                         <!-- Расширенные настройки -->
-                        <Expander x:Name="SettingsExpander" Header="⚙️ Параметры подключения" 
+                        <Expander x:Name="SettingsExpander" Header="⚙️ Параметры подключения" IsExpanded="True"
                                   Margin="0,5,0,0" Expanded="OnExpanderExpanded" Collapsed="OnExpanderCollapsed">
                             <StackPanel Margin="0,15,0,0">
                                 <TextBlock Text="Сервер (Host)" Foreground="#555" FontSize="12" Margin="0,0,0,5"/>
@@ -55,7 +62,7 @@
                                          Margin="0,0,0,12" Background="White" BorderBrush="#E0E0E0" BorderThickness="1"
                                          Foreground="#2C3E50"/>
 
-                                <TextBlock Text="Имя базы данных (создастся автоматически)" Foreground="#555" FontSize="12" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="DatabaseLabel" Text="Имя базы данных" Foreground="#555" FontSize="12" Margin="0,0,0,5"/>
                                 <TextBox x:Name="DatabaseBox" Height="40" Padding="10" FontSize="13" 
                                          IsEnabled="False" Background="#F0F4F8" BorderBrush="#E0E0E0" BorderThickness="1" 
                                          Margin="0,0,0,12" Foreground="#666"/>
@@ -88,12 +95,12 @@
                 <!-- Кнопки -->
                 <Border Grid.Row="2" Background="#F0F4F8" Padding="15" CornerRadius="0,0,10,10">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button x:Name="CancelButton" Content="Отмена" Width="90" Height="35" 
-                                Margin="0,0,10,0" Background="#95A5A6" Foreground="White"
-                                Click="OnCancelClick" Cursor="Hand" FontSize="13"/>
-                        <Button x:Name="CreateButton" Content="Создать" Width="90" Height="35" 
-                                Background="#27AE60" Foreground="White" IsEnabled="False"
+                        <Button x:Name="CreateButton" Content="Создать" Width="110" Height="36"
+                                Margin="0,0,10,0" Background="#27AE60" Foreground="White" IsEnabled="False"
                                 Click="OnCreateClick" Cursor="Hand" FontSize="13"/>
+                        <Button x:Name="CancelButton" Content="Отмена" Width="110" Height="36"
+                                Background="#95A5A6" Foreground="White"
+                                Click="OnCancelClick" Cursor="Hand" FontSize="13"/>
                     </StackPanel>
                 </Border>
             </Grid>

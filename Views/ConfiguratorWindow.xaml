@@ -53,7 +53,10 @@
                 <StackPanel>
                     <Border Background="#1A252F" Padding="15">
                         <StackPanel>
-                            <TextBlock Text="BIS ERP" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="SystemIconText" FontSize="20" Margin="0,0,8,0"/>
+                                <TextBlock x:Name="SystemNameText" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                            </StackPanel>
                             <TextBlock Text="Режим конфигуратора" FontSize="11" Foreground="#7F8C8D"/>
                         </StackPanel>
                     </Border>

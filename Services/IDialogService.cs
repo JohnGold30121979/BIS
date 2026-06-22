@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using BIS.ERP.Models;
 
 namespace BIS.ERP.Services
 {
@@ -20,6 +21,7 @@ namespace BIS.ERP.Services
         Task<bool> ShowLoginAsync();
         bool ShowRegister();
         bool ShowCreateInfoBase(out string? infoBaseName);
+        bool ShowEditInfoBase(InfoBase infoBase, out string? infoBaseName);
         void ShowSetup();
     }
 }

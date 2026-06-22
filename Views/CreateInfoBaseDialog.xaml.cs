@@ -13,6 +13,8 @@ namespace BIS.ERP.Views
         public int Port => int.TryParse(PortBox.Text, out var port) ? port : 5432;
         public string Username => UsernameBox.Text;
         public string Password => PasswordBox.Password;
+        public string DatabaseName => DatabaseBox.Text.Trim();
+        public bool AttachExisting => (ModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "Attach";
 
         public bool IsSuccess { get; private set; } = false;
 
@@ -32,6 +34,8 @@ namespace BIS.ERP.Views
 
         private void GenerateDatabaseName()
         {
+            if (AttachExisting)
+                return;
             // Генерируем имя БД только из латинских букв, цифр и подчеркиваний
             var baseName = NameBox.Text.Trim()
                 .Replace(" ", "_")
@@ -50,6 +54,21 @@ namespace BIS.ERP.Views
             // Добавляем префикс и суффикс с датой
             DatabaseBox.Text = $"bis_{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}";
             CreateButton.IsEnabled = !string.IsNullOrWhiteSpace(NameBox.Text);
+        }
+
+        private void OnModeChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (DatabaseBox == null)
+                return;
+            DatabaseBox.IsEnabled = AttachExisting;
+            DatabaseBox.Background = AttachExisting
+                ? System.Windows.Media.Brushes.White
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(240, 244, 248));
+            DatabaseLabel.Text = AttachExisting
+                ? "Имя существующей базы данных"
+                : "Имя новой базы данных";
+            if (!AttachExisting)
+                GenerateDatabaseName();
         }
 
         // Транслитерация кириллицы в латиницу
@@ -98,8 +117,11 @@ namespace BIS.ERP.Views
             try
             {
                 var manager = new InfoBaseManager();
+                var database = AttachExisting && !string.IsNullOrWhiteSpace(DatabaseName)
+                    ? DatabaseName
+                    : "postgres";
                 var success = await manager.TestConnectionAsync(
-                    Host, Port, "postgres", Username, Password);
+                    Host, Port, database, Username, Password);
 
                 if (success)
                 {
@@ -141,8 +163,16 @@ namespace BIS.ERP.Views
             {
                 var manager = new InfoBaseManager();
 
+                if (string.IsNullOrWhiteSpace(DatabaseName))
+                {
+                    ShowError("Введите имя базы данных");
+                    CreateButton.IsEnabled = true;
+                    return;
+                }
+
+                var testDatabase = AttachExisting ? DatabaseName : "postgres";
                 var canConnect = await manager.TestConnectionAsync(
-                    Host, Port, "postgres", Username, Password);
+                    Host, Port, testDatabase, Username, Password);
 
                 if (!canConnect)
                 {
@@ -152,13 +182,9 @@ namespace BIS.ERP.Views
                 }
 
                 // Создаем базу с описанием
-                var newBase = await manager.CreateInfoBaseAsync(
-                    InfoBaseName,
-                    "Universal",
-                    Host,
-                    Port,
-                    Username,
-                    Password);
+                var newBase = AttachExisting
+                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password)
+                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName);
 
                 // Обновляем описание для отображения
                 if (newBase != null)
@@ -182,13 +208,13 @@ namespace BIS.ERP.Views
         private void OnExpanderExpanded(object sender, RoutedEventArgs e)
         {
             // Увеличиваем высоту окна при раскрытии
-            this.Height = 560;
+            this.Height = 600;
         }
 
         private void OnExpanderCollapsed(object sender, RoutedEventArgs e)
         {
             // Возвращаем высоту при сворачивании
-            this.Height = 380;
+            this.Height = 420;
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e)

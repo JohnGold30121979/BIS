@@ -220,6 +220,7 @@ namespace BIS.ERP.Services
                 if (!table.Columns.Contains(columnName) || !maps.TryGetValue(item.MetadataField!.Name, out var map))
                     continue;
 
+                table.Columns[columnName]!.ReadOnly = false;
                 foreach (DataRow row in table.Rows)
                 {
                     if (Guid.TryParse(row[columnName]?.ToString(), out var id) && map.TryGetValue(id, out var displayValue))

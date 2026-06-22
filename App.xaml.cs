@@ -14,6 +14,7 @@ namespace BIS.ERP
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             try
             {
@@ -30,7 +31,7 @@ namespace BIS.ERP
                 ThemeService.Apply(settings?.Theme ?? ThemeService.DefaultTheme);
 
                 // Проверяем подключение
-                bool needSetup = string.IsNullOrEmpty(settings?.Password) || !settings.TestConnection();
+                bool needSetup = !settings.TestConnection();
 
                 if (needSetup)
                 {

@@ -27,10 +27,9 @@
                       DisplayMemberPath="Name" SelectedValuePath="Id"/>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                <Button x:Name="CancelButton" Content="Отмена" Width="90" Height="35" 
-                        Margin="0,0,10,0" Click="OnCancelClick"/>
-                <Button x:Name="CreateButton" Content="Создать" Width="90" Height="35" 
-                        Background="#27AE60" Foreground="White" Click="OnCreateClick"/>
+                <Button x:Name="CreateButton" Content="Создать" Width="110" Height="36"
+                        Margin="0,0,10,0" Background="#27AE60" Foreground="White" Click="OnCreateClick"/>
+                <Button x:Name="CancelButton" Content="Отмена" Width="110" Height="36" Click="OnCancelClick"/>
             </StackPanel>
         </StackPanel>
     </Border>

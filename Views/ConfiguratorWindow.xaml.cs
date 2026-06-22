@@ -42,6 +42,11 @@ namespace BIS.ERP.Views
             {
                 Mouse.OverrideCursor = Cursors.Wait;
 
+                var systemConfiguration = await new SystemConfigurationService().GetAsync();
+                SystemNameText.Text = systemConfiguration.SystemName;
+                SystemIconText.Text = systemConfiguration.Icon;
+                Title = $"{systemConfiguration.SystemName} - Конфигуратор";
+
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);

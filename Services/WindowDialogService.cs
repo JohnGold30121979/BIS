@@ -1,6 +1,8 @@
 using System.Threading.Tasks;
 using System.Windows;
 using BIS.ERP.Views;
+using BIS.ERP.Models;
+using BIS.ERP.Views.Dialogs;
 
 namespace BIS.ERP.Services
 {
@@ -58,6 +60,14 @@ namespace BIS.ERP.Services
         public bool ShowCreateInfoBase(out string? infoBaseName)
         {
             var dialog = new CreateInfoBaseDialog { Owner = _owner };
+            var result = dialog.ShowDialog() == true;
+            infoBaseName = result ? dialog.InfoBaseName : null;
+            return result;
+        }
+
+        public bool ShowEditInfoBase(InfoBase infoBase, out string? infoBaseName)
+        {
+            var dialog = new EditInfoBaseDialog(infoBase.Name) { Owner = _owner };
             var result = dialog.ShowDialog() == true;
             infoBaseName = result ? dialog.InfoBaseName : null;
             return result;

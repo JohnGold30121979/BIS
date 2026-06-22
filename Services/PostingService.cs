@@ -41,6 +41,8 @@ namespace BIS.ERP.Services
         public async Task<List<PostingViewModel>> GetAllPostingsAsync(DateTime? startDate = null, DateTime? endDate = null)
         {
             var postings = new List<PostingViewModel>();
+            var organizationMap = await LoadReferenceMapAsync("Организации");
+            var employeeMap = await LoadReferenceMapAsync("Сотрудники (Списочный состав)");
 
             // 1. Проводки из doc_postings
             try
@@ -83,8 +85,8 @@ namespace BIS.ERP.Services
                         AmountCurrency = row.AmountCurrency,
                         Currency = row.Currency,
                         Note = row.Note,
-                        Organization = row.Organization,
-                        Employee = row.Employee,
+                        Organization = ResolveReference(row.Organization, organizationMap),
+                        Employee = ResolveReference(row.Employee, employeeMap),
                         Site = "",
                         ResponsiblePerson = "",
                         DocumentId = null
@@ -153,8 +155,8 @@ namespace BIS.ERP.Services
                                 Amount = amount,
                                 AmountCurrency = amountCurrency,
                                 Note = note ?? "",
-                                Organization = organization ?? "",
-                                Employee = employee ?? "",
+                                Organization = ResolveReference(organization, organizationMap),
+                                Employee = ResolveReference(employee, employeeMap),
                                 Currency = rowData.ContainsKey("Currency") ? rowData["Currency"]?.ToString() : "KGS",
                                 Site = "",
                                 ResponsiblePerson = "",
@@ -170,6 +172,36 @@ namespace BIS.ERP.Services
             }
 
             return postings.OrderByDescending(p => p.Date).ThenBy(p => p.DocumentNumber).ToList();
+        }
+
+        private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(string catalogName)
+        {
+            try
+            {
+                var catalog = await _context.MetadataObjects.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == catalogName);
+                if (catalog == null)
+                    return new Dictionary<Guid, string>();
+
+                var rows = await new MetadataService(_context).GetCatalogDataAsync(catalog.Id);
+                var displayField = new MetadataField();
+                return rows.Where(row => Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out _))
+                    .ToDictionary(
+                        row => Guid.Parse(row["Id"].ToString()!),
+                        row => ReferenceDisplayHelper.BuildDisplayValue(row, displayField));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки ссылок справочника {catalogName}: {ex.Message}");
+                return new Dictionary<Guid, string>();
+            }
+        }
+
+        private static string ResolveReference(string? value, IReadOnlyDictionary<Guid, string> map)
+        {
+            if (Guid.TryParse(value, out var id) && map.TryGetValue(id, out var displayValue))
+                return displayValue;
+            return value ?? string.Empty;
         }
 
         // Вспомогательный класс для SQL запроса

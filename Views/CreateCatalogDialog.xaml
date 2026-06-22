@@ -91,13 +91,12 @@
         <!-- Кнопки -->
         <Border Grid.Row="1" Background="White" Padding="20,10,20,20" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="CancelButton" Content="Отмена" Width="90" Height="35" 
-                        Margin="0,0,10,0" Click="OnCancelClick"                 
-                        Background="#95A5A6" Foreground="White" Cursor="Hand"/>
                 <Button Content="📁 Загрузить из JSON" Click="OnLoadFromJsonClick" 
-                        Margin="5" Background="#9B59B6" Foreground="White"/>
-                <Button x:Name="CreateButton" Content="Создать" Width="90" Height="35" 
-                        Background="#27AE60" Foreground="White" Click="OnCreateClick" Cursor="Hand"/>
+                        Margin="0,0,10,0" Background="#9B59B6" Foreground="White"/>
+                <Button x:Name="CreateButton" Content="Создать" Width="110" Height="36"
+                        Margin="0,0,10,0" Background="#27AE60" Foreground="White" Click="OnCreateClick" Cursor="Hand"/>
+                <Button x:Name="CancelButton" Content="Отмена" Width="110" Height="36"
+                        Click="OnCancelClick" Background="#95A5A6" Foreground="White" Cursor="Hand"/>
                 
             </StackPanel>
         </Border>

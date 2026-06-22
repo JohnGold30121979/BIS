@@ -32,13 +32,22 @@ namespace BIS.ERP.Views
             _viewModel.ExitRequested += (_, _) => Application.Current.Shutdown();
 
             DataContext = _viewModel;
-            Loaded += async (_, _) => await _viewModel.LoadAsync();
+            Loaded += OnLoaded;
 
             InfoBasesList.MouseDoubleClick += async (_, _) =>
             {
                 if (_viewModel.StartWorkModeCommand.CanExecute(null))
                     await _viewModel.StartWorkModeCommand.ExecuteAsync(null);
             };
+        }
+
+        private async void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            var configuration = await new SystemConfigurationService().GetAsync();
+            SystemNameText.Text = configuration.SystemName;
+            SystemIconText.Text = configuration.Icon;
+            Title = $"Запуск {configuration.SystemName}";
+            await _viewModel.LoadAsync();
         }
     }
 }

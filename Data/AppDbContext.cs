@@ -53,6 +53,7 @@ public class AppDbContext : DbContext
     public DbSet<FinancialReportLineAccount> FinancialReportLineAccounts { get; set; }
     public DbSet<TaxJournalRecord> TaxJournalRecords { get; set; }
     public DbSet<LocalizationEntry> LocalizationEntries { get; set; }
+    public DbSet<SystemConfiguration> SystemConfigurations { get; set; }
     
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

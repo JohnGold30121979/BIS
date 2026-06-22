@@ -35,7 +35,8 @@ public class InfoBaseManager
             using var connection = new NpgsqlConnection(settings.GetPostgresConnectionString());
             connection.Open();
 
-            using var cmd = new NpgsqlCommand($"CREATE DATABASE {settings.DatabaseName}", connection);
+            var quotedDatabaseName = new NpgsqlCommandBuilder().QuoteIdentifier(settings.DatabaseName);
+            using var cmd = new NpgsqlCommand($"CREATE DATABASE {quotedDatabaseName}", connection);
             cmd.ExecuteNonQuery();
 
             // Теперь создаем таблицы в новой базе
@@ -73,13 +74,16 @@ public class InfoBaseManager
     }
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
-    string host, int port, string username, string password)
+    string host, int port, string username, string password, string? databaseName = null)
     {
-        var dbName = $"bis_{Guid.NewGuid():N}";
+        var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(dbName, "^[a-zA-Z0-9_]+$"))
+            throw new ArgumentException("Имя базы данных может содержать только латинские буквы, цифры и знак подчеркивания.");
 
         try
         {
-            using var connection = new NpgsqlConnection($"Host={host};Port={port};Username={username};Password={password}");
+            using var connection = new NpgsqlConnection(
+                $"Host={host};Port={port};Database=postgres;Username={username};Password={password}");
             await connection.OpenAsync();
 
             using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", connection);
@@ -196,6 +200,58 @@ public class InfoBaseManager
 
         _currentInfoBase = selected;
         return true;
+    }
+
+    public async Task<InfoBase> AttachInfoBaseAsync(
+        string name, string host, int port, string databaseName, string username, string password)
+    {
+        if (!await TestConnectionAsync(host, port, databaseName, username, password))
+            throw new InvalidOperationException("Не удалось подключиться к указанной базе данных.");
+        if (await _masterContext.InfoBases.AnyAsync(item =>
+                item.Host == host && item.Port == port && item.DatabaseName == databaseName))
+            throw new InvalidOperationException("Эта база данных уже добавлена в список.");
+
+        var connectionString = AppDbContext.BuildConnectionString(host, port, databaseName, username, password);
+        await using (var connection = new NpgsqlConnection(connectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(@"
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'public' AND table_name = 'MetadataObjects')", connection);
+            var isBisDatabase = Convert.ToBoolean(await command.ExecuteScalarAsync());
+            if (!isBisDatabase)
+                throw new InvalidOperationException(
+                    "Указанная база доступна, но не содержит структуру BIS ERP. Создайте новую базу или выберите существующую базу BIS ERP.");
+        }
+
+        var infoBase = new InfoBase
+        {
+            Name = name.Trim(), Description = name.Trim(), Type = "Universal",
+            Host = host.Trim(), Port = port, DatabaseName = databaseName.Trim(),
+            Username = username.Trim(), Password = password, IsActive = false,
+            Version = "1.0", CreatedAt = DateTime.UtcNow
+        };
+        await _masterContext.InfoBases.AddAsync(infoBase);
+        await _masterContext.SaveChangesAsync();
+        return infoBase;
+    }
+
+    public async Task UpdateInfoBaseNameAsync(Guid id, string name)
+    {
+        var normalizedName = name?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedName))
+            throw new ArgumentException("Наименование информационной базы не может быть пустым.");
+        if (await _masterContext.InfoBases.AnyAsync(item => item.Id != id && item.Name == normalizedName))
+            throw new InvalidOperationException("Информационная база с таким наименованием уже существует.");
+
+        var infoBase = await _masterContext.InfoBases.FindAsync(id)
+            ?? throw new InvalidOperationException("Информационная база не найдена.");
+        infoBase.Name = normalizedName;
+        infoBase.Description = normalizedName;
+        await _masterContext.SaveChangesAsync();
+        if (_currentInfoBase?.Id == id)
+            _currentInfoBase = infoBase;
     }
 
     public async Task<AppDbContext> GetCurrentDbContextAsync()

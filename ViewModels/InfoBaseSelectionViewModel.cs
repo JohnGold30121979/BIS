@@ -32,7 +32,7 @@ namespace BIS.ERP.ViewModels
         public bool IsEmpty => !HasInfoBases;
         public string ConnectionPath => SelectedInfoBase == null
             ? "Выберите информационную базу"
-            : $"File=\"{SelectedInfoBase.DatabaseName}\";";
+            : $"Сервер: {SelectedInfoBase.Host}:{SelectedInfoBase.Port}; База: {SelectedInfoBase.DatabaseName}";
 
         public event EventHandler<bool>? OpenMainWindowRequested;
         public event EventHandler? CloseRequested;
@@ -97,9 +97,19 @@ namespace BIS.ERP.ViewModels
         }
 
         [RelayCommand(CanExecute = nameof(HasSelectedInfoBase))]
-        private void Edit()
+        private async Task EditAsync()
         {
-            _dialogService.ShowInformation($"Редактирование базы: {SelectedInfoBase?.Name}\n\nФункция в разработке.");
+            if (SelectedInfoBase == null || !_dialogService.ShowEditInfoBase(SelectedInfoBase, out var newName))
+                return;
+            try
+            {
+                await _infoBaseManager.UpdateInfoBaseNameAsync(SelectedInfoBase.Id, newName!);
+                await LoadAsync();
+            }
+            catch (Exception ex)
+            {
+                _dialogService.ShowError($"Ошибка изменения базы: {ex.Message}");
+            }
         }
 
         [RelayCommand(CanExecute = nameof(HasSelectedInfoBase))]

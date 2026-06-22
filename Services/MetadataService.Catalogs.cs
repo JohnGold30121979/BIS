@@ -710,6 +710,18 @@ namespace BIS.ERP.Services
 
             foreach (var document in documents.Where(document => targetNames.Contains(document.Name)))
             {
+                var duplicateFields = document.Fields
+                    .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                    .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(group => group.OrderBy(field => field.Order).Skip(1))
+                    .ToList();
+                if (duplicateFields.Count > 0)
+                {
+                    _context.MetadataFields.RemoveRange(duplicateFields);
+                    foreach (var duplicate in duplicateFields)
+                        document.Fields.Remove(duplicate);
+                }
+
                 var columns = document.Fields.Select(field => field.DbColumnName)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var nextOrder = document.Fields.Count == 0 ? 1 : document.Fields.Max(field => field.Order) + 1;

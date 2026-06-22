@@ -41,7 +41,7 @@
 
             <!-- Заголовок -->
             <TextBlock Grid.Row="0" Text="BIS ERP" FontSize="28" FontWeight="Bold" 
-                       Foreground="{DynamicResource AppPrimaryTextBrush}" HorizontalAlignment="Center" 
+                       Foreground="{DynamicResource AppBodyTextBrush}" HorizontalAlignment="Center"
                        Margin="0,0,0,5"/>
 
             <TextBlock Grid.Row="1" Text="Настройка подключения к PostgreSQL" 
@@ -49,32 +49,32 @@
                        Margin="0,0,0,25"/>
 
             <!-- Сервер -->
-            <TextBlock Grid.Row="2" Text="Сервер (Host)" Foreground="{DynamicResource AppPrimaryTextBrush}" Margin="0,0,0,5"/>
+            <TextBlock Grid.Row="2" Text="Сервер (Host)" Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,5"/>
             <TextBox x:Name="HostBox" Grid.Row="3" Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}" Height="35" 
                      Padding="10,5" Margin="0,0,0,15"
                      Background="{DynamicResource AppInputBackgroundBrush}" Foreground="{DynamicResource AppInputForegroundBrush}"/>
 
             <!-- Порт -->
-            <TextBlock Grid.Row="4" Text="Порт" Foreground="{DynamicResource AppPrimaryTextBrush}" Margin="0,0,0,5"/>
+            <TextBlock Grid.Row="4" Text="Порт" Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,5"/>
             <TextBox x:Name="PortBox" Grid.Row="5" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" Height="35" 
                      Padding="10,5" Margin="0,0,0,15"
                      Background="{DynamicResource AppInputBackgroundBrush}" Foreground="{DynamicResource AppInputForegroundBrush}"/>
 
             <!-- Пользователь -->
-            <TextBlock Grid.Row="6" Text="Пользователь" Foreground="{DynamicResource AppPrimaryTextBrush}" Margin="0,0,0,5"/>
+            <TextBlock Grid.Row="6" Text="Пользователь" Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,5"/>
             <TextBox x:Name="UsernameBox" Grid.Row="7" Text="{Binding Username, UpdateSourceTrigger=PropertyChanged}" Height="35" 
                      Padding="10,5" Margin="0,0,0,15"
                      Background="{DynamicResource AppInputBackgroundBrush}" Foreground="{DynamicResource AppInputForegroundBrush}"/>
 
             <!-- Пароль -->
-            <TextBlock Grid.Row="8" Text="Пароль" Foreground="{DynamicResource AppPrimaryTextBrush}" Margin="0,0,0,5"/>
+            <TextBlock Grid.Row="8" Text="Пароль" Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,5"/>
             <PasswordBox x:Name="PasswordBox" Grid.Row="9" Height="35" 
                          Padding="10,5" Margin="0,0,0,20"
                          Background="{DynamicResource AppInputBackgroundBrush}" Foreground="{DynamicResource AppInputForegroundBrush}"
                          behaviors:PasswordBoxBindingBehavior.BindPassword="True"
                          behaviors:PasswordBoxBindingBehavior.BoundPassword="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-            <TextBlock Grid.Row="10" Text="Стиль интерфейса" Foreground="{DynamicResource AppPrimaryTextBrush}" Margin="0,0,0,5"/>
+            <TextBlock Grid.Row="10" Text="Стиль интерфейса" Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,5"/>
             <ComboBox Grid.Row="11" Height="35" Margin="0,0,0,15"
                       SelectedValuePath="Tag"
                       SelectedValue="{Binding Theme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">

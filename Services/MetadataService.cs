@@ -2033,7 +2033,6 @@ namespace BIS.ERP.Services
 
                 if (exists > 0)
                 {
-                    System.Diagnostics.Debug.WriteLine("Таблица doc_numbering уже существует");
                     return;
                 }
 

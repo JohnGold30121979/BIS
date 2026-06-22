@@ -72,11 +72,14 @@ namespace BIS.ERP
         {
             try
             {
+                var systemConfiguration = await new SystemConfigurationService().GetAsync();
+                SystemNameText.Text = systemConfiguration.SystemName;
+                SystemIconText.Text = systemConfiguration.Icon;
                 _currentInfoBase = await _infoBaseManager.GetCurrentInfoBaseAsync();
                 if (_currentInfoBase != null)
                 {
                     CurrentInfoBaseText.Text = _currentInfoBase.Name;
-                    this.Title = $"BIS ERP - {_currentInfoBase.Name}";
+                    this.Title = $"{systemConfiguration.SystemName} - {_currentInfoBase.Name}";
 
                     // ✅ Устанавливаем иконку кнопки темы при загрузке
                     var settings = AppSettings.Instance;
@@ -506,7 +509,7 @@ namespace BIS.ERP
         }
       
         // Открытие окна настроек      
-        private void OpenSettingsWindow()
+        private async void OpenSettingsWindow()
         {
             try
             {
@@ -514,10 +517,13 @@ namespace BIS.ERP
                 var settingsWindow = new SettingsWindow();
                 settingsWindow.Owner = this;
                 settingsWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-                settingsWindow.ShowDialog();
-
-                // После закрытия окна настроек - обновляем интерфейс
-                // (тема уже применена в SettingsWindow)
+                if (settingsWindow.ShowDialog() == true)
+                {
+                    var configuration = await new SystemConfigurationService().GetAsync();
+                    SystemNameText.Text = configuration.SystemName;
+                    SystemIconText.Text = configuration.Icon;
+                    Title = $"{configuration.SystemName} - {_currentInfoBase?.Name}";
+                }
             }
             catch (Exception ex)
             {

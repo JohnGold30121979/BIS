@@ -8,6 +8,7 @@ namespace BIS.ERP.Views
     public partial class SettingsWindow : Window
     {
         private readonly AppSettings _settings;
+        private readonly SystemConfigurationService _systemConfigurationService = new();
 
         public SettingsWindow()
         {
@@ -27,6 +28,12 @@ namespace BIS.ERP.Views
             LanguageComboBox.SelectedValue = _settings.Language;
 
             UpdateCurrentThemeText();
+            Loaded += async (_, _) =>
+            {
+                var configuration = await _systemConfigurationService.GetAsync();
+                SystemNameBox.Text = configuration.SystemName;
+                SystemIconBox.Text = configuration.Icon;
+            };
         }
 
         private async void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
@@ -84,8 +91,9 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Закрытие окна
         /// </summary>
-        private void OnCloseClick(object sender, RoutedEventArgs e)
+        private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            await _systemConfigurationService.SaveAsync(SystemNameBox.Text, SystemIconBox.Text);
             DialogResult = true;
             Close();
         }
