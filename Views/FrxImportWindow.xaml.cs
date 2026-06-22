@@ -61,7 +61,20 @@ namespace BIS.ERP.Views
         {
             if (FilesList.SelectedItem is FrxFileInfo file)
             {
-                PreviewText.Text = $"Файл: {file.FileName}\nРазмер: {file.Size} байт\nПуть: {file.FullPath}";
+                try
+                {
+                    var parser = new FrxParser();
+                    var parsed = parser.ParseFrxFile(file.FullPath);
+                    var template = parser.GetPrintTemplate(parsed);
+                    var memoPath = Path.ChangeExtension(file.FullPath, ".FRT");
+                    PreviewText.Text = $"Файл: {file.FileName}\nFRT: {(File.Exists(memoPath) ? "найден" : "не найден")}\n" +
+                                       $"Полос: {parsed.Bands.Count}; элементов: {parsed.Fields.Count}\n" +
+                                       $"Источник будет определен автоматически по имени формы.";
+                }
+                catch (Exception ex)
+                {
+                    PreviewText.Text = $"Не удалось разобрать макет: {ex.Message}";
+                }
             }
         }
 
@@ -83,47 +96,34 @@ namespace BIS.ERP.Views
                 {
                     System.Diagnostics.Debug.WriteLine($"=== Импорт файла: {file.FileName} ===");
 
-                    // Читаем файл
-                    var frxData = File.ReadAllBytes(file.FullPath);
-                    System.Diagnostics.Debug.WriteLine($"Размер файла: {frxData.Length} байт");
-
-                    // Создаем простой отчет вместо полного парсинга
                     var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                     var reportService = new ReportService(context);
-
-                    var report = new Report
-                    {
-                        Id = Guid.NewGuid(),
-                        Name = Path.GetFileNameWithoutExtension(file.FileName),
-                        Description = $"Импортирован из FRX: {file.FileName}",
-                        Icon = "📊",
-                        ReportType = "Standard",
-                        DataSourceType = "Catalog",
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-
-                    // Добавляем поля по умолчанию
-                    report.Fields.Add(new ReportField
-                    {
-                        Id = Guid.NewGuid(),
-                        FieldName = "code",
-                        DisplayName = "Код",
-                        Order = 1,
-                        IsVisible = true,
-                        Width = 100
-                    });
-
-                    report.Fields.Add(new ReportField
-                    {
-                        Id = Guid.NewGuid(),
-                        FieldName = "name",
-                        DisplayName = "Наименование",
-                        Order = 2,
-                        IsVisible = true,
-                        Width = 200
-                    });
-
+                    var metadataService = new MetadataService(context);
+                    var documents = await metadataService.GetDocumentsAsync();
+                    var parser = new FrxParser();
+                    var parsed = parser.ParseFrxFile(file.FullPath);
+                    var template = parser.GetPrintTemplate(parsed);
+                    var target = DetectTargetDocument(file.FileName, documents);
+                    var code = $"foxpro.{Path.GetFileNameWithoutExtension(file.FileName).ToLowerInvariant()}";
+                    var report = (await reportService.GetReportsAsync()).FirstOrDefault(item => item.Code == code) ?? new Report();
+                    report.Code = code;
+                    report.Name = target == null
+                        ? Path.GetFileNameWithoutExtension(file.FileName)
+                        : $"{target.Name} ({Path.GetFileNameWithoutExtension(file.FileName)})";
+                    report.Description = $"Импортирован из Visual FoxPro: {file.FileName}";
+                    report.Icon = "🖨";
+                    report.ReportType = "FoxProLayout";
+                    report.DataSourceType = "Document";
+                    report.DataSourceId = target?.Id;
+                    report.IsPrintForm = true;
+                    report.IsActive = target != null;
+                    report.IsDefault = false;
+                    report.SourceFormat = "FoxProFRX";
+                    report.TemplateVersion = 1;
+                    report.Template = parsed.FrxXml;
+                    report.PageOrientation = template.PageWidth >= template.PageHeight ? "Landscape" : "Portrait";
+                    report.CreatedAt = report.CreatedAt == default ? DateTime.UtcNow : report.CreatedAt;
+                    report.UpdatedAt = DateTime.UtcNow;
                     await reportService.SaveReportAsync(report);
                     imported++;
 
@@ -147,6 +147,16 @@ namespace BIS.ERP.Views
             ImportButton.IsEnabled = true;
             DialogResult = true;
             Close();
+        }
+
+        private static MetadataObject? DetectTargetDocument(string fileName, IEnumerable<MetadataObject> documents)
+        {
+            var normalized = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
+            if (normalized.Contains("pri") || normalized.Contains("pko") || normalized.Contains("при"))
+                return documents.FirstOrDefault(item => item.Name == "Приходный кассовый ордер");
+            if (normalized.Contains("ras") || normalized.Contains("rko") || normalized.Contains("рас"))
+                return documents.FirstOrDefault(item => item.Name == "Расходный кассовый ордер");
+            return null;
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e)

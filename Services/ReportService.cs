@@ -792,6 +792,9 @@ namespace BIS.ERP.Services
         {
             try
             {
+                await new PrintFormService(_context).EnsureSchemaAsync();
+                if (string.IsNullOrWhiteSpace(report.Code))
+                    report.Code = $"report.{Guid.NewGuid():N}";
                 if (report.Id == Guid.Empty)
                 {
                     // Новый отчет
@@ -833,6 +836,7 @@ namespace BIS.ERP.Services
                         existingReport.DataSourceId = report.DataSourceId;
                         existingReport.ReportType = report.ReportType;
                         existingReport.Icon = report.Icon;
+                        CopyPrintFormSettings(report, existingReport);
                         existingReport.Order = report.Order;
                         CopyReportLayout(report, existingReport);
                         existingReport.UpdatedAt = DateTime.UtcNow;
@@ -868,6 +872,13 @@ namespace BIS.ERP.Services
                 }
 
                 await _context.SaveChangesAsync();
+                if (report.IsPrintForm && report.IsDefault && report.DataSourceId.HasValue)
+                {
+                    await _context.Database.ExecuteSqlInterpolatedAsync($@"
+                        UPDATE ""Reports"" SET ""IsDefault"" = false
+                        WHERE ""DataSourceId"" = {report.DataSourceId.Value}
+                          AND ""IsPrintForm"" = true AND ""Id"" <> {report.Id}");
+                }
                 return report;
             }
             catch (Exception ex)
@@ -879,6 +890,7 @@ namespace BIS.ERP.Services
         // Получение всех отчетов
         public async Task<List<Report>> GetReportsAsync()
         {
+            await new PrintFormService(_context).EnsureSchemaAsync();
             return await _context.Set<Report>()
                 .Include(r => r.Fields)
                 .Include(r => r.Filters)
@@ -893,6 +905,7 @@ namespace BIS.ERP.Services
         {
             try
             {
+                await new PrintFormService(_context).EnsureSchemaAsync();
                 var existingReport = await _context.Reports
                     .Include(r => r.Fields)
                     .Include(r => r.Filters)
@@ -903,6 +916,7 @@ namespace BIS.ERP.Services
                     existingReport.Name = report.Name;
                     existingReport.Description = report.Description;
                     existingReport.Icon = report.Icon;
+                    CopyPrintFormSettings(report, existingReport);
                     existingReport.DataSourceType = report.DataSourceType;
                     existingReport.DataSourceId = report.DataSourceId;
                     existingReport.ReportType = report.ReportType;
@@ -948,6 +962,18 @@ namespace BIS.ERP.Services
             target.AlternateRowColor = source.AlternateRowColor;
             target.ShowGrandTotal = source.ShowGrandTotal;
             target.HeaderColor = source.HeaderColor;
+        }
+
+        private static void CopyPrintFormSettings(Report source, Report target)
+        {
+            target.Code = source.Code;
+            target.IsActive = source.IsActive;
+            target.IsPrintForm = source.IsPrintForm;
+            target.IsDefault = source.IsDefault;
+            target.SourceFormat = source.SourceFormat;
+            target.TemplateVersion = source.TemplateVersion;
+            target.Template = source.Template;
+            target.Settings = source.Settings;
         }
         // Удаление отчета
         // Удаление отчета

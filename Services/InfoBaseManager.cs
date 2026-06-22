@@ -113,6 +113,7 @@ public class InfoBaseManager
             var metadataService = new MetadataService(dbContext);
             await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
             await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
+            await new PrintFormService(dbContext).SeedCashOrderFormsAsync();
 
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();

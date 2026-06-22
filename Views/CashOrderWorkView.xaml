@@ -21,7 +21,7 @@
         </StackPanel>
 
         <!-- Панель инструментов -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+        <WrapPanel Grid.Row="1" Margin="0,0,0,10">
             <Button x:Name="AddButton" Content="➕ Добавить" Width="100" Height="35" Margin="0,0,10,0"
                     Background="#27AE60" Foreground="White" Click="OnAddClick"/>
             <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="35" Margin="0,0,10,0"
@@ -30,9 +30,11 @@
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
             <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
                     Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
-            <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="100" Height="35"
+            <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
+                    Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
+            <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="100" Height="35" Margin="0,0,0,5"
                     Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Таблица -->
         <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 

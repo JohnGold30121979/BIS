@@ -30,6 +30,18 @@ namespace BIS.ERP.Models
 
         public string Icon { get; set; } = "📊";
 
+        [MaxLength(100)]
+        public string Code { get; set; } = string.Empty;
+
+        public bool IsActive { get; set; } = true;
+        public bool IsPrintForm { get; set; }
+        public bool IsDefault { get; set; }
+
+        [MaxLength(30)]
+        public string SourceFormat { get; set; } = "Native";
+
+        public int TemplateVersion { get; set; } = 1;
+
         public int Order { get; set; } = 0;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -72,6 +84,9 @@ namespace BIS.ERP.Models
         public bool AlternateRowColors { get; set; } = true;
         public bool ShowGrandTotal { get; set; } = true;
         public string HeaderColor { get; set; } = "#2C3E50";
+
+        [NotMapped]
+        public string AvailabilityDisplay => IsActive ? "Доступен" : "Отключен";
     }
 
     public class ReportField

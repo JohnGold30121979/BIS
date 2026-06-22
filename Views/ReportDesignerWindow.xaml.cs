@@ -18,6 +18,7 @@ namespace BIS.ERP.Views
     public partial class ReportDesignerWindow : Window
     {
         private ReportService _reportService;
+        private PrintFormService _printFormService;
         private MetadataService _metadataService;
         private Report _currentReport;
         private List<MetadataObject> _availableCatalogs;
@@ -46,6 +47,7 @@ namespace BIS.ERP.Views
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 _reportService = new ReportService(context);
+                _printFormService = new PrintFormService(context);
                 _metadataService = new MetadataService(context);
 
                 await LoadDataSources();
@@ -70,6 +72,7 @@ namespace BIS.ERP.Views
         private async Task LoadDataSources()
         {
             _availableCatalogs = await _metadataService.GetCatalogsAsync();
+            _availableCatalogs.AddRange(await _metadataService.GetDocumentsAsync());
 
             DataSourceCombo.Items.Clear();
             DataSourceCombo.Items.Add(new ComboBoxItem { Tag = null, Content = "-- Выберите источник данных --" });
@@ -79,7 +82,7 @@ namespace BIS.ERP.Views
                 DataSourceCombo.Items.Add(new ComboBoxItem
                 {
                     Tag = catalog,
-                    Content = $"📚 {catalog.Name}"
+                    Content = $"{(catalog.ObjectType == "Document" ? "📄" : "📚")} {catalog.Name}"
                 });
             }
 
@@ -244,7 +247,11 @@ namespace BIS.ERP.Views
             ShowGridLinesCheck.IsChecked = report.ShowGridLines;
             ShowGrandTotalCheck.IsChecked = report.ShowGrandTotal;
             ShowPageNumbersCheck.IsChecked = report.ShowPageNumbers;
-            ReportTypeCombo.SelectedIndex = report.ReportType == "InvoiceMaterialsKg" ? 3 : 0;
+            IsActiveCheck.IsChecked = report.IsActive;
+            IsPrintFormCheck.IsChecked = report.IsPrintForm;
+            IsDefaultCheck.IsChecked = report.IsDefault;
+            ReportTypeCombo.SelectedItem = ReportTypeCombo.Items.Cast<ComboBoxItem>()
+                .FirstOrDefault(item => item.Tag?.ToString() == report.ReportType) ?? ReportTypeCombo.Items[0];
 
             // Выбор источника
             if (report.DataSourceId.HasValue)
@@ -300,7 +307,10 @@ namespace BIS.ERP.Views
 
         private async void OnPreviewClick(object sender, RoutedEventArgs e)
         {
-            await GenerateAndShowReport();
+            if (IsPrintFormCheck.IsChecked == true)
+                await ExportPrintFormPreviewAsync(false);
+            else
+                await GenerateAndShowReport();
         }
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -315,6 +325,12 @@ namespace BIS.ERP.Views
                 var report = BuildReportFromForm();
                 if (report == null)
                     return;
+
+                if (report.IsPrintForm)
+                {
+                    await ExportPrintFormPreviewAsync(true, report);
+                    return;
+                }
 
                 var data = await _reportService.GetReportDataAsync(report);
                 var dialog = new SaveFileDialog
@@ -338,6 +354,30 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка формирования PDF: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private Task ExportPrintFormPreviewAsync(bool showConfirmation, Report? report = null)
+        {
+            report ??= BuildReportFromForm();
+            if (report == null)
+                return Task.CompletedTask;
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "Сохранить предпросмотр печатной формы",
+                Filter = "PDF файлы (*.pdf)|*.pdf",
+                DefaultExt = "pdf",
+                FileName = $"{GetSafeFileName(report.Name)}_предпросмотр.pdf"
+            };
+            if (dialog.ShowDialog() != true)
+                return Task.CompletedTask;
+
+            File.WriteAllBytes(dialog.FileName, _printFormService.ExportTemplatePreview(report));
+            StatusText.Text = $"Предпросмотр сформирован: {dialog.FileName}";
+            if (showConfirmation)
+                MessageBox.Show("PDF печатной формы успешно сформирован.", "Печатная форма",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            return Task.CompletedTask;
         }
 
         private async Task GenerateAndShowReport()
@@ -410,6 +450,10 @@ namespace BIS.ERP.Views
                 _currentReport.DataSourceType = catalog.ObjectType;
                 _currentReport.DataSourceId = catalog.Id;
                 _currentReport.ReportType = GetSelectedReportType();
+                _currentReport.IsActive = IsActiveCheck.IsChecked ?? true;
+                _currentReport.IsPrintForm = IsPrintFormCheck.IsChecked ?? false;
+                _currentReport.IsDefault = IsDefaultCheck.IsChecked ?? false;
+                _currentReport.SourceFormat = _currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native";
                 _currentReport.Icon = "📊";
                 _currentReport.UpdatedAt = DateTime.UtcNow;
 
@@ -493,7 +537,7 @@ namespace BIS.ERP.Views
                 return null;
             }
 
-            if (!_reportFields.Any())
+            if (!_reportFields.Any() && IsPrintFormCheck.IsChecked != true)
             {
                 MessageBox.Show("Добавьте хотя бы одно поле в отчет", "Внимание",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -512,6 +556,11 @@ namespace BIS.ERP.Views
                 DataSourceType = selectedCatalog.ObjectType,
                 DataSourceId = selectedCatalog.Id,
                 ReportType = GetSelectedReportType(),
+                IsActive = IsActiveCheck.IsChecked ?? true,
+                IsPrintForm = IsPrintFormCheck.IsChecked ?? false,
+                IsDefault = IsDefaultCheck.IsChecked ?? false,
+                SourceFormat = GetSelectedReportType() == "FoxProLayout" ? "FoxProFRX" : "Native",
+                Template = _currentReport?.Template ?? "",
                 Fields = _reportFields.OrderBy(field => field.Order).ToList(),
                 Filters = _reportFilters.Where(filter => !string.IsNullOrWhiteSpace(filter.FieldName)).ToList(),
                 PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait",
@@ -533,7 +582,7 @@ namespace BIS.ERP.Views
 
         private string GetSelectedReportType()
         {
-            return ReportTypeCombo.SelectedIndex == 3 ? "InvoiceMaterialsKg" : "Table";
+            return (ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Table";
         }
 
         private void SelectColorInCombo(ComboBox combo, string colorHex)

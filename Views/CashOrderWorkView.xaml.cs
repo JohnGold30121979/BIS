@@ -7,6 +7,9 @@ using System.Windows;
 using System.Windows.Controls;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
+using Microsoft.Win32;
+using System.IO;
 
 namespace BIS.ERP.Views
 {
@@ -35,6 +38,7 @@ namespace BIS.ERP.Views
             EditButton.IsEnabled = hasSelection;
             DeleteButton.IsEnabled = hasSelection;
             PostButton.IsEnabled = hasSelection;
+            PrintButton.IsEnabled = hasSelection;
         }
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -277,7 +281,7 @@ namespace BIS.ERP.Views
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
-            var selectedRow = DataGrid.SelectedItem as DataRowView;
+            var selectedRow = DataGrid.SelectedItem as CashOrderRow;
             if (selectedRow == null)
             {
                 MessageBox.Show("Выберите документ для редактирования!", "Внимание",
@@ -287,8 +291,7 @@ namespace BIS.ERP.Views
 
             try
             {
-                var id = (Guid)selectedRow["Id"];
-                var dialog = new CashOrderDialog(_documentMetadata, _metadataService, id);
+                var dialog = new CashOrderDialog(_documentMetadata, _metadataService, selectedRow.Id);
                 dialog.Owner = Window.GetWindow(this);
                 dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
@@ -308,7 +311,7 @@ namespace BIS.ERP.Views
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
-            var selectedRow = DataGrid.SelectedItem as DataRowView;
+            var selectedRow = DataGrid.SelectedItem as CashOrderRow;
             if (selectedRow == null)
             {
                 MessageBox.Show("Выберите документ для удаления!", "Внимание",
@@ -323,8 +326,7 @@ namespace BIS.ERP.Views
             {
                 try
                 {
-                    var id = (Guid)selectedRow["Id"];
-                    await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, id);
+                    await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, selectedRow.Id);
                     await LoadData();
                     MessageBox.Show("Документ успешно удалён!", "Успех",
                         MessageBoxButton.OK, MessageBoxImage.Information);
@@ -375,6 +377,57 @@ namespace BIS.ERP.Views
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadData();
+        }
+
+        private async void OnPrintClick(object sender, RoutedEventArgs e)
+        {
+            if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
+            {
+                MessageBox.Show("Выберите документ для печати.", "Печатная форма",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var printFormService = new PrintFormService(context);
+                await printFormService.SeedCashOrderFormsAsync();
+                var forms = await printFormService.GetPrintFormsAsync(_documentMetadata.Id);
+                if (forms.Count == 0)
+                {
+                    MessageBox.Show("Для документа не настроены печатные формы.", "Печатная форма",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
+                if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
+                    return;
+
+                var saveDialog = new SaveFileDialog
+                {
+                    Title = "Сохранить печатную форму",
+                    Filter = "PDF файлы (*.pdf)|*.pdf",
+                    DefaultExt = "pdf",
+                    FileName = $"{_documentMetadata.Name}_{selectedRow.DocNumber}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
+                };
+                if (saveDialog.ShowDialog() != true)
+                    return;
+
+                StatusText.Text = "Формирование PDF...";
+                var pdf = await printFormService.ExportDocumentAsync(selectionDialog.SelectedReport, selectedRow.Id);
+                File.WriteAllBytes(saveDialog.FileName, pdf);
+                StatusText.Text = "PDF сформирован";
+                MessageBox.Show("Печатная форма сохранена в PDF.", "Печать",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка печати";
+                MessageBox.Show($"Ошибка формирования печатной формы: {ex.Message}", "Печать",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 

@@ -98,7 +98,9 @@ namespace BIS.ERP
 
                     await _accountingPeriodService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
+                    await new PrintFormService(context).EnsureSchemaAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
+                    await new PrintFormService(context).SeedCashOrderFormsAsync();
                     await BuildNavigationTree();
                 }
             }
@@ -292,7 +294,8 @@ namespace BIS.ERP
 
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
-            if (reports.Any())
+            var navigationReports = reports.Where(report => report.IsActive && !report.IsPrintForm).ToList();
+            if (navigationReports.Any())
             {
                 var reportsSection = new NavigationItem
                 {
@@ -302,7 +305,7 @@ namespace BIS.ERP
                     Type = "Section"
                 };
 
-                foreach (var report in reports.OrderBy(r => r.Order).ThenBy(r => r.Name))
+                foreach (var report in navigationReports.OrderBy(r => r.Order).ThenBy(r => r.Name))
                 {
                     reportsSection.Children.Add(new NavigationItem
                     {

@@ -51,6 +51,9 @@ namespace BIS.ERP.Views
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
+                var printFormService = new PrintFormService(_context);
+                await printFormService.EnsureSchemaAsync();
+                await printFormService.SeedCashOrderFormsAsync();
 
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Order).ToList();
@@ -134,7 +137,7 @@ namespace BIS.ERP.Views
             // Отчеты
             var reportsItem = new TreeViewItem
             {
-                Header = "📊 Отчеты",
+                Header = "📊 Отчеты и печатные формы",
                 IsExpanded = true,
                 Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
             };
@@ -145,7 +148,7 @@ namespace BIS.ERP.Views
                 {
                     var reportItem = new TreeViewItem
                     {
-                        Header = $"{report.Icon} {report.Name}",
+                        Header = $"{report.Icon} {report.Name}{(report.IsActive ? string.Empty : " [отключен]")}",
                         Tag = report,
                         Foreground = Brushes.White
                     };
@@ -1123,7 +1126,8 @@ namespace BIS.ERP.Views
             var mainPanel = new StackPanel { MaxWidth = 620 };
             mainPanel.Children.Add(new TextBlock
             {
-                Text = report.Description,
+                Text = $"{report.Description}\nСтатус: {report.AvailabilityDisplay}; формат: {report.SourceFormat}; " +
+                       $"тип: {(report.IsPrintForm ? "печатная форма" : "отчет")}",
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 0, 0, 15)
             });
@@ -1144,6 +1148,21 @@ namespace BIS.ERP.Views
             };
 
             mainPanel.Children.Add(designerButton);
+            var availabilityButton = new Button
+            {
+                Content = report.IsActive ? "Отключить форму" : "Сделать доступной",
+                Height = 36,
+                MinWidth = 180,
+                Margin = new Thickness(0, 10, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom(report.IsActive ? "#D68910" : "#27AE60"),
+                Foreground = Brushes.White
+            };
+            availabilityButton.Click += async (_, _) =>
+            {
+                await new PrintFormService(_context).SetAvailabilityAsync(report.Id, !report.IsActive);
+                await LoadMetadata();
+            };
+            mainPanel.Children.Add(availabilityButton);
             PropertiesPanel.Children.Add(mainPanel);
         }
 

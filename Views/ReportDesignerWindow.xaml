@@ -52,6 +52,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120"/>
@@ -71,10 +72,13 @@
 
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="Тип отчета:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <ComboBox x:Name="ReportTypeCombo" Grid.Row="2" Grid.Column="3" Height="35" Margin="5" SelectedIndex="0">
-                                <ComboBoxItem>Таблица</ComboBoxItem>
-                                <ComboBoxItem>Список</ComboBoxItem>
-                                <ComboBoxItem>Карточка</ComboBoxItem>
-                                <ComboBoxItem>Счет-фактура на материалы (КР)</ComboBoxItem>
+                                <ComboBoxItem Content="Таблица" Tag="Table"/>
+                                <ComboBoxItem Content="Список" Tag="List"/>
+                                <ComboBoxItem Content="Карточка" Tag="Card"/>
+                                <ComboBoxItem Content="Счет-фактура на материалы (КР)" Tag="InvoiceMaterialsKg"/>
+                                <ComboBoxItem Content="Приходный кассовый ордер" Tag="CashReceiptOrder"/>
+                                <ComboBoxItem Content="Расходный кассовый ордер" Tag="CashPaymentOrder"/>
+                                <ComboBoxItem Content="Макет Visual FoxPro FRX" Tag="FoxProLayout"/>
                             </ComboBox>
 
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Заголовок:" VerticalAlignment="Center" FontWeight="Bold"/>
@@ -91,6 +95,12 @@
 
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Итоговый текст:" VerticalAlignment="Top" FontWeight="Bold"/>
                             <TextBox x:Name="SummaryTextBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" Height="60" TextWrapping="Wrap" Margin="5"/>
+
+                            <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="5,12,5,0">
+                                <CheckBox x:Name="IsActiveCheck" Content="Отчет доступен" IsChecked="True" Margin="0,0,20,0"/>
+                                <CheckBox x:Name="IsPrintFormCheck" Content="Печатная форма документа" Margin="0,0,20,0"/>
+                                <CheckBox x:Name="IsDefaultCheck" Content="По умолчанию"/>
+                            </StackPanel>
                         </Grid>
                     </Border>
                 </ScrollViewer>
