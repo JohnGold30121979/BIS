@@ -12,6 +12,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Win32;
 using System.Collections.ObjectModel;
 using System.Windows.Data;
 
@@ -1194,6 +1195,85 @@ namespace BIS.ERP.Views
             if (dialog.ShowDialog() == true)
             {
                 await LoadMetadata();
+            }
+        }
+
+        private async void OnExportConfigurationClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_context == null)
+                    _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+
+                var dialog = new SaveFileDialog
+                {
+                    Title = "Выгрузить конфигурацию",
+                    Filter = "BIS configuration (*.bisconfig.json)|*.bisconfig.json|JSON (*.json)|*.json",
+                    FileName = $"bis_configuration_{DateTime.Now:yyyyMMdd_HHmm}.bisconfig.json"
+                };
+
+                if (dialog.ShowDialog(this) != true)
+                    return;
+
+                Mouse.OverrideCursor = Cursors.Wait;
+                await new ConfigurationExchangeService(_context).ExportAsync(dialog.FileName);
+                MessageBox.Show("Конфигурация выгружена.", "Выгрузка конфигурации",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка выгрузки конфигурации: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        private async void OnImportConfigurationClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_context == null)
+                    _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+
+                var dialog = new OpenFileDialog
+                {
+                    Title = "Загрузить конфигурацию",
+                    Filter = "BIS configuration (*.bisconfig.json)|*.bisconfig.json|JSON (*.json)|*.json|Все файлы (*.*)|*.*",
+                    Multiselect = false
+                };
+
+                if (dialog.ShowDialog(this) != true)
+                    return;
+
+                var result = MessageBox.Show(
+                    "Загрузка заменит текущую структуру конфигурации, отчеты и данные динамических таблиц. Продолжить?",
+                    "Загрузка конфигурации",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result != MessageBoxResult.Yes)
+                    return;
+
+                Mouse.OverrideCursor = Cursors.Wait;
+                var package = await new ConfigurationExchangeService(_context).ImportAsync(dialog.FileName);
+                await LoadMetadata();
+                MessageBox.Show(
+                    $"Конфигурация загружена.\nОбъектов: {package.MetadataObjects.Count}\nОтчетов: {package.Reports.Count}\nТаблиц данных: {package.TableData.Count}",
+                    "Загрузка конфигурации",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки конфигурации: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
             }
         }
 

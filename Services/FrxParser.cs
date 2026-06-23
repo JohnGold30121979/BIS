@@ -20,12 +20,18 @@ namespace BIS.ERP.Services
                 throw new FileNotFoundException("FRX файл не найден", frxPath);
 
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var extension = Path.GetExtension(frxPath).ToLowerInvariant();
+            var fileBytes = File.ReadAllBytes(frxPath);
+            var fileText = TryReadText(fileBytes);
+            if (extension is ".json" or ".fpx" || fileText.TrimStart().StartsWith("{") || fileText.TrimStart().StartsWith("["))
+                return ParseFoxProJsonFile(frxPath, fileBytes, fileText);
+
             var report = new FrxReport
             {
                 Id = Guid.NewGuid(),
                 Name = Path.GetFileNameWithoutExtension(frxPath),
                 OriginalFileName = Path.GetFileName(frxPath),
-                FrxData = File.ReadAllBytes(frxPath),
+                FrxData = fileBytes,
                 CreatedAt = DateTime.UtcNow
             };
             var records = ReadVisualFoxProRecords(frxPath);
@@ -34,6 +40,172 @@ namespace BIS.ERP.Services
             report.ReportType = "FoxProLayout";
             report.Description = $"Импортирован из Visual FoxPro: {report.OriginalFileName}";
             return report;
+        }
+
+        private FrxReport ParseFoxProJsonFile(string filePath, byte[] fileBytes, string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            var report = new FrxReport
+            {
+                Id = Guid.NewGuid(),
+                Name = Path.GetFileNameWithoutExtension(filePath),
+                OriginalFileName = Path.GetFileName(filePath),
+                FrxData = fileBytes,
+                CreatedAt = DateTime.UtcNow,
+                ReportType = "FoxProLayout",
+                Description = $"Импортирован из FoxPro JSON: {Path.GetFileName(filePath)}"
+            };
+
+            if (TryDeserializeTemplate(document.RootElement, out var readyTemplate))
+            {
+                FillReportFromTemplate(report, readyTemplate);
+                report.FrxXml = JsonSerializer.Serialize(readyTemplate);
+                return report;
+            }
+
+            var records = ExtractJsonRecords(document.RootElement);
+            if (records.Count == 0)
+                throw new InvalidOperationException("JSON не содержит элементов макета FoxPro.");
+
+            var template = BuildVisualFoxProTemplate(report, records);
+            report.FrxXml = JsonSerializer.Serialize(template);
+            return report;
+        }
+
+        private static bool TryDeserializeTemplate(JsonElement root, out PrintFormTemplate template)
+        {
+            template = new PrintFormTemplate();
+            if (root.ValueKind != JsonValueKind.Object)
+                return false;
+
+            var hasTemplateShape =
+                root.TryGetProperty("Elements", out _) ||
+                root.TryGetProperty("elements", out _) ||
+                root.TryGetProperty("Bands", out _) ||
+                root.TryGetProperty("bands", out _);
+
+            if (!hasTemplateShape)
+                return false;
+
+            template = JsonSerializer.Deserialize<PrintFormTemplate>(root.GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new PrintFormTemplate();
+            return template.Elements.Count > 0 || template.Bands.Count > 0;
+        }
+
+        private static List<Dictionary<string, object?>> ExtractJsonRecords(JsonElement root)
+        {
+            var recordsElement = root;
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var propertyName in new[] { "records", "Records", "rows", "Rows", "data", "Data", "items", "Items" })
+                {
+                    if (root.TryGetProperty(propertyName, out var candidate) && candidate.ValueKind == JsonValueKind.Array)
+                    {
+                        recordsElement = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (recordsElement.ValueKind != JsonValueKind.Array)
+                return new List<Dictionary<string, object?>>();
+
+            var records = new List<Dictionary<string, object?>>();
+            foreach (var item in recordsElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var record = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in item.EnumerateObject())
+                    record[property.Name] = ReadJsonValue(property.Value);
+                records.Add(record);
+            }
+
+            return records;
+        }
+
+        private static object? ReadJsonValue(JsonElement value)
+        {
+            return value.ValueKind switch
+            {
+                JsonValueKind.Null => null,
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Number when value.TryGetInt32(out var intValue) => intValue,
+                JsonValueKind.Number when value.TryGetDecimal(out var decimalValue) => decimalValue,
+                JsonValueKind.String => value.GetString(),
+                _ => value.GetRawText()
+            };
+        }
+
+        private static void FillReportFromTemplate(FrxReport report, PrintFormTemplate template)
+        {
+            var bandMap = new Dictionary<string, FrxBand>(StringComparer.OrdinalIgnoreCase);
+            var order = 0;
+            foreach (var templateBand in template.Bands.OrderBy(item => item.Order))
+            {
+                var band = new FrxBand
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = report.Id,
+                    BandType = string.IsNullOrWhiteSpace(templateBand.Type) ? "Detail" : templateBand.Type,
+                    Top = (int)Math.Round(templateBand.Top),
+                    Height = Math.Max(1, (int)Math.Round(templateBand.Height)),
+                    Order = order++,
+                    IsVisible = true
+                };
+                report.Bands.Add(band);
+                bandMap[band.BandType] = band;
+            }
+
+            if (report.Bands.Count == 0)
+            {
+                var detail = new FrxBand { Id = Guid.NewGuid(), ReportId = report.Id, BandType = "Detail", Height = 25, IsVisible = true };
+                report.Bands.Add(detail);
+                bandMap[detail.BandType] = detail;
+            }
+
+            order = 0;
+            foreach (var element in template.Elements.OrderBy(item => item.Order))
+            {
+                if (!bandMap.TryGetValue(element.BandType, out var band))
+                    band = report.Bands.First();
+
+                var field = new FrxField
+                {
+                    Id = Guid.NewGuid(),
+                    BandId = band.Id,
+                    FieldName = string.IsNullOrWhiteSpace(element.Text) ? element.Expression : element.Text,
+                    Expression = element.Expression,
+                    FieldType = string.IsNullOrWhiteSpace(element.Type) ? "Text" : element.Type,
+                    Left = (int)Math.Round(element.Left),
+                    Top = (int)Math.Round(element.Top),
+                    Width = Math.Max(1, (int)Math.Round(element.Width)),
+                    Height = Math.Max(1, (int)Math.Round(element.Height)),
+                    FontName = string.IsNullOrWhiteSpace(element.FontName) ? "Arial" : element.FontName,
+                    FontSize = Math.Max(1, (int)Math.Round(element.FontSize)),
+                    FontBold = element.Bold,
+                    Alignment = string.IsNullOrWhiteSpace(element.Alignment) ? "Left" : element.Alignment,
+                    BorderStyle = string.IsNullOrWhiteSpace(element.BorderStyle) ? "None" : element.BorderStyle,
+                    IsVisible = true,
+                    Order = order++
+                };
+                report.Fields.Add(field);
+                band.Fields.Add(field);
+            }
+        }
+
+        private static string TryReadText(byte[] data)
+        {
+            try
+            {
+                return Encoding.UTF8.GetString(data);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         public PrintFormTemplate GetPrintTemplate(FrxReport report)

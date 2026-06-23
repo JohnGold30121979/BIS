@@ -16,7 +16,19 @@ namespace BIS.ERP.Views
                 DialogResult = true;
                 Close();
             };
-            viewModel.CloseRequested += (_, _) => Close();
+            viewModel.CloseRequested += (_, _) =>
+            {
+                try
+                {
+                    DialogResult = false;
+                }
+                catch (InvalidOperationException)
+                {
+                    // LoginWindow can be shown either as a dialog or as a regular window.
+                }
+
+                Application.Current.Shutdown();
+            };
 
             DataContext = viewModel;
         }

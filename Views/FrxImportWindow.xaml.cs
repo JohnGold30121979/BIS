@@ -25,8 +25,8 @@ namespace BIS.ERP.Views
         {
             var dialog = new OpenFileDialog
             {
-                Title = "Выберите FRX файлы",
-                Filter = "FoxPro Report Files (*.frx)|*.frx|Все файлы (*.*)|*.*",
+                Title = "Выберите макеты FoxPro",
+                Filter = "FoxPro reports (*.frx;*.fpx;*.json)|*.frx;*.fpx;*.json|FRX (*.frx)|*.frx|JSON (*.json)|*.json|Все файлы (*.*)|*.*",
                 Multiselect = true
             };
 

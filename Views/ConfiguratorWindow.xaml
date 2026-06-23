@@ -15,6 +15,9 @@
         <!-- Главное меню -->
         <Menu Grid.Row="0" Background="#2C3E50" Foreground="White">
             <MenuItem Header="Файл">
+                <MenuItem Header="Выгрузить конфигурацию..." Click="OnExportConfigurationClick"/>
+                <MenuItem Header="Загрузить конфигурацию..." Click="OnImportConfigurationClick"/>
+                <Separator/>
                 <MenuItem Header="Выход" Click="OnExitClick"/>
             </MenuItem>
             <MenuItem Header="Создать">
@@ -78,6 +81,12 @@
                         <Button x:Name="ImportFrxButton" Content="📁 Импорт FRX" 
                                 Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
                                 Click="OnImportFrxClick"/>
+                        <Button x:Name="ExportConfigurationButton" Content="⬆ Выгрузить конфигурацию"
+                                Background="#16A085" Foreground="White" Height="35" Margin="0,5,0,0"
+                                Click="OnExportConfigurationClick"/>
+                        <Button x:Name="ImportConfigurationButton" Content="⬇ Загрузить конфигурацию"
+                                Background="#D68910" Foreground="White" Height="35" Margin="0,5,0,0"
+                                Click="OnImportConfigurationClick"/>
                         <Button x:Name="RefreshButton" Content="🔄 Обновить" 
                                 Background="#3498DB" Foreground="White" Height="35" Margin="0,10,0,0"
                                 Click="OnRefreshClick"/>
