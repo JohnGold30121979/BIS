@@ -758,6 +758,7 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("План счетов"))
                     await CreateChartOfAccountsCatalog(config);
                 await EnsureChartOfAccountsCatalogStructureAsync();
+                await EnsureCashOrderPostingAccountsAsync();
 
                 if (!existingCatalogs.Contains("Банки"))
                     await CreateBanksCatalog(config);

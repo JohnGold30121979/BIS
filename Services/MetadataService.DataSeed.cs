@@ -180,6 +180,39 @@ namespace BIS.ERP.Services
             System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
         }
 
+        public async Task EnsureCashOrderPostingAccountsAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "План счетов");
+            if (catalog == null)
+                return;
+
+            var accounts = InitialDataProvider.GetChartOfAccounts()
+                .Where(item => item.Code is "3010" or "4010" or "6010" or "6810" or "6850");
+
+            foreach (var account in accounts)
+            {
+                var sql = $@"
+                    INSERT INTO ""{catalog.TableName}""
+                    (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                    SELECT
+                        '{Guid.NewGuid()}',
+                        '{EscapeSql(account.Code)}',
+                        '{EscapeSql(account.Name)}',
+                        '{EscapeSql(account.AccountType)}',
+                        '{EscapeSql(account.Description)}',
+                        {account.Level},
+                        true,
+                        NOW(),
+                        NOW()
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM ""{catalog.TableName}"" WHERE ""code"" = '{EscapeSql(account.Code)}'
+                    )";
+
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+        }
+
         private async Task EnsureAccountAnalyticsLinksDataAsync(MetadataObject catalog)
         {
             foreach (var link in AccountAnalyticsDefaultLinks.Items)

@@ -70,11 +70,13 @@ public class InfoBaseManager
             settings.Host,
             settings.Port,
             settings.Username,
-            settings.Password);
+            settings.Password,
+            createTestPostings: settings.CreateTestPostingsForNewInfoBases);
     }
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
-    string host, int port, string username, string password, string? databaseName = null)
+    string host, int port, string username, string password, string? databaseName = null,
+    bool createTestPostings = true)
     {
         var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
         if (!System.Text.RegularExpressions.Regex.IsMatch(dbName, "^[a-zA-Z0-9_]+$"))
@@ -115,6 +117,7 @@ public class InfoBaseManager
             await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
             await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
             await new PrintFormService(dbContext).SeedCashOrderFormsAsync();
+            await new TestPostingMetadataSeedService(dbContext).EnsureAsync(createTestPostings);
 
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();

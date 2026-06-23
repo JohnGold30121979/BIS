@@ -108,6 +108,7 @@ namespace BIS.ERP
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
                     await new DocumentationMetadataSeedService(context).EnsureAsync();
                     await new PrintFormService(context).SeedCashOrderFormsAsync();
+                    await new TestPostingMetadataSeedService(context).EnsureAsync(createTestPostings: false);
                     await BuildNavigationTree();
                 }
             }

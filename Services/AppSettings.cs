@@ -19,6 +19,7 @@ namespace BIS.ERP.Services
         public string Password { get; set; } = "";
         public string Theme { get; set; } = "Default";
         public string Language { get; set; } = "ru-RU";
+        public bool CreateTestPostingsForNewInfoBases { get; set; } = true;
 
         public static AppSettings Instance
         {

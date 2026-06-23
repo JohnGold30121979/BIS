@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <None Remove="Assets\AppIcon.ico" />
+    <Compile Remove="Tests\**\*.cs" />
+    <None Remove="Tests\**\*" />
   </ItemGroup>
 
   <ItemGroup>

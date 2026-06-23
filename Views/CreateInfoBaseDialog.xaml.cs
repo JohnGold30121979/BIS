@@ -15,6 +15,7 @@ namespace BIS.ERP.Views
         public string Password => PasswordBox.Password;
         public string DatabaseName => DatabaseBox.Text.Trim();
         public bool AttachExisting => (ModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "Attach";
+        public bool CreateTestPostings => CreateTestPostingsCheckBox.IsChecked == true;
 
         public bool IsSuccess { get; private set; } = false;
 
@@ -28,6 +29,7 @@ namespace BIS.ERP.Views
             PortBox.Text = settings.Port.ToString();
             UsernameBox.Text = settings.Username;
             PasswordBox.Password = settings.Password;
+            CreateTestPostingsCheckBox.IsChecked = settings.CreateTestPostingsForNewInfoBases;
 
             GenerateDatabaseName();
         }
@@ -69,6 +71,8 @@ namespace BIS.ERP.Views
                 : "Имя новой базы данных";
             if (!AttachExisting)
                 GenerateDatabaseName();
+            if (CreateTestPostingsCheckBox != null)
+                CreateTestPostingsCheckBox.IsEnabled = !AttachExisting;
         }
 
         // Транслитерация кириллицы в латиницу
@@ -184,7 +188,7 @@ namespace BIS.ERP.Views
                 // Создаем базу с описанием
                 var newBase = AttachExisting
                     ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password)
-                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName);
+                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, CreateTestPostings);
 
                 // Обновляем описание для отображения
                 if (newBase != null)
