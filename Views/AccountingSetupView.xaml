@@ -9,7 +9,7 @@
         </Grid.RowDefinitions>
         <StackPanel Margin="0,0,0,12">
             <TextBlock Text="Настройка бухгалтерского учета" FontSize="24" FontWeight="Bold"/>
-            <TextBlock Text="Начальные остатки и состав строк финансовой отчетности"
+            <TextBlock Text="Здесь задаются входящие остатки по счетам и правила формирования Баланса и Отчета о финансовых результатах"
                        Foreground="{DynamicResource AppSecondaryTextBrush}"/>
         </StackPanel>
 

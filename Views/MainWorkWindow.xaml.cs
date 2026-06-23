@@ -6,6 +6,7 @@ using ClosedXML.Excel;
 using Microsoft.Win32;
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -50,6 +51,7 @@ namespace BIS.ERP
         private DocumentService _documentService;
         private LocalizationService _localizationService;
         private AccountingPeriodService _accountingPeriodService;
+        private UserAccessService _userAccessService;
         private InfoBase _currentInfoBase;
         private bool _isLoadingReport = false;
         private Point _dragStartPoint;
@@ -95,8 +97,10 @@ namespace BIS.ERP
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context);
                     _documentService = new DocumentService(context);
+                    _userAccessService = new UserAccessService(context);
 
                     await _accountingPeriodService.EnsureSchemaAsync();
+                    await _userAccessService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
                     await new PrintFormService(context).EnsureSchemaAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
@@ -320,6 +324,22 @@ namespace BIS.ERP
                 NavigationItems.Add(reportsSection);
             }
 
+            var helpSection = new NavigationItem
+            {
+                Id = "HelpSection",
+                Name = "СПРАВКА",
+                Icon = "?",
+                Type = "Section"
+            };
+            helpSection.Children.Add(new NavigationItem
+            {
+                Id = "AboutSystem",
+                Name = "О системе",
+                Icon = "i",
+                Type = "AboutSystem"
+            });
+            NavigationItems.Add(helpSection);
+
             // ========== РАЗДЕЛ: АДМИНИСТРИРОВАНИЕ ==========
             var adminSection = new NavigationItem
             {
@@ -337,19 +357,28 @@ namespace BIS.ERP
                 Type = "Profile"
             });
 
-            // ПУНКТ "НАСТРОЙКИ"
-            adminSection.Children.Add(new NavigationItem
+            if (_authService.IsAdmin)
             {
-                Id = "Settings",
-                Name = "Настройки",
-                Icon = "⚙️",
-                Type = "Settings"
-            });
+                adminSection.Children.Add(new NavigationItem
+                {
+                    Id = "Settings",
+                    Name = "Настройки системы",
+                    Icon = "⚙️",
+                    Type = "Settings"
+                });
+                adminSection.Children.Add(new NavigationItem
+                {
+                    Id = "UserAccessManagement",
+                    Name = "Пользователи и права",
+                    Icon = "🔐",
+                    Type = "UserAccessManagement"
+                });
+            }
 
             adminSection.Children.Add(new NavigationItem
             {
                 Id = "SwitchMode",
-                Name = "Сменить режим",
+                Name = "Сменить пользователя или базу",
                 Icon = "🔄",
                 Type = "SwitchMode"
             });
@@ -357,14 +386,18 @@ namespace BIS.ERP
             adminSection.Children.Add(new NavigationItem
             {
                 Id = "Logout",
-                Name = "Выход",
+                Name = "Завершить работу",
                 Icon = "🚪",
                 Type = "Logout"
             });
 
             NavigationItems.Add(adminSection);
 
+            if (!_authService.IsAdmin && _authService.CurrentUser != null)
+                await ApplyUserPermissionsAsync(_authService.CurrentUser.Id);
+
             // Подписываемся на события выбора
+            NavigationTree.SelectedItemChanged -= OnNavigationItemSelected;
             NavigationTree.SelectedItemChanged += OnNavigationItemSelected;
 
             // Раскрываем секции по умолчанию
@@ -496,6 +529,15 @@ namespace BIS.ERP
                         OpenSettingsWindow();
                         break;
 
+                    case "UserAccessManagement":
+                        var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems));
+                        break;
+
+                    case "AboutSystem":
+                        new AboutSystemDialog { Owner = this }.ShowDialog();
+                        break;
+
                     case "SwitchMode":
                         OnSwitchModeClick(null, null);
                         break;
@@ -509,6 +551,32 @@ namespace BIS.ERP
             {
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private async Task ApplyUserPermissionsAsync(int userId)
+        {
+            var allowedKeys = await _userAccessService.GetAllowedKeysAsync(userId);
+            for (var index = NavigationItems.Count - 1; index >= 0; index--)
+            {
+                if (!FilterNavigationItem(NavigationItems[index], allowedKeys))
+                    NavigationItems.RemoveAt(index);
+            }
+        }
+
+        private static bool FilterNavigationItem(NavigationItem item, IReadOnlySet<string> allowedKeys)
+        {
+            var hadChildren = item.Children.Count > 0;
+            for (var index = item.Children.Count - 1; index >= 0; index--)
+            {
+                if (!FilterNavigationItem(item.Children[index], allowedKeys))
+                    item.Children.RemoveAt(index);
+            }
+
+            if (hadChildren)
+                return item.Children.Count > 0;
+            if (item.Id is "UserProfile" or "SwitchMode" or "Logout" or "AboutSystem")
+                return true;
+            return allowedKeys.Contains(item.Id);
         }
       
         // Открытие окна настроек      
@@ -712,9 +780,7 @@ namespace BIS.ERP
             if (result == MessageBoxResult.Yes)
             {
                 _authService.Logout();
-                var loginWindow = new LoginWindow();
-                loginWindow.Show();
-                this.Close();
+                Application.Current.Shutdown();
             }
         }
 

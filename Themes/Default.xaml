@@ -14,6 +14,14 @@
     <SolidColorBrush x:Key="AppTableHeaderBackgroundBrush" Color="#DCE6EF"/>
     <SolidColorBrush x:Key="AppSelectionBrush" Color="#2F80C9"/>
     <SolidColorBrush x:Key="AppSelectionTextBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppMenuBackgroundBrush" Color="#2C3E50"/>
+    <SolidColorBrush x:Key="AppMenuForegroundBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppMenuPopupBackgroundBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AppMenuPopupForegroundBrush" Color="#243447"/>
+    <SolidColorBrush x:Key="AppMenuHoverBrush" Color="#DCE6EF"/>
+    <SolidColorBrush x:Key="AppDisabledButtonBackgroundBrush" Color="#CBD3DB"/>
+    <SolidColorBrush x:Key="AppDisabledButtonForegroundBrush" Color="#435363"/>
+    <SolidColorBrush x:Key="AppDisabledButtonBorderBrush" Color="#AEB9C4"/>
 
     <SolidColorBrush x:Key="AppPrimaryTextBrush" Color="#FFFFFF"/>
     <SolidColorBrush x:Key="AppSecondaryTextBrush" Color="#7F8C8D"/>
@@ -28,6 +36,70 @@
     <Style TargetType="Window">
         <Setter Property="Background" Value="{DynamicResource AppWindowBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+    </Style>
+    <Style TargetType="Menu">
+        <Setter Property="Background" Value="{DynamicResource AppMenuBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppMenuForegroundBrush}"/>
+    </Style>
+    <Style TargetType="MenuItem">
+        <Setter Property="Background" Value="{DynamicResource AppMenuPopupBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppMenuPopupForegroundBrush}"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Style.Triggers>
+            <Trigger Property="Role" Value="TopLevelHeader">
+                <Setter Property="Background" Value="{DynamicResource AppMenuBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AppMenuForegroundBrush}"/>
+            </Trigger>
+            <Trigger Property="Role" Value="TopLevelItem">
+                <Setter Property="Background" Value="{DynamicResource AppMenuBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AppMenuForegroundBrush}"/>
+            </Trigger>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AppMenuHoverBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource AppDisabledButtonForegroundBrush}"/>
+                <Setter Property="Opacity" Value="0.78"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style TargetType="Button">
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
+                        <ContentPresenter x:Name="ButtonContent" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          Margin="{TemplateBinding Padding}"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.9"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.78"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource AppDisabledButtonBackgroundBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AppDisabledButtonBorderBrush}"/>
+                            <Setter TargetName="ButtonContent" Property="TextElement.Foreground" Value="{DynamicResource AppDisabledButtonForegroundBrush}"/>
+                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="1"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
     <Style TargetType="TextBox">
         <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}"/>

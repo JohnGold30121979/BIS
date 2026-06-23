@@ -13,10 +13,11 @@
         </Grid.RowDefinitions>
 
         <!-- Главное меню -->
-        <Menu Grid.Row="0" Background="#2C3E50" Foreground="White">
+        <Menu Grid.Row="0">
             <MenuItem Header="Файл">
                 <MenuItem Header="Выгрузить конфигурацию..." Click="OnExportConfigurationClick"/>
                 <MenuItem Header="Загрузить конфигурацию..." Click="OnImportConfigurationClick"/>
+                <MenuItem Header="Настройки системы..." Click="OnSettingsClick"/>
                 <Separator/>
                 <MenuItem Header="Выход" Click="OnExitClick"/>
             </MenuItem>
@@ -52,19 +53,20 @@
             </Grid.ColumnDefinitions>
 
             <!-- Левая панель -->
-            <Border Grid.Column="0" Background="#2C3E50">
+            <Border Grid.Column="0" Background="{DynamicResource AppSidebarBackgroundBrush}">
                 <StackPanel>
-                    <Border Background="#1A252F" Padding="15">
+                    <Border Background="{DynamicResource AppHeaderBackgroundBrush}" Padding="15">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock x:Name="SystemIconText" FontSize="20" Margin="0,0,8,0"/>
-                                <TextBlock x:Name="SystemNameText" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                                <TextBlock x:Name="SystemNameText" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource AppPrimaryTextBrush}"/>
                             </StackPanel>
                             <TextBlock Text="Режим конфигуратора" FontSize="11" Foreground="#7F8C8D"/>
                         </StackPanel>
                     </Border>
 
-                    <TreeView x:Name="MetadataTree" Background="#2C3E50" BorderThickness="0" 
+                    <TreeView x:Name="MetadataTree" Background="{DynamicResource AppSidebarBackgroundBrush}"
+                              Foreground="{DynamicResource AppPrimaryTextBrush}" BorderThickness="0" 
                               Margin="0,10,0,0" MaxHeight="500">
                         <TreeView.Resources>
                             <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#34495E"/>
@@ -107,7 +109,7 @@
             </Border>
 
             <!-- Правая панель -->
-            <Border Grid.Column="1" Background="#F5F6FA">
+            <Border Grid.Column="1" Background="{DynamicResource AppContentBackgroundBrush}">
                 <Grid Margin="20">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>

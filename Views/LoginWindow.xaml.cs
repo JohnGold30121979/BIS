@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using BIS.ERP.Services;
 using BIS.ERP.ViewModels;
 
@@ -31,6 +32,23 @@ namespace BIS.ERP.Views
             };
 
             DataContext = viewModel;
+            Loaded += (_, _) => LoginBox.Focus();
+        }
+
+        private void OnLoginPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter)
+                return;
+            e.Handled = true;
+            PasswordBox.Focus();
+        }
+
+        private void OnPasswordPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter)
+                return;
+            e.Handled = true;
+            LoginButton.Focus();
         }
     }
 }

@@ -33,6 +33,10 @@ namespace BIS.ERP.Views
                 var configuration = await _systemConfigurationService.GetAsync();
                 SystemNameBox.Text = configuration.SystemName;
                 SystemIconBox.Text = configuration.Icon;
+                DescriptionBox.Text = configuration.Description;
+                CompanyDetailsBox.Text = configuration.CompanyDetails;
+                EmailBox.Text = configuration.Email;
+                PhoneBox.Text = configuration.Phone;
             };
         }
 
@@ -93,7 +97,13 @@ namespace BIS.ERP.Views
         /// </summary>
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
-            await _systemConfigurationService.SaveAsync(SystemNameBox.Text, SystemIconBox.Text);
+            await _systemConfigurationService.SaveAsync(
+                SystemNameBox.Text,
+                SystemIconBox.Text,
+                DescriptionBox.Text,
+                CompanyDetailsBox.Text,
+                EmailBox.Text,
+                PhoneBox.Text);
             DialogResult = true;
             Close();
         }

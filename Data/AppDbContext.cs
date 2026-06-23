@@ -54,6 +54,7 @@ public class AppDbContext : DbContext
     public DbSet<TaxJournalRecord> TaxJournalRecords { get; set; }
     public DbSet<LocalizationEntry> LocalizationEntries { get; set; }
     public DbSet<SystemConfiguration> SystemConfigurations { get; set; }
+    public DbSet<UserAccessPermission> UserAccessPermissions { get; set; }
     
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -71,6 +72,10 @@ public class AppDbContext : DbContext
         // Существующие настройки...
         modelBuilder.Entity<InfoBase>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<User>().HasIndex(x => x.Login).IsUnique();
+        modelBuilder.Entity<UserAccessPermission>().HasKey(permission => permission.Id);
+        modelBuilder.Entity<UserAccessPermission>()
+            .HasIndex(permission => new { permission.UserId, permission.NavigationKey })
+            .IsUnique();
         modelBuilder.Entity<Material>().HasIndex(x => x.Code).IsUnique();
         modelBuilder.Entity<FixedAsset>().HasIndex(x => x.InventoryNumber).IsUnique();       
 

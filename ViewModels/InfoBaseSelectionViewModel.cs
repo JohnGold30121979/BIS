@@ -153,6 +153,16 @@ namespace BIS.ERP.ViewModels
                 return;
             }
 
+            try
+            {
+                await _infoBaseManager.SetCurrentInfoBaseAsync(SelectedInfoBase.Id);
+            }
+            catch (Exception ex)
+            {
+                _dialogService.ShowError($"Ошибка выбора информационной базы: {ex.Message}");
+                return;
+            }
+
             if (!await _dialogService.ShowLoginAsync())
                 return;
 
@@ -173,7 +183,6 @@ namespace BIS.ERP.ViewModels
 
             try
             {
-                await _infoBaseManager.SetCurrentInfoBaseAsync(SelectedInfoBase.Id);
                 OpenMainWindowRequested?.Invoke(this, configMode);
                 CloseRequested?.Invoke(this, EventArgs.Empty);
             }

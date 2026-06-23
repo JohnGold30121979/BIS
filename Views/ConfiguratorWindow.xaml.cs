@@ -49,6 +49,7 @@ namespace BIS.ERP.Views
                 Title = $"{systemConfiguration.SystemName} - Конфигуратор";
 
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                await new SystemConfigurationService(_context).GetAsync();
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
@@ -1298,12 +1299,26 @@ namespace BIS.ERP.Views
 
         private void OnExitClick(object sender, RoutedEventArgs e)
         {
-            Close();
+            var result = MessageBox.Show("Завершить работу приложения?", "Выход",
+                MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result == MessageBoxResult.Yes)
+                Application.Current.Shutdown();
         }
 
         private void OnAboutClick(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("BIS ERP Конфигуратор v1.0", "О программе", MessageBoxButton.OK, MessageBoxImage.Information);
+            new AboutSystemDialog { Owner = this }.ShowDialog();
+        }
+
+        private async void OnSettingsClick(object sender, RoutedEventArgs e)
+        {
+            var dialog = new SettingsWindow { Owner = this };
+            if (dialog.ShowDialog() != true)
+                return;
+            var configuration = await new SystemConfigurationService().GetAsync();
+            SystemNameText.Text = configuration.SystemName;
+            SystemIconText.Text = configuration.Icon;
+            Title = $"{configuration.SystemName} - Конфигуратор";
         }
 
 

@@ -28,11 +28,21 @@ namespace BIS.ERP.Services
             return configuration;
         }
 
-        public async Task SaveAsync(string systemName, string icon)
+        public async Task SaveAsync(
+            string systemName,
+            string icon,
+            string description,
+            string companyDetails,
+            string email,
+            string phone)
         {
             var configuration = await GetAsync();
             configuration.SystemName = string.IsNullOrWhiteSpace(systemName) ? "BIS ERP" : systemName.Trim();
             configuration.Icon = string.IsNullOrWhiteSpace(icon) ? "🏢" : icon.Trim();
+            configuration.Description = description?.Trim() ?? string.Empty;
+            configuration.CompanyDetails = companyDetails?.Trim() ?? string.Empty;
+            configuration.Email = email?.Trim() ?? string.Empty;
+            configuration.Phone = phone?.Trim() ?? string.Empty;
             configuration.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
         }
@@ -42,7 +52,15 @@ namespace BIS.ERP.Services
                 ""Id"" uuid PRIMARY KEY,
                 ""SystemName"" varchar(120) NOT NULL,
                 ""Icon"" varchar(20) NOT NULL,
+                ""Description"" varchar(1000) NOT NULL DEFAULT '',
+                ""CompanyDetails"" varchar(2000) NOT NULL DEFAULT '',
+                ""Email"" varchar(160) NOT NULL DEFAULT '',
+                ""Phone"" varchar(80) NOT NULL DEFAULT '',
                 ""UpdatedAt"" timestamp with time zone NOT NULL
-            );");
+            );
+            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Description"" varchar(1000) NOT NULL DEFAULT '';
+            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""CompanyDetails"" varchar(2000) NOT NULL DEFAULT '';
+            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Email"" varchar(160) NOT NULL DEFAULT '';
+            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Phone"" varchar(80) NOT NULL DEFAULT '';");
     }
 }
