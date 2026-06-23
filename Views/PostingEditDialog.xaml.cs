@@ -288,74 +288,11 @@ namespace BIS.ERP.Views
 
         private UserControl CreateAccountPickerControl(string fieldName, object? currentValue)
         {
-            var selectedAccount = _accountAnalytics.FindAccount(currentValue);
-            var textBox = new TextBox
-            {
-                Height = 30,
-                IsReadOnly = true,
-                Background = System.Windows.Media.Brushes.LightGray,
-                Text = selectedAccount?.DisplayName ?? currentValue?.ToString() ?? string.Empty
-            };
-
-            var button = new Button
-            {
-                Content = "?",
-                Width = 32,
-                Height = 30,
-                Margin = new Thickness(5, 0, 0, 0)
-            };
-
-            var panel = new DockPanel();
-            DockPanel.SetDock(button, Dock.Right);
-            panel.Children.Add(button);
-            panel.Children.Add(textBox);
-
-            var picker = new UserControl
-            {
-                Content = panel,
-                Tag = selectedAccount,
-                MinWidth = 200
-            };
-
-            button.Click += (s, e) =>
-            {
-                var accountsData = _accountAnalytics.Accounts
-                    .Select(account => new Dictionary<string, object>
-                    {
-                        ["Id"] = account.Id,
-                        ["Код"] = account.Code,
-                        ["Наименование"] = GetAccountName(account),
-                        ["Тип счета"] = string.Empty,
-                        ["Активен"] = true
-                    })
-                    .ToList();
-
-                var dialog = new AccountSelectionDialog(accountsData)
-                {
-                    Owner = this
-                };
-
-                if (dialog.ShowDialog() != true || dialog.SelectedAccount == null)
-                    return;
-
-                var selected = _accountAnalytics.FindAccount(dialog.SelectedAccount.GetValueOrDefault("Id"));
-                if (selected == null)
-                    return;
-
-                picker.Tag = selected;
-                textBox.Text = selected.DisplayName;
-                UpdateAnalyticControlsVisibility();
-            };
-
-            return picker;
-        }
-
-        private static string GetAccountName(AccountReferenceItem account)
-        {
-            var prefix = $"{account.Code} - ";
-            return account.DisplayName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                ? account.DisplayName[prefix.Length..]
-                : account.DisplayName;
+            return AccountPickerControlFactory.Create(
+                _accountAnalytics,
+                currentValue,
+                this,
+                UpdateAnalyticControlsVisibility);
         }
 
         private void UpdateAnalyticControlsVisibility()
@@ -416,7 +353,7 @@ namespace BIS.ERP.Views
         {
             return control switch
             {
-                UserControl { Tag: AccountReferenceItem account } => account,
+                UserControl userControl => AccountPickerControlFactory.GetSelectedAccount(userControl),
                 ComboBox { SelectedItem: AccountReferenceItem account } => account,
                 _ => null
             };

@@ -1,5 +1,6 @@
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -106,22 +107,11 @@ namespace BIS.ERP.Views.Dialogs
 
             if (AccountAnalyticsRules.IsAccountSelectorField(field) && _accountAnalytics.Accounts.Count > 0)
             {
-                var comboBox = new ComboBox
-                {
-                    Height = 30,
-                    Name = safeName,
-                    DisplayMemberPath = "DisplayName",
-                    SelectedValuePath = "Id",
-                    MinWidth = 200,
-                    ItemsSource = _accountAnalytics.Accounts
-                };
-
-                var selectedAccount = _accountAnalytics.FindAccount(currentValue);
-                if (selectedAccount != null)
-                    comboBox.SelectedItem = selectedAccount;
-
-                comboBox.SelectionChanged += (s, e) => UpdateAccountControlledFieldsVisibility();
-                return comboBox;
+                return AccountPickerControlFactory.Create(
+                    _accountAnalytics,
+                    currentValue,
+                    this,
+                    UpdateAccountControlledFieldsVisibility);
             }
 
             if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -200,6 +190,8 @@ namespace BIS.ERP.Views.Dialogs
                     var datePicker = new DatePicker { Height = 30, Name = safeName };
                     if (currentValue is DateTime dt)
                         datePicker.SelectedDate = dt;
+                    else if (!_editId.HasValue)
+                        datePicker.SelectedDate = DateTime.Today;
                     return datePicker;
 
                 case "Bool":
@@ -272,9 +264,9 @@ namespace BIS.ERP.Views.Dialogs
             var selectedSettings = _fieldControls
                 .Where(pair => _fieldsByName.TryGetValue(pair.Key, out var field) &&
                                AccountAnalyticsRules.IsAccountSelectorField(field))
-                .Select(pair => pair.Value as ComboBox)
-                .Where(comboBox => comboBox?.SelectedItem is AccountReferenceItem)
-                .Select(comboBox => _accountAnalytics.GetSettings((AccountReferenceItem)comboBox!.SelectedItem))
+                .Select(pair => AccountPickerControlFactory.GetSelectedAccount(pair.Value))
+                .Where(account => account != null)
+                .Select(account => _accountAnalytics.GetSettings(account))
                 .ToList();
 
             foreach (var field in _metadata.Fields)
@@ -383,6 +375,8 @@ namespace BIS.ERP.Views.Dialogs
         {
             switch (control)
             {
+                case UserControl when AccountPickerControlFactory.GetSelectedAccount(control) != null:
+                    return AccountPickerControlFactory.GetSelectedAccountValue(field, control);
                 case ComboBox comboBox when comboBox.SelectedItem is AccountReferenceItem account:
                     return AccountAnalyticsRules.GetAccountValueForField(field, account);
                 case ComboBox comboBox when comboBox.SelectedItem is BIS.ERP.Models.ReferenceItem selectedItem:

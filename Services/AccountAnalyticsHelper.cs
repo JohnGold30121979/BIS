@@ -362,6 +362,18 @@ namespace BIS.ERP.Services
             if (field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true)
                 return true;
 
+            var normalizedName = NormalizeFieldName(field.Name);
+            var normalizedColumn = NormalizeFieldName(field.DbColumnName);
+            if (normalizedName is "дебет" or "кредит" or "счет дебета" or "счет кредита" or
+                "корр счет" or "коррсчет" or "счет кассы" or "счет учета" ||
+                normalizedColumn is "debit account" or "credit account" or "corr account" or
+                "correspondent account" or "cash account")
+            {
+                return true;
+            }
+            if (field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+
             var name = NormalizeFieldName(field.Name);
             return name is "дебет" or "кредит" or "корр счет" or "коррсчет" or "счет кассы" or "счет учета";
         }
@@ -414,6 +426,13 @@ namespace BIS.ERP.Services
         public static object GetAccountValueForField(MetadataField field, AccountReferenceItem account)
         {
             if (field.Name.Equals("Дебет", StringComparison.OrdinalIgnoreCase) ||
+                field.Name.Equals("Кредит", StringComparison.OrdinalIgnoreCase) ||
+                field.DbColumnName.Equals("debit_account", StringComparison.OrdinalIgnoreCase) ||
+                field.DbColumnName.Equals("credit_account", StringComparison.OrdinalIgnoreCase))
+            {
+                return account.Code;
+            }
+            if (field.Name.Equals("Дебет", StringComparison.OrdinalIgnoreCase) ||
                 field.Name.Equals("Кредит", StringComparison.OrdinalIgnoreCase))
             {
                 return account.Code;
@@ -443,6 +462,7 @@ namespace BIS.ERP.Services
             return value
                 .Replace(".", string.Empty)
                 .Replace("-", " ")
+                .Replace("_", " ")
                 .Trim()
                 .ToLowerInvariant();
         }

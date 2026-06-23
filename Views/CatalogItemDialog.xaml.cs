@@ -349,6 +349,8 @@ namespace BIS.ERP.Views
                     var datePicker = new DatePicker { Height = 35 };
                     if (existingData != null && existingData.ContainsKey(field.Name))
                         datePicker.SelectedDate = existingData[field.Name] as DateTime?;
+                    else
+                        datePicker.SelectedDate = DateTime.Today;
                     return datePicker;
 
                 case "Bool":
