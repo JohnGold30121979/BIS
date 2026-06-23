@@ -1652,15 +1652,60 @@ namespace BIS.ERP.Services
             }
         }
 
+        public async Task UnpostDocumentAsync(Guid documentId, Guid recordId)
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var document = await _context.MetadataObjects.Include(item => item.Fields)
+                    .FirstOrDefaultAsync(item => item.Id == documentId)
+                    ?? throw new InvalidOperationException("Документ не найден.");
+                if (document.Name != "Приходный кассовый ордер" && document.Name != "Расходный кассовый ордер")
+                    throw new InvalidOperationException("Отмена проведения пока поддерживается для ПКО и РКО.");
+
+                var record = await GetRecordDataAsync(document.TableName, recordId);
+                await EnsureDocumentDateCanBeModifiedAsync(document, record);
+                if (record.GetValueOrDefault("is_posted") is not bool isPosted || !isPosted)
+                    throw new InvalidOperationException("Документ не проведен.");
+
+                var amount = Convert.ToDecimal(record.GetValueOrDefault("amount") ?? 0m);
+                var documentNumber = NormalizeLegacyDocumentNumber(record.GetValueOrDefault("doc_number")?.ToString());
+                if (Guid.TryParse(record.GetValueOrDefault("cash_desk_id")?.ToString(), out var cashDeskId))
+                {
+                    var wasReceipt = document.Name == "Приходный кассовый ордер";
+                    await UpdateCashDeskBalance(cashDeskId, amount, !wasReceipt);
+                }
+
+                await _context.Database.ExecuteSqlRawAsync(@"
+                    DELETE FROM doc_postings
+                    WHERE doc_number = @number AND document_type = @type;",
+                    new NpgsqlParameter("@number", documentNumber),
+                    new NpgsqlParameter("@type", document.Name));
+
+                var tableName = QuoteIdentifier(document.TableName);
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE {tableName}
+                    SET ""is_posted"" = false, ""UpdatedAt"" = NOW()
+                    WHERE ""Id"" = @recordId;",
+                    new NpgsqlParameter("@recordId", recordId));
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
         private async Task ProcessDocumentByPostingRulesAsync(
             MetadataObject document,
             Dictionary<string, object> recordData,
             Guid recordId,
             decimal documentAmount)
         {
-            var postingDate = recordData.GetValueOrDefault("date") is DateTime date
-                ? date
-                : DateTime.Today;
+            var postingDate = recordData.GetValueOrDefault("doc_date") is DateTime documentDate
+                ? documentDate
+                : recordData.GetValueOrDefault("date") is DateTime date ? date : DateTime.Today;
             var documentNumber = NormalizeLegacyDocumentNumber(
                 recordData.GetValueOrDefault("number")?.ToString() ??
                 recordData.GetValueOrDefault("doc_number")?.ToString());
@@ -1673,6 +1718,10 @@ namespace BIS.ERP.Services
 
                 var debit = EvaluateExpression(rule.DebitAccountExpression, recordData).Trim();
                 var credit = EvaluateExpression(rule.CreditAccountExpression, recordData).Trim();
+                if (Guid.TryParse(debit, out var debitAccountId))
+                    debit = await GetAccountCodeById(debitAccountId);
+                if (Guid.TryParse(credit, out var creditAccountId))
+                    credit = await GetAccountCodeById(creditAccountId);
                 var amountText = EvaluateExpression(rule.AmountExpression, recordData);
                 var amount = decimal.TryParse(amountText, System.Globalization.NumberStyles.Any,
                     System.Globalization.CultureInfo.InvariantCulture, out var parsedAmount)

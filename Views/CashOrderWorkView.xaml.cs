@@ -34,11 +34,14 @@ namespace BIS.ERP.Views
 
         private void UpdateButtonsState()
         {
-            var hasSelection = DataGrid.SelectedItem != null;
-            EditButton.IsEnabled = hasSelection;
-            DeleteButton.IsEnabled = hasSelection;
+            var selected = DataGrid.SelectedItem as CashOrderRow;
+            var hasSelection = selected != null;
+            EditButton.IsEnabled = hasSelection && selected?.IsPosted != true;
+            DeleteButton.IsEnabled = hasSelection && selected?.IsPosted != true;
             PostButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
+            PostButton.Content = selected?.IsPosted == true ? "↩ Отменить проведение" : "✅ Провести";
+            PostButton.Width = selected?.IsPosted == true ? 175 : 100;
         }
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -349,22 +352,26 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var result = MessageBox.Show("Провести выбранный документ?", "Подтверждение",
+            var actionText = selectedRow.IsPosted ? "Отменить проведение выбранного документа?" : "Провести выбранный документ?";
+            var result = MessageBox.Show(actionText, "Подтверждение",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
 
             if (result == MessageBoxResult.Yes)
             {
                 try
                 {
-                    StatusText.Text = "🔄 Проведение...";
-                    await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
+                    StatusText.Text = selectedRow.IsPosted ? "Отмена проведения..." : "Проведение...";
+                    if (selectedRow.IsPosted)
+                        await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
+                    else
+                        await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
                     await LoadData();
-                    MessageBox.Show("Документ успешно проведён!", "Успех",
+                    MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
                         MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка проведения: {ex.Message}", "Ошибка",
+                    MessageBox.Show($"Ошибка изменения проведения: {ex.Message}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally

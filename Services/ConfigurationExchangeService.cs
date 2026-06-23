@@ -29,6 +29,7 @@ namespace BIS.ERP.Services
 
         public async Task ExportAsync(string filePath)
         {
+            await new ModuleMetadataService(_context).EnsureSchemaAsync();
             var metadata = await _context.MetadataObjects
                 .AsNoTracking()
                 .Include(item => item.Fields)
@@ -53,7 +54,9 @@ namespace BIS.ERP.Services
                 ExportedAt = DateTime.UtcNow,
                 SystemConfigurations = await _context.SystemConfigurations.AsNoTracking().ToListAsync(),
                 MetadataObjects = metadata,
-                Reports = reports
+                Reports = reports,
+                Modules = await _context.MetadataModules.AsNoTracking().OrderBy(item => item.Order).ToListAsync(),
+                ModuleItems = await _context.MetadataModuleItems.AsNoTracking().OrderBy(item => item.Order).ToListAsync()
             };
 
             foreach (var obj in metadata.Where(item => !string.IsNullOrWhiteSpace(item.TableName)))
@@ -86,6 +89,7 @@ namespace BIS.ERP.Services
                 await ReplaceMetadataAsync(package.MetadataObjects);
                 await ReplaceReportsAsync(package.Reports);
                 await ReplaceSystemConfigurationAsync(package.SystemConfigurations);
+                await ReplaceModulesAsync(package.Modules, package.ModuleItems);
                 await _context.SaveChangesAsync();
 
                 var metadataService = new MetadataService(_context);
@@ -165,6 +169,17 @@ namespace BIS.ERP.Services
             _context.SystemConfigurations.RemoveRange(await _context.SystemConfigurations.ToListAsync());
             if (configurations.Count > 0)
                 await _context.SystemConfigurations.AddRangeAsync(configurations);
+        }
+
+        private async Task ReplaceModulesAsync(List<MetadataModule> modules, List<MetadataModuleItem> items)
+        {
+            await new ModuleMetadataService(_context).EnsureSchemaAsync();
+            _context.MetadataModuleItems.RemoveRange(await _context.MetadataModuleItems.ToListAsync());
+            _context.MetadataModules.RemoveRange(await _context.MetadataModules.ToListAsync());
+            if (modules.Count > 0)
+                await _context.MetadataModules.AddRangeAsync(modules);
+            if (items.Count > 0)
+                await _context.MetadataModuleItems.AddRangeAsync(items);
         }
 
         private async Task<List<Dictionary<string, object?>>> ReadTableAsync(string tableName)

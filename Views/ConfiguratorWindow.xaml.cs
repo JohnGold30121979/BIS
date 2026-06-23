@@ -56,12 +56,12 @@ namespace BIS.ERP.Views
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
                 await printFormService.SeedCashOrderFormsAsync();
+                await new DocumentationMetadataSeedService(_context).EnsureAsync();
 
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Order).ToList();
                 _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Order).ToList();
                 _reports = await _reportService.GetReportsAsync();
-
                 BuildMetadataTree();
                 ShowCatalogsList();
             }
@@ -160,6 +160,13 @@ namespace BIS.ERP.Views
             }
 
             rootItem.Items.Add(catalogsItem);
+            var modulesItem = new TreeViewItem
+            {
+                Header = "Модули и разделы",
+                Foreground = Brushes.White
+            };
+            modulesItem.Selected += (s, e) => ShowModulesEditor();
+            rootItem.Items.Add(modulesItem);
             rootItem.Items.Add(documentsItem);
             rootItem.Items.Add(reportsItem);
             var translationsItem = new TreeViewItem
@@ -171,6 +178,18 @@ namespace BIS.ERP.Views
             rootItem.Items.Add(translationsItem);
             MetadataTree.Items.Add(rootItem);
         }
+
+        private void ShowModulesEditor()
+        {
+            if (_context == null)
+                return;
+            EditorTitle.Text = "Модули и разделы";
+            EditorDescription.Text = "Состав документов и отчетов рабочего интерфейса";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(new BIS.ERP.Views.Configurator.ModuleManagementView(_context));
+        }
+
+        private void OnModulesClick(object sender, RoutedEventArgs e) => ShowModulesEditor();
 
         private async void ShowTranslationsEditor()
         {

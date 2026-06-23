@@ -26,6 +26,7 @@
                     <ComboBoxItem Tag="FinancialResults">Финансовые результаты</ComboBoxItem>
                     <ComboBoxItem Tag="PurchaseSalesJournal">Журнал закупок и продаж</ComboBoxItem>
                     <ComboBoxItem Tag="PeriodCollection">Сбор информации за период</ComboBoxItem>
+                    <ComboBoxItem Tag="CashBook">Кассовая книга</ComboBoxItem>
                 </ComboBox>
                 <TextBlock Text="С:" VerticalAlignment="Center" Margin="16,0,6,0"/>
                 <DatePicker x:Name="StartDatePicker" Width="130" Height="32"/>

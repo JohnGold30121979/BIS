@@ -12,6 +12,8 @@ namespace BIS.ERP.Models
         public List<SystemConfiguration> SystemConfigurations { get; set; } = new();
         public List<MetadataObject> MetadataObjects { get; set; } = new();
         public List<Report> Reports { get; set; } = new();
+        public List<MetadataModule> Modules { get; set; } = new();
+        public List<MetadataModuleItem> ModuleItems { get; set; } = new();
         public List<ConfigurationTableData> TableData { get; set; } = new();
     }
 

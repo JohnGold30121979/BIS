@@ -59,6 +59,7 @@ namespace BIS.ERP.Views
                     "FinancialResults" => await BuildFinancialResultsAsync(start, end),
                     "PurchaseSalesJournal" => await BuildPurchaseSalesJournalAsync(start, end),
                     "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
+                    "CashBook" => await BuildCashBookAsync(start, end),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
 
@@ -185,6 +186,46 @@ namespace BIS.ERP.Views
 
             AddTotalsRow(table, 2);
             return (table, CreateReport(table, $"Оборотно-сальдовая ведомость за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
+        }
+
+        private async Task<(DataTable, Report)> BuildCashBookAsync(DateTime start, DateTime end)
+        {
+            var receiptType = "Приходный кассовый ордер";
+            var paymentType = "Расходный кассовый ордер";
+            var allPostings = await _postingService.GetAllPostingsAsync(null, end);
+            var cashPostings = allPostings
+                .Where(posting => posting.DocumentType == receiptType || posting.DocumentType == paymentType)
+                .ToList();
+            var openingRows = cashPostings.Where(posting => posting.Date < start).ToList();
+            var balance = openingRows.Sum(posting => posting.DocumentType == receiptType ? posting.Amount : -posting.Amount);
+            var rows = cashPostings.Where(posting => posting.Date >= start && posting.Date <= end.Date.AddDays(1).AddTicks(-1))
+                .OrderBy(posting => posting.Date).ThenBy(posting => posting.DocumentNumber).ToList();
+
+            var table = new DataTable("Кассовая книга");
+            table.Columns.Add("Дата", typeof(DateTime));
+            table.Columns.Add("Номер", typeof(string));
+            table.Columns.Add("Документ", typeof(string));
+            table.Columns.Add("Содержание", typeof(string));
+            table.Columns.Add("Приход", typeof(decimal));
+            table.Columns.Add("Расход", typeof(decimal));
+            table.Columns.Add("Остаток", typeof(decimal));
+            table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, 0m, 0m, balance);
+
+            decimal totalReceipt = 0;
+            decimal totalPayment = 0;
+            foreach (var posting in rows)
+            {
+                var receipt = posting.DocumentType == receiptType ? posting.Amount : 0m;
+                var payment = posting.DocumentType == paymentType ? posting.Amount : 0m;
+                totalReceipt += receipt;
+                totalPayment += payment;
+                balance += receipt - payment;
+                table.Rows.Add(posting.Date, posting.DocumentNumber, posting.DocumentType, posting.Note,
+                    receipt, payment, balance);
+            }
+            table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty,
+                totalReceipt, totalPayment, balance);
+            return (table, CreateReport(table, $"Кассовая книга за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
         }
 
         private async Task<(DataTable, Report)> BuildGeneralLedgerAsync(int year)

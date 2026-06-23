@@ -32,9 +32,22 @@ namespace BIS.ERP.Views
 
         private void UpdateButtonsState()
         {
-            var hasSelection = DataGrid.SelectedItem != null;
-            EditButton.IsEnabled = hasSelection;
-            DeleteButton.IsEnabled = hasSelection;
+            var row = DataGrid.SelectedItem as DataRowView;
+            var hasSelection = row != null;
+            var isPosted = row != null && IsPosted(row);
+            EditButton.IsEnabled = hasSelection && !isPosted;
+            DeleteButton.IsEnabled = hasSelection && !isPosted;
+            PostButton.IsEnabled = hasSelection && !isPosted;
+        }
+
+        private static bool IsPosted(DataRowView row)
+        {
+            foreach (var columnName in new[] { "Проведен", "Проведён", "is_posted" })
+            {
+                if (row.DataView.Table.Columns.Contains(columnName) && row[columnName] is bool value)
+                    return value;
+            }
+            return false;
         }
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)

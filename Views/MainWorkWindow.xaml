@@ -75,6 +75,7 @@
                                 <Setter Property="FontSize" Value="13"/>
                                 <Setter Property="Padding" Value="5,8"/>
                                 <Setter Property="Cursor" Value="Hand"/>
+                                <Setter Property="IsExpanded" Value="True"/>
                                 <Style.Triggers>
                                     <Trigger Property="IsSelected" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource AppHighlightBrush}"/>

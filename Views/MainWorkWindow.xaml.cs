@@ -52,6 +52,7 @@ namespace BIS.ERP
         private LocalizationService _localizationService;
         private AccountingPeriodService _accountingPeriodService;
         private UserAccessService _userAccessService;
+        private ModuleMetadataService _moduleMetadataService;
         private InfoBase _currentInfoBase;
         private bool _isLoadingReport = false;
         private Point _dragStartPoint;
@@ -98,12 +99,14 @@ namespace BIS.ERP
                     _reportService = new ReportService(context);
                     _documentService = new DocumentService(context);
                     _userAccessService = new UserAccessService(context);
+                    _moduleMetadataService = new ModuleMetadataService(context);
 
                     await _accountingPeriodService.EnsureSchemaAsync();
                     await _userAccessService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
                     await new PrintFormService(context).EnsureSchemaAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
+                    await new DocumentationMetadataSeedService(context).EnsureAsync();
                     await new PrintFormService(context).SeedCashOrderFormsAsync();
                     await BuildNavigationTree();
                 }
@@ -116,6 +119,181 @@ namespace BIS.ERP
         }
 
         private async Task BuildNavigationTree()
+        {
+            NavigationItems.Clear();
+
+            var catalogs = await _metadataService.GetCatalogsAsync();
+            var documents = await _metadataService.GetDocumentsAsync();
+            var reports = (await _reportService.GetReportsAsync())
+                .Where(report => report.IsActive && !report.IsPrintForm).ToList();
+            var modules = await _moduleMetadataService.GetModulesAsync();
+            var moduleItems = await _moduleMetadataService.GetItemsAsync();
+            if (modules.Count == 0 && (await _moduleMetadataService.GetModulesAsync(true)).Count == 0)
+            {
+                await BuildLegacyNavigationTree();
+                return;
+            }
+            var assignmentByObject = moduleItems.ToDictionary(item => item.ObjectId, item => item);
+
+            var directoriesSection = new NavigationItem
+            {
+                Id = "DirectoriesSection", Name = "СПРАВОЧНИКИ", Icon = "📚", Type = "Section"
+            };
+            foreach (var catalog in catalogs.OrderBy(item => item.Order).ThenBy(item => item.Name))
+            {
+                directoriesSection.Children.Add(new NavigationItem
+                {
+                    Id = catalog.Id.ToString(),
+                    Name = catalog.Name == "Сотрудники (Списочный состав)" ? "Сотрудники" : catalog.Name,
+                    Icon = catalog.Icon,
+                    Type = catalog.Name == "Сотрудники (Списочный состав)" ? "EmployeesCatalog" : "Catalog",
+                    Tag = catalog,
+                    Order = catalog.Order
+                });
+            }
+            NavigationItems.Add(directoriesSection);
+
+            foreach (var module in modules)
+            {
+                var moduleSection = new NavigationItem
+                {
+                    Id = $"Module:{module.Id}", Name = module.Name.ToUpperInvariant(), Icon = module.Icon, Type = "Section",
+                    Order = module.Order, Tag = module
+                };
+                var documentIds = moduleItems.Where(item => item.ModuleId == module.Id && item.ObjectType == "Document")
+                    .OrderBy(item => item.Order).Select(item => item.ObjectId).ToHashSet();
+                var reportIds = moduleItems.Where(item => item.ModuleId == module.Id && item.ObjectType == "Report")
+                    .OrderBy(item => item.Order).Select(item => item.ObjectId).ToHashSet();
+
+                var moduleDocuments = documents.Where(document => documentIds.Contains(document.Id)).ToList();
+                if (moduleDocuments.Count > 0)
+                {
+                    var group = new NavigationItem
+                    {
+                        Id = $"ModuleDocuments:{module.Id}", Name = "Документы", Icon = "📄", Type = "Group"
+                    };
+                    foreach (var document in moduleDocuments)
+                        group.Children.Add(CreateDocumentNavigationItem(document));
+                    moduleSection.Children.Add(group);
+                }
+
+                var moduleReports = reports.Where(report => reportIds.Contains(report.Id)).ToList();
+                if (moduleReports.Count > 0)
+                {
+                    var group = new NavigationItem
+                    {
+                        Id = $"ModuleReports:{module.Id}", Name = "Отчеты", Icon = "📊", Type = "Group"
+                    };
+                    foreach (var report in moduleReports)
+                        group.Children.Add(new NavigationItem
+                        {
+                            Id = report.Id.ToString(), Name = report.Name, Icon = report.Icon,
+                            Type = "Report", Tag = report, Order = report.Order
+                        });
+                    moduleSection.Children.Add(group);
+                }
+
+                if (module.Code == ModuleMetadataService.FinanceCode)
+                {
+                    var financeTools = new NavigationItem
+                    {
+                        Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
+                    };
+                    financeTools.Children.Add(new NavigationItem { Id = "Operations", Name = "Операции", Icon = "📋", Type = "Operations" });
+                    financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
+                    financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
+                    financeTools.Children.Add(new NavigationItem { Id = "AccountingSetup", Name = "Настройка учета", Icon = "⚙", Type = "AccountingSetup" });
+                    moduleSection.Children.Add(financeTools);
+                }
+
+                if (moduleSection.Children.Count > 0)
+                    NavigationItems.Add(moduleSection);
+            }
+
+            var unassignedDocuments = documents.Where(document => !assignmentByObject.ContainsKey(document.Id)).ToList();
+            var unassignedReports = reports.Where(report => !assignmentByObject.ContainsKey(report.Id)).ToList();
+            if (unassignedDocuments.Count > 0 || unassignedReports.Count > 0)
+            {
+                var otherSection = new NavigationItem
+                {
+                    Id = "UnassignedSection", Name = "НЕРАСПРЕДЕЛЕННЫЕ ОБЪЕКТЫ", Icon = "📂", Type = "Section"
+                };
+                foreach (var document in unassignedDocuments)
+                    otherSection.Children.Add(CreateDocumentNavigationItem(document));
+                foreach (var report in unassignedReports)
+                    otherSection.Children.Add(new NavigationItem
+                    {
+                        Id = report.Id.ToString(), Name = report.Name, Icon = report.Icon,
+                        Type = "Report", Tag = report, Order = report.Order
+                    });
+                NavigationItems.Add(otherSection);
+            }
+
+            var serviceSection = new NavigationItem
+            {
+                Id = "ServiceDataSection", Name = "СЛУЖЕБНЫЕ ДАННЫЕ", Icon = "🗄", Type = "Section"
+            };
+            var dbfCount = await _documentService.GetDocumentsCountAsync();
+            serviceSection.Children.Add(new NavigationItem
+            {
+                Id = "DbfDocuments", Name = "DBF Документы", Icon = "🗄", Type = "DbfDocuments",
+                Badge = dbfCount > 0 ? dbfCount.ToString() : string.Empty
+            });
+            NavigationItems.Add(serviceSection);
+
+            AddHelpAndAdministrationSections();
+
+            if (!_authService.IsAdmin && _authService.CurrentUser != null)
+                await ApplyUserPermissionsAsync(_authService.CurrentUser.Id);
+
+            NavigationTree.SelectedItemChanged -= OnNavigationItemSelected;
+            NavigationTree.SelectedItemChanged += OnNavigationItemSelected;
+        }
+
+        private static NavigationItem CreateDocumentNavigationItem(MetadataObject document)
+        {
+            var type = document.Name switch
+            {
+                "Приходный кассовый ордер" or "Расходный кассовый ордер" => "CashOrder",
+                "Платежное поручение" => "PaymentOrder",
+                "Проводки" => "PostingsDocument",
+                _ => "DynamicDocument"
+            };
+            return new NavigationItem
+            {
+                Id = document.Id.ToString(), Name = document.Name, Icon = document.Icon,
+                Type = type, Tag = document, Order = document.Order
+            };
+        }
+
+        private void AddHelpAndAdministrationSections()
+        {
+            var helpSection = new NavigationItem
+            {
+                Id = "HelpSection", Name = "СПРАВКА", Icon = "?", Type = "Section"
+            };
+            helpSection.Children.Add(new NavigationItem
+            {
+                Id = "AboutSystem", Name = "О системе", Icon = "i", Type = "AboutSystem"
+            });
+            NavigationItems.Add(helpSection);
+
+            var adminSection = new NavigationItem
+            {
+                Id = "AdminSection", Name = "АДМИНИСТРИРОВАНИЕ", Icon = "⚙", Type = "Section"
+            };
+            adminSection.Children.Add(new NavigationItem { Id = "UserProfile", Name = "Профиль", Icon = "👤", Type = "Profile" });
+            if (_authService.IsAdmin)
+            {
+                adminSection.Children.Add(new NavigationItem { Id = "Settings", Name = "Настройки системы", Icon = "⚙", Type = "Settings" });
+                adminSection.Children.Add(new NavigationItem { Id = "UserAccessManagement", Name = "Пользователи и права", Icon = "🔐", Type = "UserAccessManagement" });
+            }
+            adminSection.Children.Add(new NavigationItem { Id = "SwitchMode", Name = "Сменить пользователя или базу", Icon = "🔄", Type = "SwitchMode" });
+            adminSection.Children.Add(new NavigationItem { Id = "Logout", Name = "Завершить работу", Icon = "🚪", Type = "Logout" });
+            NavigationItems.Add(adminSection);
+        }
+
+        private async Task BuildLegacyNavigationTree()
         {
             NavigationItems.Clear();
 
