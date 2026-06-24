@@ -661,6 +661,157 @@ namespace BIS.ERP.Services
             }
         }
 
+        #region Начальные данные для новых справочников
+        
+        // Начальные данные для справочника "Налоги"
+        private async Task AddTaxDataToTable(MetadataObject catalog)
+        {
+            var tableName = catalog.TableName;
+            var taxes = new[]
+            {
+        new { code = "NDS20", name = "НДС 20%", rate = 20m, is_active = true, sort_order = 1 },
+        new { code = "NDS12", name = "НДС 12%", rate = 12m, is_active = true, sort_order = 2 },
+        new { code = "NDS0", name = "НДС 0%", rate = 0m, is_active = true, sort_order = 3 },
+        new { code = "SALES_TAX", name = "Налог с продаж", rate = 2m, is_active = true, sort_order = 4 },
+        new { code = "WITHOUT_TAX", name = "Без налога", rate = 0m, is_active = true, sort_order = 5 }
+        };
+
+            foreach (var tax in taxes)
+            {
+                try
+                {
+                    var sql = $@"
+                INSERT INTO ""{tableName}"" (""code"", ""name"", ""rate"", ""is_active"", ""sort_order"", ""CreatedAt"")
+                SELECT 
+                    '{tax.code}', 
+                    '{tax.name}', 
+                    {tax.rate}, 
+                    {tax.is_active}, 
+                    {tax.sort_order}, 
+                    CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{tax.code}'
+                )";
+
+                    await _context.Database.ExecuteSqlRawAsync(sql);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {tax.code}: {ex.Message}");
+                }
+            }
+        }
+        
+        // Начальные данные для справочника "Виды поставки"
+        private async Task AddSupplyKindDataToTable(MetadataObject catalog)
+        {
+            var tableName = catalog.TableName;
+            var items = new[]
+            {
+            new { code = "OPT", name = "Оптовая", is_active = true },
+            new { code = "ROZN", name = "Розничная", is_active = true },
+            new { code = "IMP", name = "Импорт", is_active = true },
+            new { code = "EXPORT", name = "Экспорт", is_active = true }
+            };
+
+            foreach (var item in items)
+            {
+                try
+                {
+                    var sql = $@"
+                INSERT INTO ""{tableName}"" (""code"", ""name"", ""is_active"", ""CreatedAt"")
+                SELECT 
+                    '{item.code}', 
+                    '{item.name}', 
+                    {item.is_active}, 
+                    CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{item.code}'
+                )";
+
+                    await _context.Database.ExecuteSqlRawAsync(sql);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
+                }
+            }
+        }
+        
+        // Начальные данные для справочника "Виды оплаты"       
+        private async Task AddPaymentKindDataToTable(MetadataObject catalog)
+        {
+            var tableName = catalog.TableName;
+            var items = new[]
+            {
+            new { code = "CASH", name = "Наличные", rate = 0m, is_active = true },
+            new { code = "CARD", name = "Банковская карта", rate = 1.5m, is_active = true },
+            new { code = "TRANSFER", name = "Безналичный перевод", rate = 0m, is_active = true },
+            new { code = "CHEQUE", name = "Чек", rate = 0m, is_active = true }
+            };
+
+            foreach (var item in items)
+            {
+                try
+                {
+                    var sql = $@"
+                INSERT INTO ""{tableName}"" (""code"", ""name"", ""rate"", ""is_active"", ""CreatedAt"")
+                SELECT 
+                    '{item.code}', 
+                    '{item.name}', 
+                    {item.rate}, 
+                    {item.is_active}, 
+                    CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{item.code}'
+                )";
+
+                    await _context.Database.ExecuteSqlRawAsync(sql);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
+                }
+            }
+        }
+      
+        // Начальные данные для справочника "Типы поставки"
+        private async Task AddDeliveryTypeDataToTable(MetadataObject catalog)
+        {
+            var tableName = catalog.TableName;
+            var items = new[]
+            {
+            new { code = "STANDARD", name = "Стандартная", is_active = true },
+            new { code = "EXPRESS", name = "Срочная", is_active = true },
+            new { code = "SAMOVIVOZ", name = "Самовывоз", is_active = true }
+            };
+
+            foreach (var item in items)
+            {
+                try
+                {
+                    var sql = $@"
+                INSERT INTO ""{tableName}"" (""code"", ""name"", ""is_active"", ""CreatedAt"")
+                SELECT 
+                    '{item.code}', 
+                    '{item.name}', 
+                    {item.is_active}, 
+                    CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{item.code}'
+                )";
+
+                    await _context.Database.ExecuteSqlRawAsync(sql);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
+                }
+            }
+        }
+
+        #endregion
+
         private static string EscapeSql(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");

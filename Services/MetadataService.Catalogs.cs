@@ -10,6 +10,7 @@ namespace BIS.ERP.Services
 {
     public partial class MetadataService
     {
+        #region catalogs
         private async Task CreateCurrencyRatesCatalog(MetadataConfiguration config)
         {
             try
@@ -44,7 +45,7 @@ namespace BIS.ERP.Services
         private async Task CreateCurrencyCatalog(MetadataConfiguration config)
         {
             try
-            {              
+            {
                 var catalog = new MetadataObject
                 {
                     Id = Guid.NewGuid(),
@@ -648,7 +649,201 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Кассы': {ex.Message}");
             }
-        }      
+        }
+
+
+        // Справочник "Налоги"
+        private async Task CreateTaxCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Налоги",
+                    TableName = "catalog_taxes",
+                    ObjectType = "Catalog",
+                    Description = "Справочник налогов (НДС, налог с продаж и т.д.)",
+                    Icon = "💰",
+                    Order = 14,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetTaxFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddTaxDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Налоги' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Налоги': {ex.Message}");
+            }
+        }
+
+        // Справочник "Подразделения"
+        private async Task CreateDivisionCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Подразделения",
+                    TableName = "catalog_divisions",
+                    ObjectType = "Catalog",
+                    Description = "Справочник подразделений предприятия",
+                    Icon = "🏢",
+                    Order = 15,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetStandardCatalogFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Подразделения' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Подразделения': {ex.Message}");
+            }
+        }
+
+
+        // Справочник "Участки"       
+        private async Task CreatePlotCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Участки (новые)",
+                    TableName = "catalog_plots",
+                    ObjectType = "Catalog",
+                    Description = "Справочник участков (склады, цеха, отделы)",
+                    Icon = "📍",
+                    Order = 16,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetPlotFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Участки (новые)' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Участки': {ex.Message}");
+            }
+        }
+
+        // Справочник "Виды поставки"
+        private async Task CreateSupplyKindCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Виды поставки",
+                    TableName = "catalog_supply_kinds",
+                    ObjectType = "Catalog",
+                    Description = "Справочник видов поставки (опт, розница, импорт)",
+                    Icon = "📦",
+                    Order = 17,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetStandardCatalogFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddSupplyKindDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Виды поставки' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Виды поставки': {ex.Message}");
+            }
+        }
+
+        // Справочник "Виды оплаты"
+        private async Task CreatePaymentKindCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Виды оплаты",
+                    TableName = "catalog_payment_kinds",
+                    ObjectType = "Catalog",
+                    Description = "Справочник видов оплаты (наличные, карта, безнал)",
+                    Icon = "💳",
+                    Order = 18,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetPaymentKindFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddPaymentKindDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Виды оплаты' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Виды оплаты': {ex.Message}");
+            }
+        }
+
+        // Справочник "Типы поставки"
+        private async Task CreateDeliveryTypeCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Типы поставки",
+                    TableName = "catalog_delivery_types",
+                    ObjectType = "Catalog",
+                    Description = "Справочник типов поставки (срочная, стандартная)",
+                    Icon = "🚚",
+                    Order = 19,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetStandardCatalogFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddDeliveryTypeDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Типы поставки' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Типы поставки': {ex.Message}");
+            }
+        }
+
+        #endregion catalogs
 
         private async Task EnsureStandardReportTemplatesAsync(MetadataConfiguration config)
         {
@@ -847,4 +1042,3 @@ namespace BIS.ERP.Services
 
     }
 }
-

@@ -170,7 +170,7 @@ namespace BIS.ERP.Services
             }
         }
 
-        // Получение данных справочника      
+        // Получение данных справочника
         public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
         {
             var catalog = await _context.MetadataObjects
@@ -698,7 +698,7 @@ namespace BIS.ERP.Services
 
         // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
 
-        public async Task InitializePredefinedCatalogsAsync(Guid infoBaseId)  // ← добавить параметр
+        public async Task InitializePredefinedCatalogsAsync(Guid infoBaseId)
         {
             try
             {
@@ -784,8 +784,30 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Кассы"))
                     await CreateCashDesksCatalog(config);
 
+                // Новые справочники                
+
+                if (!existingCatalogs.Contains("Налоги"))
+                    await CreateTaxCatalog(config);
+
+                if (!existingCatalogs.Contains("Подразделения"))
+                    await CreateDivisionCatalog(config);
+
+                if (!existingCatalogs.Contains("Участки (новые)"))
+                    await CreatePlotCatalog(config);
+
+                if (!existingCatalogs.Contains("Виды поставки"))
+                    await CreateSupplyKindCatalog(config);
+
+                if (!existingCatalogs.Contains("Виды оплаты"))
+                    await CreatePaymentKindCatalog(config);
+
+                if (!existingCatalogs.Contains("Типы поставки"))
+                    await CreateDeliveryTypeCatalog(config);
+
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
                 await EnsureStandardReportTemplatesAsync(config);
+
+
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }

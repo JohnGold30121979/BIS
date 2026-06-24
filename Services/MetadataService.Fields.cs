@@ -2198,4 +2198,176 @@ public partial class MetadataService
     };
     }
 
+    #region Поля для новых справочников
+
+   // Поля для справочника "Налоги"
+    private List<MetadataField> GetTaxFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 10,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ставка",
+            DbColumnName = "rate",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 2,
+            IsRequired = true,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = true,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Порядок",
+            DbColumnName = "sort_order",
+            FieldType = "Int",
+            IsRequired = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+    }
+    
+    // Поля для справочника "Участки (новые)"
+    private List<MetadataField> GetPlotFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 10,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Описание",
+            DbColumnName = "description",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = true,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+    }
+   
+    // Поля для справочника "Виды оплаты"
+    private List<MetadataField> GetPaymentKindFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+    {
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код",
+            DbColumnName = "code",
+            FieldType = "String",
+            Length = 10,
+            IsRequired = true,
+            IsUnique = true,
+            Order = 1,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Наименование",
+            DbColumnName = "name",
+            FieldType = "String",
+            Length = 200,
+            IsRequired = true,
+            Order = 2,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ставка",
+            DbColumnName = "rate",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 2,
+            IsRequired = false,
+            Order = 3,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Активен",
+            DbColumnName = "is_active",
+            FieldType = "Bool",
+            IsRequired = true,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        }
+    };
+    }
+
+    #endregion
+
 }
