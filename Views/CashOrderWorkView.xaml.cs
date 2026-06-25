@@ -412,22 +412,16 @@ namespace BIS.ERP.Views
                 if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
                     return;
 
-                var saveDialog = new SaveFileDialog
-                {
-                    Title = "Сохранить печатную форму",
-                    Filter = "PDF файлы (*.pdf)|*.pdf",
-                    DefaultExt = "pdf",
-                    FileName = $"{_documentMetadata.Name}_{selectedRow.DocNumber}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
-                };
-                if (saveDialog.ShowDialog() != true)
-                    return;
-
                 StatusText.Text = "Формирование PDF...";
                 var pdf = await printFormService.ExportDocumentAsync(selectionDialog.SelectedReport, selectedRow.Id);
-                File.WriteAllBytes(saveDialog.FileName, pdf);
                 StatusText.Text = "PDF сформирован";
-                MessageBox.Show("Печатная форма сохранена в PDF.", "Печать",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+
+                // ✅ Открываем окно предпросмотра
+                var previewWindow = new PdfPreviewWindow(pdf);
+                previewWindow.Owner = Window.GetWindow(this);
+                previewWindow.ShowDialog();
+
+                StatusText.Text = "Готово";
             }
             catch (Exception ex)
             {
