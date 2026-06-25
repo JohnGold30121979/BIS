@@ -792,8 +792,8 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Подразделения"))
                     await CreateDivisionCatalog(config);
 
-                if (!existingCatalogs.Contains("Участки (новые)"))
-                    await CreatePlotCatalog(config);
+                //if (!existingCatalogs.Contains("Участки (новые)"))
+                //    await CreatePlotCatalog(config);
 
                 if (!existingCatalogs.Contains("Виды поставки"))
                     await CreateSupplyKindCatalog(config);

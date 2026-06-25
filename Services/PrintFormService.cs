@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Globalization;
+using System.IO;
 
 namespace BIS.ERP.Services
 {
@@ -142,7 +143,12 @@ namespace BIS.ERP.Services
                 Amount = amount,
                 AmountInWords = RussianMoneyInWords(amount),
                 Basis = GetString(row, "Основание", "basis"),
-                Note = GetString(row, "Примечание", "description")
+                Note = GetString(row, "Примечание", "description"),
+
+                 // НОВЫЕ ПОЛЯ
+             //   DebitAccount = debitAccount,
+            //    CreditAccount = creditAccount,
+           //    AmountInCurrency = amountInCurrency
             };
             var organizationValue = GetString(row, "organization_id");
             if (Guid.TryParse(organizationValue, out var organizationId))
@@ -224,7 +230,7 @@ namespace BIS.ERP.Services
                         {
                             columns.RelativeColumn(2); columns.RelativeColumn(2); columns.RelativeColumn(1);
                         });
-                        foreach (var title in new[] { "Дебет", "Кредит / корр. счет", "Сумма" })
+                        foreach (var title in new[] { "Дебет", "Кредит", "Сумма" })
                             table.Cell().Border(1).Padding(4).AlignCenter().Text(title).Bold();
                         table.Cell().Border(1).Padding(4).Text(data.CashDesk);
                         table.Cell().Border(1).Padding(4).Text(data.CorrespondentAccount);
@@ -392,6 +398,8 @@ namespace BIS.ERP.Services
             {
                 ["nfil1"] = data.Organization, ["inn1"] = data.Inn, ["okpo1"] = data.Okpo,
                 ["dok1"] = data.Number, ["date1"] = data.Date.ToString("dd.MM.yyyy"),
+                ["deb1"] = GetAccountCode(data.DebitAccount ?? data.CashDesk),
+                ["cred1"] = GetAccountCode(data.CreditAccount ?? data.CorrespondentAccount),
                 ["deb"] = data.CashDesk, ["deb1"] = GetAccountCode(data.CorrespondentAccount),
                 ["cred"] = GetAccountCode(data.CorrespondentAccount), ["cred1"] = data.CashDesk,
                 ["sum"] = $"{data.Amount:N2}", ["sum1"] = $"{data.Amount:N2}", ["sum_v"] = $"{data.Amount:N2}",
@@ -492,6 +500,86 @@ namespace BIS.ERP.Services
             return string.Join(" ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
         }
 
+       
+        // Парсинг FRX-файла (макет FoxPro) с использованием FrxParser
+        public async Task<string> ParseFrxFileAsync(byte[] fileData, string fileName)
+        {
+            try
+            {
+                // Создаем временный файл
+                var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.frx");
+                await File.WriteAllBytesAsync(tempFile, fileData);
+
+                // Используем FrxParser
+                var parser = new FrxParser();
+                var frxReport = parser.ParseFrxFile(tempFile);
+
+                // Удаляем временный файл
+                if (File.Exists(tempFile))
+                    File.Delete(tempFile);
+
+                // Получаем PrintFormTemplate из FrxReport
+                var template = parser.GetPrintTemplate(frxReport);
+
+                // Сериализуем в JSON
+                var json = JsonSerializer.Serialize(template, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                });
+
+                return json;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка парсинга FRX: {ex.Message}");
+                return string.Empty;
+            }
+        }     
+
+        private static string CleanFoxText(string input)
+        {
+            var cleaned = input;
+            cleaned = cleaned.Replace("TEXT", "");
+            cleaned = cleaned.Replace("LABEL", "");
+            cleaned = cleaned.Replace("=", "");
+            cleaned = cleaned.Replace("\"", "");
+            cleaned = cleaned.Replace("'", "");
+            cleaned = cleaned.Trim();
+
+            while (cleaned.Contains("  "))
+                cleaned = cleaned.Replace("  ", " ");
+
+            return cleaned;
+        }
+
+        private static string ExtractFoxExpression(string input)
+        {
+            // Ищем выражение в скобках
+            var startIdx = input.IndexOf('(');
+            var endIdx = input.LastIndexOf(')');
+
+            if (startIdx >= 0 && endIdx > startIdx)
+            {
+                var expr = input.Substring(startIdx + 1, endIdx - startIdx - 1);
+                return CleanFoxText(expr);
+            }
+
+            // Ищем после "="
+            var eqIdx = input.IndexOf('=');
+            if (eqIdx >= 0 && eqIdx < input.Length - 1)
+            {
+                var expr = input.Substring(eqIdx + 1);
+                return CleanFoxText(expr);
+            }
+
+            var result = CleanFoxText(input);
+            if (result.Length > 0 && !result.Contains("EXPRESSION") && !result.Contains("FIELD"))
+                return result;
+
+            return string.Empty;
+        }
+
         private sealed class CashOrderPrintData
         {
             public string DocumentName { get; init; } = string.Empty;
@@ -503,6 +591,12 @@ namespace BIS.ERP.Services
             public string Person { get; init; } = string.Empty;
             public string CashDesk { get; init; } = string.Empty;
             public string CorrespondentAccount { get; init; } = string.Empty;
+
+            // НОВЫЕ ПОЛЯ
+            public string DebitAccount { get; set; } = string.Empty;
+            public string CreditAccount { get; set; } = string.Empty;
+            public decimal AmountInCurrency { get; set; }
+
             public decimal Amount { get; init; }
             public string AmountInWords { get; init; } = string.Empty;
             public string Basis { get; init; } = string.Empty;

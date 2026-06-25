@@ -1,17 +1,18 @@
-﻿using System;
+﻿using BIS.ERP.Models;
+using BIS.ERP.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Win32;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using Microsoft.Win32;
-using System.IO;
-using BIS.ERP.Models;
-using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
 {
@@ -236,6 +237,7 @@ namespace BIS.ERP.Views
             HeaderTextBox.Text = report.HeaderText ?? "";
             FooterTextBox.Text = report.FooterText ?? "";
             SummaryTextBox.Text = report.SummaryText ?? "";
+            TemplateTextBox.Text = report.Template ?? "";
 
             // Ориентация
             OrientationCombo.SelectedIndex = report.PageOrientation == "Landscape" ? 1 : 0;
@@ -435,11 +437,17 @@ namespace BIS.ERP.Views
                     return;
                 }
 
+                // ✅ СОЗДАЕМ НОВЫЙ ОТЧЕТ, ЕСЛИ ЕГО НЕТ
                 if (_currentReport == null)
                 {
-                    _currentReport = new Report();
+                    _currentReport = new Report
+                    {
+                        Id = Guid.NewGuid(),
+                        CreatedAt = DateTime.UtcNow
+                    };
                 }
 
+                // Заполняем данные
                 _currentReport.Name = ReportNameBox.Text;
                 _currentReport.Description = ReportDescBox.Text;
                 _currentReport.TitleText = TitleTextBox.Text;
@@ -454,62 +462,151 @@ namespace BIS.ERP.Views
                 _currentReport.IsPrintForm = IsPrintFormCheck.IsChecked ?? false;
                 _currentReport.IsDefault = IsDefaultCheck.IsChecked ?? false;
                 _currentReport.SourceFormat = _currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native";
+                _currentReport.Template = TemplateTextBox?.Text ?? "";
                 _currentReport.Icon = "📊";
                 _currentReport.UpdatedAt = DateTime.UtcNow;
 
                 if (_currentReport.CreatedAt == DateTime.MinValue)
                     _currentReport.CreatedAt = DateTime.UtcNow;
 
+                // Настройки оформления
                 _currentReport.PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait";
                 _currentReport.FontName = FontCombo.Text;
-                _currentReport.FontSize = int.Parse(FontSizeCombo.Text);
+                _currentReport.FontSize = int.TryParse(FontSizeCombo.Text, out var fontSize) ? fontSize : 10;
                 _currentReport.HeaderColor = GetSelectedColor(HeaderColorCombo);
                 _currentReport.AlternateRowColors = AlternateRowColorsCheck.IsChecked ?? true;
                 _currentReport.ShowGridLines = ShowGridLinesCheck.IsChecked ?? true;
                 _currentReport.ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true;
                 _currentReport.ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true;
 
-                _currentReport.Fields.Clear();
-                foreach (var field in _reportFields)
+                // ✅ ОЧИЩАЕМ И ЗАНОВО ЗАПОЛНЯЕМ ПОЛЯ
+                var fieldsToAdd = _reportFields.Select(f => new ReportField
                 {
-                    _currentReport.Fields.Add(new ReportField
-                    {
-                        Id = field.Id == Guid.Empty ? Guid.NewGuid() : field.Id,
-                        FieldName = field.FieldName,
-                        DisplayName = field.DisplayName,
-                        Order = field.Order,
-                        Width = field.Width,
-                        IsVisible = field.IsVisible,
-                        Alignment = field.Alignment,
-                        AggregateType = field.AggregateType,
-                        Format = field.Format
-                    });
-                }
+                    Id = f.Id == Guid.Empty ? Guid.NewGuid() : f.Id,
+                    ReportId = _currentReport.Id,
+                    FieldName = f.FieldName,
+                    DisplayName = f.DisplayName,
+                    Order = f.Order,
+                    Width = f.Width,
+                    IsVisible = f.IsVisible,
+                    Alignment = f.Alignment,
+                    AggregateType = f.AggregateType,
+                    Format = f.Format
+                }).ToList();
 
-                _currentReport.Filters.Clear();
-                foreach (var filter in _reportFilters)
-                {
-                    if (!string.IsNullOrWhiteSpace(filter.FieldName))
+                // ✅ ОЧИЩАЕМ И ЗАНОВО ЗАПОЛНЯЕМ ФИЛЬТРЫ
+                var filtersToAdd = _reportFilters
+                    .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
+                    .Select(f => new ReportFilter
                     {
-                        _currentReport.Filters.Add(new ReportFilter
-                        {
-                            Id = filter.Id == Guid.Empty ? Guid.NewGuid() : filter.Id,
-                            FieldName = filter.FieldName,
-                            Operation = filter.Operation,
-                            Value = filter.Value,
-                            Value2 = filter.Value2,
-                            Order = filter.Order
-                        });
+                        Id = f.Id == Guid.Empty ? Guid.NewGuid() : f.Id,
+                        ReportId = _currentReport.Id,
+                        FieldName = f.FieldName,
+                        Operation = f.Operation,
+                        Value = f.Value,
+                        Value2 = f.Value2,
+                        Order = f.Order
+                    }).ToList();
+
+                // ✅ ИСПОЛЬЗУЕМ ОТДЕЛЬНЫЙ КОНТЕКСТ ДЛЯ СОХРАНЕНИЯ
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+
+                if (_currentReport.Id == Guid.Empty)
+                {
+                    // ✅ НОВЫЙ ОТЧЕТ - ПРОСТО ДОБАВЛЯЕМ
+                    _currentReport.Id = Guid.NewGuid();
+                    _currentReport.Fields = fieldsToAdd;
+                    _currentReport.Filters = filtersToAdd;
+
+                    context.Reports.Add(_currentReport);
+                    await context.SaveChangesAsync();
+                }
+                else
+                {
+                    // ✅ СУЩЕСТВУЮЩИЙ ОТЧЕТ - ОБНОВЛЯЕМ
+                    var existingReport = await context.Reports
+                        .Include(r => r.Fields)
+                        .Include(r => r.Filters)
+                        .FirstOrDefaultAsync(r => r.Id == _currentReport.Id);
+
+                    if (existingReport == null)
+                    {
+                        // Отчет не найден - создаем новый
+                        _currentReport.Id = Guid.NewGuid();
+                        _currentReport.Fields = fieldsToAdd;
+                        _currentReport.Filters = filtersToAdd;
+                        context.Reports.Add(_currentReport);
                     }
-                }
+                    else
+                    {
+                        // ✅ ОБНОВЛЯЕМ ОСНОВНЫЕ ПОЛЯ
+                        existingReport.Name = _currentReport.Name;
+                        existingReport.Description = _currentReport.Description;
+                        existingReport.TitleText = _currentReport.TitleText;
+                        existingReport.SubtitleText = _currentReport.SubtitleText;
+                        existingReport.HeaderText = _currentReport.HeaderText;
+                        existingReport.FooterText = _currentReport.FooterText;
+                        existingReport.SummaryText = _currentReport.SummaryText;
+                        existingReport.DataSourceType = _currentReport.DataSourceType;
+                        existingReport.DataSourceId = _currentReport.DataSourceId;
+                        existingReport.ReportType = _currentReport.ReportType;
+                        existingReport.IsActive = _currentReport.IsActive;
+                        existingReport.IsPrintForm = _currentReport.IsPrintForm;
+                        existingReport.IsDefault = _currentReport.IsDefault;
+                        existingReport.SourceFormat = _currentReport.SourceFormat;
+                        existingReport.Template = _currentReport.Template;
+                        existingReport.Icon = _currentReport.Icon;
+                        existingReport.UpdatedAt = DateTime.UtcNow;
+                        existingReport.PageOrientation = _currentReport.PageOrientation;
+                        existingReport.FontName = _currentReport.FontName;
+                        existingReport.FontSize = _currentReport.FontSize;
+                        existingReport.HeaderColor = _currentReport.HeaderColor;
+                        existingReport.AlternateRowColors = _currentReport.AlternateRowColors;
+                        existingReport.ShowGridLines = _currentReport.ShowGridLines;
+                        existingReport.ShowGrandTotal = _currentReport.ShowGrandTotal;
+                        existingReport.ShowPageNumbers = _currentReport.ShowPageNumbers;
 
-                await _reportService.SaveReportAsync(_currentReport);
+                        // ✅ УДАЛЯЕМ СТАРЫЕ ПОЛЯ
+                        context.ReportFields.RemoveRange(existingReport.Fields);
+
+                        // ✅ УДАЛЯЕМ СТАРЫЕ ФИЛЬТРЫ
+                        context.ReportFilters.RemoveRange(existingReport.Filters);
+
+                        // ✅ ДОБАВЛЯЕМ НОВЫЕ ПОЛЯ
+                        foreach (var field in fieldsToAdd)
+                        {
+                            field.ReportId = existingReport.Id;
+                            existingReport.Fields.Add(field);
+                        }
+
+                        // ✅ ДОБАВЛЯЕМ НОВЫЕ ФИЛЬТРЫ
+                        foreach (var filter in filtersToAdd)
+                        {
+                            filter.ReportId = existingReport.Id;
+                            existingReport.Filters.Add(filter);
+                        }
+
+                        context.Reports.Update(existingReport);
+                    }
+
+                    await context.SaveChangesAsync();
+                }
 
                 MessageBox.Show($"Отчет \"{_currentReport.Name}\" сохранен!", "Успех",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
                 DialogResult = true;
                 Close();
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // ✅ ОБРАБОТКА КОНКУРЕНТНОСТИ
+                MessageBox.Show(
+                    "Ошибка конкурентности при сохранении. Возможно, отчет был изменен другим пользователем.\n\n" +
+                    $"Детали: {ex.Message}",
+                    "Ошибка сохранения",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
             }
             catch (Exception ex)
             {
@@ -560,7 +657,7 @@ namespace BIS.ERP.Views
                 IsPrintForm = IsPrintFormCheck.IsChecked ?? false,
                 IsDefault = IsDefaultCheck.IsChecked ?? false,
                 SourceFormat = GetSelectedReportType() == "FoxProLayout" ? "FoxProFRX" : "Native",
-                Template = _currentReport?.Template ?? "",
+                //Template = _currentReport?.Template ?? "",
                 Fields = _reportFields.OrderBy(field => field.Order).ToList(),
                 Filters = _reportFilters.Where(filter => !string.IsNullOrWhiteSpace(filter.FieldName)).ToList(),
                 PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait",
@@ -570,7 +667,8 @@ namespace BIS.ERP.Views
                 AlternateRowColors = AlternateRowColorsCheck.IsChecked ?? true,
                 ShowGridLines = ShowGridLinesCheck.IsChecked ?? true,
                 ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true,
-                ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true
+                ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true,
+                Template = TemplateTextBox.Text
             };
         }
 
@@ -605,7 +703,75 @@ namespace BIS.ERP.Views
             DialogResult = false;
             Close();
         }
+       
+        // Загрузка FRX-файла в поле шаблона
+        private async void OnLoadFrxClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var openDialog = new OpenFileDialog
+                {
+                    Title = "Выберите файл макета FoxPro (.frx)",
+                    Filter = "FoxPro макеты (*.frx)|*.frx|Все файлы (*.*)|*.*",
+                    DefaultExt = ".frx",
+                    CheckFileExists = true
+                };
+
+                if (openDialog.ShowDialog() != true)
+                    return;
+
+                StatusText.Text = $"Загрузка: {Path.GetFileName(openDialog.FileName)}...";
+
+                // Читаем файл
+                var fileBytes = File.ReadAllBytes(openDialog.FileName);
+
+                // Парсим FRX
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var printFormService = new PrintFormService(context);
+                var templateJson = await printFormService.ParseFrxFileAsync(fileBytes, openDialog.FileName);
+
+                if (!string.IsNullOrEmpty(templateJson))
+                {
+                    // ЗАПОЛНЯЕМ ПОЛЕ
+                    TemplateTextBox.Text = templateJson;
+
+                    // Автоматически выбираем тип "Макет Visual FoxPro FRX"
+                    foreach (ComboBoxItem item in ReportTypeCombo.Items)
+                    {
+                        if (item.Tag?.ToString() == "FoxProLayout")
+                        {
+                            ReportTypeCombo.SelectedItem = item;
+                            break;
+                        }
+                    }
+
+                    // Устанавливаем флаг печатной формы
+                    IsPrintFormCheck.IsChecked = true;
+
+                    StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}";
+
+                    MessageBox.Show($"FRX-макет успешно загружен!\n\n" +
+                                   $"Файл: {Path.GetFileName(openDialog.FileName)}\n" +
+                                   $"Размер: {templateJson.Length} символов",
+                                   "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    StatusText.Text = "❌ Ошибка парсинга FRX";
+                    MessageBox.Show("Не удалось распарсить FRX-файл.", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"❌ Ошибка: {ex.Message}";
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
     }
+
+
 
     public class FieldDef
     {

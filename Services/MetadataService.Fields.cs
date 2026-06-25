@@ -1840,6 +1840,7 @@ public partial class MetadataService
     {
         return new List<MetadataField>
     {
+        // Существующие поля
         new MetadataField
         {
             Id = Guid.NewGuid(),
@@ -1903,7 +1904,7 @@ public partial class MetadataService
             Id = Guid.NewGuid(),
             Name = "Корр. счет",
             DbColumnName = "correspondent_account",
-            FieldType = "String",
+            FieldType = "String",  // или Reference на План счетов
             Length = 50,
             IsRequired = false,
             Order = 6,
@@ -1939,6 +1940,81 @@ public partial class MetadataService
             FieldType = "Bool",
             IsRequired = true,
             Order = 9,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Валюта",
+            DbColumnName = "currency_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "Справочник валют",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            IsRequired = false,
+            Order = 10,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Сотрудник",
+            DbColumnName = "employee_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "Сотрудники (Списочный состав)",
+            DisplayPattern = "{Табельный номер} - {ФИО}",
+            DisplayFields = "Табельный номер,ФИО",
+            IsRequired = false,
+            Order = 11,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Материал",
+            DbColumnName = "material_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "Справочник материалов",
+            DisplayPattern = "{Код} - {Наименование материала}",
+            DisplayFields = "Код,Наименование материала",
+            IsRequired = false,
+            Order = 12,
+            MetadataObjectId = metadataObjectId
+        },
+        
+        // ✅ НОВЫЕ ПОЛЯ ДЛЯ ПЕЧАТНОЙ ФОРМЫ
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Дебет",
+            DbColumnName = "debit_account",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 13,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Кредит",
+            DbColumnName = "credit_account",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 14,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Сумма в валюте",
+            DbColumnName = "amount_currency",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 2,
+            IsRequired = false,
+            Order = 15,
             MetadataObjectId = metadataObjectId
         }
     };

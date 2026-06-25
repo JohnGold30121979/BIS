@@ -38,12 +38,15 @@
         <!-- Основное содержимое с вкладками -->
         <TabControl Grid.Row="1" Margin="10">
             <!-- Вкладка: Общие -->
+
             <!-- Вкладка: Общие -->
             <TabItem Header="📋 Общие">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Padding="20" Background="White">
                         <Grid>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -61,15 +64,17 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
+                            <!-- Row 0: Название -->
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Название:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <TextBox x:Name="ReportNameBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Height="35" Margin="0,5"/>
 
+                            <!-- Row 1: Описание -->
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Описание:" VerticalAlignment="Top" FontWeight="Bold" Margin="0,5"/>
                             <TextBox x:Name="ReportDescBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Height="60" TextWrapping="Wrap" Margin="0,5"/>
 
+                            <!-- Row 2: Источник + Тип отчета -->
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Источник:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <ComboBox x:Name="DataSourceCombo" Grid.Row="2" Grid.Column="1" Height="35" Margin="5"/>
-
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="Тип отчета:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <ComboBox x:Name="ReportTypeCombo" Grid.Row="2" Grid.Column="3" Height="35" Margin="5" SelectedIndex="0">
                                 <ComboBoxItem Content="Таблица" Tag="Table"/>
@@ -81,22 +86,57 @@
                                 <ComboBoxItem Content="Макет Visual FoxPro FRX" Tag="FoxProLayout"/>
                             </ComboBox>
 
+                            <!-- Row 3: Заголовок -->
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Заголовок:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <TextBox x:Name="TitleTextBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Height="35" Margin="5"/>
 
+                            <!-- Row 4: Подзаголовок -->
                             <TextBlock Grid.Row="4" Grid.Column="0" Text="Подзаголовок:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <TextBox x:Name="SubtitleTextBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" Height="35" Margin="5"/>
 
+                            <!-- Row 5: Текст в шапке -->
                             <TextBlock Grid.Row="5" Grid.Column="0" Text="Текст в шапке:" VerticalAlignment="Top" FontWeight="Bold"/>
                             <TextBox x:Name="HeaderTextBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Height="60" TextWrapping="Wrap" Margin="5"/>
 
+                            <!-- Row 6: Текст в подвале -->
                             <TextBlock Grid.Row="6" Grid.Column="0" Text="Текст в подвале:" VerticalAlignment="Top" FontWeight="Bold"/>
                             <TextBox x:Name="FooterTextBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" Height="60" TextWrapping="Wrap" Margin="5"/>
 
+                            <!-- Row 7: Итоговый текст -->
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Итоговый текст:" VerticalAlignment="Top" FontWeight="Bold"/>
                             <TextBox x:Name="SummaryTextBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" Height="60" TextWrapping="Wrap" Margin="5"/>
 
-                            <StackPanel Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="5,12,5,0">
+                            <!-- Row 8: FRX-шаблон с кнопкой загрузки -->
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="FRX-шаблон:" VerticalAlignment="Top" FontWeight="Bold" Margin="0,5"/>
+                            <Grid Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="3">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <Button Grid.Row="0" Content="📂 Загрузить FRX-файл" 
+                            Width="160" Height="30" Margin="0,0,0,5"
+                            Background="#E67E22" Foreground="White" 
+                            Click="OnLoadFrxClick"
+                            HorizontalAlignment="Left"
+                            Cursor="Hand">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+
+                                <TextBox x:Name="TemplateTextBox" Grid.Row="1" 
+                             Height="150" TextWrapping="Wrap" AcceptsReturn="True" 
+                             FontFamily="Consolas" FontSize="11" 
+                             ToolTip="JSON-описание макета FoxPro"/>
+                            </Grid>
+
+                            <!-- Row 9: Чекбоксы -->
+                            <StackPanel Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="5,12,5,0">
                                 <CheckBox x:Name="IsActiveCheck" Content="Отчет доступен" IsChecked="True" Margin="0,0,20,0"/>
                                 <CheckBox x:Name="IsPrintFormCheck" Content="Печатная форма документа" Margin="0,0,20,0"/>
                                 <CheckBox x:Name="IsDefaultCheck" Content="По умолчанию"/>
