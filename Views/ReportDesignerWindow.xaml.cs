@@ -96,6 +96,9 @@ namespace BIS.ERP.Views
             if (selected?.Tag is MetadataObject catalog)
             {
                 await LoadAvailableFields(catalog);
+
+                // ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ UI
+                AvailableFields.Items.Refresh();
             }
             else
             {
@@ -117,17 +120,25 @@ namespace BIS.ERP.Views
                 }
             }
 
-            AvailableFields.ItemsSource = fields;
-            AvailableFilterFields.Clear();
-            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            // ОБНОВЛЯЕМ ЧЕРЕЗ DISPATCHER
+            await Dispatcher.InvokeAsync(() =>
             {
-                AvailableFilterFields.Add(new FieldDef
+                AvailableFields.ItemsSource = fields;
+                AvailableFilterFields.Clear();
+
+                foreach (var field in catalog.Fields.OrderBy(field => field.Order))
                 {
-                    Name = field.Name,
-                    DbColumnName = field.DbColumnName,
-                    Type = field.FieldType
-                });
-            }
+                    AvailableFilterFields.Add(new FieldDef
+                    {
+                        Name = field.Name,
+                        DbColumnName = field.DbColumnName,
+                        Type = field.FieldType
+                    });
+                }
+
+                // Принудительное обновление
+                AvailableFields.Items.Refresh();
+            });
         }
 
         private void ConfigureFieldColumns()
@@ -437,7 +448,6 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                // ✅ СОЗДАЕМ НОВЫЙ ОТЧЕТ, ЕСЛИ ЕГО НЕТ
                 if (_currentReport == null)
                 {
                     _currentReport = new Report
@@ -479,7 +489,6 @@ namespace BIS.ERP.Views
                 _currentReport.ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true;
                 _currentReport.ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true;
 
-                // ✅ ОЧИЩАЕМ И ЗАНОВО ЗАПОЛНЯЕМ ПОЛЯ
                 var fieldsToAdd = _reportFields.Select(f => new ReportField
                 {
                     Id = f.Id == Guid.Empty ? Guid.NewGuid() : f.Id,
@@ -494,7 +503,6 @@ namespace BIS.ERP.Views
                     Format = f.Format
                 }).ToList();
 
-                // ✅ ОЧИЩАЕМ И ЗАНОВО ЗАПОЛНЯЕМ ФИЛЬТРЫ
                 var filtersToAdd = _reportFilters
                     .Where(f => !string.IsNullOrWhiteSpace(f.FieldName))
                     .Select(f => new ReportFilter
@@ -508,22 +516,17 @@ namespace BIS.ERP.Views
                         Order = f.Order
                     }).ToList();
 
-                // ✅ ИСПОЛЬЗУЕМ ОТДЕЛЬНЫЙ КОНТЕКСТ ДЛЯ СОХРАНЕНИЯ
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
 
                 if (_currentReport.Id == Guid.Empty)
                 {
-                    // ✅ НОВЫЙ ОТЧЕТ - ПРОСТО ДОБАВЛЯЕМ
                     _currentReport.Id = Guid.NewGuid();
                     _currentReport.Fields = fieldsToAdd;
                     _currentReport.Filters = filtersToAdd;
-
                     context.Reports.Add(_currentReport);
-                    await context.SaveChangesAsync();
                 }
                 else
                 {
-                    // ✅ СУЩЕСТВУЮЩИЙ ОТЧЕТ - ОБНОВЛЯЕМ
                     var existingReport = await context.Reports
                         .Include(r => r.Fields)
                         .Include(r => r.Filters)
@@ -531,7 +534,6 @@ namespace BIS.ERP.Views
 
                     if (existingReport == null)
                     {
-                        // Отчет не найден - создаем новый
                         _currentReport.Id = Guid.NewGuid();
                         _currentReport.Fields = fieldsToAdd;
                         _currentReport.Filters = filtersToAdd;
@@ -539,58 +541,24 @@ namespace BIS.ERP.Views
                     }
                     else
                     {
-                        // ✅ ОБНОВЛЯЕМ ОСНОВНЫЕ ПОЛЯ
-                        existingReport.Name = _currentReport.Name;
-                        existingReport.Description = _currentReport.Description;
-                        existingReport.TitleText = _currentReport.TitleText;
-                        existingReport.SubtitleText = _currentReport.SubtitleText;
-                        existingReport.HeaderText = _currentReport.HeaderText;
-                        existingReport.FooterText = _currentReport.FooterText;
-                        existingReport.SummaryText = _currentReport.SummaryText;
-                        existingReport.DataSourceType = _currentReport.DataSourceType;
-                        existingReport.DataSourceId = _currentReport.DataSourceId;
-                        existingReport.ReportType = _currentReport.ReportType;
-                        existingReport.IsActive = _currentReport.IsActive;
-                        existingReport.IsPrintForm = _currentReport.IsPrintForm;
-                        existingReport.IsDefault = _currentReport.IsDefault;
-                        existingReport.SourceFormat = _currentReport.SourceFormat;
-                        existingReport.Template = _currentReport.Template;
-                        existingReport.Icon = _currentReport.Icon;
-                        existingReport.UpdatedAt = DateTime.UtcNow;
-                        existingReport.PageOrientation = _currentReport.PageOrientation;
-                        existingReport.FontName = _currentReport.FontName;
-                        existingReport.FontSize = _currentReport.FontSize;
-                        existingReport.HeaderColor = _currentReport.HeaderColor;
-                        existingReport.AlternateRowColors = _currentReport.AlternateRowColors;
-                        existingReport.ShowGridLines = _currentReport.ShowGridLines;
-                        existingReport.ShowGrandTotal = _currentReport.ShowGrandTotal;
-                        existingReport.ShowPageNumbers = _currentReport.ShowPageNumbers;
+                        // ✅ УДАЛЯЕМ СТАРЫЙ И СОЗДАЕМ НОВЫЙ
+                        var reportId = existingReport.Id;
+                        var createdAt = existingReport.CreatedAt;
 
-                        // ✅ УДАЛЯЕМ СТАРЫЕ ПОЛЯ
                         context.ReportFields.RemoveRange(existingReport.Fields);
-
-                        // ✅ УДАЛЯЕМ СТАРЫЕ ФИЛЬТРЫ
                         context.ReportFilters.RemoveRange(existingReport.Filters);
+                        context.Reports.Remove(existingReport);
+                        await context.SaveChangesAsync();
 
-                        // ✅ ДОБАВЛЯЕМ НОВЫЕ ПОЛЯ
-                        foreach (var field in fieldsToAdd)
-                        {
-                            field.ReportId = existingReport.Id;
-                            existingReport.Fields.Add(field);
-                        }
-
-                        // ✅ ДОБАВЛЯЕМ НОВЫЕ ФИЛЬТРЫ
-                        foreach (var filter in filtersToAdd)
-                        {
-                            filter.ReportId = existingReport.Id;
-                            existingReport.Filters.Add(filter);
-                        }
-
-                        context.Reports.Update(existingReport);
+                        _currentReport.Id = reportId;
+                        _currentReport.CreatedAt = createdAt;
+                        _currentReport.Fields = fieldsToAdd;
+                        _currentReport.Filters = filtersToAdd;
+                        context.Reports.Add(_currentReport);
                     }
-
-                    await context.SaveChangesAsync();
                 }
+
+                await context.SaveChangesAsync();
 
                 MessageBox.Show($"Отчет \"{_currentReport.Name}\" сохранен!", "Успех",
                     MessageBoxButton.OK, MessageBoxImage.Information);
@@ -600,9 +568,8 @@ namespace BIS.ERP.Views
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                // ✅ ОБРАБОТКА КОНКУРЕНТНОСТИ
                 MessageBox.Show(
-                    "Ошибка конкурентности при сохранении. Возможно, отчет был изменен другим пользователем.\n\n" +
+                    "Ошибка конкурентности при сохранении. Попробуйте еще раз.\n\n" +
                     $"Детали: {ex.Message}",
                     "Ошибка сохранения",
                     MessageBoxButton.OK,
