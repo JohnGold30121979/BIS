@@ -1,22 +1,24 @@
-﻿using System;
+﻿using BIS.ERP.Models;
+using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
+using Microsoft.Win32;
+using System;
 using System.Collections.Generic;
 using System.Data;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using BIS.ERP.Models;
-using BIS.ERP.Services;
-using BIS.ERP.Views.Dialogs;
-using Microsoft.Win32;
-using System.IO;
+using System.Windows.Input;
+using System.Windows.Media;
 
 namespace BIS.ERP.Views
 {
     public partial class CashOrderWorkView : UserControl
     {
         private readonly MetadataObject _documentMetadata;
-        private readonly MetadataService _metadataService;        
+        private readonly MetadataService _metadataService;
         private bool _isLoading = false;
 
         public CashOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)
@@ -63,29 +65,68 @@ namespace BIS.ERP.Views
                 var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
                 var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
+                // ---- Создаём кэш для Reference полей ----
                 var referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
 
-                // Загружаем Reference поля
-                foreach (var field in _documentMetadata.Fields.Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog)))
-                {
-                    if (catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
-                    {
-                        var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
-                        var dict = new Dictionary<Guid, string>();
+                // 1. Собрать все Reference поля документа (из метаданных)
+                var refFields = _documentMetadata.Fields
+                    .Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog))
+                    .ToList();
 
-                        foreach (var item in refData)
+                System.Diagnostics.Debug.WriteLine($"🔍 Найдено Reference полей: {refFields.Count}");
+
+                // 2. Для каждого поля собрать уникальные ID из данных
+                foreach (var field in refFields)
+                {
+                    var ids = new HashSet<Guid>();
+                    foreach (var row in data)
+                    {
+                        if (row.TryGetValue(field.Name, out var value) && value != null)
                         {
-                            if (!item.ContainsKey("Id")) continue;
-                            if (Guid.TryParse(item["Id"].ToString(), out var id))
-                            {
-                                dict[id] = ReferenceDisplayHelper.BuildDisplayValue(item, field);
-                            }
+                            if (Guid.TryParse(value.ToString(), out var id))
+                                ids.Add(id);
                         }
-                        referenceCache[field.Name] = dict;
                     }
+
+                    if (ids.Count == 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"⏭️ Поле '{field.Name}' — нет данных, пропускаем");
+                        continue;
+                    }
+
+                    // 3. Найти справочник по ReferenceCatalog
+                    if (!catalogsDict.TryGetValue(field.ReferenceCatalog, out var catalog))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"❌ Справочник '{field.ReferenceCatalog}' не найден");
+                        continue;
+                    }
+
+                    // 4. Загрузить данные справочника
+                    var refData = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                    var dict = new Dictionary<Guid, string>();
+
+                    foreach (var item in refData)
+                    {
+                        if (!item.TryGetValue("Id", out var refId) || refId == null)
+                            continue;
+                        if (!Guid.TryParse(refId.ToString(), out var id))
+                            continue;
+
+                        // Построить отображаемое имя
+                        var display = ReferenceDisplayHelper.BuildDisplayValue(item, field);
+                        if (string.IsNullOrEmpty(display))
+                        {
+                            var fallback = item.FirstOrDefault(kv => kv.Key != "Id").Value?.ToString();
+                            display = !string.IsNullOrEmpty(fallback) ? fallback : id.ToString();
+                        }
+                        dict[id] = display;
+                    }
+
+                    referenceCache[field.Name] = dict;
+                    System.Diagnostics.Debug.WriteLine($"✅ Загружено {dict.Count} записей для '{field.Name}' (справочник: {field.ReferenceCatalog})");
                 }
 
-                // Загружаем счета из плана счетов
+                // 5. Специальная загрузка для корреспондирующего счета (план счетов)
                 try
                 {
                     var chartCatalog = catalogsDict.FirstOrDefault(c => c.Key.StartsWith("План счетов")).Value;
@@ -95,7 +136,7 @@ namespace BIS.ERP.Views
                         var accountDict = new Dictionary<Guid, string>();
                         foreach (var acc in accountsData)
                         {
-                            if (acc.ContainsKey("Id") && Guid.TryParse(acc["Id"].ToString(), out var accId))
+                            if (acc.TryGetValue("Id", out var accIdObj) && accIdObj != null && Guid.TryParse(accIdObj.ToString(), out var accId))
                             {
                                 var code = acc.ContainsKey("Код") ? acc["Код"].ToString() : "";
                                 var name = acc.ContainsKey("Наименование") ? acc["Наименование"].ToString() : "";
@@ -103,6 +144,11 @@ namespace BIS.ERP.Views
                             }
                         }
                         referenceCache["correspondent_account"] = accountDict;
+                        System.Diagnostics.Debug.WriteLine($"✅ Загружено счетов: {accountDict.Count}");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("❌ План счетов не найден!");
                     }
                 }
                 catch (Exception ex)
@@ -110,37 +156,138 @@ namespace BIS.ERP.Views
                     System.Diagnostics.Debug.WriteLine($"Ошибка загрузки счетов: {ex.Message}");
                 }
 
+                // ---- Создание списка строк ----
                 var rows = new List<CashOrderRow>();
 
                 foreach (var row in data)
                 {
                     var newRow = new CashOrderRow
                     {
-                        Id = row.ContainsKey("Id") ? Guid.Parse(row["Id"].ToString()) : Guid.NewGuid(),
-                        DocNumber = row.ContainsKey("Номер") ? row["Номер"]?.ToString() :
-                                   (row.ContainsKey("Номер документа") ? row["Номер документа"]?.ToString() : ""),
-                        DocDate = row.ContainsKey("Дата") && row["Дата"] != null ? (DateTime)row["Дата"] : DateTime.Now,
-                        Amount = row.ContainsKey("Сумма") && row["Сумма"] != null ? Convert.ToDecimal(row["Сумма"]) : 0,
-                        Basis = row.ContainsKey("Основание") ? row["Основание"]?.ToString() : "",
-                        Description = row.ContainsKey("Примечание") ? row["Примечание"]?.ToString() : "",
-                        IsPosted = row.ContainsKey("Проведён") && row["Проведён"] != null ? (bool)row["Проведён"] : false,
-                        CreatedAt = row.ContainsKey("CreatedAt") && row["CreatedAt"] != null ? (DateTime)row["CreatedAt"] : DateTime.Now,
-                        UpdatedAt = row.ContainsKey("UpdatedAt") && row["UpdatedAt"] != null ? (DateTime)row["UpdatedAt"] : DateTime.Now,
+                        Id = row.TryGetValue("Id", out var idObj) && idObj != DBNull.Value && idObj != null
+                            ? Guid.Parse(idObj.ToString())
+                            : Guid.NewGuid(),
+                        DocNumber = row.TryGetValue("Номер", out var numObj) && numObj != DBNull.Value
+                            ? numObj?.ToString()
+                            : (row.TryGetValue("Номер документа", out var numObj2) && numObj2 != DBNull.Value
+                                ? numObj2?.ToString()
+                                : ""),
+                        DocDate = row.TryGetValue("Дата", out var dateObj) && dateObj != DBNull.Value && dateObj != null
+                            ? (DateTime)dateObj
+                            : DateTime.Now,
+                        Amount = row.TryGetValue("Сумма", out var amtObj) && amtObj != DBNull.Value && amtObj != null
+                            ? Convert.ToDecimal(amtObj)
+                            : 0,
+                        Basis = row.TryGetValue("Основание", out var basisObj) && basisObj != DBNull.Value
+                            ? basisObj?.ToString()
+                            : "",
+                        Description = row.TryGetValue("Примечание", out var descObj) && descObj != DBNull.Value
+                            ? descObj?.ToString()
+                            : "",
+                        IsPosted = row.TryGetValue("Проведён", out var postedObj) && postedObj != DBNull.Value && postedObj != null
+                            ? (bool)postedObj
+                            : false,
+                        CreatedAt = row.TryGetValue("CreatedAt", out var createdObj) && createdObj != DBNull.Value && createdObj != null
+                            ? (DateTime)createdObj
+                            : DateTime.Now,
+                        UpdatedAt = row.TryGetValue("UpdatedAt", out var updatedObj) && updatedObj != DBNull.Value && updatedObj != null
+                            ? (DateTime)updatedObj
+                            : DateTime.Now,
 
-                        // НОВЫЕ ПОЛЯ
-                        DebitAccount = row.ContainsKey("Дебет") ? row["Дебет"]?.ToString() : "",
-                        CreditAccount = row.ContainsKey("Кредит") ? row["Кредит"]?.ToString() : "",
-                        AmountInCurrency = row.ContainsKey("Сумма в валюте") && row["Сумма в валюте"] != null ? Convert.ToDecimal(row["Сумма в валюте"]) : 0
-                    };                  
+                        // Новые поля
+                        DebitAccount = row.TryGetValue("Дебет", out var debObj) && debObj != DBNull.Value
+                            ? debObj?.ToString()
+                            : "",
+                        CreditAccount = row.TryGetValue("Кредит", out var credObj) && credObj != DBNull.Value
+                            ? credObj?.ToString()
+                            : "",
+                        AmountInCurrency = row.TryGetValue("Сумма в валюте", out var curObj) && curObj != DBNull.Value && curObj != null
+                            ? Convert.ToDecimal(curObj)
+                            : 0,
+                        CashDeskId = row.TryGetValue("Касса", out var cashIdObj) && cashIdObj != DBNull.Value ? cashIdObj?.ToString() : ""
+                    };
 
-                    // Загружаем остальные Reference поля...
-                    // (оставьте существующий код для Organizations, Currency, Employee, Material)
+                    // ---- Загрузка Reference полей через кэш ----
+                    // Организация
+                    if (row.TryGetValue("Организация", out var orgObj) && orgObj != DBNull.Value && orgObj != null)
+                    {
+                        if (Guid.TryParse(orgObj.ToString(), out var orgId) &&
+                            referenceCache.TryGetValue("Организация", out var orgDict) &&
+                            orgDict.TryGetValue(orgId, out var orgName))
+                        {
+                            newRow.OrganizationName = orgName;
+                        }
+                        else
+                        {
+                            newRow.OrganizationName = orgObj.ToString();
+                        }
+                    }
+
+                    // Валюта
+                    if (row.TryGetValue("Валюта", out var curObj2) && curObj2 != DBNull.Value && curObj2 != null)
+                    {
+                        if (Guid.TryParse(curObj2.ToString(), out var curId) &&
+                            referenceCache.TryGetValue("Валюта", out var curDict) &&
+                            curDict.TryGetValue(curId, out var curName))
+                        {
+                            newRow.CurrencyName = curName;
+                        }
+                        else
+                        {
+                            newRow.CurrencyName = curObj2.ToString();
+                        }
+                    }
+
+                    // Сотрудник
+                    if (row.TryGetValue("Сотрудник", out var empObj) && empObj != DBNull.Value && empObj != null)
+                    {
+                        if (Guid.TryParse(empObj.ToString(), out var empId) &&
+                            referenceCache.TryGetValue("Сотрудник", out var empDict) &&
+                            empDict.TryGetValue(empId, out var empName))
+                        {
+                            newRow.EmployeeName = empName;
+                        }
+                        else
+                        {
+                            newRow.EmployeeName = empObj.ToString();
+                        }
+                    }
+
+                    // Материал
+                    if (row.TryGetValue("Материал", out var matObj) && matObj != DBNull.Value && matObj != null)
+                    {
+                        if (Guid.TryParse(matObj.ToString(), out var matId) &&
+                            referenceCache.TryGetValue("Материал", out var matDict) &&
+                            matDict.TryGetValue(matId, out var matName))
+                        {
+                            newRow.MaterialName = matName;
+                        }
+                        else
+                        {
+                            newRow.MaterialName = matObj.ToString();
+                        }
+                    }
+
+                    // Корреспондирующий счет
+                    if (row.TryGetValue("Корр. счет", out var corrObj) && corrObj != DBNull.Value && corrObj != null)
+                    {
+                        if (Guid.TryParse(corrObj.ToString(), out var corrId) &&
+                            referenceCache.TryGetValue("correspondent_account", out var accDict) &&
+                            accDict.TryGetValue(corrId, out var accName))
+                        {
+                            newRow.CorrespondentAccountName = accName;
+                        }
+                        else
+                        {
+                            newRow.CorrespondentAccountName = corrObj.ToString();
+                        }
+                    }
 
                     rows.Add(newRow);
                 }
 
                 DataGrid.ItemsSource = rows;
-                //UpdateAnalyticColumns(data, accountAnalytics);
+                DataGrid.Items.Refresh();
+                // UpdateAnalyticColumns(data, accountAnalytics);
 
                 StatusText.Text = $"📊 Загружено записей: {rows.Count}";
                 UpdateButtonsState();
@@ -157,7 +304,7 @@ namespace BIS.ERP.Views
                 _isLoading = false;
             }
         }
-        
+
 
         private static Visibility GetAnalyticColumnVisibility(
             string fieldName,
@@ -273,10 +420,19 @@ namespace BIS.ERP.Views
                 try
                 {
                     StatusText.Text = selectedRow.IsPosted ? "Отмена проведения..." : "Проведение...";
+
+                    // Меняем статус документа
                     if (selectedRow.IsPosted)
                         await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
                     else
                         await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
+
+                    // ✅ Обновляем кассу (isPosting = true если проводим, false если отменяем)
+                    if (!string.IsNullOrEmpty(selectedRow.CashDeskId))
+                    {
+                        await UpdateCashDeskBalanceAsync(selectedRow.CashDeskId, selectedRow.Amount, !selectedRow.IsPosted);
+                    }
+
                     await LoadData();
                     MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
                         MessageBoxButton.OK, MessageBoxImage.Information);
@@ -342,6 +498,96 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var selected = DataGrid.SelectedItem as CashOrderRow;
+            if (selected == null)
+                return;
+
+            // Конвертируем CashOrderRow в PostingViewModel
+            var posting = new PostingViewModel
+            {
+                DocumentNumber = selected.DocNumber,
+                Date = selected.DocDate,
+                DocumentType = _documentMetadata.Name,
+                DebitAccount = selected.DebitAccount,
+                CreditAccount = selected.CreditAccount,
+                Amount = selected.Amount,
+                AmountCurrency = selected.AmountInCurrency,
+                Currency = selected.CurrencyName,
+                Organization = selected.OrganizationName,
+                Employee = selected.EmployeeName,
+                Note = selected.Description
+            };
+
+            var dialog = new PostingDetailsDialog(posting);
+            dialog.Owner = Window.GetWindow(this);
+            dialog.ShowDialog();
+        }
+
+        private void DataGrid_LoadingRow(object sender, DataGridRowEventArgs e)
+        {
+            var row = e.Row.DataContext as CashOrderRow;
+            if (row != null && row.IsPosted)
+            {
+                e.Row.Background = new SolidColorBrush(Color.FromRgb(212, 237, 218));
+            }
+        }
+
+        /// <summary>
+        /// Обновление остатка кассы при проведении/отмене проведения
+        /// </summary>
+        private async Task UpdateCashDeskBalanceAsync(string cashDeskId, decimal amount, bool isPosting)
+        {
+            try
+            {
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var cashDeskCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Кассы");
+
+                if (cashDeskCatalog == null)
+                    return;
+
+                var cashDeskData = await _metadataService.GetCatalogDataAsync(cashDeskCatalog.Id);
+                var cashDesk = cashDeskData.FirstOrDefault(c => c["Id"].ToString() == cashDeskId);
+
+                if (cashDesk == null)
+                    return;
+
+                var currentBalance = cashDesk.ContainsKey("Текущий остаток")
+                    ? Convert.ToDecimal(cashDesk["Текущий остаток"])
+                    : 0;
+
+                decimal newBalance;
+                if (_documentMetadata.Name == "Приходный кассовый ордер")
+                {
+                    // При проведении – увеличиваем, при отмене – уменьшаем
+                    newBalance = isPosting ? currentBalance + amount : currentBalance - amount;
+                }
+                else if (_documentMetadata.Name == "Расходный кассовый ордер")
+                {
+                    // При проведении – уменьшаем, при отмене – увеличиваем
+                    newBalance = isPosting ? currentBalance - amount : currentBalance + amount;
+                }
+                else
+                {
+                    return;
+                }
+
+                if (newBalance == currentBalance)
+                    return;
+
+                var updateData = new Dictionary<string, object> { ["Текущий остаток"] = newBalance };
+                await _metadataService.UpdateDynamicRecordAsync(cashDeskCatalog.Id, Guid.Parse(cashDeskId), updateData);
+
+                System.Diagnostics.Debug.WriteLine($"✅ Касса обновлена: новый остаток = {newBalance}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"❌ Ошибка обновления кассы: {ex.Message}");
+            }
+        }
+
     }
 
     public class CashOrderRow
@@ -367,5 +613,6 @@ namespace BIS.ERP.Views
         public string DebitAccount { get; set; } = string.Empty;
         public string CreditAccount { get; set; } = string.Empty;
         public decimal AmountInCurrency { get; set; }
+        public string CashDeskId { get; set; } = string.Empty;
     }
 }

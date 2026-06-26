@@ -91,7 +91,8 @@
                   RowHeight="35"
                   FontSize="12"
                   VirtualizingPanel.IsVirtualizing="True"
-                  VirtualizingPanel.VirtualizationMode="Recycling">
+                  VirtualizingPanel.VirtualizationMode="Recycling" 
+                  MouseDoubleClick="PostingsGrid_MouseDoubleClick">
 
             <DataGrid.Resources>
                 <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3498DB" Opacity="0.3"/>

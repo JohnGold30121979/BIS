@@ -16,9 +16,17 @@ namespace BIS.ERP.Views
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
         private Guid _selectedCorrAccountId;
+        private string _selectedCorrAccountCode = string.Empty;
+        private Guid _selectedCashDeskId;
+        private string _selectedCashDeskCode = "1110";
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
+        private List<CashDeskItem> _cashDesks = new();
+
+        // Для сотрудника
+        private Guid _selectedEmployeeId = Guid.Empty;
+        private string _selectedEmployeeName = string.Empty;
 
         public CashOrderDialog(MetadataObject document, MetadataService metadataService)
         {
@@ -50,36 +58,34 @@ namespace BIS.ERP.Views
 
             try
             {
-                System.Diagnostics.Debug.WriteLine("=== InitializeAsync START ===");
-                this.Cursor = Cursors.Wait;             
+                this.Cursor = Cursors.Wait;
 
-                // Загружаем данные в фоновом потоке
                 var data = await Task.Run(async () => await LoadAllDataAsync());
 
-                System.Diagnostics.Debug.WriteLine("2. LoadReferenceDataAsync завершён");
-
-                // Обновляем UI в основном потоке
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    System.Diagnostics.Debug.WriteLine("3. Обновление UI...");
-
-                    // Заполняем ComboBox
+                    // Заполняем ComboBox (кроме сотрудника)
                     if (data.CashDesks != null)
                         CashDeskCombo.ItemsSource = data.CashDesks;
                     if (data.Organizations != null)
                         OrganizationCombo.ItemsSource = data.Organizations;
                     if (data.Currencies != null)
                         CurrencyCombo.ItemsSource = data.Currencies;
-                    if (data.Employees != null)
-                        EmployeeCombo.ItemsSource = data.Employees;
                     if (data.Materials != null)
                         MaterialCombo.ItemsSource = data.Materials;
+
                     _accountAnalytics = data.AccountAnalytics;
 
                     // Генерируем номер
                     if (!editId.HasValue)
                     {
                         NumberBox.Text = data.DocumentNumber;
+
+                        if (data.CashDesks != null && data.CashDesks.Any())
+                        {
+                            CashDeskCombo.SelectedItem = data.CashDesks.First();
+                            _selectedCashDeskId = data.CashDesks.First().Id;
+                        }
                     }
                     else if (data.Record != null)
                     {
@@ -97,26 +103,40 @@ namespace BIS.ERP.Views
                         if (data.Record.ContainsKey("Примечание"))
                             DescriptionBox.Text = data.Record["Примечание"].ToString();
 
+                        // Загружаем кассу
+                        if (data.Record.TryGetValue("Касса", out var cashValue))
+                            SelectComboByRecordValue(CashDeskCombo, data.Record, "Касса");
+
+                        // Загружаем корреспондирующий счет
                         if (data.Record.TryGetValue("Корр. счет", out var accountValue))
                             ApplySelectedCorrAccount(accountValue);
 
+                        // Загружаем организацию
                         SelectComboByRecordValue(OrganizationCombo, data.Record, "Организация");
+
+                        // Загружаем валюту
                         SelectComboByRecordValue(CurrencyCombo, data.Record, "Валюта");
-                        SelectComboByRecordValue(EmployeeCombo, data.Record, "Сотрудник");
+
+                        // Загружаем сотрудника (через отдельный метод)
+                        if (data.Record.TryGetValue("Сотрудник", out var employeeValue) && Guid.TryParse(employeeValue?.ToString(), out var empId))
+                        {
+                            _selectedEmployeeId = empId;
+                            var emp = data.Employees?.FirstOrDefault(e => e.Id == empId);
+                            EmployeeNameBox.Text = emp != null ? emp.DisplayName : employeeValue.ToString();
+                            _selectedEmployeeName = emp?.DisplayName ?? employeeValue.ToString();
+                        }
+
+                        // Загружаем материал
                         SelectComboByRecordValue(MaterialCombo, data.Record, "Материал");
                     }
 
                     UpdateAccountControlledFieldsVisibility();
-                    System.Diagnostics.Debug.WriteLine("4. UI обновлён");
                 });
 
-                _isDataLoaded = true;               
-                System.Diagnostics.Debug.WriteLine("=== InitializeAsync COMPLETED ===");
+                _isDataLoaded = true;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"=== InitializeAsync ERROR: {ex.Message} ===");
-                System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");               
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -129,25 +149,25 @@ namespace BIS.ERP.Views
 
         private async Task<DialogData> LoadAllDataAsync()
         {
-            System.Diagnostics.Debug.WriteLine("1. Начинаем LoadReferenceDataAsync...");
-
             var result = new DialogData();
             var allCatalogs = await _metadataService.GetCatalogsAsync();
             result.AccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
-            // Загружаем кассы
+            // Кассы
             var cashDesks = allCatalogs.FirstOrDefault(c => c.Name == "Кассы");
             if (cashDesks != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(cashDesks.Id);
-                result.CashDesks = data.Select(d => new ReferenceItem
+                result.CashDesks = data.Select(d => new CashDeskItem
                 {
                     Id = Guid.Parse(d["Id"].ToString()),
-                    DisplayName = d["Наименование"].ToString()
+                    DisplayName = d.ContainsKey("Наименование") ? d["Наименование"].ToString() : d["name"].ToString(),
+                    AccountCode = d.ContainsKey("Счет кассы") ? d["Счет кассы"].ToString() :
+                                  d.ContainsKey("Счет") ? d["Счет"].ToString() : "1110"
                 }).ToList();
             }
 
-            // Загружаем организации
+            // Организации
             var orgs = allCatalogs.FirstOrDefault(c => c.Name == "Организации");
             if (orgs != null)
             {
@@ -159,8 +179,11 @@ namespace BIS.ERP.Views
                 }).ToList();
             }
 
+            // Валюты
             result.Currencies = await LoadReferenceItemsAsync(allCatalogs, "Справочник валют", "Код", "Наименование");
+            // Сотрудники (для диалога выбора)
             result.Employees = await LoadReferenceItemsAsync(allCatalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
+            // Материалы
             result.Materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
 
             // Генерируем номер
@@ -180,20 +203,19 @@ namespace BIS.ERP.Views
                 result.Record = data.FirstOrDefault(r => r["Id"].ToString() == _editId.Value.ToString());
             }
 
-            System.Diagnostics.Debug.WriteLine("2. LoadReferenceDataAsync завершён");
             return result;
         }
 
         private class DialogData
         {
-            public List<ReferenceItem> CashDesks { get; set; }
-            public List<ReferenceItem> Organizations { get; set; }
-            public List<ReferenceItem> Currencies { get; set; }
-            public List<ReferenceItem> Employees { get; set; }
-            public List<ReferenceItem> Materials { get; set; }
+            public List<CashDeskItem> CashDesks { get; set; } = new();
+            public List<ReferenceItem> Organizations { get; set; } = new();
+            public List<ReferenceItem> Currencies { get; set; } = new();
+            public List<ReferenceItem> Employees { get; set; } = new();
+            public List<ReferenceItem> Materials { get; set; } = new();
             public AccountAnalyticsRegistry AccountAnalytics { get; set; } = new();
-            public string DocumentNumber { get; set; }
-            public Dictionary<string, object> Record { get; set; }
+            public string DocumentNumber { get; set; } = string.Empty;
+            public Dictionary<string, object>? Record { get; set; }
         }
 
         private async void SelectAccount_Click(object sender, RoutedEventArgs e)
@@ -234,6 +256,8 @@ namespace BIS.ERP.Views
                         _selectedCorrAccountId = Guid.Parse(dialog.SelectedAccount["Id"].ToString());
                     }
 
+                    _selectedCorrAccountCode = accountCode;
+
                     UpdateAccountControlledFieldsVisibility();
                 }
             }
@@ -265,38 +289,126 @@ namespace BIS.ERP.Views
 
                 NumberBox.Text = documentNumber;
 
+                var amount = decimal.TryParse(AmountBox.Text, out var parsedAmount) ? parsedAmount : 0;
+
+                // ПРОВЕРКА ЗАПОЛНЕНИЯ ВСЕХ АКТИВНЫХ ПОЛЕЙ
+                if (OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem == null)
+                {
+                    MessageBox.Show("Выберите организацию!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    OrganizationCombo.Focus();
+                    return;
+                }
+
+                if (EmployeePanel.Visibility == Visibility.Visible && _selectedEmployeeId == Guid.Empty)
+                {
+                    MessageBox.Show("Выберите сотрудника!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (CurrencyPanel.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem == null)
+                {
+                    MessageBox.Show("Выберите валюту!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    CurrencyCombo.Focus();
+                    return;
+                }
+
+                if (MaterialPanel.Visibility == Visibility.Visible && MaterialCombo.SelectedItem == null)
+                {
+                    MessageBox.Show("Выберите материал!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MaterialCombo.Focus();
+                    return;
+                }
+
+                // Получаем кассу
+                string cashDeskId = string.Empty;
+                string cashDeskCode = "1110";
+
+                if (CashDeskCombo.SelectedItem is CashDeskItem cashDesk)
+                {
+                    cashDeskId = cashDesk.Id.ToString();
+                    cashDeskCode = cashDesk.AccountCode;
+                    _selectedCashDeskId = cashDesk.Id;
+                    _selectedCashDeskCode = cashDesk.AccountCode;
+                }
+
+                // Получаем корреспондирующий счет
+                string corrAccountId = _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId.ToString() : string.Empty;
+                string corrAccountCode = _selectedCorrAccountCode;
+
+                if (string.IsNullOrEmpty(corrAccountCode))
+                {
+                    MessageBox.Show("Выберите корреспондирующий счет (кнопка '?').", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Определяем дебет и кредит
+                string debitAccount, creditAccount;
+                if (_document.Name == "Приходный кассовый ордер")
+                {
+                    debitAccount = cashDeskCode;
+                    creditAccount = corrAccountCode;
+                }
+                else if (_document.Name == "Расходный кассовый ордер")
+                {
+                    debitAccount = corrAccountCode;
+                    creditAccount = cashDeskCode;
+                }
+                else
+                {
+                    debitAccount = cashDeskCode;
+                    creditAccount = corrAccountCode;
+                }
+
+                if (debitAccount == creditAccount)
+                {
+                    MessageBox.Show("Дебет и кредит не могут быть одинаковыми!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Валюта
+                bool isCurrencyEnabled = IsCurrencyEnabledForAccount(corrAccountCode);
+                decimal amountInCurrency = isCurrencyEnabled ? amount : 0;
+
                 var itemData = new Dictionary<string, object>
                 {
                     ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
-                    ["Сумма"] = decimal.TryParse(AmountBox.Text, out var amount) ? amount : 0,
+                    ["Сумма"] = amount,
                     ["Основание"] = BasisBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
-                    ["Проведён"] = false
+                    ["Проведён"] = false,
+                    ["Касса"] = cashDeskId,
+                    ["Корр. счет"] = corrAccountId,
+                    ["Дебет"] = debitAccount,
+                    ["Кредит"] = creditAccount,
+                    ["Сумма в валюте"] = amountInCurrency
                 };
 
-                SetFieldValueIfExists(itemData, "Касса",
-                    CashDeskCombo.SelectedItem is ReferenceItem cashDesk ? cashDesk.Id.ToString() : string.Empty);
+                // Заполняем остальные поля (только если они видимы, иначе не сохраняем)
                 SetFieldValueIfExists(itemData, "Организация",
                     OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem org
                         ? org.Id.ToString()
                         : string.Empty);
+
                 SetFieldValueIfExists(itemData, "Валюта",
                     CurrencyPanel.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem is ReferenceItem currency
                         ? currency.Id.ToString()
                         : string.Empty);
+
                 SetFieldValueIfExists(itemData, "Сотрудник",
-                    EmployeePanel.Visibility == Visibility.Visible && EmployeeCombo.SelectedItem is ReferenceItem employee
-                        ? employee.Id.ToString()
+                    EmployeePanel.Visibility == Visibility.Visible && _selectedEmployeeId != Guid.Empty
+                        ? _selectedEmployeeId.ToString()
                         : string.Empty);
+
                 SetFieldValueIfExists(itemData, "Материал",
                     MaterialPanel.Visibility == Visibility.Visible && MaterialCombo.SelectedItem is ReferenceItem material
                         ? material.Id.ToString()
                         : string.Empty);
-                SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
-                SetFieldValueIfExists(itemData, "Корр. счет",
-                    _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId.ToString() : string.Empty);
 
+                SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
+
+                // Сохраняем документ
                 if (_editId.HasValue)
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
                 else
@@ -307,11 +419,36 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка сохранения: {ex.Message}");
+                MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
                 this.Cursor = null;
+            }
+        }
+
+        private bool IsCurrencyEnabledForAccount(string accountCode)
+        {
+            if (string.IsNullOrEmpty(accountCode))
+                return false;
+
+            try
+            {
+                var settings = _accountAnalytics.GetSettingsByCode(accountCode);
+                if (settings == null)
+                    return false;
+
+                var currencyDefinition = _accountAnalytics.Definitions
+                    .FirstOrDefault(d => d.Code == "currencies");
+                if (currencyDefinition == null)
+                    return false;
+
+                return settings.Allows(currencyDefinition);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -328,6 +465,7 @@ namespace BIS.ERP.Views
                 return;
 
             _selectedCorrAccountId = account.Id;
+            _selectedCorrAccountCode = account.Code;
             CorrAccountBox.Text = account.DisplayName;
         }
 
@@ -359,16 +497,15 @@ namespace BIS.ERP.Views
                     showWhenNoAccountSelected: false,
                     showUnmappedFields: false));
 
-            SetAccountControlledPanelVisibility(
-                EmployeePanel,
-                EmployeeCombo,
-                AccountAnalyticsRules.ShouldShowField(
-                    "Сотрудник",
-                    new[] { settings },
-                    _accountAnalytics.Definitions,
-                    "Сотрудники (Списочный состав)",
-                    showWhenNoAccountSelected: false,
-                    showUnmappedFields: false));
+            // Для сотрудника – просто показываем/скрываем панель, ComboBox нет
+            EmployeePanel.Visibility = AccountAnalyticsRules.ShouldShowField(
+                "Сотрудник",
+                new[] { settings },
+                _accountAnalytics.Definitions,
+                "Сотрудники (Списочный состав)",
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false)
+                ? Visibility.Visible : Visibility.Collapsed;
 
             SetAccountControlledPanelVisibility(
                 MaterialPanel,
@@ -461,8 +598,71 @@ namespace BIS.ERP.Views
         {
             panel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
 
-            if (!isVisible)
+            if (!isVisible && comboBox != null)
                 comboBox.SelectedItem = null;
         }
+
+        private async void SelectEmployee_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                this.Cursor = Cursors.Wait;
+
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var employeeCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Сотрудники (Списочный состав)");
+
+                if (employeeCatalog == null)
+                {
+                    MessageBox.Show("Справочник сотрудников не найден!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var employeesData = await _metadataService.GetCatalogDataAsync(employeeCatalog.Id);
+
+                if (employeesData == null || employeesData.Count == 0)
+                {
+                    MessageBox.Show("В справочнике сотрудников нет данных!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new ReferenceSelectionDialog(employeesData, "Табельный номер", "ФИО");
+                dialog.Owner = this;
+
+                if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
+                {
+                    var employee = dialog.SelectedItem;
+                    var displayName = $"{employee.GetValueOrDefault("Табельный номер")} - {employee.GetValueOrDefault("ФИО")}";
+
+                    EmployeeNameBox.Text = displayName;
+                    _selectedEmployeeId = Guid.Parse(employee["Id"].ToString());
+                    _selectedEmployeeName = employee.GetValueOrDefault("ФИО")?.ToString() ?? string.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при выборе сотрудника: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                this.Cursor = null;
+            }
+        }
+
+        private void CashDeskCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CashDeskCombo.SelectedItem is CashDeskItem selected)
+            {
+                _selectedCashDeskId = selected.Id;
+                _selectedCashDeskCode = selected.AccountCode;
+                CashDeskAccountBox.Text = _selectedCashDeskCode;
+            }
+        }
+    }
+
+    public class CashDeskItem : ReferenceItem
+    {
+        public string AccountCode { get; set; } = "1110";
+        public string DisplayNameWithAccount => $"{DisplayName} (счет {AccountCode})";
     }
 }

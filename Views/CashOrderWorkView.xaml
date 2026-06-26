@@ -39,7 +39,19 @@
         <!-- Таблица -->
         <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 
           IsReadOnly="True" SelectionChanged="OnSelectionChanged"
-          AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1">
+          AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1"
+          MouseDoubleClick="DataGrid_MouseDoubleClick"
+          LoadingRow="DataGrid_LoadingRow">
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="Background" Value="White"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsPostedDisplay}" Value="Да">
+                            <Setter Property="Background" Value="LightGreen"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
@@ -48,10 +60,11 @@
                 <DataGridTextColumn Header="Сумма в сом" Binding="{Binding Amount, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="В валюте" Binding="{Binding AmountInCurrency, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding Description}" Width="150"/>
-                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80" Visibility="Collapsed"/>
-                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150" Visibility="Collapsed"/>
-                <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150" Visibility="Collapsed"/>
+                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
+                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150"/>
+                <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150"/>
             </DataGrid.Columns>
+            
         </DataGrid>
         <!-- Статус бар -->
         <StatusBar Grid.Row="3" Margin="0,10,0,0">

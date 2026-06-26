@@ -106,6 +106,8 @@ namespace BIS.ERP.Views
             }
 
             PostingsGrid.ItemsSource = _filteredPostings;
+
+
             TotalInfo.Text = $"Общая сумма: {_filteredPostings.Sum(p => p.Amount):N2} сом";
         }
 
@@ -141,6 +143,17 @@ namespace BIS.ERP.Views
         {
             // TODO: Открыть диалог сводных оборотов
             MessageBox.Show("Сводные обороты", "Информация");
+        }
+
+        private void PostingsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var selected = PostingsGrid.SelectedItem as PostingViewModel;
+            if (selected == null)
+                return;
+
+            var dialog = new PostingDetailsDialog(selected);
+            dialog.Owner = Window.GetWindow(this);
+            dialog.ShowDialog();
         }
     }
 }
