@@ -295,8 +295,18 @@ namespace BIS.ERP.Services
 
         private static byte[] BuildFoxProLayoutPdf(Report report, CashOrderPrintData data)
         {
-            var template = JsonSerializer.Deserialize<PrintFormTemplate>(report.Template)
-                ?? throw new InvalidOperationException("Макет FoxPro поврежден.");
+            // Используем FrxParser для корректной десериализации (поддерживает FrxFullData и PrintFormTemplate)
+            var frxReport = new FrxReport
+            {
+                Id = Guid.NewGuid(),
+                Name = report.Name,
+                OriginalFileName = string.Empty,
+                FrxXml = report.Template
+            };
+            var parser = new FrxParser();
+            var template = parser.GetPrintTemplate(frxReport);
+            if (template.Elements.Count == 0 && template.Bands.Count == 0)
+                throw new InvalidOperationException("Макет FoxPro поврежден: не найдено элементов.");
             var svg = BuildFoxProSvg(template, data);
             return QuestPDF.Fluent.Document.Create(document => document.Page(page =>
             {
@@ -535,7 +545,75 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка парсинга FRX: {ex.Message}");
                 return string.Empty;
             }
-        }     
+        }
+
+        // Извлечение полей отчета из PrintFormTemplate (JSON макета FoxPro)
+        public static List<ReportField> ExtractReportFieldsFromTemplate(string templateJson)
+        {
+            var fields = new List<ReportField>();
+            if (string.IsNullOrWhiteSpace(templateJson))
+                return fields;
+
+            try
+            {
+                var template = JsonSerializer.Deserialize<PrintFormTemplate>(templateJson);
+                if (template == null)
+                    return fields;
+
+                int order = 0;
+                foreach (var element in template.Elements.OrderBy(e => e.Order))
+                {
+                    // Пропускаем линии и рамки — они не являются полями данных
+                    if (element.Type is "Line" or "Box" or "Picture")
+                        continue;
+
+                    var fieldName = string.IsNullOrWhiteSpace(element.Expression)
+                        ? element.Text
+                        : element.Expression;
+
+                    // Очищаем от кавычек и лишнего
+                    if (!string.IsNullOrWhiteSpace(fieldName))
+                    {
+                        fieldName = fieldName.Trim('"', '\'', ' ', '=');
+                        // Пропускаем пустые или состоящие только из пробелов/знаков
+                        if (string.IsNullOrWhiteSpace(fieldName) || fieldName == "+" || fieldName == "-")
+                            continue;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
+                    var displayName = element.Type == "Text"
+                        ? element.Text?.Trim('"', '\'', ' ')
+                        : fieldName;
+
+                    if (!string.IsNullOrWhiteSpace(displayName))
+                    {
+                        displayName = displayName.Trim('"', '\'', ' ');
+                        if (string.IsNullOrWhiteSpace(displayName))
+                            displayName = fieldName;
+                    }
+
+                    fields.Add(new ReportField
+                    {
+                        Id = Guid.NewGuid(),
+                        FieldName = fieldName,
+                        DisplayName = displayName ?? fieldName,
+                        Width = Math.Max(1, (int)Math.Round(element.Width)),
+                        Alignment = element.Alignment.ToLower(),
+                        IsVisible = true,
+                        Order = order++
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка извлечения полей из шаблона: {ex.Message}");
+            }
+
+            return fields;
+        }
 
         private static string CleanFoxText(string input)
         {

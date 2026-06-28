@@ -81,6 +81,8 @@ namespace BIS.ERP.Models
         public string FontName { get; set; } = "Segoe UI";
         public int FontSize { get; set; } = 10;
         public bool FontBold { get; set; } = false;
+        public bool FontItalic { get; set; } = false;
+        public bool FontUnderline { get; set; } = false;
         public string BorderStyle { get; set; } = "None";
         public bool IsVisible { get; set; } = true;
         public int Order { get; set; } = 0;

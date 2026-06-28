@@ -283,9 +283,23 @@ namespace BIS.ERP.Views
 
             // Загрузка полей
             _reportFields.Clear();
-            foreach (var field in report.Fields.OrderBy(f => f.Order))
+            if (report.Fields != null && report.Fields.Count > 0)
             {
-                _reportFields.Add(field);
+                foreach (var field in report.Fields.OrderBy(f => f.Order))
+                {
+                    _reportFields.Add(field);
+                }
+            }
+            else if (report.ReportType == "FoxProLayout" && !string.IsNullOrWhiteSpace(report.Template))
+            {
+                // Если поля не сохранились, но есть FRX-шаблон — извлекаем поля из него
+                var extractedFields = PrintFormService.ExtractReportFieldsFromTemplate(report.Template);
+                int fieldOrder = 1;
+                foreach (var field in extractedFields)
+                {
+                    field.Order = fieldOrder++;
+                    _reportFields.Add(field);
+                }
             }
 
             // Загрузка фильтров
@@ -715,11 +729,29 @@ namespace BIS.ERP.Views
                     // Устанавливаем флаг печатной формы
                     IsPrintFormCheck.IsChecked = true;
 
-                    StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}";
+                    // ИЗВЛЕКАЕМ ПОЛЯ ИЗ ШАБЛОНА И ЗАПОЛНЯЕМ ИМИ ТАБЛИЦУ ПОЛЕЙ
+                    var extractedFields = PrintFormService.ExtractReportFieldsFromTemplate(templateJson);
+                    _reportFields.Clear();
+                    int fieldOrder = 1;
+                    foreach (var field in extractedFields)
+                    {
+                        field.Order = fieldOrder++;
+                        _reportFields.Add(field);
+                    }
+                    ReportFieldsGrid.Items.Refresh();
+
+                    // Также обновляем список доступных полей, убирая уже добавленные
+                    if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
+                    {
+                        _ = LoadAvailableFields(catalog);
+                    }
+
+                    StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей: {_reportFields.Count}";
 
                     MessageBox.Show($"FRX-макет успешно загружен!\n\n" +
                                    $"Файл: {Path.GetFileName(openDialog.FileName)}\n" +
-                                   $"Размер: {templateJson.Length} символов",
+                                   $"Размер: {templateJson.Length} символов\n" +
+                                   $"Извлечено полей: {_reportFields.Count}",
                                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 else

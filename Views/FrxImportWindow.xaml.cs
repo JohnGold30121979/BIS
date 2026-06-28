@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -67,15 +68,47 @@ namespace BIS.ERP.Views
                     var parsed = parser.ParseFrxFile(file.FullPath);
                     var template = parser.GetPrintTemplate(parsed);
                     var memoPath = Path.ChangeExtension(file.FullPath, ".FRT");
-                    PreviewText.Text = $"Файл: {file.FileName}\nFRT: {(File.Exists(memoPath) ? "найден" : "не найден")}\n" +
-                                       $"Полос: {parsed.Bands.Count}; элементов: {parsed.Fields.Count}\n" +
-                                       $"Источник будет определен автоматически по имени формы.";
+
+                    var preview = new StringBuilder();
+                    preview.AppendLine($"📄 Файл: {file.FileName}");
+                    preview.AppendLine($"📦 FRT: {(File.Exists(memoPath) ? "найден" : "не найден")}");
+                    preview.AppendLine($"📊 Полос: {parsed.Bands.Count}");
+                    preview.AppendLine($"🏷 Поля/элементы: {parsed.Fields.Count}");
+                    preview.AppendLine($"📐 Размер: {template.PageWidth:F0}x{template.PageHeight:F0}");
+
+                    // Детальная информация по бандам
+                    if (parsed.Bands.Count > 0)
+                    {
+                        preview.AppendLine();
+                        preview.AppendLine("── Полосы отчета ──");
+                        foreach (var band in parsed.Bands.OrderBy(b => b.Order))
+                        {
+                            var bandFields = parsed.Fields.Where(f => f.BandId == band.Id).ToList();
+                            preview.AppendLine($"  [{band.BandType}] top={band.Top} h={band.Height} fields={bandFields.Count}");
+                            foreach (var field in bandFields.OrderBy(f => f.Order))
+                            {
+                                var expr = !string.IsNullOrEmpty(field.Expression) ? $" = {Truncate(field.Expression, 40)}" : "";
+                                preview.AppendLine($"    · {field.FieldName} ({field.FieldType}) [{field.Left},{field.Top} {field.Width}x{field.Height}]{expr}");
+                            }
+                        }
+                    }
+
+                    preview.AppendLine();
+                    preview.AppendLine($"🔄 Источник: будет определен автоматически по имени формы.");
+
+                    PreviewText.Text = preview.ToString();
                 }
                 catch (Exception ex)
                 {
-                    PreviewText.Text = $"Не удалось разобрать макет: {ex.Message}";
+                    PreviewText.Text = $"❌ Не удалось разобрать макет: {ex.Message}\n{ex.StackTrace}";
                 }
             }
+        }
+
+        private static string Truncate(string value, int maxLen)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            return value.Length <= maxLen ? value : value[..maxLen] + "...";
         }
 
         private async void OnImportClick(object sender, RoutedEventArgs e)
@@ -121,6 +154,16 @@ namespace BIS.ERP.Views
                     report.SourceFormat = "FoxProFRX";
                     report.TemplateVersion = 1;
                     report.Template = parsed.FrxXml;
+
+                    // ИЗВЛЕКАЕМ ПОЛЯ ИЗ FRX-ШАБЛОНА, чтобы они не пропадали
+                    var extractedFields = PrintFormService.ExtractReportFieldsFromTemplate(report.Template);
+                    report.Fields.Clear();
+                    foreach (var field in extractedFields)
+                    {
+                        field.ReportId = report.Id;
+                        report.Fields.Add(field);
+                    }
+
                     report.PageOrientation = template.PageWidth >= template.PageHeight ? "Landscape" : "Portrait";
                     report.CreatedAt = report.CreatedAt == default ? DateTime.UtcNow : report.CreatedAt;
                     report.UpdatedAt = DateTime.UtcNow;
