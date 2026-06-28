@@ -952,6 +952,82 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsureCashOrderDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        {
+            var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Приходный кассовый ордер",
+                "Расходный кассовый ордер"
+            };
+
+            foreach (var document in documents.Where(document => targetNames.Contains(document.Name)))
+            {
+                var columns = document.Fields
+                    .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                    .Select(field => field.DbColumnName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var nextOrder = document.Fields.Count == 0 ? 1 : document.Fields.Max(field => field.Order) + 1;
+                foreach (var field in GetCashOrderRequiredFields(document.Id, nextOrder))
+                {
+                    if (columns.Contains(field.DbColumnName))
+                        continue;
+
+                    field.Id = Guid.NewGuid();
+                    field.MetadataObjectId = document.Id;
+                    await _context.MetadataFields.AddAsync(field);
+                    await AddColumnToTableAsync(document.TableName, field);
+                    document.Fields.Add(field);
+                    columns.Add(field.DbColumnName);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static IEnumerable<MetadataField> GetCashOrderRequiredFields(Guid metadataObjectId, int startOrder)
+        {
+            yield return new MetadataField
+            {
+                Name = "Касса",
+                DbColumnName = "cash_desk_id",
+                FieldType = "Reference",
+                ReferenceCatalog = "Кассы",
+                DisplayPattern = "{Код} - {Наименование}",
+                DisplayFields = "Код,Наименование",
+                Order = startOrder++,
+                MetadataObjectId = metadataObjectId
+            };
+            yield return new MetadataField
+            {
+                Name = "Дебет",
+                DbColumnName = "debit_account",
+                FieldType = "String",
+                Length = 50,
+                Order = startOrder++,
+                MetadataObjectId = metadataObjectId
+            };
+            yield return new MetadataField
+            {
+                Name = "Кредит",
+                DbColumnName = "credit_account",
+                FieldType = "String",
+                Length = 50,
+                Order = startOrder++,
+                MetadataObjectId = metadataObjectId
+            };
+            yield return new MetadataField
+            {
+                Name = "Сумма в валюте",
+                DbColumnName = "amount_currency",
+                FieldType = "Decimal",
+                Precision = 18,
+                Scale = 2,
+                Order = startOrder,
+                MetadataObjectId = metadataObjectId
+            };
+        }
+
         private async Task EnsureAssetsCatalogStructureAsync()
         {
             var catalog = await _context.MetadataObjects

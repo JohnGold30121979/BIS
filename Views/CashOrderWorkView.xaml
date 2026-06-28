@@ -71,6 +71,10 @@
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Готово" Foreground="Gray"/>
             </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="Подсказка: двойной щелчок по строке показывает реальную проводку документа." Foreground="Gray"/>
+            </StatusBarItem>
         </StatusBar>
     </Grid>
 </UserControl>

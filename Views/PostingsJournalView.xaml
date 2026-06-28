@@ -92,6 +92,7 @@
                   FontSize="12"
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling" 
+                  SelectionChanged="PostingsGrid_SelectionChanged"
                   MouseDoubleClick="PostingsGrid_MouseDoubleClick">
 
             <DataGrid.Resources>
@@ -147,6 +148,10 @@
             <Separator/>
             <StatusBarItem>
                 <TextBlock x:Name="TotalInfo" Text=""/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="Подсказка: двойной щелчок по строке открывает подробности проводки." Foreground="Gray"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

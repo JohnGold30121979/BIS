@@ -43,6 +43,7 @@ namespace BIS.ERP.Services
             var postings = new List<PostingViewModel>();
             var organizationMap = await LoadReferenceMapAsync("Организации");
             var employeeMap = await LoadReferenceMapAsync("Сотрудники (Списочный состав)");
+            var accountMap = await LoadAccountMapAsync();
 
             // 1. Проводки из doc_postings
             try
@@ -60,7 +61,9 @@ namespace BIS.ERP.Services
                 description as Note,
                 COALESCE(CAST(organization_id AS text), '') as Organization,
                 COALESCE(CAST(employee_id AS text), '') as Employee,
-                ""Id"" as Id
+                ""Id"" as Id,
+                ""CreatedAt"" as CreatedAt,
+                is_active as IsActive
             FROM doc_postings
             WHERE is_active = true";
 
@@ -80,7 +83,11 @@ namespace BIS.ERP.Services
                         DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(row.DocumentNumber),
                         DocumentType = row.DocumentType,
                         DebitAccount = row.DebitAccount,
+                        DebitAccountName = ResolveAccount(row.DebitAccount, accountMap),
                         CreditAccount = row.CreditAccount,
+                        CreditAccountName = ResolveAccount(row.CreditAccount, accountMap),
+                        CorrespondentAccount = row.DebitAccount == "3010" ? row.CreditAccount : row.CreditAccount == "3010" ? row.DebitAccount : "",
+                        Direction = row.DebitAccount == "3010" ? "Приход в кассу" : row.CreditAccount == "3010" ? "Расход из кассы" : "Бухгалтерская проводка",
                         Amount = row.Amount,
                         AmountCurrency = row.AmountCurrency,
                         Currency = row.Currency,
@@ -89,7 +96,9 @@ namespace BIS.ERP.Services
                         Employee = ResolveReference(row.Employee, employeeMap),
                         Site = "",
                         ResponsiblePerson = "",
-                        DocumentId = null
+                        DocumentId = null,
+                        CreatedAt = row.CreatedAt,
+                        IsActive = row.IsActive
                     });
                 }
             }
@@ -151,7 +160,11 @@ namespace BIS.ERP.Services
                                 DocumentNumber = doc.Number,
                                 DocumentType = doc.DocumentType,
                                 DebitAccount = debet ?? "",
+                                DebitAccountName = ResolveAccount(debet, accountMap),
                                 CreditAccount = credit ?? "",
+                                CreditAccountName = ResolveAccount(credit, accountMap),
+                                CorrespondentAccount = debet == "3010" ? credit ?? "" : credit == "3010" ? debet ?? "" : "",
+                                Direction = debet == "3010" ? "Приход в кассу" : credit == "3010" ? "Расход из кассы" : "Импортированная проводка",
                                 Amount = amount,
                                 AmountCurrency = amountCurrency,
                                 Note = note ?? "",
@@ -204,6 +217,41 @@ namespace BIS.ERP.Services
             return value ?? string.Empty;
         }
 
+        private async Task<Dictionary<string, string>> LoadAccountMapAsync()
+        {
+            try
+            {
+                var catalog = await _context.MetadataObjects.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
+                if (catalog == null)
+                    return new Dictionary<string, string>();
+
+                var rows = await new MetadataService(_context).GetCatalogDataAsync(catalog.Id);
+                var result = new Dictionary<string, string>();
+                foreach (var row in rows)
+                {
+                    var code = row.GetValueOrDefault("Код")?.ToString() ?? row.GetValueOrDefault("code")?.ToString();
+                    var name = row.GetValueOrDefault("Наименование")?.ToString() ?? row.GetValueOrDefault("name")?.ToString();
+                    if (!string.IsNullOrWhiteSpace(code))
+                        result[code] = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}";
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки плана счетов: {ex.Message}");
+                return new Dictionary<string, string>();
+            }
+        }
+
+        private static string ResolveAccount(string? code, IReadOnlyDictionary<string, string> map)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+                return string.Empty;
+            return map.TryGetValue(code, out var display) ? display : code;
+        }
+
         // Вспомогательный класс для SQL запроса
         private class PostingSqlRow
         {
@@ -219,6 +267,8 @@ namespace BIS.ERP.Services
             public string Organization { get; set; }
             public string Employee { get; set; }
             public Guid Id { get; set; }
+            public DateTime CreatedAt { get; set; }
+            public bool IsActive { get; set; }
         }
 
         // Получение оборотов по счету

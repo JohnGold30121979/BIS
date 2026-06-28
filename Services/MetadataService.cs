@@ -734,6 +734,11 @@ namespace BIS.ERP.Services
                     .ToListAsync();
 
                 // Создаём  справочники
+                var existingDocumentsWithFields = await _context.MetadataObjects
+                    .Include(m => m.Fields)
+                    .Where(m => m.ObjectType == "Document")
+                    .ToListAsync();
+                await EnsureCashOrderDocumentStructureAsync(existingDocumentsWithFields);
 
                 if (!existingCatalogs.Contains("Участки"))
                     await CreateSitesCatalog(config);
@@ -1693,7 +1698,7 @@ namespace BIS.ERP.Services
 
                 var amount = Convert.ToDecimal(record.GetValueOrDefault("amount") ?? 0m);
                 var documentNumber = NormalizeLegacyDocumentNumber(record.GetValueOrDefault("doc_number")?.ToString());
-                if (Guid.TryParse(record.GetValueOrDefault("cash_desk_id")?.ToString(), out var cashDeskId))
+                if (TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk"))
                 {
                     var wasReceipt = document.Name == "Приходный кассовый ордер";
                     await UpdateCashDeskBalance(cashDeskId, amount, !wasReceipt);
@@ -1787,25 +1792,14 @@ namespace BIS.ERP.Services
             System.Diagnostics.Debug.WriteLine($"IsReceipt: {isReceipt}");
 
             // Получаем ID кассы
-            Guid cashDeskId = Guid.Empty;
-            if (recordData.ContainsKey("cash_desk_id") && recordData["cash_desk_id"] != null)
-            {
-                Guid.TryParse(recordData["cash_desk_id"].ToString(), out cashDeskId);
-            }
-            else if (recordData.ContainsKey("Касса") && recordData["Касса"] != null)
-            {
-                Guid.TryParse(recordData["Касса"].ToString(), out cashDeskId);
-            }
+            TryGetGuid(recordData, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk");
 
             if (cashDeskId != Guid.Empty)
                 System.Diagnostics.Debug.WriteLine($"CashDeskId: {cashDeskId}");
 
             // Получаем корреспондирующий счёт
-            Guid corrAccountId = Guid.Empty;
-            if (recordData.ContainsKey("correspondent_account") && recordData["correspondent_account"] != null)
-            {
-                Guid.TryParse(recordData["correspondent_account"].ToString(), out corrAccountId);
-            }
+            TryGetGuid(recordData, out var corrAccountId, "correspondent_account", "Корр. счет", "Корр. счёт");
+            var corrAccountCode = GetStringValue(recordData, "correspondent_account", "Корр. счет", "Корр. счёт");
 
             // Старые записи могут содержать конкретную кассу. Новые документы работают по счету,
             // поэтому остаток справочника касс обновляем только когда касса явно указана.
@@ -1830,11 +1824,11 @@ namespace BIS.ERP.Services
             if (isReceipt)
             {
                 debitAccount = "3010"; // Счёт кассы
-                creditAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : "";
+                creditAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : corrAccountCode;
             }
             else
             {
-                debitAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : "";
+                debitAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : corrAccountCode;
                 creditAccount = "3010"; // Счёт кассы
             }
 
@@ -1978,9 +1972,9 @@ namespace BIS.ERP.Services
                 {
                     // Автоопределение типа
                     if (debitAccount == "3010" && creditAccount != "3010")
-                        documentType = "Расходный кассовый ордер";
-                    else if (creditAccount == "3010" && debitAccount != "3010")
                         documentType = "Приходный кассовый ордер";
+                    else if (creditAccount == "3010" && debitAccount != "3010")
+                        documentType = "Расходный кассовый ордер";
                     else if (debitAccount == "3010" || creditAccount == "3010")
                         documentType = "Кассовая операция";
                     else
@@ -2047,6 +2041,30 @@ namespace BIS.ERP.Services
                 sql,
                 new NpgsqlParameter("@amount", amount),
                 new NpgsqlParameter("@cashDeskId", cashDeskId));
+        }
+
+        private static bool TryGetGuid(Dictionary<string, object> data, out Guid value, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var raw) && raw != null && raw != DBNull.Value &&
+                    Guid.TryParse(raw.ToString(), out value))
+                    return true;
+            }
+
+            value = Guid.Empty;
+            return false;
+        }
+
+        private static string GetStringValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var raw) && raw != null && raw != DBNull.Value)
+                    return raw.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
         }
 
         private async Task<string> GetAccountCodeById(Guid accountId)

@@ -145,6 +145,12 @@ namespace BIS.ERP.Views
             MessageBox.Show("Сводные обороты", "Информация");
         }
 
+        private void PostingsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (PostingsGrid.SelectedItem is PostingViewModel selected)
+                StatusText.Text = selected.DetailHint;
+        }
+
         private void PostingsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             var selected = PostingsGrid.SelectedItem as PostingViewModel;

@@ -49,6 +49,10 @@ namespace BIS.ERP.Views
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateButtonsState();
+            if (DataGrid.SelectedItem is CashOrderRow selected)
+                StatusText.Text = selected.IsPosted
+                    ? $"Проведен: Дт {selected.DebitAccount} / Кт {selected.CreditAccount}, {selected.Amount:N2} сом. Двойной щелчок откроет проводку."
+                    : $"Не проведен: {selected.DocNumber}, {selected.Amount:N2} сом.";
         }
 
         private async Task LoadData()
@@ -427,12 +431,6 @@ namespace BIS.ERP.Views
                     else
                         await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
 
-                    // ✅ Обновляем кассу (isPosting = true если проводим, false если отменяем)
-                    if (!string.IsNullOrEmpty(selectedRow.CashDeskId))
-                    {
-                        await UpdateCashDeskBalanceAsync(selectedRow.CashDeskId, selectedRow.Amount, !selectedRow.IsPosted);
-                    }
-
                     await LoadData();
                     MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
                         MessageBoxButton.OK, MessageBoxImage.Information);
@@ -499,20 +497,32 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        private async void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             var selected = DataGrid.SelectedItem as CashOrderRow;
             if (selected == null)
                 return;
 
-            // Конвертируем CashOrderRow в PostingViewModel
-            var posting = new PostingViewModel
+            PostingViewModel? posting = null;
+            if (selected.IsPosted)
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var postingService = new PostingService(context);
+                var postings = await postingService.GetAllPostingsAsync(selected.DocDate.Date, selected.DocDate.Date);
+                posting = postings.FirstOrDefault(item =>
+                    item.DocumentNumber == MetadataService.NormalizeLegacyDocumentNumber(selected.DocNumber) &&
+                    item.DocumentType == _documentMetadata.Name);
+            }
+
+            posting ??= new PostingViewModel
             {
                 DocumentNumber = selected.DocNumber,
                 Date = selected.DocDate,
                 DocumentType = _documentMetadata.Name,
                 DebitAccount = selected.DebitAccount,
                 CreditAccount = selected.CreditAccount,
+                CorrespondentAccount = selected.DebitAccount == "3010" ? selected.CreditAccount : selected.CreditAccount == "3010" ? selected.DebitAccount : selected.CorrespondentAccountName,
+                Direction = selected.IsPosted ? "Проводка документа" : "Документ еще не проведен",
                 Amount = selected.Amount,
                 AmountCurrency = selected.AmountInCurrency,
                 Currency = selected.CurrencyName,
@@ -532,59 +542,6 @@ namespace BIS.ERP.Views
             if (row != null && row.IsPosted)
             {
                 e.Row.Background = new SolidColorBrush(Color.FromRgb(212, 237, 218));
-            }
-        }
-
-        /// <summary>
-        /// Обновление остатка кассы при проведении/отмене проведения
-        /// </summary>
-        private async Task UpdateCashDeskBalanceAsync(string cashDeskId, decimal amount, bool isPosting)
-        {
-            try
-            {
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var cashDeskCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Кассы");
-
-                if (cashDeskCatalog == null)
-                    return;
-
-                var cashDeskData = await _metadataService.GetCatalogDataAsync(cashDeskCatalog.Id);
-                var cashDesk = cashDeskData.FirstOrDefault(c => c["Id"].ToString() == cashDeskId);
-
-                if (cashDesk == null)
-                    return;
-
-                var currentBalance = cashDesk.ContainsKey("Текущий остаток")
-                    ? Convert.ToDecimal(cashDesk["Текущий остаток"])
-                    : 0;
-
-                decimal newBalance;
-                if (_documentMetadata.Name == "Приходный кассовый ордер")
-                {
-                    // При проведении – увеличиваем, при отмене – уменьшаем
-                    newBalance = isPosting ? currentBalance + amount : currentBalance - amount;
-                }
-                else if (_documentMetadata.Name == "Расходный кассовый ордер")
-                {
-                    // При проведении – уменьшаем, при отмене – увеличиваем
-                    newBalance = isPosting ? currentBalance - amount : currentBalance + amount;
-                }
-                else
-                {
-                    return;
-                }
-
-                if (newBalance == currentBalance)
-                    return;
-
-                var updateData = new Dictionary<string, object> { ["Текущий остаток"] = newBalance };
-                await _metadataService.UpdateDynamicRecordAsync(cashDeskCatalog.Id, Guid.Parse(cashDeskId), updateData);
-
-                System.Diagnostics.Debug.WriteLine($"✅ Касса обновлена: новый остаток = {newBalance}");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"❌ Ошибка обновления кассы: {ex.Message}");
             }
         }
 

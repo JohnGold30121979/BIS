@@ -9,7 +9,11 @@ namespace BIS.ERP.Models
         public string DocumentNumber { get; set; } = string.Empty;
         public string DocumentType { get; set; } = string.Empty;
         public string DebitAccount { get; set; } = string.Empty;
+        public string DebitAccountName { get; set; } = string.Empty;
         public string CreditAccount { get; set; } = string.Empty;
+        public string CreditAccountName { get; set; } = string.Empty;
+        public string CorrespondentAccount { get; set; } = string.Empty;
+        public string Direction { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public decimal AmountCurrency { get; set; }
         public string Currency { get; set; } = string.Empty;
@@ -19,5 +23,9 @@ namespace BIS.ERP.Models
         public string Site { get; set; } = string.Empty;
         public string ResponsiblePerson { get; set; } = string.Empty;
         public Guid? DocumentId { get; set; }
+        public DateTime? CreatedAt { get; set; }
+        public bool IsActive { get; set; } = true;
+        public string DetailHint =>
+            $"{Date:dd.MM.yyyy} {DocumentType} N {DocumentNumber}: Дт {DebitAccount} / Кт {CreditAccount}, {Amount:N2} сом";
     }
 }
