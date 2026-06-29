@@ -4,6 +4,7 @@ using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -76,6 +77,9 @@ namespace BIS.ERP.Views
                 _isLoading = false;
             }
         }
+
+        private Report? _selectedReport;
+        private TreeViewItem? _selectedReportTreeItem;
 
         private void BuildMetadataTree()
         {
@@ -155,6 +159,8 @@ namespace BIS.ERP.Views
                         Foreground = Brushes.White
                     };
                     reportItem.Selected += (s, e) => ShowReportEditor(report);
+                    reportItem.Tag = report;
+                    reportItem.ContextMenu = (ContextMenu)MetadataTree.Resources["ReportContextMenu"];
                     reportsItem.Items.Add(reportItem);
                 }
             }
@@ -1140,6 +1146,9 @@ namespace BIS.ERP.Views
 
         private void ShowReportEditor(Report report)
         {
+            _selectedReport = report;
+            DeleteReportMenuItem.IsEnabled = true;
+
             EditorTitle.Text = $"✏️ Редактирование отчета: {report.Name}";
             EditorDescription.Text = "";
             PropertiesPanel.Children.Clear();
@@ -1167,8 +1176,8 @@ namespace BIS.ERP.Views
                 if (designer.ShowDialog() == true)
                     await LoadMetadata();
             };
-
             mainPanel.Children.Add(designerButton);
+
             var availabilityButton = new Button
             {
                 Content = report.IsActive ? "Отключить форму" : "Сделать доступной",
@@ -1184,7 +1193,200 @@ namespace BIS.ERP.Views
                 await LoadMetadata();
             };
             mainPanel.Children.Add(availabilityButton);
+
+            // Кнопка удаления
+            var deleteButton = new Button
+            {
+                Content = "🗑️ Удалить отчет",
+                Height = 36,
+                MinWidth = 180,
+                Margin = new Thickness(0, 10, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#E74C3C"),
+                Foreground = Brushes.White
+            };
+            deleteButton.Click += async (_, _) => await DeleteSelectedReport(report);
+            mainPanel.Children.Add(deleteButton);
+
+            // Предпросмотр
+            if (report.SourceFormat == "FoxProFRX" && !string.IsNullOrWhiteSpace(report.Template))
+            {
+                var previewButton = new Button
+                {
+                    Content = "🚫 Предпросмотр печатной формы",
+                    Height = 36,
+                    MinWidth = 180,
+                    Margin = new Thickness(0, 10, 0, 0),
+                    Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
+                    Foreground = Brushes.White
+                };
+                previewButton.Click += (_, _) =>
+                {
+                    try
+                    {
+                        var pdf = new PrintFormService(_context).ExportTemplatePreview(report);
+                        var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.pdf");
+                        File.WriteAllBytes(tempFile, pdf);
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = tempFile,
+                            UseShellExecute = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                };
+                mainPanel.Children.Add(previewButton);
+            }
+
             PropertiesPanel.Children.Add(mainPanel);
+        }
+
+        private async Task DeleteSelectedReport(Report? report = null)
+        {
+            report ??= _selectedReport;
+            if (report == null) return;
+
+            var result = MessageBox.Show(
+                $"Удалить отчет \"{report.Name}\"?\n\nЭто действие нельзя отменить.",
+                "Подтверждение удаления",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    await _reportService.DeleteReportAsync(report.Id);
+                    await LoadMetadata();
+                    PropertiesPanel.Children.Clear();
+                    EditorTitle.Text = "📊 Отчет удален";
+                    EditorDescription.Text = "";
+                    _selectedReport = null;
+                    DeleteReportMenuItem.IsEnabled = false;
+                    MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            }
+        }
+
+        private void OnDeleteReportClick(object sender, RoutedEventArgs e)
+        {
+            _ = DeleteSelectedReport();
+        }
+
+        private void OnTreeSelectedChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            if (e.NewValue is TreeViewItem item && item.Tag is Report report)
+            {
+                _selectedReport = report;
+                _selectedReportTreeItem = item;
+                DeleteReportMenuItem.IsEnabled = true;
+            }
+            else if (e.NewValue is TreeViewItem && !(e.NewValue as TreeViewItem)?.Header?.ToString()?.Contains("Отчет") == true)
+            {
+                _selectedReport = null;
+                DeleteReportMenuItem.IsEnabled = false;
+            }
+        }
+
+        private void OnTreeRightClick(object sender, MouseButtonEventArgs e)
+        {
+            var treeItem = sender as TreeViewItem;
+            if (treeItem == null)
+            {
+                // Находим TreeViewItem под курсором
+                var element = e.OriginalSource as FrameworkElement;
+                while (element != null && element is not TreeViewItem)
+                    element = VisualTreeHelper.GetParent(element) as FrameworkElement;
+                treeItem = element as TreeViewItem;
+            }
+
+            if (treeItem?.Tag is Report report)
+            {
+                _selectedReport = report;
+                _selectedReportTreeItem = treeItem;
+                DeleteReportMenuItem.IsEnabled = true;
+                treeItem.IsSelected = true;
+
+                // Показываем контекстное меню
+                var contextMenu = (ContextMenu)MetadataTree.Resources["ReportContextMenu"];
+                contextMenu.PlacementTarget = treeItem;
+                contextMenu.IsOpen = true;
+            }
+        }
+
+        private void OnOpenReportDesignerClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedReport != null)
+            {
+                var designer = new ReportDesignerWindow(_selectedReport) { Owner = this };
+                if (designer.ShowDialog() == true)
+                    _ = LoadMetadata();
+            }
+        }
+
+        private async void OnToggleReportAvailabilityClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedReport != null)
+            {
+                await new PrintFormService(_context).SetAvailabilityAsync(_selectedReport.Id, !_selectedReport.IsActive);
+                await LoadMetadata();
+            }
+        }
+
+        private void OnPreviewReportPdfClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedReport == null) return;
+            try
+            {
+                var pdf = new PrintFormService(_context).ExportTemplatePreview(_selectedReport);
+                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
+                File.WriteAllBytes(tempFile, pdf);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = tempFile,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OnPreviewReportClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedReport == null) return;
+            try
+            {
+                var pdf = new PrintFormService(_context).ExportTemplatePreview(_selectedReport);
+                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
+                File.WriteAllBytes(tempFile, pdf);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = tempFile,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         // ОСТАЛЬНЫЕ МЕТОДЫ

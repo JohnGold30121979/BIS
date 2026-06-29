@@ -44,21 +44,133 @@ namespace BIS.ERP.Services
         {
             await EnsureSchemaAsync();
             var documents = await _context.MetadataObjects.AsNoTracking()
+                .Include(m => m.Fields)
                 .Where(item => item.ObjectType == "Document" &&
                     (item.Name == "Приходный кассовый ордер" || item.Name == "Расходный кассовый ордер"))
                 .ToListAsync();
             var receipt = documents.FirstOrDefault(item => item.Name == "Приходный кассовый ордер");
             var payment = documents.FirstOrDefault(item => item.Name == "Расходный кассовый ордер");
 
-            if (receipt != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.receipt.standard"))
-                await _context.Reports.AddAsync(CreateCashForm(
-                    "cash.receipt.standard", "Приходный кассовый ордер с квитанцией",
-                    "CashReceiptOrder", receipt.Id, "ПКО и отрывная квитанция на одном листе"));
-            if (payment != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.payment.standard"))
-                await _context.Reports.AddAsync(CreateCashForm(
-                    "cash.payment.standard", "Расходный кассовый ордер",
-                    "CashPaymentOrder", payment.Id, "Унифицированная печатная форма РКО"));
+            if (receipt != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.receipt.foxpro"))
+            {
+                var frxTemplate = GenerateCashReceiptFrxTemplate(receipt);
+                await _context.Reports.AddAsync(new Report
+                {
+                    Code = "cash.receipt.foxpro",
+                    Name = "Приходный кассовый ордер с квитанцией",
+                    TitleText = "Приходный кассовый ордер",
+                    Description = "ПКО и отрывная квитанция на одном листе",
+                    DataSourceType = "Document",
+                    DataSourceId = receipt.Id,
+                    ReportType = "FoxProLayout",
+                    IsPrintForm = true,
+                    IsActive = true,
+                    IsDefault = true,
+                    SourceFormat = "FoxProFRX",
+                    TemplateVersion = 1,
+                    Icon = "🖨",
+                    Order = 10,
+                    PageOrientation = "Landscape",
+                    ShowGridLines = false,
+                    ShowHeader = false,
+                    ShowFooter = false,
+                    ShowPageNumbers = false,
+                    Template = JsonSerializer.Serialize(frxTemplate, new JsonSerializerOptions { WriteIndented = true }),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (payment != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.payment.foxpro"))
+            {
+                var frxTemplate = GenerateCashPaymentFrxTemplate(payment);
+                await _context.Reports.AddAsync(new Report
+                {
+                    Code = "cash.payment.foxpro",
+                    Name = "Расходный кассовый ордер",
+                    TitleText = "Расходный кассовый ордер",
+                    Description = "Унифицированная печатная форма РКО",
+                    DataSourceType = "Document",
+                    DataSourceId = payment.Id,
+                    ReportType = "FoxProLayout",
+                    IsPrintForm = true,
+                    IsActive = true,
+                    IsDefault = true,
+                    SourceFormat = "FoxProFRX",
+                    TemplateVersion = 1,
+                    Icon = "🖨",
+                    Order = 10,
+                    PageOrientation = "Portrait",
+                    ShowGridLines = false,
+                    ShowHeader = false,
+                    ShowFooter = false,
+                    ShowPageNumbers = false,
+                    Template = JsonSerializer.Serialize(frxTemplate, new JsonSerializerOptions { WriteIndented = true }),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
             await _context.SaveChangesAsync();
+        }
+
+        private static PrintFormTemplate GenerateCashReceiptFrxTemplate(MetadataObject document)
+        {
+            var fields = document.Fields.ToList();
+            var template = new PrintFormTemplate
+            {
+                SourceFormat = "FoxProFRX",
+                PageWidth = 2970,
+                PageHeight = 2100,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "PageHeader", Top = 0, Height = 120, Order = 0 },
+                    new() { Type = "Detail", Top = 120, Height = 300, Order = 1 },
+                    new() { Type = "Summary", Top = 420, Height = 100, Order = 2 }
+                },
+                Elements = new List<PrintFormElement>
+                {
+                    new() { Type = "Text", Text = "ПРИХОДНЫЙ КАССОВЫЙ ОРДЕР", BandType = "PageHeader", Left = 200, Top = 20, Width = 2500, Height = 60, FontName = "Arial", FontSize = 18, Bold = true, Alignment = "Center", Order = 0 },
+                    new() { Type = "Text", Text = "Номер документа: {Номер}", BandType = "Detail", Left = 200, Top = 100, Width = 1200, Height = 40, FontName = "Arial", FontSize = 11, Order = 1 },
+                    new() { Type = "Text", Text = "Дата: {Дата}", BandType = "Detail", Left = 1500, Top = 100, Width = 1200, Height = 40, FontName = "Arial", FontSize = 11, Alignment = "Right", Order = 2 },
+                    new() { Type = "Text", Text = "Принято от: {Сотрудник}", BandType = "Detail", Left = 200, Top = 160, Width = 2500, Height = 40, FontName = "Arial", FontSize = 11, Order = 3 },
+                    new() { Type = "Text", Text = "Основание: {Основание}", BandType = "Detail", Left = 200, Top = 220, Width = 2500, Height = 40, FontName = "Arial", FontSize = 11, Order = 4 },
+                    new() { Type = "Text", Text = "Сумма: {Сумма} KGS", BandType = "Detail", Left = 200, Top = 280, Width = 2500, Height = 40, FontName = "Arial", FontSize = 12, Bold = true, Order = 5 },
+                    new() { Type = "Text", Text = "Главный бухгалтер __________________", BandType = "Summary", Left = 200, Top = 10, Width = 1200, Height = 30, FontName = "Arial", FontSize = 10, Order = 6 },
+                    new() { Type = "Text", Text = "Кассир __________________", BandType = "Summary", Left = 1500, Top = 10, Width = 1200, Height = 30, FontName = "Arial", FontSize = 10, Order = 7 }
+                }
+            };
+            return template;
+        }
+
+        private static PrintFormTemplate GenerateCashPaymentFrxTemplate(MetadataObject document)
+        {
+            var fields = document.Fields.ToList();
+            var template = new PrintFormTemplate
+            {
+                SourceFormat = "FoxProFRX",
+                PageWidth = 2100,
+                PageHeight = 2970,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "PageHeader", Top = 0, Height = 120, Order = 0 },
+                    new() { Type = "Detail", Top = 120, Height = 350, Order = 1 },
+                    new() { Type = "Summary", Top = 470, Height = 120, Order = 2 }
+                },
+                Elements = new List<PrintFormElement>
+                {
+                    new() { Type = "Text", Text = "РАСХОДНЫЙ КАССОВЫЙ ОРДЕР", BandType = "PageHeader", Left = 200, Top = 20, Width = 1700, Height = 60, FontName = "Arial", FontSize = 18, Bold = true, Alignment = "Center", Order = 0 },
+                    new() { Type = "Text", Text = "Номер документа: {Номер}", BandType = "Detail", Left = 200, Top = 100, Width = 800, Height = 40, FontName = "Arial", FontSize = 11, Order = 1 },
+                    new() { Type = "Text", Text = "Дата: {Дата}", BandType = "Detail", Left = 1100, Top = 100, Width = 800, Height = 40, FontName = "Arial", FontSize = 11, Alignment = "Right", Order = 2 },
+                    new() { Type = "Text", Text = "Выдать: {Сотрудник}", BandType = "Detail", Left = 200, Top = 170, Width = 1700, Height = 40, FontName = "Arial", FontSize = 11, Order = 3 },
+                    new() { Type = "Text", Text = "Основание: {Основание}", BandType = "Detail", Left = 200, Top = 230, Width = 1700, Height = 40, FontName = "Arial", FontSize = 11, Order = 4 },
+                    new() { Type = "Text", Text = "Сумма: {Сумма} KGS", BandType = "Detail", Left = 200, Top = 290, Width = 1700, Height = 40, FontName = "Arial", FontSize = 12, Bold = true, Order = 5 },
+                    new() { Type = "Text", Text = "Руководитель __________________", BandType = "Summary", Left = 200, Top = 20, Width = 800, Height = 30, FontName = "Arial", FontSize = 10, Order = 6 },
+                    new() { Type = "Text", Text = "Главный бухгалтер __________________", BandType = "Summary", Left = 200, Top = 60, Width = 800, Height = 30, FontName = "Arial", FontSize = 10, Order = 7 },
+                    new() { Type = "Text", Text = "Получил __________________", BandType = "Summary", Left = 1000, Top = 20, Width = 800, Height = 30, FontName = "Arial", FontSize = 10, Order = 8 }
+                }
+            };
+            return template;
         }
 
         public async Task<List<Report>> GetPrintFormsAsync(Guid metadataId, bool includeInactive = true)
@@ -615,7 +727,7 @@ namespace BIS.ERP.Services
             return fields;
         }
 
-        private static string CleanFoxText(string input)
+        public static string CleanFoxText(string input)
         {
             var cleaned = input;
             cleaned = cleaned.Replace("TEXT", "");

@@ -109,6 +109,41 @@ namespace BIS.ERP.Models
         public bool IsVisible { get; set; } = true;
     }
 
+    public class ReportElementMapping
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        public Guid ReportId { get; set; }
+
+        [ForeignKey("ReportId")]
+        public virtual Report Report { get; set; }
+
+        public int ElementOrder { get; set; }
+        public string ElementType { get; set; } = "Text";
+        public string ElementText { get; set; } = string.Empty;
+        public string ElementExpression { get; set; } = string.Empty;
+        public string BandType { get; set; } = "Detail";
+        public double Left { get; set; }
+        public double Top { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+        public string FontName { get; set; } = "Arial";
+        public double FontSize { get; set; } = 9;
+        public bool Bold { get; set; }
+        public bool Italic { get; set; }
+        public string Alignment { get; set; } = "Left";
+        public int Order { get; set; }
+
+        // Настройки соответствия данным
+        public string? MappedFieldName { get; set; }
+        public string? MappedDisplayName { get; set; }
+        public string DataSource { get; set; } = string.Empty;
+        public string FormatString { get; set; } = string.Empty;
+        public bool IsVisible { get; set; } = true;
+        public string CustomText { get; set; } = string.Empty;
+    }
+
     public class ReportFilter
     {
         [Key]

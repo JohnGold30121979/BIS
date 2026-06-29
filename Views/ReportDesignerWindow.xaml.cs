@@ -26,6 +26,7 @@ namespace BIS.ERP.Views
         private ObservableCollection<ReportField> _reportFields;
         private ObservableCollection<ReportFilter> _reportFilters;
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
+        private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
         public ReportDesignerWindow(Report report = null)
         {
@@ -37,6 +38,7 @@ namespace BIS.ERP.Views
 
             ReportFieldsGrid.ItemsSource = _reportFields;
             FiltersList.ItemsSource = _reportFilters;
+            ElementMappingGrid.ItemsSource = _frxElementMappings;
             ConfigureFieldColumns();
 
             _ = InitializeAsync(report);
@@ -302,6 +304,16 @@ namespace BIS.ERP.Views
                 }
             }
 
+            // Обновляем доступные поля для источника данных
+            if (report.DataSourceId.HasValue)
+            {
+                var catalog = _availableCatalogs.FirstOrDefault(c => c.Id == report.DataSourceId);
+                if (catalog != null)
+                {
+                    _ = LoadAvailableFields(catalog);
+                }
+            }
+
             // Загрузка фильтров
             _reportFilters.Clear();
             foreach (var filter in report.Filters.OrderBy(f => f.Order))
@@ -334,10 +346,36 @@ namespace BIS.ERP.Views
 
         private async void OnPreviewClick(object sender, RoutedEventArgs e)
         {
-            if (IsPrintFormCheck.IsChecked == true)
-                await ExportPrintFormPreviewAsync(false);
-            else
-                await GenerateAndShowReport();
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+
+                if (IsPrintFormCheck.IsChecked == true)
+                {
+                    var report = BuildReportFromForm();
+                    if (report == null)
+                        return;
+
+                    var pdfBytes = _printFormService.ExportTemplatePreview(report);
+                    var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
+                    previewWindow.ShowDialog();
+
+                    StatusText.Text = "✅ Предпросмотр открыт";
+                }
+                else
+                {
+                    await GenerateAndShowReport();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
         }
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -389,21 +427,19 @@ namespace BIS.ERP.Views
             if (report == null)
                 return Task.CompletedTask;
 
-            var dialog = new SaveFileDialog
-            {
-                Title = "Сохранить предпросмотр печатной формы",
-                Filter = "PDF файлы (*.pdf)|*.pdf",
-                DefaultExt = "pdf",
-                FileName = $"{GetSafeFileName(report.Name)}_предпросмотр.pdf"
-            };
-            if (dialog.ShowDialog() != true)
-                return Task.CompletedTask;
+            var pdfBytes = _printFormService.ExportTemplatePreview(report);
+            var tempPdf = Path.Combine(Path.GetTempPath(), $"preview_{Guid.NewGuid():N}.pdf");
+            File.WriteAllBytes(tempPdf, pdfBytes);
 
-            File.WriteAllBytes(dialog.FileName, _printFormService.ExportTemplatePreview(report));
-            StatusText.Text = $"Предпросмотр сформирован: {dialog.FileName}";
-            if (showConfirmation)
-                MessageBox.Show("PDF печатной формы успешно сформирован.", "Печатная форма",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = tempPdf,
+                UseShellExecute = true,
+                Verb = "open"
+            };
+            System.Diagnostics.Process.Start(psi);
+
+            StatusText.Text = "✅ Предпросмотр открыт";
             return Task.CompletedTask;
         }
 
@@ -740,6 +776,9 @@ namespace BIS.ERP.Views
                     }
                     ReportFieldsGrid.Items.Refresh();
 
+                    // ЗАПОЛНЯЕМ ТАБЛИЦУ СООТВЕТСТВИЙ ЭЛЕМЕНТОВ МАКЕТА
+                    await LoadFrxElementMappings(templateJson);
+
                     // Также обновляем список доступных полей, убирая уже добавленные
                     if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                     {
@@ -768,6 +807,91 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private async Task LoadFrxElementMappings(string templateJson)
+        {
+            try
+            {
+                var template = System.Text.Json.JsonSerializer.Deserialize<PrintFormTemplate>(templateJson);
+                if (template == null || template.Elements == null)
+                {
+                    MappingPreviewText.Text = "Нет элементов для отображения.";
+                    return;
+                }
+
+                _frxElementMappings.Clear();
+                int order = 0;
+                foreach (var element in template.Elements.OrderBy(e => e.Order))
+                {
+                    // Пропускаем линии, рамки и пустые тексты
+                    if (element.Type is "Line" or "Box" or "Picture")
+                        continue;
+
+                    var elementText = string.IsNullOrWhiteSpace(element.Expression)
+                        ? PrintFormService.CleanFoxText(element.Text)
+                        : element.Expression;
+
+                    if (string.IsNullOrWhiteSpace(elementText) || elementText == "+" || elementText == "-")
+                        continue;
+
+                    _frxElementMappings.Add(new FrXElementMappingViewModel
+                    {
+                        Id = Guid.NewGuid(),
+                        ElementOrder = element.Order,
+                        ElementType = element.Type,
+                        ElementText = elementText,
+                        BandType = element.BandType,
+                        Left = element.Left,
+                        Top = element.Top,
+                        Width = element.Width,
+                        Height = element.Height,
+                        FontName = element.FontName,
+                        FontSize = element.FontSize,
+                        Bold = element.Bold,
+                        Italic = element.Italic,
+                        Alignment = element.Alignment,
+                        Order = order++,
+                        MappedFieldName = string.Empty,
+                        FormatString = string.Empty,
+                        IsVisible = true,
+                        CustomText = string.Empty
+                    });
+                }
+
+                ElementMappingGrid.Items.Refresh();
+                UpdateMappingPreview();
+
+                if (_frxElementMappings.Count > 0)
+                    FrXFieldsTab.IsEnabled = true;
+            }
+            catch (Exception ex)
+            {
+                MappingPreviewText.Text = $"Ошибка загрузки элементов: {ex.Message}";
+            }
+        }
+
+        private void UpdateMappingPreview()
+        {
+            if (_frxElementMappings.Count == 0)
+            {
+                MappingPreviewText.Text = "Нет элементов для отображения.";
+                return;
+            }
+
+            var preview = new System.Text.StringBuilder();
+            preview.AppendLine("=== Соответствия элементов макета ===");
+            preview.AppendLine();
+
+            foreach (var mapping in _frxElementMappings.OrderBy(m => m.Order))
+            {
+                var status = string.IsNullOrWhiteSpace(mapping.MappedFieldName)
+                    ? "⏳ не назначено"
+                    : $"✅ {mapping.MappedFieldName}";
+                preview.AppendLine($"{mapping.Order + 1}. [{mapping.ElementType}] \"{mapping.ElementText}\" → {status}");
+            }
+
+            MappingPreviewText.Text = preview.ToString();
+        }
     }
 
 
@@ -777,5 +901,52 @@ namespace BIS.ERP.Views
         public string Name { get; set; } = string.Empty;
         public string DbColumnName { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
+    }
+
+    public class FrXElementMappingViewModel : System.ComponentModel.INotifyPropertyChanged
+    {
+        public Guid Id { get; set; }
+        public int ElementOrder { get; set; }
+        public string ElementType { get; set; } = "Text";
+        public string ElementText { get; set; } = string.Empty;
+        public string BandType { get; set; } = "Detail";
+        public double Left { get; set; }
+        public double Top { get; set; }
+        public double Width { get; set; }
+        public double Height { get; set; }
+        public string FontName { get; set; } = "Arial";
+        public double FontSize { get; set; } = 9;
+        public bool Bold { get; set; }
+        public bool Italic { get; set; }
+        public string Alignment { get; set; } = "Left";
+        public int Order { get; set; }
+
+        private string _mappedFieldName = string.Empty;
+        public string MappedFieldName
+        {
+            get => _mappedFieldName;
+            set { _mappedFieldName = value; OnPropertyChanged(nameof(MappedFieldName)); }
+        }
+
+        private string _formatString = string.Empty;
+        public string FormatString
+        {
+            get => _formatString;
+            set { _formatString = value; OnPropertyChanged(nameof(FormatString)); }
+        }
+
+        private bool _isVisible = true;
+        public bool IsVisible
+        {
+            get => _isVisible;
+            set { _isVisible = value; OnPropertyChanged(nameof(IsVisible)); }
+        }
+
+        public string CustomText { get; set; } = string.Empty;
+        public string LeftTop => $"{(int)Left}/{(int)Top}";
+
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged(string name) =>
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
     }
 }

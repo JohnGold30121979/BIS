@@ -215,6 +215,52 @@
                 </Grid>
             </TabItem>
 
+            <!-- Вкладка: Соответствия полей (только для FRX) -->
+            <TabItem Header="🔗 FRX поля" x:Name="FrXFieldsTab">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Border Padding="15" Background="White">
+                        <StackPanel>
+                            <TextBlock Text="Соответствие элементов макета полям данных" 
+                                       FontSize="14" FontWeight="Bold" Margin="0,0,0,15"/>
+                            
+                            <DataGrid x:Name="ElementMappingGrid" AutoGenerateColumns="False"
+                                      CanUserAddRows="False" CanUserDeleteRows="False"
+                                      RowHeight="45" MaxHeight="500" Margin="0,0,0,15">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Элемент" Binding="{Binding ElementText}" Width="120" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Тип" Binding="{Binding ElementType}" Width="70" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Положение (L/T)" Binding="{Binding LeftTop}" Width="90" IsReadOnly="True"/>
+                                    <DataGridTemplateColumn Header="Поле данных" Width="160">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding DataContext.AvailableFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          DisplayMemberPath="Name"
+                                                          SelectedValuePath="DbColumnName"
+                                                          SelectedValue="{Binding MappedFieldName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          Height="25" Margin="2"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Формат" Binding="{Binding FormatString}" Width="100"/>
+                                    <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="60"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <TextBlock Text="💡 Для каждого элемента макета выберите, какое поле данных в него подставлять." 
+                                       FontSize="11" Foreground="Gray" Margin="0,0,0,10"/>
+
+                            <Separator Margin="0,0,0,10"/>
+
+                            <TextBlock Text="Предпросмотр соответствий" FontSize="13" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <Border Background="#F8F9FA" Padding="10" CornerRadius="5">
+                                <TextBlock x:Name="MappingPreviewText" FontSize="11" Foreground="#333" 
+                                           TextWrapping="Wrap" Text="Загрузите FRX-макет, чтобы увидеть соответствия."/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </ScrollViewer>
+            </TabItem>
+
             <!-- Вкладка: Оформление -->            
             <TabItem Header="🎨 Оформление">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">

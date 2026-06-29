@@ -15,7 +15,8 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="300" MinWidth="250"/>
+            <ColumnDefinition Width="300" MinWidth="200"/>
+            <ColumnDefinition Width="Auto"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
@@ -104,8 +105,13 @@
             </DockPanel>
         </Border>
 
+        <!-- Сплиттер -->
+        <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                      Background="#34495E" ResizeBehavior="PreviousAndNext"
+                      ShowsPreview="True"/>
+
         <!-- Правая панель - контент -->
-        <Border Grid.Column="1" Background="{DynamicResource AppContentBackgroundBrush}">
+        <Border Grid.Column="2" Background="{DynamicResource AppContentBackgroundBrush}">
             <ContentControl x:Name="ContentArea" Margin="20"/>
         </Border>
     </Grid>
