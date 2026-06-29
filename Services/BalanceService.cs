@@ -262,7 +262,9 @@ namespace BIS.ERP.Services
             foreach (var document in documents.Where(document =>
                          document.Name.Equals("Приход товаров", StringComparison.OrdinalIgnoreCase) ||
                          document.Name.Equals("Расход товаров", StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase)))
+                         document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase) ||
+                         document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
+                         document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase)))
             {
                 var rows = await metadataService.GetCatalogDataAsync(document.Id);
                 var maps = await ReferenceDisplayHelper.LoadMapsAsync(document, metadataService);
@@ -273,12 +275,16 @@ namespace BIS.ERP.Services
                         continue;
 
                     var isPurchase = document.Name.Contains("Приход", StringComparison.OrdinalIgnoreCase) ||
-                                     document.Name.Contains("получ", StringComparison.OrdinalIgnoreCase);
+                                     document.Name.Contains("получ", StringComparison.OrdinalIgnoreCase) ||
+                                     document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase);
+                    var isSales = document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
+                                  document.Name.Contains("Расход", StringComparison.OrdinalIgnoreCase) ||
+                                  document.Name.Contains("реализа", StringComparison.OrdinalIgnoreCase);
                     var amount = GetDecimal(row, "Сумма", "Сумма в сом");
                     var taxAmount = GetDecimal(row, "Сумма НДС", "vat_amount");
                     result.Add(new PurchaseSaleJournalEntry
                     {
-                        Section = isPurchase ? "Закупки" : "Продажи",
+                        Section = isPurchase ? "Закупки" : isSales ? "Продажи" : "Продажи",
                         Date = date,
                         DocumentNumber = GetString(row, "Номер", "Номер документа", "doc_number"),
                         DocumentType = document.Name,

@@ -107,7 +107,10 @@ namespace BIS.ERP
                     await new PrintFormService(context).EnsureSchemaAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
                     await new DocumentationMetadataSeedService(context).EnsureAsync();
-                    await new PrintFormService(context).SeedCashOrderFormsAsync();
+                    await new InvoiceMetadataSeedService(context).EnsureAsync();
+                    var printFormService = new PrintFormService(context);
+                    await printFormService.SeedCashOrderFormsAsync();
+                    await printFormService.SeedInvoiceFormsAsync();
                     await new TestPostingMetadataSeedService(context).EnsureAsync(createTestPostings: false);
                     await BuildNavigationTree();
                 }
@@ -140,7 +143,7 @@ namespace BIS.ERP
             {
                 Id = "DirectoriesSection", Name = "СПРАВОЧНИКИ", Icon = "📚", Type = "Section"
             };
-            foreach (var catalog in catalogs.OrderBy(item => item.Order).ThenBy(item => item.Name))
+            foreach (var catalog in catalogs.OrderBy(item => item.Name))
             {
                 directoriesSection.Children.Add(new NavigationItem
                 {
@@ -166,7 +169,9 @@ namespace BIS.ERP
                 var reportIds = moduleItems.Where(item => item.ModuleId == module.Id && item.ObjectType == "Report")
                     .OrderBy(item => item.Order).Select(item => item.ObjectId).ToHashSet();
 
-                var moduleDocuments = documents.Where(document => documentIds.Contains(document.Id)).ToList();
+                var moduleDocuments = documents.Where(document => documentIds.Contains(document.Id))
+                    .OrderBy(document => document.Name)
+                    .ToList();
                 if (moduleDocuments.Count > 0)
                 {
                     var group = new NavigationItem
@@ -178,7 +183,9 @@ namespace BIS.ERP
                     moduleSection.Children.Add(group);
                 }
 
-                var moduleReports = reports.Where(report => reportIds.Contains(report.Id)).ToList();
+                var moduleReports = reports.Where(report => reportIds.Contains(report.Id))
+                    .OrderBy(report => report.Name)
+                    .ToList();
                 if (moduleReports.Count > 0)
                 {
                     var group = new NavigationItem
@@ -219,9 +226,9 @@ namespace BIS.ERP
                 {
                     Id = "UnassignedSection", Name = "НЕРАСПРЕДЕЛЕННЫЕ ОБЪЕКТЫ", Icon = "📂", Type = "Section"
                 };
-                foreach (var document in unassignedDocuments)
+                foreach (var document in unassignedDocuments.OrderBy(document => document.Name))
                     otherSection.Children.Add(CreateDocumentNavigationItem(document));
-                foreach (var report in unassignedReports)
+                foreach (var report in unassignedReports.OrderBy(report => report.Name))
                     otherSection.Children.Add(new NavigationItem
                     {
                         Id = report.Id.ToString(), Name = report.Name, Icon = report.Icon,
@@ -258,6 +265,7 @@ namespace BIS.ERP
                 "Приходный кассовый ордер" or "Расходный кассовый ордер" => "CashOrder",
                 "Платежное поручение" => "PaymentOrder",
                 "Проводки" => "PostingsDocument",
+                InvoiceDocumentTypes.SalesIssue or InvoiceDocumentTypes.PurchaseRegistration => "InvoiceDocument",
                 _ => "DynamicDocument"
             };
             return new NavigationItem
@@ -680,6 +688,14 @@ namespace BIS.ERP
                         {
                             var paymentView = new PaymentOrderWorkView(document3, _metadataService);
                             _navigation.NavigateTo(paymentView);
+                        }
+                        break;
+
+                    case "InvoiceDocument":
+                        if (item.Tag is MetadataObject invoiceDocument)
+                        {
+                            var invoiceView = new InvoiceWorkView(invoiceDocument, _metadataService);
+                            _navigation.NavigateTo(invoiceView);
                         }
                         break;
 

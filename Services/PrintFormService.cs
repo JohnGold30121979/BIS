@@ -204,6 +204,55 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        public async Task SeedInvoiceFormsAsync()
+        {
+            await EnsureSchemaAsync();
+            var documents = await _context.MetadataObjects.AsNoTracking()
+                .Include(m => m.Fields)
+                .Where(item => item.ObjectType == "Document" &&
+                    (item.Name == InvoiceDocumentTypes.SalesIssue || item.Name == InvoiceDocumentTypes.PurchaseRegistration))
+                .ToListAsync();
+
+            foreach (var document in documents.OrderBy(item => item.Name))
+            {
+                var isSales = InvoiceDocumentTypes.IsSales(document.Name);
+                var code = isSales ? "invoice.sales.foxpro" : "invoice.purchase.foxpro";
+                if (await _context.Reports.AnyAsync(item => item.Code == code))
+                    continue;
+
+                var template = GenerateInvoiceFrxTemplate(document, isSales);
+                await _context.Reports.AddAsync(new Report
+                {
+                    Code = code,
+                    Name = isSales ? "Счет-фактура на реализацию" : "Счет-фактура полученная",
+                    TitleText = "Счет-фактура",
+                    Description = isSales
+                        ? "Печатная форма выписки счет-фактуры"
+                        : "Печатная форма регистрации полученной счет-фактуры",
+                    DataSourceType = "Document",
+                    DataSourceId = document.Id,
+                    ReportType = "FoxProLayout",
+                    IsPrintForm = true,
+                    IsActive = true,
+                    IsDefault = true,
+                    SourceFormat = "FoxProFRX",
+                    TemplateVersion = 1,
+                    Icon = "🧾",
+                    Order = 30,
+                    PageOrientation = "Portrait",
+                    ShowGridLines = false,
+                    ShowHeader = false,
+                    ShowFooter = false,
+                    ShowPageNumbers = false,
+                    Template = JsonSerializer.Serialize(template, new JsonSerializerOptions { WriteIndented = true }),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         private static PrintFormTemplate GenerateCashReceiptFrxTemplate(MetadataObject document)
         {
             var fields = document.Fields.ToList();
@@ -261,6 +310,105 @@ namespace BIS.ERP.Services
                 }
             };
             return template;
+        }
+
+        private static PrintFormTemplate GenerateInvoiceFrxTemplate(MetadataObject document, bool isSales)
+        {
+            var elements = new List<PrintFormElement>();
+            void Add(string type, string text, string expression, double left, double top, double width, double height,
+                double fontSize = 9, bool bold = false, string align = "Left")
+            {
+                elements.Add(new PrintFormElement
+                {
+                    Type = type,
+                    Text = text,
+                    Expression = expression,
+                    BandType = top < 520 ? "PageHeader" : top < 2050 ? "Detail" : "Summary",
+                    Left = left,
+                    Top = top,
+                    Width = width,
+                    Height = height,
+                    FontName = "Arial",
+                    FontSize = fontSize,
+                    Bold = bold,
+                    Alignment = align,
+                    BorderStyle = type == "Box" ? "Solid" : "None",
+                    Order = elements.Count
+                });
+            }
+
+            Add("Box", "", "", 70, 70, 1960, 2550);
+            Add("Text", "СЧЕТ-ФАКТУРА", "", 120, 110, 1860, 70, 16, true, "Center");
+            Add("Text", isSales ? "Выписка счет-фактуры" : "Регистрация счет-фактуры", "", 120, 185, 1860, 50, 10, false, "Center");
+            Add("Text", "Номер:", "", 120, 280, 170, 45, 10, true);
+            Add("Expression", "", "number", 295, 280, 300, 45, 10, true);
+            Add("Text", "Дата:", "", 1180, 280, 150, 45, 10, true);
+            Add("Expression", "", "date", 1340, 280, 300, 45, 10);
+            Add("Text", "Номер ЭСФ:", "", 120, 345, 240, 45, 10, true);
+            Add("Expression", "", "esf_number", 370, 345, 450, 45, 10);
+            Add("Text", "Организация:", "", 120, 410, 260, 45, 10, true);
+            Add("Expression", "", "organization", 390, 410, 1420, 45, 10);
+            Add("Text", "Счет:", "", 120, 475, 160, 45, 10, true);
+            Add("Expression", "", "counterparty_account", 290, 475, 500, 45, 10);
+            Add("Text", "Основание:", "", 860, 475, 220, 45, 10, true);
+            Add("Expression", "", "basis", 1090, 475, 800, 45, 10);
+
+            const double tableLeft = 120;
+            const double tableTop = 610;
+            const double rowHeight = 105;
+            var widths = new[] { 80d, 620d, 240d, 250d, 210d, 210d, 250d };
+            var headers = new[] { "N", "Наименование", "Счет", "Без налогов", "НДС", "Налог", "Итого" };
+            Add("Box", "", "", tableLeft, tableTop, widths.Sum(), rowHeight * 10);
+            var x = tableLeft;
+            for (var column = 0; column < widths.Length; column++)
+            {
+                Add("Text", headers[column], "", x + 8, tableTop + 22, widths[column] - 16, 45, 8.5, true, column == 1 ? "Left" : "Center");
+                if (column > 0)
+                    Add("Line", "", "", x, tableTop, 0, rowHeight * 10);
+                x += widths[column];
+            }
+            for (var row = 1; row <= 9; row++)
+                Add("Line", "", "", tableLeft, tableTop + rowHeight * row, widths.Sum(), 0);
+
+            for (var row = 1; row <= 8; row++)
+            {
+                var y = tableTop + rowHeight * row + 22;
+                Add("Text", row.ToString(CultureInfo.InvariantCulture), "", tableLeft + 10, y, widths[0] - 20, 40, 8.5, false, "Center");
+                Add("Expression", "", $"line{row}_name", tableLeft + widths[0] + 10, y, widths[1] - 20, 40, 8.5);
+                Add("Expression", "", $"line{row}_account", tableLeft + widths[0] + widths[1] + 10, y, widths[2] - 20, 40, 8.5);
+                Add("Expression", "", $"line{row}_amount_without_tax", tableLeft + widths[0] + widths[1] + widths[2] + 10, y, widths[3] - 20, 40, 8.5, false, "Right");
+                Add("Expression", "", $"line{row}_vat", tableLeft + widths[0] + widths[1] + widths[2] + widths[3] + 10, y, widths[4] - 20, 40, 8.5, false, "Right");
+                Add("Expression", "", $"line{row}_sales_tax", tableLeft + widths[0] + widths[1] + widths[2] + widths[3] + widths[4] + 10, y, widths[5] - 20, 40, 8.5, false, "Right");
+                Add("Expression", "", $"line{row}_total", tableLeft + widths[0] + widths[1] + widths[2] + widths[3] + widths[4] + widths[5] + 10, y, widths[6] - 20, 40, 8.5, false, "Right");
+            }
+
+            Add("Text", "Итого без налогов:", "", 1100, 1690, 420, 45, 10, true);
+            Add("Expression", "", "amount_without_tax", 1530, 1690, 330, 45, 10, true, "Right");
+            Add("Text", "Сумма НДС:", "", 1100, 1760, 420, 45, 10, true);
+            Add("Expression", "", "vat_total", 1530, 1760, 330, 45, 10, true, "Right");
+            Add("Text", "Налог с продаж:", "", 1100, 1830, 420, 45, 10, true);
+            Add("Expression", "", "sales_tax_total", 1530, 1830, 330, 45, 10, true, "Right");
+            Add("Text", "Всего к оплате:", "", 1100, 1900, 420, 50, 11, true);
+            Add("Expression", "", "total_amount", 1530, 1900, 330, 50, 11, true, "Right");
+            Add("Text", "Сумма прописью:", "", 120, 2070, 380, 45, 10, true);
+            Add("Expression", "", "amount_in_words", 120, 2135, 1760, 110, 10);
+            Add("Text", "Руководитель __________________________", "", 120, 2360, 760, 45, 10, true);
+            Add("Text", "Главный бухгалтер _____________________", "", 1030, 2360, 780, 45, 10, true);
+
+            return new PrintFormTemplate
+            {
+                SourceFormat = "FoxProFRX",
+                OriginalFileName = $"{document.TableName}.frx",
+                PageWidth = 2100,
+                PageHeight = 2970,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "PageHeader", Top = 0, Height = 540, Order = 0 },
+                    new() { Type = "Detail", Top = 540, Height = 1510, Order = 1 },
+                    new() { Type = "Summary", Top = 2050, Height = 620, Order = 2 }
+                },
+                Elements = elements
+            };
         }
 
         public static PrintFormTemplate CreateDefaultNativeTemplate(string reportType)
@@ -472,6 +620,9 @@ namespace BIS.ERP.Services
             var metadata = await _context.MetadataObjects.Include(item => item.Fields)
                 .FirstOrDefaultAsync(item => item.Id == report.DataSourceId.Value)
                 ?? throw new InvalidOperationException("Документ-источник печатной формы не найден.");
+            if (InvoiceDocumentTypes.IsSales(metadata.Name) || InvoiceDocumentTypes.IsPurchase(metadata.Name))
+                return await ExportInvoiceDocumentAsync(report, recordId, metadata);
+
             var metadataService = new MetadataService(_context);
             var rows = await metadataService.GetCatalogDataAsync(metadata.Id);
             var rawRow = rows.FirstOrDefault(row => Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var id) && id == recordId)
@@ -487,6 +638,36 @@ namespace BIS.ERP.Services
             var fallbackTemplate = CreateBlankNativeTemplate();
             report.Template = JsonSerializer.Serialize(fallbackTemplate);
             report.SourceFormat = "Native";
+            return BuildTemplateLayoutPdf(report, data, mappings);
+        }
+
+        public async Task<byte[]> ExportInvoiceDocumentAsync(Report report, Guid invoiceId)
+        {
+            if (!report.IsActive)
+                throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            if (!report.DataSourceId.HasValue)
+                throw new InvalidOperationException("У печатной формы не указан документ-источник.");
+
+            var metadata = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Id == report.DataSourceId.Value)
+                ?? throw new InvalidOperationException("Документ-источник печатной формы не найден.");
+            return await ExportInvoiceDocumentAsync(report, invoiceId, metadata);
+        }
+
+        private async Task<byte[]> ExportInvoiceDocumentAsync(Report report, Guid invoiceId, MetadataObject metadata)
+        {
+            var invoiceService = new InvoiceService(_context);
+            invoiceService.Configure(metadata);
+            var invoice = await invoiceService.GetInvoiceAsync(invoiceId)
+                ?? throw new InvalidOperationException("Счет-фактура для печати не найден.");
+            var data = BuildInvoicePrintData(invoice, metadata.Name);
+            var mappings = await LoadElementMappingsAsync(report);
+
+            if (!string.IsNullOrWhiteSpace(report.Template))
+                return BuildTemplateLayoutPdf(report, data, mappings);
+
+            report.Template = JsonSerializer.Serialize(GenerateInvoiceFrxTemplate(metadata, InvoiceDocumentTypes.IsSales(metadata.Name)));
+            report.SourceFormat = "FoxProFRX";
             return BuildTemplateLayoutPdf(report, data, mappings);
         }
 
@@ -567,6 +748,61 @@ namespace BIS.ERP.Services
                 }
             }
             return data;
+        }
+
+        private static CashOrderPrintData BuildInvoicePrintData(InvoiceDocument invoice, string documentName)
+        {
+            var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            void AddExtra(string key, object? value)
+            {
+                var normalized = NormalizeFieldName(key);
+                extra[key] = value ?? string.Empty;
+                extra[normalized] = value ?? string.Empty;
+            }
+
+            AddExtra("esf_number", invoice.EsfNumber);
+            AddExtra("Номер ЭСФ", invoice.EsfNumber);
+            AddExtra("counterparty_account", invoice.CounterpartyAccountCode);
+            AddExtra("Счет", invoice.CounterpartyAccountCode);
+            AddExtra("payment_kind", invoice.PaymentKind);
+            AddExtra("delivery_kind", invoice.DeliveryKind);
+            AddExtra("supply_kind", invoice.SupplyKind);
+            AddExtra("amount_without_tax", invoice.AmountWithoutTax);
+            AddExtra("vat_total", invoice.VatTotal);
+            AddExtra("sales_tax_total", invoice.SalesTaxTotal);
+            AddExtra("total_amount", invoice.TotalAmount);
+            AddExtra("is_posted", invoice.IsPosted ? "Да" : "Нет");
+
+            for (var index = 0; index < invoice.Lines.Count; index++)
+            {
+                var number = index + 1;
+                var line = invoice.Lines[index];
+                AddExtra($"line{number}_name", line.Name);
+                AddExtra($"line{number}_account", line.AccountCode);
+                AddExtra($"line{number}_account_name", string.IsNullOrWhiteSpace(line.AccountName) ? line.AccountCode : line.AccountName);
+                AddExtra($"line{number}_amount_without_tax", line.AmountWithoutTax);
+                AddExtra($"line{number}_vat", line.VatAmount);
+                AddExtra($"line{number}_sales_tax", line.SalesTaxAmount);
+                AddExtra($"line{number}_total", line.LineTotal);
+            }
+
+            return new CashOrderPrintData
+            {
+                DocumentName = documentName,
+                Number = invoice.DocNumber,
+                Date = invoice.DocDate,
+                Organization = invoice.OrganizationName,
+                Person = invoice.OrganizationName,
+                CorrespondentAccount = invoice.CounterpartyAccountCode,
+                DebitAccount = invoice.CounterpartyAccountCode,
+                CreditAccount = string.Empty,
+                Amount = invoice.TotalAmount,
+                AmountInCurrency = invoice.TotalAmount,
+                AmountInWords = RussianMoneyInWords(invoice.TotalAmount),
+                Basis = invoice.Basis,
+                Note = invoice.IsPosted ? "Проведён" : "Не проведён",
+                ExtraFields = extra
+            };
         }
 
         private async Task<string> ResolveAccountCodeAsync(string value)
@@ -957,7 +1193,7 @@ namespace BIS.ERP.Services
         private static string GetPrintDataValue(CashOrderPrintData data, string fieldName, string formatString)
         {
             var normalized = NormalizeFieldName(fieldName);
-            object value = normalized switch
+            object? value = normalized switch
             {
                 "document_name" => data.DocumentName,
                 "number" or "doc_number" or "dok1" => data.Number,
@@ -979,7 +1215,7 @@ namespace BIS.ERP.Services
                 "note" or "description" => data.Note,
                 "currency" or "nval1" => "KGS",
                 "rate" or "kurs_v" => "1,00",
-                _ => string.Empty
+                _ => TryGetExtraFieldValue(data, fieldName, normalized)
             };
 
             return value switch
@@ -998,6 +1234,21 @@ namespace BIS.ERP.Services
                     : number.ToString(formatString),
                 _ => value?.ToString() ?? string.Empty
             };
+        }
+
+        private static object? TryGetExtraFieldValue(CashOrderPrintData data, string fieldName, string normalized)
+        {
+            if (data.ExtraFields.Count == 0)
+                return null;
+
+            var direct = (fieldName ?? string.Empty).Trim().Trim('{', '}');
+            if (data.ExtraFields.TryGetValue(direct, out var value))
+                return value;
+            if (data.ExtraFields.TryGetValue(normalized, out value))
+                return value;
+
+            var compact = Regex.Replace(normalized, @"[\s\.\-]+", "_");
+            return data.ExtraFields.TryGetValue(compact, out value) ? value : null;
         }
 
         private static string NormalizeFieldName(string fieldName)
@@ -1021,7 +1272,17 @@ namespace BIS.ERP.Services
                 "основание" => "basis",
                 "примечание" => "note",
                 "валюта" => "currency",
-                _ => value
+                "номер эсф" or "эсф" => "esf_number",
+                "счет" or "счёт" => "counterparty_account",
+                "вид оплаты" => "payment_kind",
+                "вид поставки" => "delivery_kind",
+                "тип поставки" => "supply_kind",
+                "сумма без налогов" or "без налогов" => "amount_without_tax",
+                "сумма ндс" or "ндс" => "vat_total",
+                "налог с продаж" => "sales_tax_total",
+                "итого" or "всего" or "всего к оплате" => "total_amount",
+                "проведен" or "проведён" => "is_posted",
+                _ => Regex.Replace(value, @"[\s\.\-]+", "_")
             };
         }
 
@@ -1350,6 +1611,7 @@ namespace BIS.ERP.Services
             public string AmountInWords { get; init; } = string.Empty;
             public string Basis { get; init; } = string.Empty;
             public string Note { get; init; } = string.Empty;
+            public Dictionary<string, object> ExtraFields { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
         private readonly record struct CashDeskPrintInfo(string DisplayName, string Account);

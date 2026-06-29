@@ -187,6 +187,25 @@ namespace BIS.ERP.Services
             return postings.OrderByDescending(p => p.Date).ThenBy(p => p.DocumentNumber).ToList();
         }
 
+        public async Task<List<PostingViewModel>> GetPostingsByDocumentAsync(
+            string documentType,
+            string documentNumber,
+            DateTime? documentDate = null)
+        {
+            var normalizedNumber = MetadataService.NormalizeLegacyDocumentNumber(documentNumber);
+            var startDate = documentDate?.Date ?? DateTime.Today.AddYears(-10);
+            var endDate = documentDate?.Date ?? DateTime.Today.AddYears(1);
+            var postings = await GetAllPostingsAsync(startDate, endDate);
+            return postings
+                .Where(posting =>
+                    string.Equals(posting.DocumentType, documentType, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(posting.DocumentNumber, normalizedNumber, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(posting => posting.Date)
+                .ThenBy(posting => posting.DebitAccount)
+                .ThenBy(posting => posting.CreditAccount)
+                .ToList();
+        }
+
         private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(string catalogName)
         {
             try

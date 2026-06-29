@@ -56,13 +56,18 @@ namespace BIS.ERP.Views
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
-                await printFormService.SeedCashOrderFormsAsync();
                 await new DocumentationMetadataSeedService(_context).EnsureAsync();
+                await new InvoiceMetadataSeedService(_context).EnsureAsync();
+                await printFormService.SeedCashOrderFormsAsync();
+                await printFormService.SeedInvoiceFormsAsync();
 
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
-                _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Order).ToList();
-                _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Order).ToList();
-                _reports = await _reportService.GetReportsAsync();
+                _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Name).ToList();
+                _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Name).ToList();
+                _reports = (await _reportService.GetReportsAsync())
+                    .OrderBy(report => report.IsPrintForm ? 1 : 0)
+                    .ThenBy(report => report.Name)
+                    .ToList();
                 BuildMetadataTree();
                 ShowCatalogsList();
             }

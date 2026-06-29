@@ -58,9 +58,9 @@ namespace BIS.ERP.Views.Configurator
             var assignments = (await _moduleService.GetItemsAsync())
                 .Where(item => item.ModuleId == moduleId).Select(item => item.ObjectId).ToHashSet();
             var documents = await _context.MetadataObjects.AsNoTracking()
-                .Where(item => item.ObjectType == "Document").OrderBy(item => item.Order).ThenBy(item => item.Name).ToListAsync();
+                .Where(item => item.ObjectType == "Document").OrderBy(item => item.Name).ToListAsync();
             var reports = await _context.Reports.AsNoTracking()
-                .Where(item => !item.IsPrintForm).OrderBy(item => item.Order).ThenBy(item => item.Name).ToListAsync();
+                .Where(item => !item.IsPrintForm).OrderBy(item => item.Name).ToListAsync();
             _documents.Clear();
             foreach (var document in documents)
                 _documents.Add(new ModuleObjectRow(document.Id, document.Name, document.Description, assignments.Contains(document.Id)));

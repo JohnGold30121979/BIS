@@ -1,0 +1,36 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.DocumentPostingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Проводки документа" Height="520" Width="980"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TitleText" Grid.Row="0" FontSize="16" FontWeight="Bold" Margin="0,0,0,10"/>
+
+        <DataGrid x:Name="PostingsGrid" Grid.Row="1" AutoGenerateColumns="False"
+                  IsReadOnly="True" AlternatingRowBackground="#F5F5F5">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="90"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="90"/>
+                <DataGridTextColumn Header="Расшифровка дебета" Binding="{Binding DebitAccountName}" Width="180"/>
+                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="90"/>
+                <DataGridTextColumn Header="Расшифровка кредита" Binding="{Binding CreditAccountName}" Width="180"/>
+                <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, StringFormat=N2}" Width="100"/>
+                <DataGridTextColumn Header="Содержание" Binding="{Binding Note}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock x:Name="SummaryText" Grid.Row="2" Margin="0,8,0,8" FontWeight="SemiBold"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Закрыть" Width="100" Height="35" Click="OnCloseClick"
+                    Background="#3498DB" Foreground="White"/>
+        </StackPanel>
+    </Grid>
+</Window>

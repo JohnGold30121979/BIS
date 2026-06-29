@@ -154,7 +154,10 @@ namespace BIS.ERP.Services
 
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 "Проводки", "Приходный кассовый ордер", "Расходный кассовый ордер", "Платежное поручение",
-                "Платежная ведомость", "Доверенность", "Авансовый отчет", "Расчет курсовой разницы");
+                "Платежная ведомость", "Доверенность", "Авансовый отчет", "Расчет курсовой разницы",
+                InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
+            await MoveByNameToModuleAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
+                InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 "Приход товаров", "Расход товаров", "Внутреннее перемещение ТМЦ", "Приход из производства ТМЦ",
                 "Расход в производство", "Передача ТМЦ в подотчет", "Инвентаризация ТМЦ");
@@ -189,6 +192,49 @@ namespace BIS.ERP.Services
                     ModuleId = moduleId, ObjectId = candidate.Id, ObjectType = objectType, Order = ++order
                 });
             }
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task MoveByNameToModuleAsync(
+            Guid moduleId,
+            string objectType,
+            IEnumerable<(Guid Id, string Name)> objects,
+            params string[] names)
+        {
+            var namesSet = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var candidates = objects.Where(item => namesSet.Contains(item.Name)).ToList();
+            if (candidates.Count == 0)
+                return;
+
+            var objectIds = candidates.Select(item => item.Id).ToHashSet();
+            var existingItems = await _context.MetadataModuleItems
+                .Where(item => item.ObjectType == objectType && objectIds.Contains(item.ObjectId))
+                .ToListAsync();
+            var order = await _context.MetadataModuleItems.Where(item => item.ModuleId == moduleId)
+                .Select(item => (int?)item.Order).MaxAsync() ?? 0;
+
+            foreach (var candidate in candidates.OrderBy(item => item.Name))
+            {
+                var item = existingItems.FirstOrDefault(existing => existing.ObjectId == candidate.Id);
+                if (item == null)
+                {
+                    await _context.MetadataModuleItems.AddAsync(new MetadataModuleItem
+                    {
+                        ModuleId = moduleId,
+                        ObjectId = candidate.Id,
+                        ObjectType = objectType,
+                        Order = ++order
+                    });
+                    continue;
+                }
+
+                if (item.ModuleId != moduleId)
+                {
+                    item.ModuleId = moduleId;
+                    item.Order = ++order;
+                }
+            }
+
             await _context.SaveChangesAsync();
         }
 
