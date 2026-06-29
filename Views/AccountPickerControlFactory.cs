@@ -76,6 +76,18 @@ namespace BIS.ERP.Views
             return control is UserControl { Tag: AccountReferenceItem account } ? account : null;
         }
 
+        public static void SetSelectedAccount(Control control, AccountReferenceItem? account)
+        {
+            if (control is not UserControl picker)
+                return;
+
+            picker.Tag = account;
+
+            var textBox = FindDescendant<TextBox>(picker);
+            if (textBox != null)
+                textBox.Text = account?.DisplayName ?? string.Empty;
+        }
+
         public static object GetSelectedAccountValue(MetadataField field, Control control)
         {
             var account = GetSelectedAccount(control);
@@ -100,6 +112,23 @@ namespace BIS.ERP.Views
             return account.DisplayName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
                 ? account.DisplayName[prefix.Length..]
                 : account.DisplayName;
+        }
+
+        private static T? FindDescendant<T>(DependencyObject root)
+            where T : DependencyObject
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            {
+                var child = VisualTreeHelper.GetChild(root, i);
+                if (child is T match)
+                    return match;
+
+                var nested = FindDescendant<T>(child);
+                if (nested != null)
+                    return nested;
+            }
+
+            return null;
         }
     }
 }

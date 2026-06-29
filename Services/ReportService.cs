@@ -33,6 +33,12 @@ namespace BIS.ERP.Services
 
             try
             {
+                if (report == null)
+                    throw new Exception("Отчет не выбран");
+
+                if (!report.DataSourceId.HasValue)
+                    throw new Exception($"Для отчета \"{report.Name}\" не выбран источник данных");
+
                 if (report?.DataSourceId.HasValue == true)
                 {
                     var catalog = await _context.MetadataObjects
@@ -44,10 +50,27 @@ namespace BIS.ERP.Services
                         throw new Exception($"Справочник не найден");
                     }
 
-                    var selectedFields = report.Fields
+                    var configuredFields = report.Fields ?? new List<ReportField>();
+                    var selectedFields = configuredFields
                         .Where(field => field.IsVisible)
                         .OrderBy(field => field.Order)
                         .ToList();
+                    if (selectedFields.Count == 0 && configuredFields.Count == 0)
+                    {
+                        selectedFields = catalog.Fields
+                            .OrderBy(field => field.Order)
+                            .Where(field => !string.Equals(field.DbColumnName, "Id", StringComparison.OrdinalIgnoreCase))
+                            .Select((field, index) => new ReportField
+                            {
+                                FieldName = field.DbColumnName,
+                                DisplayName = field.Name,
+                                Order = index + 1,
+                                IsVisible = true,
+                                Width = 120
+                            })
+                            .ToList();
+                    }
+
                     var selectColumns = new List<string>();
 
                     foreach (var field in selectedFields)
@@ -818,6 +841,13 @@ namespace BIS.ERP.Services
                         filter.ReportId = report.Id;
                     }
 
+                    foreach (var mapping in report.ElementMappings)
+                    {
+                        if (mapping.Id == Guid.Empty)
+                            mapping.Id = Guid.NewGuid();
+                        mapping.ReportId = report.Id;
+                    }
+
                     await _context.Reports.AddAsync(report);
                 }
                 else
@@ -826,6 +856,7 @@ namespace BIS.ERP.Services
                     var existingReport = await _context.Reports
                         .Include(r => r.Fields)
                         .Include(r => r.Filters)
+                        .Include(r => r.ElementMappings)
                         .FirstOrDefaultAsync(r => r.Id == report.Id);
 
                     if (existingReport != null)
@@ -859,6 +890,14 @@ namespace BIS.ERP.Services
                             existingReport.Filters.Add(filter);
                         }
 
+                        _context.ReportElementMappings.RemoveRange(existingReport.ElementMappings);
+                        foreach (var mapping in report.ElementMappings)
+                        {
+                            mapping.Id = Guid.NewGuid();
+                            mapping.ReportId = report.Id;
+                            existingReport.ElementMappings.Add(mapping);
+                        }
+
                         _context.Reports.Update(existingReport);
                     }
                     else
@@ -867,6 +906,21 @@ namespace BIS.ERP.Services
                         report.Id = Guid.NewGuid();
                         report.CreatedAt = DateTime.UtcNow;
                         report.UpdatedAt = DateTime.UtcNow;
+                        foreach (var field in report.Fields)
+                        {
+                            field.Id = field.Id == Guid.Empty ? Guid.NewGuid() : field.Id;
+                            field.ReportId = report.Id;
+                        }
+                        foreach (var filter in report.Filters)
+                        {
+                            filter.Id = filter.Id == Guid.Empty ? Guid.NewGuid() : filter.Id;
+                            filter.ReportId = report.Id;
+                        }
+                        foreach (var mapping in report.ElementMappings)
+                        {
+                            mapping.Id = mapping.Id == Guid.Empty ? Guid.NewGuid() : mapping.Id;
+                            mapping.ReportId = report.Id;
+                        }
                         await _context.Reports.AddAsync(report);
                     }
                 }
@@ -895,6 +949,7 @@ namespace BIS.ERP.Services
                 .Include(r => r.Fields)
                 .Include(r => r.Filters)
                 .Include(r => r.Groups)
+                .Include(r => r.ElementMappings)
                 .OrderBy(r => r.Order)
                 .ToListAsync();
         }
@@ -909,6 +964,7 @@ namespace BIS.ERP.Services
                 var existingReport = await _context.Reports
                     .Include(r => r.Fields)
                     .Include(r => r.Filters)
+                    .Include(r => r.ElementMappings)
                     .FirstOrDefaultAsync(r => r.Id == report.Id);
 
                 if (existingReport != null)
@@ -923,6 +979,14 @@ namespace BIS.ERP.Services
                     existingReport.Order = report.Order;
                     CopyReportLayout(report, existingReport);
                     existingReport.UpdatedAt = DateTime.UtcNow;
+
+                    _context.ReportElementMappings.RemoveRange(existingReport.ElementMappings);
+                    foreach (var mapping in report.ElementMappings)
+                    {
+                        mapping.Id = Guid.NewGuid();
+                        mapping.ReportId = report.Id;
+                        existingReport.ElementMappings.Add(mapping);
+                    }
 
                     _context.Reports.Update(existingReport);
                     await _context.SaveChangesAsync();
@@ -982,12 +1046,14 @@ namespace BIS.ERP.Services
             var report = await _context.Reports
                 .Include(r => r.Fields)
                 .Include(r => r.Filters)
+                .Include(r => r.ElementMappings)
                 .FirstOrDefaultAsync(r => r.Id == reportId);
 
             if (report != null)
             {
                 _context.ReportFields.RemoveRange(report.Fields);
                 _context.ReportFilters.RemoveRange(report.Filters);
+                _context.ReportElementMappings.RemoveRange(report.ElementMappings);
                 _context.Reports.Remove(report);
                 await _context.SaveChangesAsync();
             }

@@ -30,6 +30,7 @@ namespace BIS.ERP.Services
         public async Task ExportAsync(string filePath)
         {
             await new ModuleMetadataService(_context).EnsureSchemaAsync();
+            await new PrintFormService(_context).EnsureSchemaAsync();
             var metadata = await _context.MetadataObjects
                 .AsNoTracking()
                 .Include(item => item.Fields)
@@ -43,6 +44,7 @@ namespace BIS.ERP.Services
                 .Include(item => item.Fields)
                 .Include(item => item.Filters)
                 .Include(item => item.Groups)
+                .Include(item => item.ElementMappings)
                 .OrderBy(item => item.Order)
                 .ToListAsync();
 
@@ -144,9 +146,11 @@ namespace BIS.ERP.Services
 
         private async Task ReplaceReportsAsync(List<Report> reports)
         {
+            await new PrintFormService(_context).EnsureSchemaAsync();
             _context.ReportGroups.RemoveRange(await _context.ReportGroups.ToListAsync());
             _context.ReportFilters.RemoveRange(await _context.ReportFilters.ToListAsync());
             _context.ReportFields.RemoveRange(await _context.ReportFields.ToListAsync());
+            _context.ReportElementMappings.RemoveRange(await _context.ReportElementMappings.ToListAsync());
             _context.Reports.RemoveRange(await _context.Reports.ToListAsync());
             await _context.SaveChangesAsync();
 
@@ -159,6 +163,8 @@ namespace BIS.ERP.Services
                     filter.ReportId = report.Id;
                 foreach (var group in report.Groups)
                     group.ReportId = report.Id;
+                foreach (var mapping in report.ElementMappings)
+                    mapping.ReportId = report.Id;
             }
 
             await _context.Reports.AddRangeAsync(reports);
@@ -341,6 +347,8 @@ namespace BIS.ERP.Services
                     filter.Report = null!;
                 foreach (var group in report.Groups)
                     group.Report = null!;
+                foreach (var mapping in report.ElementMappings)
+                    mapping.Report = null!;
                 report.HeadersFooters.Clear();
             }
         }

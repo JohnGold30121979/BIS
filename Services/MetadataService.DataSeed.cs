@@ -563,11 +563,12 @@ namespace BIS.ERP.Services
 
                 var insertSql = $@"
                 INSERT INTO ""{catalog.TableName}"" 
-                (""Id"", ""code"", ""name"", ""currency_id"", ""initial_balance"", ""current_balance"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+                (""Id"", ""code"", ""name"", ""cash_number"", ""currency_id"", ""initial_balance"", ""current_balance"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
                 VALUES (
                     '{Guid.NewGuid()}',
-                    '1',
+                    '3010',
                     'Основная касса (сомы)',
+                    '1',
                     '{currencyKgsId}',
                     0,
                     0,

@@ -33,11 +33,32 @@ namespace BIS.ERP.Views
 
             DataContext = viewModel;
             Loaded += (_, _) => LoginBox.Focus();
+            AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(OnWindowPreviewKeyDown), true);
+            AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(OnWindowPreviewKeyDown), true);
+        }
+
+        private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!IsEnterKey(e.Key))
+                return;
+
+            if (LoginBox.IsKeyboardFocusWithin)
+            {
+                e.Handled = true;
+                PasswordBox.Focus();
+                return;
+            }
+
+            if (PasswordBox.IsKeyboardFocusWithin || LoginButton.IsKeyboardFocusWithin)
+            {
+                e.Handled = true;
+                ExecuteLoginCommand();
+            }
         }
 
         private void OnLoginPreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key != Key.Enter)
+            if (!IsEnterKey(e.Key))
                 return;
             e.Handled = true;
             PasswordBox.Focus();
@@ -45,10 +66,19 @@ namespace BIS.ERP.Views
 
         private void OnPasswordPreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key != Key.Enter)
+            if (!IsEnterKey(e.Key))
                 return;
             e.Handled = true;
-            LoginButton.Focus();
+            ExecuteLoginCommand();
         }
+
+        private void ExecuteLoginCommand()
+        {
+            var command = (DataContext as LoginViewModel)?.LoginCommand;
+            if (command?.CanExecute(null) == true)
+                command.Execute(null);
+        }
+
+        private static bool IsEnterKey(Key key) => key is Key.Enter or Key.Return;
     }
 }

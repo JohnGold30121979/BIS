@@ -42,6 +42,7 @@
                 <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="100"/>
                 <DataGridTextColumn Header="Номер документа" Binding="{Binding [Номер документа]}" Width="120"/>
                 <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="120"/>
+                <DataGridTextColumn Header="Касса" Binding="{Binding [Касса]}" Width="170"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
                 <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом]}" Width="120"/>

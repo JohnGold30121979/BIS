@@ -920,9 +920,11 @@ namespace BIS.ERP
             {
                 var context = await _infoBaseManager.GetCurrentDbContextAsync();
                 var reportService = new ReportService(context);
-                var data = await reportService.GetReportDataAsync(report);
+                var loadedReport = (await reportService.GetReportsAsync())
+                    .FirstOrDefault(item => item.Id == report.Id) ?? report;
+                var data = await reportService.GetReportDataAsync(loadedReport);
 
-                var preview = new ReportPreviewWindow(data, report, reportService);
+                var preview = new ReportPreviewWindow(data, loadedReport, reportService);
                 preview.Owner = this;
                 preview.ShowDialog();
             }

@@ -36,23 +36,28 @@
 
             <TextBlock Grid.Row="1" Text="Логин" Foreground="White" Margin="0,0,0,5"/>
             <TextBox x:Name="LoginBox" Grid.Row="2" Height="35" Padding="10" Margin="0,0,0,15"
+                     PreviewKeyDown="OnLoginPreviewKeyDown"
                      Text="{Binding Login, UpdateSourceTrigger=PropertyChanged}"/>
 
             <TextBlock Grid.Row="3" Text="Полное имя" Foreground="White" Margin="0,0,0,5"/>
             <TextBox x:Name="FullNameBox" Grid.Row="4" Height="35" Padding="10" Margin="0,0,0,15"
+                     PreviewKeyDown="OnFullNamePreviewKeyDown"
                      Text="{Binding FullName, UpdateSourceTrigger=PropertyChanged}"/>
 
             <TextBlock Grid.Row="5" Text="Email" Foreground="White" Margin="0,0,0,5"/>
             <TextBox x:Name="EmailBox" Grid.Row="6" Height="35" Padding="10" Margin="0,0,0,15"
+                     PreviewKeyDown="OnEmailPreviewKeyDown"
                      Text="{Binding Email, UpdateSourceTrigger=PropertyChanged}"/>
 
             <TextBlock Grid.Row="7" Text="Пароль" Foreground="White" Margin="0,0,0,5"/>
             <PasswordBox x:Name="PasswordBox" Grid.Row="8" Height="35" Padding="10" Margin="0,0,0,15"
+                         PreviewKeyDown="OnPasswordPreviewKeyDown"
                          behaviors:PasswordBoxBindingBehavior.BindPassword="True"
                          behaviors:PasswordBoxBindingBehavior.BoundPassword="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
             <TextBlock Grid.Row="9" Text="Подтверждение пароля" Foreground="White" Margin="0,0,0,5"/>
             <PasswordBox x:Name="ConfirmPasswordBox" Grid.Row="10" Height="35" Padding="10" Margin="0,0,0,20"
+                         PreviewKeyDown="OnConfirmPasswordPreviewKeyDown"
                          behaviors:PasswordBoxBindingBehavior.BindPassword="True"
                          behaviors:PasswordBoxBindingBehavior.BoundPassword="{Binding ConfirmPassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
@@ -61,10 +66,12 @@
 
             <StackPanel Grid.Row="12" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
                 <Button x:Name="RegisterButton" Content="Зарегистрироваться" Width="140" Height="40"
-                        Background="#3498DB" Foreground="White" Command="{Binding RegisterCommand}" Margin="0,0,10,0"/>
+                        Background="#3498DB" Foreground="White" Command="{Binding RegisterCommand}" Margin="0,0,10,0"
+                        IsDefault="True"/>
                 <Button x:Name="BackButton" Content="Назад" Width="100" Height="40"
                         Background="Transparent" Foreground="White" 
-                        BorderBrush="#3498DB" BorderThickness="1" Command="{Binding BackCommand}"/>
+                        BorderBrush="#3498DB" BorderThickness="1" Command="{Binding BackCommand}"
+                        IsCancel="True"/>
             </StackPanel>
         </Grid>
     </Border>

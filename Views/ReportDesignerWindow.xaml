@@ -76,7 +76,8 @@
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Источник:" VerticalAlignment="Center" FontWeight="Bold"/>
                             <ComboBox x:Name="DataSourceCombo" Grid.Row="2" Grid.Column="1" Height="35" Margin="5"/>
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="Тип отчета:" VerticalAlignment="Center" FontWeight="Bold"/>
-                            <ComboBox x:Name="ReportTypeCombo" Grid.Row="2" Grid.Column="3" Height="35" Margin="5" SelectedIndex="0">
+                            <ComboBox x:Name="ReportTypeCombo" Grid.Row="2" Grid.Column="3" Height="35" Margin="5" SelectedIndex="0"
+                                      SelectionChanged="OnReportTypeChanged">
                                 <ComboBoxItem Content="Таблица" Tag="Table"/>
                                 <ComboBoxItem Content="Список" Tag="List"/>
                                 <ComboBoxItem Content="Карточка" Tag="Card"/>
@@ -225,7 +226,9 @@
                             
                             <DataGrid x:Name="ElementMappingGrid" AutoGenerateColumns="False"
                                       CanUserAddRows="False" CanUserDeleteRows="False"
-                                      RowHeight="45" MaxHeight="500" Margin="0,0,0,15">
+                                      RowHeight="45" MaxHeight="500" Margin="0,0,0,15"
+                                      CurrentCellChanged="OnElementMappingChanged"
+                                      CellEditEnding="OnElementMappingCellEditEnding">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Элемент" Binding="{Binding ElementText}" Width="120" IsReadOnly="True"/>
                                     <DataGridTextColumn Header="Тип" Binding="{Binding ElementType}" Width="70" IsReadOnly="True"/>
@@ -233,7 +236,7 @@
                                     <DataGridTemplateColumn Header="Поле данных" Width="160">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <ComboBox ItemsSource="{Binding DataContext.AvailableFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                <ComboBox ItemsSource="{Binding DataContext.AvailableDataFields, RelativeSource={RelativeSource AncestorType=Window}}"
                                                           DisplayMemberPath="Name"
                                                           SelectedValuePath="DbColumnName"
                                                           SelectedValue="{Binding MappedFieldName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -242,6 +245,7 @@
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
                                     <DataGridTextColumn Header="Формат" Binding="{Binding FormatString}" Width="100"/>
+                                    <DataGridTextColumn Header="Свой текст" Binding="{Binding CustomText}" Width="160"/>
                                     <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="60"/>
                                 </DataGrid.Columns>
                             </DataGrid>
@@ -259,6 +263,158 @@
                         </StackPanel>
                     </Border>
                 </ScrollViewer>
+            </TabItem>
+
+            <!-- Вкладка: Нативный визуальный макет -->
+            <TabItem Header="🧱 Нативный макет" x:Name="NativeDesignerTab"
+                     PreviewKeyDown="OnNativeDesignerPreviewKeyDown">
+                <Grid Background="#F4F6F8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="280"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="300"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="White" Margin="0,0,10,0" Padding="12">
+                        <StackPanel>
+                            <TextBlock Text="Элементы макета" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <ComboBox x:Name="NativeBandCombo" Height="30" Margin="0,0,0,8" SelectedIndex="1">
+                                <ComboBoxItem Content="Header"/>
+                                <ComboBoxItem Content="Body"/>
+                                <ComboBoxItem Content="Footer"/>
+                            </ComboBox>
+
+                            <WrapPanel Margin="0,0,0,10">
+                                <Button Content="+ Элемент" Width="100" Height="30" Margin="0,0,6,6"
+                                        Background="#27AE60" Foreground="White" Click="OnAddNativeElementClick"/>
+                                <Button Content="- Удалить" Width="100" Height="30" Margin="0,0,6,6"
+                                        Background="#C0392B" Foreground="White" Click="OnDeleteNativeElementClick"/>
+                                <Button Content="Текст" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeTextClick"/>
+                                <Button Content="Поле" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeFieldClick"/>
+                                <Button Content="Линия" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeLineClick"/>
+                                <Button Content="Рамка" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeBoxClick"/>
+                            </WrapPanel>
+
+                            <Button Content="Новый пустой макет" Height="32" Margin="0,0,0,10"
+                                    Background="#34495E" Foreground="White" Click="OnNewBlankNativeTemplateClick"/>
+
+                            <DataGrid x:Name="NativeElementsGrid" AutoGenerateColumns="False"
+                                      Height="420" CanUserAddRows="False" CanUserDeleteRows="False"
+                                      SelectionChanged="OnNativeElementGridSelectionChanged"
+                                      CellEditEnding="OnNativeElementCellEditEnding">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="#" Binding="{Binding Order}" Width="40" IsReadOnly="True"/>
+                                    <DataGridComboBoxColumn Header="Тип" SelectedValueBinding="{Binding Type, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="85">
+                                        <DataGridComboBoxColumn.ItemsSource>
+                                            <x:Array Type="{x:Type sys:String}" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+                                                <sys:String>Text</sys:String>
+                                                <sys:String>Expression</sys:String>
+                                                <sys:String>Line</sys:String>
+                                                <sys:String>Box</sys:String>
+                                            </x:Array>
+                                        </DataGridComboBoxColumn.ItemsSource>
+                                    </DataGridComboBoxColumn>
+                                    <DataGridComboBoxColumn Header="Блок" SelectedValueBinding="{Binding BandType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="85">
+                                        <DataGridComboBoxColumn.ItemsSource>
+                                            <x:Array Type="{x:Type sys:String}" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+                                                <sys:String>Header</sys:String>
+                                                <sys:String>Body</sys:String>
+                                                <sys:String>Footer</sys:String>
+                                            </x:Array>
+                                        </DataGridComboBoxColumn.ItemsSource>
+                                    </DataGridComboBoxColumn>
+                                    <DataGridTextColumn Header="Текст" Binding="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                                    <DataGridTemplateColumn Header="Поле" Width="130">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding DataContext.AvailableDataFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          DisplayMemberPath="Name"
+                                                          SelectedValuePath="DbColumnName"
+                                                          SelectedValue="{Binding Expression, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          Height="24"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="X" Binding="{Binding Left, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
+                                    <DataGridTextColumn Header="Y" Binding="{Binding Top, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
+                                    <DataGridTextColumn Header="Ш" Binding="{Binding Width, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
+                                    <DataGridTextColumn Header="В" Binding="{Binding Height, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Background="#D9DEE5" Padding="16">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <Grid>
+                                <Canvas x:Name="NativeDesignerCanvas"
+                                        Background="White"
+                                        Focusable="True"
+                                        PreviewKeyDown="OnNativeDesignerPreviewKeyDown"
+                                        MouseMove="OnNativeDesignerMouseMove"
+                                        MouseLeftButtonUp="OnNativeDesignerMouseLeftButtonUp"/>
+                            </Grid>
+                        </ScrollViewer>
+                    </Border>
+
+                    <Border Grid.Column="2" Background="White" Margin="10,0,0,0" Padding="12">
+                        <Grid PreviewKeyDown="OnNativePropertiesPreviewKeyDown">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="90"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Свойства элемента"
+                                       FontSize="14" FontWeight="Bold" Margin="0,0,0,12"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Текст:" VerticalAlignment="Center"/>
+                            <TextBox x:Name="NativeTextBox" Grid.Row="1" Grid.Column="1" Height="28" Margin="0,3"/>
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Поле:" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="NativeFieldCombo" Grid.Row="2" Grid.Column="1" Height="28" Margin="0,3"
+                                      ItemsSource="{Binding AvailableDataFields}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="DbColumnName"/>
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="X/Y:" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
+                                <TextBox x:Name="NativeLeftBox" Width="72" Height="28" Margin="0,3,6,3"/>
+                                <TextBox x:Name="NativeTopBox" Width="72" Height="28" Margin="0,3"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Ш/В:" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
+                                <TextBox x:Name="NativeWidthBox" Width="72" Height="28" Margin="0,3,6,3"/>
+                                <TextBox x:Name="NativeHeightBox" Width="72" Height="28" Margin="0,3"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Шрифт:" VerticalAlignment="Center"/>
+                            <TextBox x:Name="NativeFontBox" Grid.Row="5" Grid.Column="1" Height="28" Margin="0,3"/>
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Размер:" VerticalAlignment="Center"/>
+                            <TextBox x:Name="NativeFontSizeBox" Grid.Row="6" Grid.Column="1" Height="28" Margin="0,3"/>
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Выравн.:" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="NativeAlignmentCombo" Grid.Row="7" Grid.Column="1" Height="28" Margin="0,3">
+                                <ComboBoxItem Content="Left"/>
+                                <ComboBoxItem Content="Center"/>
+                                <ComboBoxItem Content="Right"/>
+                            </ComboBox>
+                            <CheckBox x:Name="NativeBoldCheck" Grid.Row="8" Grid.Column="1" Content="Жирный" Margin="0,8,0,0"/>
+                            <CheckBox x:Name="NativeItalicCheck" Grid.Row="9" Grid.Column="1" Content="Курсив" Margin="0,4,0,0"/>
+                            <Button Grid.Row="10" Grid.ColumnSpan="2" Content="Применить свойства"
+                                    Height="34" Margin="0,14,0,0"
+                                    Background="#27AE60" Foreground="White"
+                                    Click="OnApplyNativeElementPropertiesClick"/>
+                        </Grid>
+                    </Border>
+                </Grid>
             </TabItem>
 
             <!-- Вкладка: Оформление -->            

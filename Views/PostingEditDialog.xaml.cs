@@ -129,6 +129,27 @@ namespace BIS.ERP.Views
                             continue;
 
                         var id = Guid.Parse(idObj.ToString());
+                        if (field.ReferenceCatalog.Equals("Кассы", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var accountCode = CashOrderDialog.ResolveCashDeskAccountCode(
+                                GetRowString(row, "Счет", "Счет кассы", "Код", "code"),
+                                result.AccountAnalytics);
+
+                            items.Add(new CashDeskItem
+                            {
+                                Id = id,
+                                DisplayName = GetRowString(
+                                    row,
+                                    "Наименование кассы",
+                                    "Наименование",
+                                    "name",
+                                    "Код") ?? "Касса",
+                                AccountCode = accountCode,
+                                CashNumber = GetRowString(row, "Номер кассы", "cash_number") ?? string.Empty
+                            });
+                            continue;
+                        }
+
                         var displayName = row.GetValueOrDefault("Наименование")?.ToString() ??
                                           row.GetValueOrDefault("name")?.ToString() ??
                                           row.GetValueOrDefault("Код")?.ToString() ??
@@ -207,7 +228,9 @@ namespace BIS.ERP.Views
                     var comboBox = new ComboBox
                     {
                         Height = 30,
-                        DisplayMemberPath = "DisplayName",
+                        DisplayMemberPath = field.ReferenceCatalog.Equals("Кассы", StringComparison.OrdinalIgnoreCase)
+                            ? "DisplayNameWithAccount"
+                            : "DisplayName",
                         SelectedValuePath = "Id",
                         MinWidth = 200
                     };
@@ -230,6 +253,9 @@ namespace BIS.ERP.Views
                     new ReferenceItem { DisplayName = $"Справочник '{field.ReferenceCatalog}' не найден" }
                 };
                     }
+
+                    if (field.ReferenceCatalog.Equals("Кассы", StringComparison.OrdinalIgnoreCase))
+                        comboBox.SelectionChanged += (_, _) => ApplyCashDeskSelectionToPostingAccounts();
 
                     inputControl = comboBox;
                 }
@@ -281,6 +307,32 @@ namespace BIS.ERP.Views
                 FieldsPanel.Children.Add(panel);
                 _fieldControls[field.Name] = inputControl;
                 _fieldPanels[field.Name] = panel;
+            }
+
+            UpdateAnalyticControlsVisibility();
+        }
+
+        private void ApplyCashDeskSelectionToPostingAccounts()
+        {
+            if (!_fieldControls.TryGetValue("Касса", out var cashControl) ||
+                cashControl is not ComboBox { SelectedItem: CashDeskItem cashDesk })
+            {
+                return;
+            }
+
+            var account = _accountAnalytics.FindAccount(cashDesk.AccountCode);
+            if (account == null)
+                return;
+
+            if (_fieldControls.TryGetValue("Дебет", out var debitControl) &&
+                AccountPickerControlFactory.GetSelectedAccount(debitControl) == null)
+            {
+                AccountPickerControlFactory.SetSelectedAccount(debitControl, account);
+            }
+            else if (_fieldControls.TryGetValue("Кредит", out var creditControl) &&
+                     AccountPickerControlFactory.GetSelectedAccount(creditControl) == null)
+            {
+                AccountPickerControlFactory.SetSelectedAccount(creditControl, account);
             }
 
             UpdateAnalyticControlsVisibility();
@@ -513,8 +565,25 @@ namespace BIS.ERP.Views
             {
                 "Номер документа" => 1,
                 "Дата" => 2,
+                "Касса" => 3,
+                "Тип документа" => 4,
                 _ => 100 + field.Order
             };
+        }
+
+        private static string? GetRowString(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                {
+                    var text = value.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                        return text;
+                }
+            }
+
+            return null;
         }
     }
 }

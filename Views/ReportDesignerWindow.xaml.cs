@@ -25,6 +25,7 @@ namespace BIS.ERP.Views
         private List<MetadataObject> _availableCatalogs;
         private ObservableCollection<ReportField> _reportFields;
         private ObservableCollection<ReportFilter> _reportFilters;
+        public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
         private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
@@ -40,6 +41,7 @@ namespace BIS.ERP.Views
             FiltersList.ItemsSource = _reportFilters;
             ElementMappingGrid.ItemsSource = _frxElementMappings;
             ConfigureFieldColumns();
+            InitializeNativeDesignerState();
 
             _ = InitializeAsync(report);
         }
@@ -105,6 +107,7 @@ namespace BIS.ERP.Views
             else
             {
                 AvailableFields.ItemsSource = null;
+                AvailableDataFields.Clear();
             }
         }
 
@@ -125,6 +128,13 @@ namespace BIS.ERP.Views
             // ОБНОВЛЯЕМ ЧЕРЕЗ DISPATCHER
             await Dispatcher.InvokeAsync(() =>
             {
+                AvailableDataFields.Clear();
+                foreach (var field in fields)
+                    AvailableDataFields.Add(field);
+
+                foreach (var field in GetPrintFormComputedFields())
+                    AvailableDataFields.Add(field);
+
                 AvailableFields.ItemsSource = fields;
                 AvailableFilterFields.Clear();
 
@@ -140,6 +150,7 @@ namespace BIS.ERP.Views
 
                 // Принудительное обновление
                 AvailableFields.Items.Refresh();
+                ElementMappingGrid.Items.Refresh();
             });
         }
 
@@ -169,7 +180,7 @@ namespace BIS.ERP.Views
         private void AddSelectedField()
         {
             var field = AvailableFields.SelectedItem as FieldDef;
-            if (field != null && !_reportFields.Any(f => f.FieldName == field.Name))
+            if (field != null && !_reportFields.Any(f => f.FieldName == field.DbColumnName))
             {
                 _reportFields.Add(new ReportField
                 {
@@ -319,6 +330,16 @@ namespace BIS.ERP.Views
             foreach (var filter in report.Filters.OrderBy(f => f.Order))
             {
                 _reportFilters.Add(filter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(report.Template))
+            {
+                _ = LoadFrxElementMappings(report.Template, report.ElementMappings);
+                LoadNativeTemplateFromReport(report);
+            }
+            else
+            {
+                LoadNativeTemplateFromReport(report);
             }
         }
 
@@ -507,6 +528,8 @@ namespace BIS.ERP.Views
                     };
                 }
 
+                SyncNativeTemplateToTemplateBoxIfNeeded();
+
                 // Заполняем данные
                 _currentReport.Name = ReportNameBox.Text;
                 _currentReport.Description = ReportDescBox.Text;
@@ -566,6 +589,8 @@ namespace BIS.ERP.Views
                         Order = f.Order
                     }).ToList();
 
+                var mappingsToAdd = BuildReportElementMappings(_currentReport.Id);
+
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
 
                 if (_currentReport.Id == Guid.Empty)
@@ -573,6 +598,9 @@ namespace BIS.ERP.Views
                     _currentReport.Id = Guid.NewGuid();
                     _currentReport.Fields = fieldsToAdd;
                     _currentReport.Filters = filtersToAdd;
+                    foreach (var mapping in mappingsToAdd)
+                        mapping.ReportId = _currentReport.Id;
+                    _currentReport.ElementMappings = mappingsToAdd;
                     context.Reports.Add(_currentReport);
                 }
                 else
@@ -580,6 +608,7 @@ namespace BIS.ERP.Views
                     var existingReport = await context.Reports
                         .Include(r => r.Fields)
                         .Include(r => r.Filters)
+                        .Include(r => r.ElementMappings)
                         .FirstOrDefaultAsync(r => r.Id == _currentReport.Id);
 
                     if (existingReport == null)
@@ -587,6 +616,9 @@ namespace BIS.ERP.Views
                         _currentReport.Id = Guid.NewGuid();
                         _currentReport.Fields = fieldsToAdd;
                         _currentReport.Filters = filtersToAdd;
+                        foreach (var mapping in mappingsToAdd)
+                            mapping.ReportId = _currentReport.Id;
+                        _currentReport.ElementMappings = mappingsToAdd;
                         context.Reports.Add(_currentReport);
                     }
                     else
@@ -597,6 +629,7 @@ namespace BIS.ERP.Views
 
                         context.ReportFields.RemoveRange(existingReport.Fields);
                         context.ReportFilters.RemoveRange(existingReport.Filters);
+                        context.ReportElementMappings.RemoveRange(existingReport.ElementMappings);
                         context.Reports.Remove(existingReport);
                         await context.SaveChangesAsync();
 
@@ -604,6 +637,9 @@ namespace BIS.ERP.Views
                         _currentReport.CreatedAt = createdAt;
                         _currentReport.Fields = fieldsToAdd;
                         _currentReport.Filters = filtersToAdd;
+                        foreach (var mapping in mappingsToAdd)
+                            mapping.ReportId = reportId;
+                        _currentReport.ElementMappings = mappingsToAdd;
                         context.Reports.Add(_currentReport);
                     }
                 }
@@ -658,7 +694,9 @@ namespace BIS.ERP.Views
                 return null;
             }
 
-            return new Report
+            SyncNativeTemplateToTemplateBoxIfNeeded();
+
+            var report = new Report
             {
                 Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? "Новый отчет" : ReportNameBox.Text.Trim(),
                 Description = ReportDescBox.Text,
@@ -687,6 +725,9 @@ namespace BIS.ERP.Views
                 ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true,
                 Template = TemplateTextBox.Text
             };
+
+            report.ElementMappings = BuildReportElementMappings(report.Id);
+            return report;
         }
 
         private static string GetSafeFileName(string name)
@@ -776,8 +817,12 @@ namespace BIS.ERP.Views
                     }
                     ReportFieldsGrid.Items.Refresh();
 
+                    var nativeTemplate = PrintFormService.DeserializePrintTemplate(templateJson);
+
                     // ЗАПОЛНЯЕМ ТАБЛИЦУ СООТВЕТСТВИЙ ЭЛЕМЕНТОВ МАКЕТА
                     await LoadFrxElementMappings(templateJson);
+                    LoadNativeTemplate(nativeTemplate);
+                    WarnIfTemplateHasOnlyGeometry(nativeTemplate, showDialog: true);
 
                     // Также обновляем список доступных полей, убирая уже добавленные
                     if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
@@ -808,11 +853,13 @@ namespace BIS.ERP.Views
             }
         }
 
-        private async Task LoadFrxElementMappings(string templateJson)
+        private async Task LoadFrxElementMappings(
+            string templateJson,
+            IEnumerable<ReportElementMapping>? savedMappings = null)
         {
             try
             {
-                var template = System.Text.Json.JsonSerializer.Deserialize<PrintFormTemplate>(templateJson);
+                var template = PrintFormService.DeserializePrintTemplate(templateJson);
                 if (template == null || template.Elements == null)
                 {
                     MappingPreviewText.Text = "Нет элементов для отображения.";
@@ -820,6 +867,9 @@ namespace BIS.ERP.Views
                 }
 
                 _frxElementMappings.Clear();
+                var savedByElementOrder = (savedMappings ?? Array.Empty<ReportElementMapping>())
+                    .GroupBy(item => item.ElementOrder)
+                    .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
                 int order = 0;
                 foreach (var element in template.Elements.OrderBy(e => e.Order))
                 {
@@ -834,12 +884,14 @@ namespace BIS.ERP.Views
                     if (string.IsNullOrWhiteSpace(elementText) || elementText == "+" || elementText == "-")
                         continue;
 
+                    savedByElementOrder.TryGetValue(element.Order, out var saved);
                     _frxElementMappings.Add(new FrXElementMappingViewModel
                     {
-                        Id = Guid.NewGuid(),
+                        Id = saved?.Id ?? Guid.NewGuid(),
                         ElementOrder = element.Order,
                         ElementType = element.Type,
                         ElementText = elementText,
+                        ElementExpression = element.Expression,
                         BandType = element.BandType,
                         Left = element.Left,
                         Top = element.Top,
@@ -851,10 +903,12 @@ namespace BIS.ERP.Views
                         Italic = element.Italic,
                         Alignment = element.Alignment,
                         Order = order++,
-                        MappedFieldName = string.Empty,
-                        FormatString = string.Empty,
-                        IsVisible = true,
-                        CustomText = string.Empty
+                        MappedFieldName = saved?.MappedFieldName ?? string.Empty,
+                        MappedDisplayName = saved?.MappedDisplayName ?? string.Empty,
+                        DataSource = saved?.DataSource ?? string.Empty,
+                        FormatString = saved?.FormatString ?? string.Empty,
+                        IsVisible = saved?.IsVisible ?? true,
+                        CustomText = saved?.CustomText ?? string.Empty
                     });
                 }
 
@@ -892,6 +946,16 @@ namespace BIS.ERP.Views
 
             MappingPreviewText.Text = preview.ToString();
         }
+
+        private void OnElementMappingChanged(object sender, EventArgs e)
+        {
+            UpdateMappingPreview();
+        }
+
+        private void OnElementMappingCellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(UpdateMappingPreview));
+        }
     }
 
 
@@ -909,6 +973,7 @@ namespace BIS.ERP.Views
         public int ElementOrder { get; set; }
         public string ElementType { get; set; } = "Text";
         public string ElementText { get; set; } = string.Empty;
+        public string ElementExpression { get; set; } = string.Empty;
         public string BandType { get; set; } = "Detail";
         public double Left { get; set; }
         public double Top { get; set; }
@@ -928,6 +993,9 @@ namespace BIS.ERP.Views
             set { _mappedFieldName = value; OnPropertyChanged(nameof(MappedFieldName)); }
         }
 
+        public string MappedDisplayName { get; set; } = string.Empty;
+        public string DataSource { get; set; } = string.Empty;
+
         private string _formatString = string.Empty;
         public string FormatString
         {
@@ -942,7 +1010,12 @@ namespace BIS.ERP.Views
             set { _isVisible = value; OnPropertyChanged(nameof(IsVisible)); }
         }
 
-        public string CustomText { get; set; } = string.Empty;
+        private string _customText = string.Empty;
+        public string CustomText
+        {
+            get => _customText;
+            set { _customText = value; OnPropertyChanged(nameof(CustomText)); }
+        }
         public string LeftTop => $"{(int)Left}/{(int)Top}";
 
         public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;

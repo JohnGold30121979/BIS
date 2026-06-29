@@ -18,7 +18,7 @@ namespace BIS.ERP.Views
         private Guid _selectedCorrAccountId;
         private string _selectedCorrAccountCode = string.Empty;
         private Guid _selectedCashDeskId;
-        private string _selectedCashDeskCode = "1110";
+        private string _selectedCashDeskCode = "3010";
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
@@ -158,13 +158,29 @@ namespace BIS.ERP.Views
             if (cashDesks != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(cashDesks.Id);
-                result.CashDesks = data.Select(d => new CashDeskItem
-                {
-                    Id = Guid.Parse(d["Id"].ToString()),
-                    DisplayName = d.ContainsKey("Наименование") ? d["Наименование"].ToString() : d["name"].ToString(),
-                    AccountCode = d.ContainsKey("Счет кассы") ? d["Счет кассы"].ToString() :
-                                  d.ContainsKey("Счет") ? d["Счет"].ToString() : "1110"
-                }).ToList();
+                result.CashDesks = data
+                    .Where(d => d.TryGetValue("Id", out var id) && Guid.TryParse(id?.ToString(), out _))
+                    .Select(d =>
+                    {
+                        var accountCode = ResolveCashDeskAccountCode(
+                            GetRowString(d, "Счет", "Счет кассы", "Код", "code"),
+                            result.AccountAnalytics);
+
+                        return new CashDeskItem
+                        {
+                            Id = Guid.Parse(d["Id"].ToString()),
+                            DisplayName = GetRowString(
+                                d,
+                                "Наименование кассы",
+                                "Наименование",
+                                "name",
+                                "Код") ?? "Касса",
+                            AccountCode = accountCode,
+                            CashNumber = GetRowString(d, "Номер кассы", "cash_number") ?? string.Empty,
+                            CurrencyName = GetRowString(d, "Валюта", "currency_id") ?? string.Empty
+                        };
+                    })
+                    .ToList();
             }
 
             // Организации
@@ -321,7 +337,7 @@ namespace BIS.ERP.Views
 
                 // Получаем кассу
                 string cashDeskId = string.Empty;
-                string cashDeskCode = "1110";
+                string cashDeskCode = ResolveCashDeskAccountCode(_selectedCashDeskCode, _accountAnalytics);
 
                 if (CashDeskCombo.SelectedItem is CashDeskItem cashDesk)
                 {
@@ -568,6 +584,41 @@ namespace BIS.ERP.Views
                       string.Empty;
         }
 
+        private static string? GetRowString(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                {
+                    var text = value.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                        return text;
+                }
+            }
+
+            return null;
+        }
+
+        public static string ResolveCashDeskAccountCode(
+            string? accountCode,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            if (!string.IsNullOrWhiteSpace(accountCode) &&
+                accountAnalytics.FindAccount(accountCode) != null)
+            {
+                return accountCode.Trim();
+            }
+
+            var defaultCashAccount = accountAnalytics.Accounts.FirstOrDefault(account =>
+                    account.Code.Equals("3010", StringComparison.OrdinalIgnoreCase)) ??
+                accountAnalytics.Accounts.FirstOrDefault(account =>
+                    account.Code.StartsWith("301", StringComparison.OrdinalIgnoreCase) ||
+                    account.DisplayName.Contains("Касса", StringComparison.OrdinalIgnoreCase));
+
+            return defaultCashAccount?.Code ??
+                   (!string.IsNullOrWhiteSpace(accountCode) ? accountCode.Trim() : "3010");
+        }
+
         private static void SelectComboByRecordValue(ComboBox comboBox, Dictionary<string, object> record, string fieldName)
         {
             if (!record.TryGetValue(fieldName, out var value) || !Guid.TryParse(value?.ToString(), out var id))
@@ -662,7 +713,12 @@ namespace BIS.ERP.Views
 
     public class CashDeskItem : ReferenceItem
     {
-        public string AccountCode { get; set; } = "1110";
-        public string DisplayNameWithAccount => $"{DisplayName} (счет {AccountCode})";
+        public string AccountCode { get; set; } = "3010";
+        public string CashNumber { get; set; } = string.Empty;
+        public string CurrencyName { get; set; } = string.Empty;
+        public string DisplayNameWithAccount =>
+            string.IsNullOrWhiteSpace(AccountCode)
+                ? DisplayName
+                : $"{DisplayName} (счет {AccountCode})";
     }
 }

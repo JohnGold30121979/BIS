@@ -175,8 +175,6 @@ namespace BIS.ERP.Views
             var table = new DataTable("Оборотно-сальдовая ведомость");
             table.Columns.Add("Счет", typeof(string));
             table.Columns.Add("Наименование", typeof(string));
-            table.Columns.Add("Сальдо нач. Дт", typeof(decimal));
-            table.Columns.Add("Сальдо нач. Кт", typeof(decimal));
             foreach (var name in new[] { "Сальдо нач. Дт", "Сальдо нач. Кт", "Оборот Дт", "Оборот Кт", "Сальдо кон. Дт", "Сальдо кон. Кт" })
                 table.Columns.Add(name, typeof(decimal));
 
@@ -234,6 +232,8 @@ namespace BIS.ERP.Views
             var table = new DataTable("Главная книга");
             table.Columns.Add("Счет", typeof(string));
             table.Columns.Add("Наименование", typeof(string));
+            table.Columns.Add("Сальдо нач. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо нач. Кт", typeof(decimal));
             for (var month = 1; month <= 12; month++)
             {
                 table.Columns.Add($"{month:00} Дт", typeof(decimal));
@@ -246,7 +246,7 @@ namespace BIS.ERP.Views
 
             foreach (var item in ledger)
             {
-                var values = new object[32];
+                var values = new object[table.Columns.Count];
                 values[0] = item.AccountCode;
                 values[1] = item.AccountName;
                 values[2] = item.OpeningDebit;

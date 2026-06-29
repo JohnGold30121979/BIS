@@ -353,7 +353,7 @@ namespace BIS.ERP.Services
         {
             var metadata = await _context.MetadataObjects
                 .Include(item => item.Fields)
-                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "План счетов");
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
             if (metadata == null)
                 return new Dictionary<string, AccountInfo>(StringComparer.OrdinalIgnoreCase);
 

@@ -42,12 +42,12 @@
             <!-- Row 3: Касса + Счет кассы -->
             <TextBlock Grid.Row="3" Grid.Column="0" Text="Касса:" VerticalAlignment="Center"/>
             <ComboBox x:Name="CashDeskCombo" Grid.Row="3" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                  DisplayMemberPath="DisplayNameWithAccount" SelectedValuePath="Id"
                   SelectionChanged="CashDeskCombo_SelectionChanged"/>
             <TextBox x:Name="CashDeskAccountBox" Grid.Row="3" Grid.Column="2" 
-                 Width="60" Height="30" Margin="5,0,0,0"
+                 Width="80" Height="30" Margin="5,0,0,0"
                  IsReadOnly="True" Background="LightGray" 
-                 Text="1110" TextAlignment="Center"/>
+                 Text="3010" TextAlignment="Center"/>
 
             <!-- Row 4: Организация -->
             <TextBlock x:Name="OrganizationLabel" Grid.Row="4" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"

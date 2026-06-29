@@ -651,6 +651,81 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task EnsureCashDesksCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Кассы");
+
+            if (catalog == null)
+                return;
+
+            foreach (var field in catalog.Fields)
+            {
+                if (field.DbColumnName?.Equals("name", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    field.Name = "Наименование кассы";
+                    field.Order = 1;
+                    field.IsRequired = true;
+                    field.Length = 200;
+                }
+                else if (field.DbColumnName?.Equals("code", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    field.Name = "Счет";
+                    field.Order = 2;
+                    field.IsRequired = true;
+                    field.Length = 20;
+                }
+                else if (field.DbColumnName?.Equals("currency_id", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    field.Order = Math.Max(field.Order, 4);
+                }
+                else if (field.DbColumnName?.Equals("initial_balance", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    field.Order = Math.Max(field.Order, 5);
+                }
+                else if (field.DbColumnName?.Equals("current_balance", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    field.Order = Math.Max(field.Order, 6);
+                }
+                else if (field.DbColumnName?.Equals("is_active", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    field.Order = Math.Max(field.Order, 7);
+                }
+            }
+
+            var existingColumns = catalog.Fields
+                .Select(field => field.DbColumnName)
+                .Where(column => !string.IsNullOrWhiteSpace(column))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var cashNumberField = GetCashDeskFields(catalog.Id)
+                .First(field => field.DbColumnName.Equals("cash_number", StringComparison.OrdinalIgnoreCase));
+
+            if (!existingColumns.Contains(cashNumberField.DbColumnName))
+            {
+                cashNumberField.Id = Guid.NewGuid();
+                cashNumberField.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(cashNumberField);
+                await AddColumnToTableAsync(catalog.TableName, cashNumberField);
+                catalog.Fields.Add(cashNumberField);
+            }
+
+            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{catalog.TableName}""
+                    SET ""cash_number"" = COALESCE(NULLIF(""cash_number"", ''), '1')
+                    WHERE ""cash_number"" IS NULL OR ""cash_number"" = '';");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка заполнения номера кассы: {ex.Message}");
+            }
+        }
+
 
         // Справочник "Налоги"
         private async Task CreateTaxCatalog(MetadataConfiguration config)
@@ -952,6 +1027,36 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsurePostingDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        {
+            var document = documents.FirstOrDefault(item =>
+                item.Name.Equals("Проводки", StringComparison.OrdinalIgnoreCase));
+            if (document == null)
+                return;
+
+            NormalizeCashDeskReferenceFields(document);
+
+            var existingColumns = document.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .Select(field => field.DbColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetPostingFields(document.Id))
+            {
+                if (existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = document.Id;
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(document.TableName, field);
+                document.Fields.Add(field);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         private async Task EnsureCashOrderDocumentStructureAsync(IEnumerable<MetadataObject> documents)
         {
             var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -962,6 +1067,8 @@ namespace BIS.ERP.Services
 
             foreach (var document in documents.Where(document => targetNames.Contains(document.Name)))
             {
+                NormalizeCashDeskReferenceFields(document);
+
                 var columns = document.Fields
                     .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
                     .Select(field => field.DbColumnName)
@@ -985,6 +1092,21 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        private static void NormalizeCashDeskReferenceFields(MetadataObject document)
+        {
+            foreach (var field in document.Fields.Where(field =>
+                         field.DbColumnName?.Equals("cash_desk_id", StringComparison.OrdinalIgnoreCase) == true ||
+                         field.ReferenceCatalog?.Equals("Кассы", StringComparison.OrdinalIgnoreCase) == true))
+            {
+                field.Name = "Касса";
+                field.FieldType = "Reference";
+                field.ReferenceCatalog = "Кассы";
+                field.DisplayPattern = "{Счет} - {Наименование кассы}";
+                field.DisplayFields = "Счет,Наименование кассы";
+                field.IsRequired = false;
+            }
+        }
+
         private static IEnumerable<MetadataField> GetCashOrderRequiredFields(Guid metadataObjectId, int startOrder)
         {
             yield return new MetadataField
@@ -993,8 +1115,8 @@ namespace BIS.ERP.Services
                 DbColumnName = "cash_desk_id",
                 FieldType = "Reference",
                 ReferenceCatalog = "Кассы",
-                DisplayPattern = "{Код} - {Наименование}",
-                DisplayFields = "Код,Наименование",
+                DisplayPattern = "{Счет} - {Наименование кассы}",
+                DisplayFields = "Счет,Наименование кассы",
                 Order = startOrder++,
                 MetadataObjectId = metadataObjectId
             };

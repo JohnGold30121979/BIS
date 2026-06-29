@@ -35,8 +35,38 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsDefault"" boolean NOT NULL DEFAULT false;
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""SourceFormat"" varchar(30) NOT NULL DEFAULT 'Native';
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""TemplateVersion"" integer NOT NULL DEFAULT 1;
+                CREATE TABLE IF NOT EXISTS ""ReportElementMappings"" (
+                    ""Id"" uuid NOT NULL,
+                    ""ReportId"" uuid NOT NULL,
+                    ""ElementOrder"" integer NOT NULL DEFAULT 0,
+                    ""ElementType"" text NOT NULL DEFAULT 'Text',
+                    ""ElementText"" text NOT NULL DEFAULT '',
+                    ""ElementExpression"" text NOT NULL DEFAULT '',
+                    ""BandType"" text NOT NULL DEFAULT 'Detail',
+                    ""Left"" double precision NOT NULL DEFAULT 0,
+                    ""Top"" double precision NOT NULL DEFAULT 0,
+                    ""Width"" double precision NOT NULL DEFAULT 0,
+                    ""Height"" double precision NOT NULL DEFAULT 0,
+                    ""FontName"" text NOT NULL DEFAULT 'Arial',
+                    ""FontSize"" double precision NOT NULL DEFAULT 9,
+                    ""Bold"" boolean NOT NULL DEFAULT false,
+                    ""Italic"" boolean NOT NULL DEFAULT false,
+                    ""Alignment"" text NOT NULL DEFAULT 'Left',
+                    ""Order"" integer NOT NULL DEFAULT 0,
+                    ""MappedFieldName"" text NULL,
+                    ""MappedDisplayName"" text NULL,
+                    ""DataSource"" text NOT NULL DEFAULT '',
+                    ""FormatString"" text NOT NULL DEFAULT '',
+                    ""IsVisible"" boolean NOT NULL DEFAULT true,
+                    ""CustomText"" text NOT NULL DEFAULT '',
+                    CONSTRAINT ""PK_ReportElementMappings"" PRIMARY KEY (""Id""),
+                    CONSTRAINT ""FK_ReportElementMappings_Reports_ReportId"" FOREIGN KEY (""ReportId"")
+                        REFERENCES ""Reports"" (""Id"") ON DELETE CASCADE
+                );
                 CREATE INDEX IF NOT EXISTS ""IX_Reports_PrintForms""
-                    ON ""Reports"" (""DataSourceId"", ""IsPrintForm"", ""IsActive"");";
+                    ON ""Reports"" (""DataSourceId"", ""IsPrintForm"", ""IsActive"");
+                CREATE INDEX IF NOT EXISTS ""IX_ReportElementMappings_ReportId_ElementOrder""
+                    ON ""ReportElementMappings"" (""ReportId"", ""ElementOrder"");";
             await _context.Database.ExecuteSqlRawAsync(sql);
         }
 
@@ -111,6 +141,66 @@ namespace BIS.ERP.Services
                 });
             }
 
+            if (receipt != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.receipt.native"))
+            {
+                var nativeTemplate = CreateDefaultNativeTemplate("CashReceiptOrder");
+                await _context.Reports.AddAsync(new Report
+                {
+                    Code = "cash.receipt.native",
+                    Name = "Приходный кассовый ордер (нативный)",
+                    TitleText = "Приходный кассовый ордер",
+                    Description = "Настраиваемая нативная форма ПКО с квитанцией",
+                    DataSourceType = "Document",
+                    DataSourceId = receipt.Id,
+                    ReportType = "CashReceiptOrder",
+                    IsPrintForm = true,
+                    IsActive = true,
+                    IsDefault = false,
+                    SourceFormat = "Native",
+                    TemplateVersion = 1,
+                    Icon = "🖨",
+                    Order = 20,
+                    PageOrientation = "Landscape",
+                    ShowGridLines = false,
+                    ShowHeader = false,
+                    ShowFooter = false,
+                    ShowPageNumbers = false,
+                    Template = JsonSerializer.Serialize(nativeTemplate, new JsonSerializerOptions { WriteIndented = true }),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            if (payment != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.payment.native"))
+            {
+                var nativeTemplate = CreateDefaultNativeTemplate("CashPaymentOrder");
+                await _context.Reports.AddAsync(new Report
+                {
+                    Code = "cash.payment.native",
+                    Name = "Расходный кассовый ордер (нативный)",
+                    TitleText = "Расходный кассовый ордер",
+                    Description = "Настраиваемая нативная форма РКО",
+                    DataSourceType = "Document",
+                    DataSourceId = payment.Id,
+                    ReportType = "CashPaymentOrder",
+                    IsPrintForm = true,
+                    IsActive = true,
+                    IsDefault = false,
+                    SourceFormat = "Native",
+                    TemplateVersion = 1,
+                    Icon = "🖨",
+                    Order = 20,
+                    PageOrientation = "Portrait",
+                    ShowGridLines = false,
+                    ShowHeader = false,
+                    ShowFooter = false,
+                    ShowPageNumbers = false,
+                    Template = JsonSerializer.Serialize(nativeTemplate, new JsonSerializerOptions { WriteIndented = true }),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
             await _context.SaveChangesAsync();
         }
 
@@ -173,10 +263,189 @@ namespace BIS.ERP.Services
             return template;
         }
 
+        public static PrintFormTemplate CreateDefaultNativeTemplate(string reportType)
+        {
+            return reportType == "CashPaymentOrder"
+                ? CreateDefaultNativePaymentTemplate()
+                : CreateDefaultNativeReceiptTemplate();
+        }
+
+        public static PrintFormTemplate CreateBlankNativeTemplate()
+        {
+            return new PrintFormTemplate
+            {
+                SourceFormat = "Native",
+                OriginalFileName = "NativeDesigner",
+                PageWidth = 2100,
+                PageHeight = 2970,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "Header", Top = 0, Height = 420, Order = 0 },
+                    new() { Type = "Body", Top = 420, Height = 1900, Order = 1 },
+                    new() { Type = "Footer", Top = 2320, Height = 520, Order = 2 }
+                },
+                Elements = new List<PrintFormElement>()
+            };
+        }
+
+        private static PrintFormTemplate CreateDefaultNativeReceiptTemplate()
+        {
+            var elements = new List<PrintFormElement>();
+            void Add(string type, string text, string expression, double left, double top, double width, double height,
+                double fontSize = 9, bool bold = false, string align = "Left", string band = "Body")
+            {
+                elements.Add(new PrintFormElement
+                {
+                    Type = type,
+                    Text = text,
+                    Expression = expression,
+                    BandType = band,
+                    Left = left,
+                    Top = top,
+                    Width = width,
+                    Height = height,
+                    FontName = "Arial",
+                    FontSize = fontSize,
+                    Bold = bold,
+                    Alignment = align,
+                    BorderStyle = type == "Box" ? "Solid" : "None",
+                    Order = elements.Count
+                });
+            }
+
+            Add("Box", "", "", 40, 40, 1420, 1720, 9, false);
+            Add("Box", "", "", 1510, 40, 1420, 1720, 9, false);
+            Add("Line", "", "", 1485, 40, 0, 1720, 9, false);
+            Add("Expression", "", "organization", 90, 80, 1200, 70, 10, true);
+            Add("Text", "ПРИХОДНЫЙ КАССОВЫЙ ОРДЕР N", "", 90, 180, 760, 70, 13, true);
+            Add("Expression", "", "number", 860, 180, 260, 70, 13, true, "Center");
+            Add("Text", "от", "", 1150, 180, 70, 70, 10);
+            Add("Expression", "", "date", 1230, 180, 210, 70, 10);
+            Add("Box", "", "", 90, 300, 1320, 180, 9, false);
+            Add("Text", "Дебет", "", 120, 325, 250, 50, 9, true, "Center");
+            Add("Text", "Кредит", "", 480, 325, 250, 50, 9, true, "Center");
+            Add("Text", "Сумма", "", 920, 325, 250, 50, 9, true, "Center");
+            Add("Expression", "", "debit_account", 120, 395, 330, 60, 9);
+            Add("Expression", "", "credit_account", 480, 395, 390, 60, 9);
+            Add("Expression", "", "amount", 920, 395, 240, 60, 9, false, "Right");
+            Add("Text", "Принято от:", "", 90, 560, 260, 55, 10, true);
+            Add("Expression", "", "person", 360, 560, 1020, 55, 10);
+            Add("Text", "Основание:", "", 90, 650, 260, 55, 10, true);
+            Add("Expression", "", "basis", 360, 650, 1020, 90, 10);
+            Add("Text", "Сумма прописью:", "", 90, 790, 360, 55, 10, true);
+            Add("Expression", "", "amount_in_words", 90, 860, 1290, 140, 10);
+            Add("Text", "Главный бухгалтер", "", 90, 1180, 420, 55, 10, true);
+            Add("Line", "", "", 520, 1230, 380, 0, 9, false);
+            Add("Text", "Кассир", "", 90, 1300, 420, 55, 10, true);
+            Add("Line", "", "", 520, 1350, 380, 0, 9, false);
+            Add("Text", "КВИТАНЦИЯ", "", 1510, 180, 1420, 70, 13, true, "Center");
+            Add("Text", "к приходному кассовому ордеру N", "", 1580, 280, 670, 60, 10);
+            Add("Expression", "", "number", 2260, 280, 230, 60, 10, true, "Center");
+            Add("Expression", "", "organization", 1580, 390, 1200, 70, 10, true);
+            Add("Text", "Принято от:", "", 1580, 520, 260, 55, 10, true);
+            Add("Expression", "", "person", 1850, 520, 960, 55, 10);
+            Add("Text", "Основание:", "", 1580, 620, 260, 55, 10, true);
+            Add("Expression", "", "basis", 1850, 620, 960, 90, 10);
+            Add("Text", "Сумма:", "", 1580, 760, 180, 55, 10, true);
+            Add("Expression", "", "amount", 1770, 760, 280, 55, 10, true, "Right");
+            Add("Text", "Сумма прописью:", "", 1580, 850, 360, 55, 10, true);
+            Add("Expression", "", "amount_in_words", 1580, 920, 1230, 140, 10);
+            Add("Text", "Главный бухгалтер", "", 1580, 1230, 420, 55, 10, true);
+            Add("Line", "", "", 2040, 1280, 420, 0, 9, false);
+            Add("Text", "Кассир", "", 1580, 1360, 420, 55, 10, true);
+            Add("Line", "", "", 2040, 1410, 420, 0, 9, false);
+
+            return new PrintFormTemplate
+            {
+                SourceFormat = "Native",
+                PageWidth = 2970,
+                PageHeight = 2100,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "Header", Top = 0, Height = 260, Order = 0 },
+                    new() { Type = "Body", Top = 260, Height = 1160, Order = 1 },
+                    new() { Type = "Footer", Top = 1420, Height = 420, Order = 2 }
+                },
+                Elements = elements
+            };
+        }
+
+        private static PrintFormTemplate CreateDefaultNativePaymentTemplate()
+        {
+            var elements = new List<PrintFormElement>();
+            void Add(string type, string text, string expression, double left, double top, double width, double height,
+                double fontSize = 9, bool bold = false, string align = "Left", string band = "Body")
+            {
+                elements.Add(new PrintFormElement
+                {
+                    Type = type,
+                    Text = text,
+                    Expression = expression,
+                    BandType = band,
+                    Left = left,
+                    Top = top,
+                    Width = width,
+                    Height = height,
+                    FontName = "Arial",
+                    FontSize = fontSize,
+                    Bold = bold,
+                    Alignment = align,
+                    BorderStyle = type == "Box" ? "Solid" : "None",
+                    Order = elements.Count
+                });
+            }
+
+            Add("Box", "", "", 70, 70, 1960, 2600, 9, false);
+            Add("Expression", "", "organization", 120, 110, 1280, 70, 10, true);
+            Add("Text", "РАСХОДНЫЙ КАССОВЫЙ ОРДЕР", "", 120, 230, 1680, 80, 15, true, "Center");
+            Add("Text", "Номер документа", "", 120, 360, 360, 60, 9, true);
+            Add("Expression", "", "number", 500, 360, 270, 60, 10, true, "Center");
+            Add("Text", "Дата составления", "", 1120, 360, 360, 60, 9, true);
+            Add("Expression", "", "date", 1500, 360, 260, 60, 10, false, "Center");
+            Add("Box", "", "", 120, 500, 1780, 220, 9, false);
+            Add("Text", "Дебет", "", 150, 530, 330, 60, 9, true, "Center");
+            Add("Text", "Кредит", "", 540, 530, 330, 60, 9, true, "Center");
+            Add("Text", "Сумма", "", 980, 530, 330, 60, 9, true, "Center");
+            Add("Expression", "", "debit_account", 150, 620, 360, 60, 9);
+            Add("Expression", "", "credit_account", 540, 620, 360, 60, 9);
+            Add("Expression", "", "amount", 980, 620, 300, 60, 9, false, "Right");
+            Add("Text", "Выдать:", "", 120, 820, 210, 60, 10, true);
+            Add("Expression", "", "person", 350, 820, 1460, 60, 10);
+            Add("Text", "Основание:", "", 120, 930, 260, 60, 10, true);
+            Add("Expression", "", "basis", 390, 930, 1420, 110, 10);
+            Add("Text", "Сумма:", "", 120, 1090, 210, 60, 10, true);
+            Add("Expression", "", "amount", 350, 1090, 320, 60, 10, true, "Right");
+            Add("Text", "Сумма прописью:", "", 120, 1200, 420, 60, 10, true);
+            Add("Expression", "", "amount_in_words", 120, 1270, 1690, 160, 10);
+            Add("Text", "Руководитель", "", 120, 1580, 360, 60, 10, true);
+            Add("Line", "", "", 520, 1630, 560, 0, 9, false);
+            Add("Text", "Главный бухгалтер", "", 120, 1710, 430, 60, 10, true);
+            Add("Line", "", "", 560, 1760, 520, 0, 9, false);
+            Add("Text", "Получил", "", 120, 1900, 260, 60, 10, true);
+            Add("Line", "", "", 390, 1950, 900, 0, 9, false);
+            Add("Text", "Кассир", "", 120, 2130, 260, 60, 10, true);
+            Add("Line", "", "", 390, 2180, 900, 0, 9, false);
+
+            return new PrintFormTemplate
+            {
+                SourceFormat = "Native",
+                PageWidth = 2100,
+                PageHeight = 2970,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "Header", Top = 0, Height = 480, Order = 0 },
+                    new() { Type = "Body", Top = 480, Height = 1050, Order = 1 },
+                    new() { Type = "Footer", Top = 1530, Height = 940, Order = 2 }
+                },
+                Elements = elements
+            };
+        }
+
         public async Task<List<Report>> GetPrintFormsAsync(Guid metadataId, bool includeInactive = true)
         {
             await EnsureSchemaAsync();
             var query = _context.Reports.AsNoTracking()
+                .Include(item => item.ElementMappings)
                 .Where(item => item.IsPrintForm && item.DataSourceId == metadataId);
             if (!includeInactive)
                 query = query.Where(item => item.IsActive);
@@ -210,12 +479,15 @@ namespace BIS.ERP.Services
             var maps = await ReferenceDisplayHelper.LoadMapsAsync(metadata, metadataService);
             var row = ReferenceDisplayHelper.ResolveRows(new[] { rawRow }, maps).Single();
             var data = await BuildCashOrderDataAsync(row, metadata.Name);
+            var mappings = await LoadElementMappingsAsync(report);
 
-            if (report.SourceFormat == "FoxProFRX" && !string.IsNullOrWhiteSpace(report.Template))
-                return BuildFoxProLayoutPdf(report, data);
-            return metadata.Name == "Расходный кассовый ордер" || report.ReportType == "CashPaymentOrder"
-                ? BuildCashPaymentPdf(report, data)
-                : BuildCashReceiptPdf(report, data);
+            if (!string.IsNullOrWhiteSpace(report.Template))
+                return BuildTemplateLayoutPdf(report, data, mappings);
+
+            var fallbackTemplate = CreateBlankNativeTemplate();
+            report.Template = JsonSerializer.Serialize(fallbackTemplate);
+            report.SourceFormat = "Native";
+            return BuildTemplateLayoutPdf(report, data, mappings);
         }
 
         public byte[] ExportTemplatePreview(Report report)
@@ -225,15 +497,29 @@ namespace BIS.ERP.Services
                 Number = "42", Date = DateTime.Today, Organization = "ОсОО Пример",
                 Inn = "12345678901234", Okpo = "12345678", Person = "Иванов Иван Иванович",
                 CashDesk = "Касса KGS", CorrespondentAccount = "11100000 - Денежные средства",
+                DebitAccount = report.ReportType == "CashPaymentOrder" ? "11100000 - Денежные средства" : "Касса KGS",
+                CreditAccount = report.ReportType == "CashPaymentOrder" ? "Касса KGS" : "11100000 - Денежные средства",
                 Amount = 12345.67m,
                 AmountInWords = "двенадцать тысяч триста сорок пять сом 67 тыйын",
                 Basis = "Оплата согласно заявлению", Note = "Предпросмотр импортированного макета"
             };
-            return report.SourceFormat == "FoxProFRX" && !string.IsNullOrWhiteSpace(report.Template)
-                ? BuildFoxProLayoutPdf(report, sample)
-                : report.ReportType == "CashPaymentOrder"
-                    ? BuildCashPaymentPdf(report, sample)
-                    : BuildCashReceiptPdf(report, sample);
+
+            if (string.IsNullOrWhiteSpace(report.Template))
+                report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
+
+            return BuildTemplateLayoutPdf(report, sample, report.ElementMappings.ToList());
+        }
+
+        private async Task<IReadOnlyCollection<ReportElementMapping>> LoadElementMappingsAsync(Report report)
+        {
+            if (report.ElementMappings?.Count > 0)
+                return report.ElementMappings.ToList();
+
+            await EnsureSchemaAsync();
+            return await _context.ReportElementMappings.AsNoTracking()
+                .Where(item => item.ReportId == report.Id)
+                .OrderBy(item => item.Order)
+                .ToListAsync();
         }
 
         private async Task<CashOrderPrintData> BuildCashOrderDataAsync(
@@ -242,7 +528,9 @@ namespace BIS.ERP.Services
         {
             var amount = GetDecimal(row, "Сумма", "amount");
             var correspondentAccount = GetString(row, "Корр. счет", "correspondent_account");
-            correspondentAccount = await ResolveAccountAsync(correspondentAccount);
+            correspondentAccount = await ResolveAccountCodeAsync(correspondentAccount);
+            var cashDesk = await ResolveCashDeskAsync(GetString(row, "Касса", "cash_desk_id"));
+            var isPayment = documentName.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase);
             var data = new CashOrderPrintData
             {
                 DocumentName = documentName,
@@ -250,19 +538,17 @@ namespace BIS.ERP.Services
                 Date = GetDate(row, "Дата", "doc_date"),
                 Organization = GetString(row, "Организация", "organization_id"),
                 Person = GetString(row, "Сотрудник", "employee_id", "МОЛ", "responsible_person_id"),
-                CashDesk = GetString(row, "Касса", "cash_desk_id"),
+                CashDesk = cashDesk.DisplayName,
                 CorrespondentAccount = correspondentAccount,
+                DebitAccount = isPayment ? correspondentAccount : cashDesk.Account,
+                CreditAccount = isPayment ? cashDesk.Account : correspondentAccount,
                 Amount = amount,
                 AmountInWords = RussianMoneyInWords(amount),
                 Basis = GetString(row, "Основание", "basis"),
                 Note = GetString(row, "Примечание", "description"),
-
-                 // НОВЫЕ ПОЛЯ
-             //   DebitAccount = debitAccount,
-            //    CreditAccount = creditAccount,
-           //    AmountInCurrency = amountInCurrency
+                AmountInCurrency = GetDecimal(row, "Сумма в валюте", "amount_currency", "amount_in_currency")
             };
-            var organizationValue = GetString(row, "organization_id");
+            var organizationValue = GetString(row, "Организация", "organization_id");
             if (Guid.TryParse(organizationValue, out var organizationId))
             {
                 var catalog = await _context.MetadataObjects.AsNoTracking()
@@ -283,17 +569,53 @@ namespace BIS.ERP.Services
             return data;
         }
 
-        private async Task<string> ResolveAccountAsync(string value)
+        private async Task<string> ResolveAccountCodeAsync(string value)
         {
-            if (!Guid.TryParse(value, out var id))
-                return value;
             var catalog = await _context.MetadataObjects.AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "План счетов");
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
             if (catalog == null)
                 return value;
             var rows = await new MetadataService(_context).GetCatalogDataAsync(catalog.Id);
-            var account = rows.FirstOrDefault(row => Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var rowId) && rowId == id);
-            return account == null ? value : $"{GetString(account, "Код")} - {GetString(account, "Наименование")}".Trim(' ', '-');
+            Dictionary<string, object>? account;
+            if (Guid.TryParse(value, out var id))
+            {
+                account = rows.FirstOrDefault(row =>
+                    Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var rowId) && rowId == id);
+            }
+            else
+            {
+                account = rows.FirstOrDefault(row =>
+                    GetString(row, "Код", "code").Equals(value, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return account == null ? GetAccountCode(value) : GetString(account, "Код", "code");
+        }
+
+        private async Task<CashDeskPrintInfo> ResolveCashDeskAsync(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return new CashDeskPrintInfo(string.Empty, "3010");
+
+            if (!Guid.TryParse(value, out var id))
+                return new CashDeskPrintInfo(value, await ResolveAccountCodeAsync(value));
+
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Кассы");
+            if (catalog == null)
+                return new CashDeskPrintInfo(value, value);
+
+            var rows = await new MetadataService(_context).GetCatalogDataAsync(catalog.Id);
+            var cashDesk = rows.FirstOrDefault(row =>
+                Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var rowId) && rowId == id);
+            if (cashDesk == null)
+                return new CashDeskPrintInfo(value, value);
+
+            var displayName = GetString(cashDesk, "Наименование кассы", "Наименование", "name");
+            var accountCode = GetString(cashDesk, "Счет", "Счет кассы", "Код", "code");
+            var account = await ResolveAccountCodeAsync(accountCode);
+            return new CashDeskPrintInfo(
+                string.IsNullOrWhiteSpace(displayName) ? value : displayName,
+                string.IsNullOrWhiteSpace(account) ? accountCode : account);
         }
 
         private static Report CreateCashForm(string code, string name, string type, Guid sourceId, string description) => new()
@@ -344,8 +666,8 @@ namespace BIS.ERP.Services
                         });
                         foreach (var title in new[] { "Дебет", "Кредит", "Сумма" })
                             table.Cell().Border(1).Padding(4).AlignCenter().Text(title).Bold();
-                        table.Cell().Border(1).Padding(4).Text(data.CashDesk);
-                        table.Cell().Border(1).Padding(4).Text(data.CorrespondentAccount);
+                        table.Cell().Border(1).Padding(4).Text(data.DebitAccount);
+                        table.Cell().Border(1).Padding(4).Text(data.CreditAccount);
                         table.Cell().Border(1).Padding(4).AlignRight().Text($"{data.Amount:N2}");
                     });
                 column.Item().Text($"Принято от: {data.Person}");
@@ -387,8 +709,8 @@ namespace BIS.ERP.Services
                         });
                         foreach (var title in new[] { "Дебет / корр. счет", "Кредит", "Сумма" })
                             table.Cell().Border(1).Padding(5).AlignCenter().Text(title).Bold();
-                        table.Cell().Border(1).Padding(5).Text(data.CorrespondentAccount);
-                        table.Cell().Border(1).Padding(5).Text(data.CashDesk);
+                        table.Cell().Border(1).Padding(5).Text(data.DebitAccount);
+                        table.Cell().Border(1).Padding(5).Text(data.CreditAccount);
                         table.Cell().Border(1).Padding(5).AlignRight().Text($"{data.Amount:N2}");
                     });
                     column.Item().Text($"Выдать: {data.Person}");
@@ -405,9 +727,11 @@ namespace BIS.ERP.Services
                 });
             })).GeneratePdf();
 
-        private static byte[] BuildFoxProLayoutPdf(Report report, CashOrderPrintData data)
+        private static byte[] BuildTemplateLayoutPdf(
+            Report report,
+            CashOrderPrintData data,
+            IReadOnlyCollection<ReportElementMapping>? mappings)
         {
-            // Используем FrxParser для корректной десериализации (поддерживает FrxFullData и PrintFormTemplate)
             var frxReport = new FrxReport
             {
                 Id = Guid.NewGuid(),
@@ -417,9 +741,9 @@ namespace BIS.ERP.Services
             };
             var parser = new FrxParser();
             var template = parser.GetPrintTemplate(frxReport);
-            if (template.Elements.Count == 0 && template.Bands.Count == 0)
-                throw new InvalidOperationException("Макет FoxPro поврежден: не найдено элементов.");
-            var svg = BuildFoxProSvg(template, data);
+            if (template.Elements.Count == 0)
+                throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
+            var svg = BuildTemplateSvg(template, report, data, mappings ?? Array.Empty<ReportElementMapping>());
             return QuestPDF.Fluent.Document.Create(document => document.Page(page =>
             {
                 page.Size(report.PageOrientation == "Landscape" ? PageSizes.A4.Landscape() : PageSizes.A4);
@@ -428,48 +752,61 @@ namespace BIS.ERP.Services
             })).GeneratePdf();
         }
 
-        private static string BuildFoxProSvg(PrintFormTemplate template, CashOrderPrintData data)
+        private static string BuildTemplateSvg(
+            PrintFormTemplate template,
+            Report report,
+            CashOrderPrintData data,
+            IReadOnlyCollection<ReportElementMapping> mappings)
         {
-            var width = Math.Max(1000, template.PageWidth);
-            var height = Math.Max(1000, template.PageHeight);
+            var layoutTemplate = CompactImportedTemplateVerticalGaps(template);
+            var width = Math.Max(1000, layoutTemplate.PageWidth);
+            var height = Math.Max(1000, layoutTemplate.PageHeight);
+            var useCompactScale = width < 5000 && height < 5000;
+            var fontScale = useCompactScale ? 10d : 105d;
+            var minFontSize = useCompactScale ? 32d : 700d;
+            var strokeWidth = useCompactScale ? 5d : 80d;
+            var mappingByOrder = mappings
+                .GroupBy(item => item.ElementOrder)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
             var svg = new StringBuilder();
             svg.Append($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width.ToString(CultureInfo.InvariantCulture)} {height.ToString(CultureInfo.InvariantCulture)}'>");
             svg.Append("<rect x='0' y='0' width='100%' height='100%' fill='white'/>");
             svg.Append("<defs>");
-            foreach (var element in template.Elements.Where(item => item.Type is "Text" or "Expression"))
+            foreach (var element in layoutTemplate.Elements.Where(item => item.Type is "Text" or "Expression"))
             {
-                var clipHeight = Math.Max(element.Height, Math.Max(700, element.FontSize * 105) * 1.4);
+                var clipHeight = Math.Max(element.Height, Math.Max(minFontSize, element.FontSize * fontScale) * 1.4);
                 svg.Append($"<clipPath id='clip{element.Order}'><rect x='{element.Left.ToString(CultureInfo.InvariantCulture)}' y='{element.Top.ToString(CultureInfo.InvariantCulture)}' width='{element.Width.ToString(CultureInfo.InvariantCulture)}' height='{clipHeight.ToString(CultureInfo.InvariantCulture)}'/></clipPath>");
             }
             svg.Append("</defs>");
-            foreach (var element in template.Elements.OrderBy(item => item.Order))
+            foreach (var element in layoutTemplate.Elements.OrderBy(item => item.Order))
             {
+                if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
+                    continue;
+
                 var x = element.Left.ToString(CultureInfo.InvariantCulture);
                 var y = element.Top.ToString(CultureInfo.InvariantCulture);
                 var w = element.Width.ToString(CultureInfo.InvariantCulture);
                 var h = element.Height.ToString(CultureInfo.InvariantCulture);
                 if (element.Type == "Line")
                 {
-                    svg.Append($"<line x1='{x}' y1='{y}' x2='{(element.Left + element.Width).ToString(CultureInfo.InvariantCulture)}' y2='{(element.Top + element.Height).ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='80'/>");
+                    svg.Append($"<line x1='{x}' y1='{y}' x2='{(element.Left + element.Width).ToString(CultureInfo.InvariantCulture)}' y2='{(element.Top + element.Height).ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}'/>");
                     continue;
                 }
                 if (element.Type == "Box")
                 {
-                    svg.Append($"<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='none' stroke='black' stroke-width='80'/>");
+                    svg.Append($"<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='none' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}'/>");
                     continue;
                 }
                 if (element.Type == "Picture")
                     continue;
 
-                var value = element.Type == "Expression"
-                    ? EvaluateFoxExpression(element.Expression, data)
-                    : UnquoteFoxText(element.Text);
+                var value = ResolveElementValue(report, layoutTemplate, element, data, mappingByOrder);
                 if (string.IsNullOrWhiteSpace(value))
                     continue;
                 var anchor = element.Alignment == "Right" ? "end" : element.Alignment == "Center" ? "middle" : "start";
                 var textX = element.Alignment == "Right" ? element.Left + element.Width :
                     element.Alignment == "Center" ? element.Left + element.Width / 2 : element.Left;
-                var fontSize = Math.Max(700, element.FontSize * 105);
+                var fontSize = Math.Max(minFontSize, element.FontSize * fontScale);
                 var fontWeight = element.Bold ? "bold" : "normal";
                 var fontStyle = element.Italic ? "italic" : "normal";
                 var lines = value.Replace("\r", string.Empty).Split('\n');
@@ -481,6 +818,211 @@ namespace BIS.ERP.Services
             }
             svg.Append("</svg>");
             return svg.ToString();
+        }
+
+        private static PrintFormTemplate CompactImportedTemplateVerticalGaps(PrintFormTemplate template)
+        {
+            if (!ShouldCompactImportedTemplate(template) || template.Elements.Count < 2)
+            {
+                return template;
+            }
+
+            var orderedElements = template.Elements
+                .Where(element => element.Height >= 0)
+                .OrderBy(element => element.Top)
+                .ThenBy(element => element.Left)
+                .ToList();
+            if (orderedElements.Count < 2)
+                return template;
+
+            var desiredGap = Math.Clamp(template.PageHeight * 0.012, 500, 900);
+            var minGapToCompact = desiredGap * 2.2;
+            var currentBottom = orderedElements[0].Top + orderedElements[0].Height;
+            var shifts = new List<(double ThresholdTop, double Shift)>();
+
+            foreach (var element in orderedElements.Skip(1))
+            {
+                if (element.Top > currentBottom)
+                {
+                    var gap = element.Top - currentBottom;
+                    if (gap > minGapToCompact)
+                    {
+                        shifts.Add((element.Top, gap - desiredGap));
+                    }
+                }
+
+                currentBottom = Math.Max(currentBottom, element.Top + element.Height);
+            }
+
+            if (shifts.Count == 0)
+                return template;
+
+            var shiftedElements = template.Elements.Select(element =>
+            {
+                var shift = shifts
+                    .Where(item => element.Top >= item.ThresholdTop)
+                    .Sum(item => item.Shift);
+
+                return new PrintFormElement
+                {
+                    Type = element.Type,
+                    Text = element.Text,
+                    Expression = element.Expression,
+                    BandType = element.BandType,
+                    Left = element.Left,
+                    Top = element.Top - shift,
+                    Width = element.Width,
+                    Height = element.Height,
+                    FontName = element.FontName,
+                    FontSize = element.FontSize,
+                    Bold = element.Bold,
+                    Italic = element.Italic,
+                    Alignment = element.Alignment,
+                    BorderStyle = element.BorderStyle,
+                    Order = element.Order
+                };
+            }).ToList();
+
+            var shiftedBands = template.Bands.Select(band =>
+            {
+                var shift = shifts
+                    .Where(item => band.Top >= item.ThresholdTop)
+                    .Sum(item => item.Shift);
+
+                return new PrintFormBand
+                {
+                    Type = band.Type,
+                    Top = band.Top - shift,
+                    Height = band.Height,
+                    Order = band.Order
+                };
+            }).ToList();
+
+            var contentBottom = shiftedElements.Max(element => element.Top + element.Height);
+            return new PrintFormTemplate
+            {
+                SourceFormat = template.SourceFormat,
+                OriginalFileName = template.OriginalFileName,
+                PageWidth = template.PageWidth,
+                PageHeight = Math.Max(1000, contentBottom + desiredGap),
+                Bands = shiftedBands,
+                Elements = shiftedElements
+            };
+        }
+
+        private static bool ShouldCompactImportedTemplate(PrintFormTemplate template)
+        {
+            return template.SourceFormat.Equals("FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+                   template.OriginalFileName.EndsWith(".frx", StringComparison.OrdinalIgnoreCase) ||
+                   template.PageWidth > 10000 ||
+                   template.PageHeight > 10000;
+        }
+
+        private static string ResolveElementValue(
+            Report report,
+            PrintFormTemplate template,
+            PrintFormElement element,
+            CashOrderPrintData data,
+            IReadOnlyDictionary<int, ReportElementMapping> mappingByOrder)
+        {
+            if (mappingByOrder.TryGetValue(element.Order, out var mapping))
+            {
+                if (!string.IsNullOrWhiteSpace(mapping.CustomText))
+                    return ReplacePlaceholders(mapping.CustomText, data, mapping.FormatString);
+
+                if (!string.IsNullOrWhiteSpace(mapping.MappedFieldName))
+                    return GetPrintDataValue(data, mapping.MappedFieldName, mapping.FormatString);
+            }
+
+            if (element.Type == "Expression")
+            {
+                if (template.SourceFormat == "Native" || report.SourceFormat == "Native")
+                    return GetPrintDataValue(data, element.Expression, string.Empty);
+
+                return EvaluateFoxExpression(element.Expression, data);
+            }
+
+            return ReplacePlaceholders(UnquoteFoxText(element.Text), data, string.Empty);
+        }
+
+        private static string ReplacePlaceholders(string text, CashOrderPrintData data, string formatString)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+
+            return Regex.Replace(text, @"\{([^{}]+)\}", match =>
+                GetPrintDataValue(data, match.Groups[1].Value, formatString));
+        }
+
+        private static string GetPrintDataValue(CashOrderPrintData data, string fieldName, string formatString)
+        {
+            var normalized = NormalizeFieldName(fieldName);
+            object value = normalized switch
+            {
+                "document_name" => data.DocumentName,
+                "number" or "doc_number" or "dok1" => data.Number,
+                "date" or "doc_date" or "date1" => data.Date,
+                "organization" or "organization_id" or "nfil1" => data.Organization,
+                "inn" or "inn1" or "organization_inn" => data.Inn,
+                "okpo" or "okpo1" or "organization_okpo" => data.Okpo,
+                "person" or "employee_id" or "responsible_person_id" or "fio" or "fiop1" or "namep1" => data.Person,
+                "cash_desk" or "cash_desk_id" or "cash" => data.CashDesk,
+                "correspondent_account" or "corr_account" or "account" => data.CorrespondentAccount,
+                "debit_account" or "debit" or "deb" => GetAccountCode(data.DebitAccount),
+                "credit_account" or "credit" or "cred" => GetAccountCode(data.CreditAccount),
+                "debit_code" or "deb1" => GetAccountCode(data.DebitAccount),
+                "credit_code" or "cred1" => GetAccountCode(data.CreditAccount),
+                "amount" or "sum" or "sum1" => data.Amount,
+                "amount_currency" or "amount_in_currency" or "sum_v" => data.AmountInCurrency,
+                "amount_in_words" or "msum1" => data.AmountInWords,
+                "basis" or "tex1" => data.Basis,
+                "note" or "description" => data.Note,
+                "currency" or "nval1" => "KGS",
+                "rate" or "kurs_v" => "1,00",
+                _ => string.Empty
+            };
+
+            return value switch
+            {
+                DateTime date => string.IsNullOrWhiteSpace(formatString)
+                    ? date.ToString("dd.MM.yyyy")
+                    : date.ToString(formatString),
+                decimal number => string.IsNullOrWhiteSpace(formatString)
+                    ? number.ToString("N2")
+                    : number.ToString(formatString),
+                double number => string.IsNullOrWhiteSpace(formatString)
+                    ? number.ToString("N2")
+                    : number.ToString(formatString),
+                float number => string.IsNullOrWhiteSpace(formatString)
+                    ? number.ToString("N2")
+                    : number.ToString(formatString),
+                _ => value?.ToString() ?? string.Empty
+            };
+        }
+
+        private static string NormalizeFieldName(string fieldName)
+        {
+            var value = (fieldName ?? string.Empty).Trim().Trim('{', '}').ToLowerInvariant();
+            return value switch
+            {
+                "номер" or "номер документа" => "number",
+                "дата" => "date",
+                "организация" => "organization",
+                "инн" => "inn",
+                "окпо" => "okpo",
+                "сотрудник" or "мол" or "получатель" or "принято от" or "выдать" => "person",
+                "касса" => "cash_desk",
+                "корр. счет" or "корр счет" or "корреспондентский счет" => "correspondent_account",
+                "дебет" => "debit_account",
+                "кредит" => "credit_account",
+                "сумма" => "amount",
+                "сумма в валюте" => "amount_in_currency",
+                "сумма прописью" => "amount_in_words",
+                "основание" => "basis",
+                "примечание" => "note",
+                "валюта" => "currency",
+                _ => value
+            };
         }
 
         private static string EvaluateFoxExpression(string expression, CashOrderPrintData data)
@@ -520,10 +1062,8 @@ namespace BIS.ERP.Services
             {
                 ["nfil1"] = data.Organization, ["inn1"] = data.Inn, ["okpo1"] = data.Okpo,
                 ["dok1"] = data.Number, ["date1"] = data.Date.ToString("dd.MM.yyyy"),
-                ["deb1"] = GetAccountCode(data.DebitAccount ?? data.CashDesk),
-                ["cred1"] = GetAccountCode(data.CreditAccount ?? data.CorrespondentAccount),
-                ["deb"] = data.CashDesk, ["deb1"] = GetAccountCode(data.CorrespondentAccount),
-                ["cred"] = GetAccountCode(data.CorrespondentAccount), ["cred1"] = data.CashDesk,
+                ["deb"] = data.DebitAccount, ["deb1"] = GetAccountCode(data.DebitAccount),
+                ["cred"] = data.CreditAccount, ["cred1"] = GetAccountCode(data.CreditAccount),
                 ["sum"] = $"{data.Amount:N2}", ["sum1"] = $"{data.Amount:N2}", ["sum_v"] = $"{data.Amount:N2}",
                 ["tex1"] = data.Basis, ["fio"] = data.Person, ["fiop1"] = data.Person,
                 ["namep1"] = data.Person, ["kodp1"] = string.Empty, ["kurs_v"] = "1,00",
@@ -629,8 +1169,13 @@ namespace BIS.ERP.Services
             try
             {
                 // Создаем временный файл
-                var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.frx");
+                var extension = Path.GetExtension(fileName);
+                var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}{(string.IsNullOrWhiteSpace(extension) ? ".frx" : extension)}");
+                var tempFrt = Path.ChangeExtension(tempFile, ".FRT");
                 await File.WriteAllBytesAsync(tempFile, fileData);
+                var sourceFrt = Path.ChangeExtension(fileName, ".FRT");
+                if (File.Exists(sourceFrt))
+                    File.Copy(sourceFrt, tempFrt, overwrite: true);
 
                 // Используем FrxParser
                 var parser = new FrxParser();
@@ -639,6 +1184,8 @@ namespace BIS.ERP.Services
                 // Удаляем временный файл
                 if (File.Exists(tempFile))
                     File.Delete(tempFile);
+                if (File.Exists(tempFrt))
+                    File.Delete(tempFrt);
 
                 // Получаем PrintFormTemplate из FrxReport
                 var template = parser.GetPrintTemplate(frxReport);
@@ -668,7 +1215,7 @@ namespace BIS.ERP.Services
 
             try
             {
-                var template = JsonSerializer.Deserialize<PrintFormTemplate>(templateJson);
+                var template = DeserializePrintTemplate(templateJson);
                 if (template == null)
                     return fields;
 
@@ -725,6 +1272,18 @@ namespace BIS.ERP.Services
             }
 
             return fields;
+        }
+
+        public static PrintFormTemplate DeserializePrintTemplate(string templateJson)
+        {
+            if (string.IsNullOrWhiteSpace(templateJson))
+                return new PrintFormTemplate();
+            return new FrxParser().GetPrintTemplate(new FrxReport
+            {
+                Id = Guid.NewGuid(),
+                Name = "Template",
+                FrxXml = templateJson
+            });
         }
 
         public static string CleanFoxText(string input)
@@ -792,5 +1351,7 @@ namespace BIS.ERP.Services
             public string Basis { get; init; } = string.Empty;
             public string Note { get; init; } = string.Empty;
         }
+
+        private readonly record struct CashDeskPrintInfo(string DisplayName, string Account);
     }
 }

@@ -215,6 +215,9 @@ namespace BIS.ERP.Services
             if (root.ValueKind != JsonValueKind.Object)
                 return false;
 
+            if (root.TryGetProperty("Template", out _) || root.TryGetProperty("template", out _))
+                return false;
+
             var hasTemplateShape =
                 root.TryGetProperty("Elements", out _) ||
                 root.TryGetProperty("elements", out _) ||
@@ -352,7 +355,20 @@ namespace BIS.ERP.Services
 
             try
             {
-                // Пробуем десериализовать как FrxFullData
+                using var document = JsonDocument.Parse(report.FrxXml);
+                if (TryDeserializeTemplate(document.RootElement, out var readyTemplate))
+                {
+                    if (string.IsNullOrWhiteSpace(readyTemplate.OriginalFileName))
+                        readyTemplate.OriginalFileName = report.OriginalFileName;
+                    return readyTemplate;
+                }
+            }
+            catch { }
+
+            try
+            {
+                // Пробуем десериализовать как FrxFullData после прямого PrintFormTemplate:
+                // у нативного шаблона тоже есть Bands, поэтому обратный порядок теряет Elements.
                 var fullData = JsonSerializer.Deserialize<FrxFullData>(report.FrxXml,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                 if (fullData?.Template != null)

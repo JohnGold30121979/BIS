@@ -551,6 +551,7 @@ namespace BIS.ERP.Services
             {
                 await EnsureChartOfAccountsCatalogStructureAsync();
                 await EnsureOrganizationsCatalogStructureAsync();
+                await EnsureCashDesksCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
             }
             catch (Exception ex)
@@ -573,6 +574,7 @@ namespace BIS.ERP.Services
             {
                 await EnsureManagedDocumentAnalyticFieldsAsync(documents);
                 await EnsureInventoryDocumentStructureAsync(documents);
+                await EnsurePostingDocumentStructureAsync(documents);
                 await EnsureGlobalDocumentNumberConfigurationAsync(documents);
 
                 foreach (var document in documents.Where(IsManagedDocument))
@@ -788,6 +790,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Кассы"))
                     await CreateCashDesksCatalog(config);
+                await EnsureCashDesksCatalogStructureAsync();
 
                 // Новые справочники                
 
@@ -869,6 +872,13 @@ namespace BIS.ERP.Services
 
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
+            if (IsPostingsDocument(metadata))
+            {
+                await SyncManualPostingCashBalanceAsync(
+                    metadata,
+                    previousRecord: null,
+                    currentRecord: await GetRecordDataAsync(metadata.TableName, recordId));
+            }
 
             return recordId;
         }
@@ -885,6 +895,9 @@ namespace BIS.ERP.Services
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);
+            var previousRecord = IsPostingsDocument(metadata)
+                ? await GetRecordDataAsync(metadata.TableName, recordId)
+                : null;
 
             var setClauses = new List<string>();
 
@@ -912,6 +925,13 @@ namespace BIS.ERP.Services
 
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
+            if (IsPostingsDocument(metadata))
+            {
+                await SyncManualPostingCashBalanceAsync(
+                    metadata,
+                    previousRecord,
+                    await GetRecordDataAsync(metadata.TableName, recordId));
+            }
         }
 
         private static List<MetadataField> SelectFieldsForWrite(
@@ -1096,6 +1116,12 @@ namespace BIS.ERP.Services
                 await EnsureDocumentDateCanBeModifiedAsync(metadata, recordData);
             }
 
+            Dictionary<string, object>? previousRecord = null;
+            if (IsPostingsDocument(metadata))
+            {
+                previousRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+            }
+
             var sql = $"DELETE FROM \"{metadata.TableName}\" WHERE \"Id\" = '{recordId}'";
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
@@ -1104,6 +1130,8 @@ namespace BIS.ERP.Services
             await _context.Database.OpenConnectionAsync();
             await command.ExecuteNonQueryAsync();
             await _context.Database.CloseConnectionAsync();
+
+            await SyncManualPostingCashBalanceAsync(metadata, previousRecord, currentRecord: null);
         }
 
         private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
@@ -1800,6 +1828,11 @@ namespace BIS.ERP.Services
             // Получаем корреспондирующий счёт
             TryGetGuid(recordData, out var corrAccountId, "correspondent_account", "Корр. счет", "Корр. счёт");
             var corrAccountCode = GetStringValue(recordData, "correspondent_account", "Корр. счет", "Корр. счёт");
+            var cashAccountCode = cashDeskId != Guid.Empty
+                ? await GetCashDeskAccountCodeAsync(cashDeskId)
+                : "3010";
+            if (string.IsNullOrWhiteSpace(cashAccountCode))
+                cashAccountCode = "3010";
 
             // Старые записи могут содержать конкретную кассу. Новые документы работают по счету,
             // поэтому остаток справочника касс обновляем только когда касса явно указана.
@@ -1823,18 +1856,18 @@ namespace BIS.ERP.Services
 
             if (isReceipt)
             {
-                debitAccount = "3010"; // Счёт кассы
+                debitAccount = cashAccountCode; // Счёт выбранной кассы
                 creditAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : corrAccountCode;
             }
             else
             {
                 debitAccount = corrAccountId != Guid.Empty ? await GetAccountCodeById(corrAccountId) : corrAccountCode;
-                creditAccount = "3010"; // Счёт кассы
+                creditAccount = cashAccountCode; // Счёт выбранной кассы
             }
 
             if (string.IsNullOrWhiteSpace(debitAccount) || string.IsNullOrWhiteSpace(creditAccount))
             {
-                throw new Exception("Для проведения кассового документа укажите корреспондирующий счет. Приход увеличивает кассу: Дт 3010 / Кт корр.счет; расход уменьшает кассу: Дт корр.счет / Кт 3010.");
+                throw new Exception($"Для проведения кассового документа укажите корреспондирующий счет. Приход увеличивает кассу: Дт {cashAccountCode} / Кт корр.счет; расход уменьшает кассу: Дт корр.счет / Кт {cashAccountCode}.");
             }
 
             // Создаём проводку с указанием типа документа
@@ -2041,6 +2074,216 @@ namespace BIS.ERP.Services
                 sql,
                 new NpgsqlParameter("@amount", amount),
                 new NpgsqlParameter("@cashDeskId", cashDeskId));
+        }
+
+        private async Task SyncManualPostingCashBalanceAsync(
+            MetadataObject metadata,
+            Dictionary<string, object>? previousRecord,
+            Dictionary<string, object>? currentRecord)
+        {
+            if (!IsPostingsDocument(metadata))
+                return;
+
+            if (previousRecord != null)
+                await ApplyManualPostingCashBalanceDeltaAsync(previousRecord, reverse: true);
+
+            if (currentRecord != null)
+                await ApplyManualPostingCashBalanceDeltaAsync(currentRecord, reverse: false);
+        }
+
+        private async Task ApplyManualPostingCashBalanceDeltaAsync(
+            Dictionary<string, object> record,
+            bool reverse)
+        {
+            if (!IsRecordActive(record))
+                return;
+
+            if (!TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса"))
+                return;
+
+            var amount = GetDecimalValue(record, "amount_kgs", "Сумма в сом", "amount", "Сумма");
+            if (amount == 0)
+                return;
+
+            var cashAccountCode = await GetCashDeskAccountCodeAsync(cashDeskId);
+            if (string.IsNullOrWhiteSpace(cashAccountCode))
+                return;
+
+            var debitAccount = GetStringValue(record, "debit_account", "Дебет");
+            var creditAccount = GetStringValue(record, "credit_account", "Кредит");
+            var accountType = await GetAccountTypeByCodeAsync(cashAccountCode);
+            var delta = CalculateAccountBalanceDelta(cashAccountCode, accountType, debitAccount, creditAccount, amount);
+
+            if (delta == 0)
+                return;
+
+            if (reverse)
+                delta = -delta;
+
+            await UpdateCashDeskBalanceDeltaAsync(cashDeskId, delta);
+        }
+
+        private async Task<string> GetCashDeskAccountCodeAsync(Guid cashDeskId)
+        {
+            const string sql = @"
+                SELECT ""code""
+                FROM ""catalog_cash_desks""
+                WHERE ""Id"" = @cashDeskId
+                LIMIT 1;";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@cashDeskId";
+            parameter.Value = cashDeskId;
+            command.Parameters.Add(parameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                return (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private async Task<string> GetAccountTypeByCodeAsync(string accountCode)
+        {
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name.StartsWith("План счетов"));
+            if (catalog == null)
+                return "Active";
+
+            var safeTableName = QuoteIdentifier(catalog.TableName);
+            var sql = $@"
+                SELECT ""account_type""
+                FROM {safeTableName}
+                WHERE ""code"" = @accountCode
+                LIMIT 1;";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@accountCode";
+            parameter.Value = accountCode;
+            command.Parameters.Add(parameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                return (await command.ExecuteScalarAsync())?.ToString() ?? "Active";
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private async Task UpdateCashDeskBalanceDeltaAsync(Guid cashDeskId, decimal delta)
+        {
+            const string sql = @"
+                UPDATE ""catalog_cash_desks""
+                SET ""current_balance"" = COALESCE(""current_balance"", 0) + @delta,
+                    ""UpdatedAt"" = NOW()
+                WHERE ""Id"" = @cashDeskId;";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                sql,
+                new NpgsqlParameter("@delta", delta),
+                new NpgsqlParameter("@cashDeskId", cashDeskId));
+        }
+
+        private static decimal CalculateAccountBalanceDelta(
+            string cashAccountCode,
+            string accountType,
+            string debitAccount,
+            string creditAccount,
+            decimal amount)
+        {
+            var isDebit = debitAccount.Equals(cashAccountCode, StringComparison.OrdinalIgnoreCase);
+            var isCredit = creditAccount.Equals(cashAccountCode, StringComparison.OrdinalIgnoreCase);
+
+            if (isDebit == isCredit)
+                return 0m;
+
+            var passive = IsPassiveAccountType(accountType);
+            if (passive)
+                return isCredit ? amount : -amount;
+
+            return isDebit ? amount : -amount;
+        }
+
+        private static bool IsPassiveAccountType(string accountType)
+        {
+            return accountType.Equals("Passive", StringComparison.OrdinalIgnoreCase) ||
+                   accountType.Equals("Пассивный", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static decimal GetDecimalValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var raw) || raw == null || raw == DBNull.Value)
+                    continue;
+
+                if (raw is decimal decimalValue)
+                    return decimalValue;
+
+                if (decimal.TryParse(
+                        raw.ToString(),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.CurrentCulture,
+                        out var currentCultureValue))
+                    return currentCultureValue;
+
+                if (decimal.TryParse(
+                        raw.ToString(),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var invariantValue))
+                    return invariantValue;
+            }
+
+            return 0m;
+        }
+
+        private static bool IsRecordActive(Dictionary<string, object> data)
+        {
+            foreach (var key in new[] { "is_active", "Активен" })
+            {
+                if (!data.TryGetValue(key, out var raw) || raw == null || raw == DBNull.Value)
+                    continue;
+
+                if (raw is bool boolValue)
+                    return boolValue;
+
+                if (bool.TryParse(raw.ToString(), out var parsed))
+                    return parsed;
+
+                var text = raw.ToString();
+                if (text?.Equals("Да", StringComparison.OrdinalIgnoreCase) == true)
+                    return true;
+                if (text?.Equals("Нет", StringComparison.OrdinalIgnoreCase) == true)
+                    return false;
+            }
+
+            return true;
         }
 
         private static bool TryGetGuid(Dictionary<string, object> data, out Guid value, params string[] keys)
@@ -2350,6 +2593,12 @@ namespace BIS.ERP.Services
         private static bool IsManagedDocument(MetadataObject metadata)
         {
             return metadata.ObjectType == "Document" && FindDocumentNumberField(metadata) != null;
+        }
+
+        private static bool IsPostingsDocument(MetadataObject metadata)
+        {
+            return metadata.ObjectType == "Document" &&
+                   metadata.Name.Equals("Проводки", StringComparison.OrdinalIgnoreCase);
         }
 
         private static MetadataField? FindDocumentNumberField(MetadataObject metadata)

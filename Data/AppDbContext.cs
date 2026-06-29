@@ -32,6 +32,7 @@ public class AppDbContext : DbContext
     public DbSet<ReportField> ReportFields { get; set; }
     public DbSet<ReportFilter> ReportFilters { get; set; }
     public DbSet<ReportGroup> ReportGroups { get; set; }
+    public DbSet<ReportElementMapping> ReportElementMappings { get; set; }
 
     // DbSet для документов (без внешних ключей на InfoBase)
     public DbSet<Document> Documents { get; set; }
@@ -97,10 +98,13 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Report>().HasMany(r => r.Fields).WithOne(f => f.Report).HasForeignKey(f => f.ReportId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Report>().HasMany(r => r.Filters).WithOne(f => f.Report).HasForeignKey(f => f.ReportId).OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<Report>().HasMany(r => r.Groups).WithOne(g => g.Report).HasForeignKey(g => g.ReportId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Report>().HasMany(r => r.ElementMappings).WithOne(m => m.Report).HasForeignKey(m => m.ReportId).OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<ReportField>().HasKey(f => f.Id);
         modelBuilder.Entity<ReportFilter>().HasKey(f => f.Id);
         modelBuilder.Entity<ReportGroup>().HasKey(g => g.Id);
+        modelBuilder.Entity<ReportElementMapping>().HasKey(m => m.Id);
+        modelBuilder.Entity<ReportElementMapping>().HasIndex(m => new { m.ReportId, m.ElementOrder });
 
         // НАСТРОЙКИ ДЛЯ ДОКУМЕНТОВ (без связи с InfoBase)
         modelBuilder.Entity<Document>().HasKey(d => d.Id);

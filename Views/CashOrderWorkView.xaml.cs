@@ -241,6 +241,21 @@ namespace BIS.ERP.Views
                         }
                     }
 
+                    // Касса
+                    if (row.TryGetValue("Касса", out var cashObj) && cashObj != DBNull.Value && cashObj != null)
+                    {
+                        if (Guid.TryParse(cashObj.ToString(), out var cashId) &&
+                            referenceCache.TryGetValue("Касса", out var cashDict) &&
+                            cashDict.TryGetValue(cashId, out var cashName))
+                        {
+                            newRow.CashDeskName = cashName;
+                        }
+                        else
+                        {
+                            newRow.CashDeskName = cashObj.ToString();
+                        }
+                    }
+
                     // Сотрудник
                     if (row.TryGetValue("Сотрудник", out var empObj) && empObj != DBNull.Value && empObj != null)
                     {

@@ -1518,6 +1518,13 @@ namespace BIS.ERP.Views
             dialog.ShowDialog();
         }
 
+        private void OnLeftNavigationPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            LeftNavigationScrollViewer.ScrollToVerticalOffset(
+                LeftNavigationScrollViewer.VerticalOffset - e.Delta);
+            e.Handled = true;
+        }
+
         private void OnExitClick(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show("Завершить работу приложения?", "Выход",

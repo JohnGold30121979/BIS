@@ -76,6 +76,7 @@ namespace BIS.ERP.Models
         public virtual ICollection<ReportField> Fields { get; set; } = new List<ReportField>();
         public virtual ICollection<ReportFilter> Filters { get; set; } = new List<ReportFilter>();
         public virtual ICollection<ReportGroup> Groups { get; set; } = new List<ReportGroup>();
+        public virtual ICollection<ReportElementMapping> ElementMappings { get; set; } = new List<ReportElementMapping>();
         public virtual ICollection<ReportHeaderFooter> HeadersFooters { get; set; } = new List<ReportHeaderFooter>();
 
         public string TitleText { get; set; } = string.Empty;
