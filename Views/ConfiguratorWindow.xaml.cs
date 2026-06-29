@@ -64,10 +64,7 @@ namespace BIS.ERP.Views
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Name).ToList();
                 _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Name).ToList();
-                _reports = (await _reportService.GetReportsAsync())
-                    .OrderBy(report => report.IsPrintForm ? 1 : 0)
-                    .ThenBy(report => report.Name)
-                    .ToList();
+                _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
                 BuildMetadataTree();
                 ShowCatalogsList();
             }
@@ -1177,7 +1174,8 @@ namespace BIS.ERP.Views
             };
             designerButton.Click += async (s, e) =>
             {
-                var designer = new ReportDesignerWindow(report) { Owner = this };
+                var fullReport = await LoadFullReportAsync(report);
+                var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
                     await LoadMetadata();
             };
@@ -1247,6 +1245,11 @@ namespace BIS.ERP.Views
             }
 
             PropertiesPanel.Children.Add(mainPanel);
+        }
+
+        private async Task<Report> LoadFullReportAsync(Report report)
+        {
+            return await _reportService.GetReportAsync(report.Id) ?? report;
         }
 
         private async Task DeleteSelectedReport(Report? report = null)
@@ -1333,11 +1336,12 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void OnOpenReportDesignerClick(object sender, RoutedEventArgs e)
+        private async void OnOpenReportDesignerClick(object sender, RoutedEventArgs e)
         {
             if (_selectedReport != null)
             {
-                var designer = new ReportDesignerWindow(_selectedReport) { Owner = this };
+                var fullReport = await LoadFullReportAsync(_selectedReport);
+                var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
                     _ = LoadMetadata();
             }
@@ -1352,12 +1356,13 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void OnPreviewReportPdfClick(object sender, RoutedEventArgs e)
+        private async void OnPreviewReportPdfClick(object sender, RoutedEventArgs e)
         {
             if (_selectedReport == null) return;
             try
             {
-                var pdf = new PrintFormService(_context).ExportTemplatePreview(_selectedReport);
+                var fullReport = await LoadFullReportAsync(_selectedReport);
+                var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
                 var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
                 File.WriteAllBytes(tempFile, pdf);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -1373,12 +1378,13 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void OnPreviewReportClick(object sender, RoutedEventArgs e)
+        private async void OnPreviewReportClick(object sender, RoutedEventArgs e)
         {
             if (_selectedReport == null) return;
             try
             {
-                var pdf = new PrintFormService(_context).ExportTemplatePreview(_selectedReport);
+                var fullReport = await LoadFullReportAsync(_selectedReport);
+                var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
                 var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
                 File.WriteAllBytes(tempFile, pdf);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo

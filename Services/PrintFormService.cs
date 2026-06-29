@@ -19,6 +19,8 @@ namespace BIS.ERP.Services
     public class PrintFormService
     {
         private readonly AppDbContext _context;
+        private static readonly object SchemaSyncLock = new();
+        private static readonly HashSet<string> EnsuredSchemaKeys = new(StringComparer.OrdinalIgnoreCase);
 
         public PrintFormService(AppDbContext context)
         {
@@ -28,6 +30,13 @@ namespace BIS.ERP.Services
 
         public async Task EnsureSchemaAsync()
         {
+            var schemaKey = _context.Database.GetConnectionString() ?? "default";
+            lock (SchemaSyncLock)
+            {
+                if (EnsuredSchemaKeys.Contains(schemaKey))
+                    return;
+            }
+
             const string sql = @"
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""Code"" varchar(100) NOT NULL DEFAULT '';
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT true;
@@ -68,6 +77,10 @@ namespace BIS.ERP.Services
                 CREATE INDEX IF NOT EXISTS ""IX_ReportElementMappings_ReportId_ElementOrder""
                     ON ""ReportElementMappings"" (""ReportId"", ""ElementOrder"");";
             await _context.Database.ExecuteSqlRawAsync(sql);
+            lock (SchemaSyncLock)
+            {
+                EnsuredSchemaKeys.Add(schemaKey);
+            }
         }
 
         public async Task SeedCashOrderFormsAsync()

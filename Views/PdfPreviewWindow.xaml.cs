@@ -2,6 +2,8 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using System.Windows.Navigation;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace BIS.ERP.Views
@@ -10,12 +12,18 @@ namespace BIS.ERP.Views
     {
         private readonly byte[] _pdfData;
         private string _tempFilePath;
+        private bool _isClosingAfterCancelledNavigation;
+        private readonly DispatcherTimer _navigationStateTimer;
 
         public PdfPreviewWindow(byte[] pdfData)
         {
             InitializeComponent();
             _pdfData = pdfData;
             Loaded += OnLoaded;
+            PdfViewer.Navigated += OnPdfViewerNavigated;
+            PdfViewer.LoadCompleted += OnPdfViewerLoadCompleted;
+            _navigationStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            _navigationStateTimer.Tick += (_, _) => CloseIfCancelledPreviewPage(null);
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
@@ -28,6 +36,7 @@ namespace BIS.ERP.Views
 
                 // Показываем PDF в WebBrowser
                 PdfViewer.Navigate(new Uri(_tempFilePath));
+                _navigationStateTimer.Start();
 
                 // Устанавливаем заголовок окна
                 Title = $"Предпросмотр - {Path.GetFileName(_tempFilePath)}";
@@ -37,6 +46,45 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка загрузки PDF: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 Close();
+            }
+        }
+
+        private void OnPdfViewerNavigated(object sender, NavigationEventArgs e)
+        {
+            CloseIfCancelledPreviewPage(e.Uri?.ToString());
+        }
+
+        private void OnPdfViewerLoadCompleted(object sender, NavigationEventArgs e)
+        {
+            CloseIfCancelledPreviewPage(e.Uri?.ToString());
+        }
+
+        private void CloseIfCancelledPreviewPage(string? uriText)
+        {
+            if (_isClosingAfterCancelledNavigation)
+                return;
+
+            var sourceText = PdfViewer.Source?.ToString() ?? string.Empty;
+            var combined = $"{uriText} {sourceText} {GetBrowserDocumentTitle()}";
+            if (!combined.Contains("navcancl", StringComparison.OrdinalIgnoreCase) &&
+                !combined.Contains("navigation canceled", StringComparison.OrdinalIgnoreCase) &&
+                !combined.Contains("отмен", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _isClosingAfterCancelledNavigation = true;
+            Dispatcher.BeginInvoke(new Action(Close));
+        }
+
+        private string GetBrowserDocumentTitle()
+        {
+            try
+            {
+                dynamic document = PdfViewer.Document;
+                return document?.Title ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
 
@@ -102,6 +150,10 @@ namespace BIS.ERP.Views
             // Удаляем временный файл
             try
             {
+                PdfViewer.Navigated -= OnPdfViewerNavigated;
+                PdfViewer.LoadCompleted -= OnPdfViewerLoadCompleted;
+                _navigationStateTimer.Stop();
+                PdfViewer.Navigate("about:blank");
                 if (!string.IsNullOrEmpty(_tempFilePath) && File.Exists(_tempFilePath))
                     File.Delete(_tempFilePath);
             }

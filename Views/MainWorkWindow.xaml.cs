@@ -126,10 +126,10 @@ namespace BIS.ERP
         {
             NavigationItems.Clear();
 
-            var catalogs = await _metadataService.GetCatalogsAsync();
-            var documents = await _metadataService.GetDocumentsAsync();
-            var reports = (await _reportService.GetReportsAsync())
-                .Where(report => report.IsActive && !report.IsPrintForm).ToList();
+            var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
+            var catalogs = allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты").ToList();
+            var documents = allMetadata.Where(item => item.ObjectType == "Document").ToList();
+            var reports = await _reportService.GetNavigationReportsAsync();
             var modules = await _moduleMetadataService.GetModulesAsync();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
             if (modules.Count == 0 && (await _moduleMetadataService.GetModulesAsync(true)).Count == 0)
@@ -936,8 +936,7 @@ namespace BIS.ERP
             {
                 var context = await _infoBaseManager.GetCurrentDbContextAsync();
                 var reportService = new ReportService(context);
-                var loadedReport = (await reportService.GetReportsAsync())
-                    .FirstOrDefault(item => item.Id == report.Id) ?? report;
+                var loadedReport = await reportService.GetReportAsync(report.Id) ?? report;
                 var data = await reportService.GetReportDataAsync(loadedReport);
 
                 var preview = new ReportPreviewWindow(data, loadedReport, reportService);

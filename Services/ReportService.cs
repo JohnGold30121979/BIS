@@ -954,6 +954,72 @@ namespace BIS.ERP.Services
                 .ToListAsync();
         }
 
+        public async Task<List<Report>> GetReportHeadersAsync(bool includePrintForms = true)
+        {
+            await new PrintFormService(_context).EnsureSchemaAsync();
+            var query = _context.Set<Report>().AsNoTracking();
+            if (!includePrintForms)
+                query = query.Where(report => !report.IsPrintForm);
+
+            return await SelectReportHeaders(query)
+                .OrderBy(report => report.IsPrintForm ? 1 : 0)
+                .ThenBy(report => report.Name)
+                .ToListAsync();
+        }
+
+        public async Task<List<Report>> GetNavigationReportsAsync()
+        {
+            var query = _context.Set<Report>().AsNoTracking()
+                .Where(report => report.IsActive && !report.IsPrintForm);
+
+            return await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
+        }
+
+        public async Task<Report?> GetReportAsync(Guid reportId)
+        {
+            await new PrintFormService(_context).EnsureSchemaAsync();
+            return await _context.Set<Report>()
+                .Include(r => r.Fields)
+                .Include(r => r.Filters)
+                .Include(r => r.Groups)
+                .Include(r => r.ElementMappings)
+                .Include(r => r.HeadersFooters)
+                .FirstOrDefaultAsync(report => report.Id == reportId);
+        }
+
+        private static IQueryable<Report> SelectReportHeaders(IQueryable<Report> query)
+        {
+            return query.Select(report => new Report
+            {
+                Id = report.Id,
+                Name = report.Name,
+                Description = report.Description,
+                DataSourceType = report.DataSourceType,
+                DataSourceId = report.DataSourceId,
+                ReportType = report.ReportType,
+                Icon = report.Icon,
+                Code = report.Code,
+                IsActive = report.IsActive,
+                IsPrintForm = report.IsPrintForm,
+                IsDefault = report.IsDefault,
+                SourceFormat = report.SourceFormat,
+                TemplateVersion = report.TemplateVersion,
+                Order = report.Order,
+                CreatedAt = report.CreatedAt,
+                UpdatedAt = report.UpdatedAt,
+                PageTitle = report.PageTitle,
+                PageOrientation = report.PageOrientation,
+                PageWidth = report.PageWidth,
+                PageHeight = report.PageHeight,
+                FontName = report.FontName,
+                FontSize = report.FontSize,
+                TitleText = report.TitleText,
+                SubtitleText = report.SubtitleText,
+                SummaryText = report.SummaryText,
+                HeaderColor = report.HeaderColor
+            });
+        }
+
 
         // Добавьте этот метод в класс ReportService (после GetReportsAsync или перед DeleteReportAsync)       
         public async Task UpdateReportAsync(Report report)
