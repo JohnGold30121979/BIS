@@ -65,9 +65,6 @@ namespace BIS.ERP
                 // ✅ Инициализация трея с привязкой к главному окну
                 InitializeTrayManager(_infoBaseWindow);
 
-                // ✅ Подписываемся на событие закрытия окна
-                _infoBaseWindow.Closed += OnMainWindowClosed;
-
                 // Показываем главное окно
                 _infoBaseWindow.Show();
             }
@@ -137,11 +134,7 @@ namespace BIS.ERP
                 _trayManager?.Dispose();
                 _trayManager = null;
 
-                // Закрываем главное окно
-                _infoBaseWindow?.Close();
-
-                // Завершаем приложение
-                Shutdown();
+                ApplicationExitService.ShutdownNow();
             }
         }
 

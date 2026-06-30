@@ -86,8 +86,8 @@ namespace BIS.ERP.Services
                         DebitAccountName = ResolveAccount(row.DebitAccount, accountMap),
                         CreditAccount = row.CreditAccount,
                         CreditAccountName = ResolveAccount(row.CreditAccount, accountMap),
-                        CorrespondentAccount = row.DebitAccount == "3010" ? row.CreditAccount : row.CreditAccount == "3010" ? row.DebitAccount : "",
-                        Direction = row.DebitAccount == "3010" ? "Приход в кассу" : row.CreditAccount == "3010" ? "Расход из кассы" : "Бухгалтерская проводка",
+                        CorrespondentAccount = ResolveCashCorrespondent(row.DocumentType, row.DebitAccount, row.CreditAccount),
+                        Direction = ResolvePostingDirection(row.DocumentType),
                         Amount = row.Amount,
                         AmountCurrency = row.AmountCurrency,
                         Currency = row.Currency,
@@ -163,8 +163,8 @@ namespace BIS.ERP.Services
                                 DebitAccountName = ResolveAccount(debet, accountMap),
                                 CreditAccount = credit ?? "",
                                 CreditAccountName = ResolveAccount(credit, accountMap),
-                                CorrespondentAccount = debet == "3010" ? credit ?? "" : credit == "3010" ? debet ?? "" : "",
-                                Direction = debet == "3010" ? "Приход в кассу" : credit == "3010" ? "Расход из кассы" : "Импортированная проводка",
+                                CorrespondentAccount = ResolveCashCorrespondent(doc.DocumentType, debet, credit),
+                                Direction = ResolvePostingDirection(doc.DocumentType, "Импортированная проводка"),
                                 Amount = amount,
                                 AmountCurrency = amountCurrency,
                                 Note = note ?? "",
@@ -204,6 +204,28 @@ namespace BIS.ERP.Services
                 .ThenBy(posting => posting.DebitAccount)
                 .ThenBy(posting => posting.CreditAccount)
                 .ToList();
+        }
+
+        private static string ResolveCashCorrespondent(string documentType, string? debitAccount, string? creditAccount)
+        {
+            if (documentType.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+                return creditAccount ?? string.Empty;
+
+            if (documentType.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+                return debitAccount ?? string.Empty;
+
+            return string.Empty;
+        }
+
+        private static string ResolvePostingDirection(string documentType, string defaultDirection = "Бухгалтерская проводка")
+        {
+            if (documentType.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+                return "Приход в кассу";
+
+            if (documentType.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+                return "Расход из кассы";
+
+            return defaultDirection;
         }
 
         private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(string catalogName)

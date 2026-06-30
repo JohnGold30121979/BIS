@@ -66,9 +66,11 @@ namespace BIS.ERP.Services
                     ""line_number"" integer NOT NULL,
                     ""name"" varchar(500) NOT NULL,
                     ""account_code"" varchar(50),
+                    ""vat_tax_code"" varchar(50),
                     ""amount_without_tax"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""vat_rate"" numeric(8,2) NOT NULL DEFAULT 0,
                     ""vat_amount"" numeric(18,2) NOT NULL DEFAULT 0,
+                    ""sales_tax_code"" varchar(50),
                     ""sales_tax_rate"" numeric(8,2) NOT NULL DEFAULT 0,
                     ""sales_tax_amount"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""line_total"" numeric(18,2) NOT NULL DEFAULT 0,
@@ -100,9 +102,11 @@ namespace BIS.ERP.Services
                     ""line_number"" integer NOT NULL,
                     ""name"" varchar(500) NOT NULL,
                     ""account_code"" varchar(50),
+                    ""vat_tax_code"" varchar(50),
                     ""amount_without_tax"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""vat_rate"" numeric(8,2) NOT NULL DEFAULT 0,
                     ""vat_amount"" numeric(18,2) NOT NULL DEFAULT 0,
+                    ""sales_tax_code"" varchar(50),
                     ""sales_tax_rate"" numeric(8,2) NOT NULL DEFAULT 0,
                     ""sales_tax_amount"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""line_total"" numeric(18,2) NOT NULL DEFAULT 0,
@@ -111,6 +115,10 @@ namespace BIS.ERP.Services
                 );
                 CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_lines_invoice"" ON ""doc_sales_invoice_lines"" (""invoice_id"");
                 CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_lines_invoice"" ON ""doc_purchase_invoice_lines"" (""invoice_id"");
+                ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
+                ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
+                ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
+                ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
             ");
         }
 
@@ -152,8 +160,8 @@ namespace BIS.ERP.Services
             var accountMap = await LoadAccountMapAsync();
             var sql = $@"
                 SELECT ""Id"", ""line_number"", ""name"", ""account_code"",
-                       ""amount_without_tax"", ""vat_rate"", ""vat_amount"",
-                       ""sales_tax_rate"", ""sales_tax_amount"", ""line_total""
+                       ""vat_tax_code"", ""amount_without_tax"", ""vat_rate"", ""vat_amount"",
+                       ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total""
                 FROM ""{LinesTableName}""
                 WHERE ""invoice_id"" = @invoiceId
                 ORDER BY ""line_number""";
@@ -174,12 +182,14 @@ namespace BIS.ERP.Services
                     Name = reader.GetString(2),
                     AccountCode = accountCode,
                     AccountName = ResolveAccount(accountCode, accountMap),
-                    AmountWithoutTax = reader.GetDecimal(4),
-                    VatRate = reader.GetDecimal(5),
-                    VatAmount = reader.GetDecimal(6),
-                    SalesTaxRate = reader.GetDecimal(7),
-                    SalesTaxAmount = reader.GetDecimal(8),
-                    LineTotal = reader.GetDecimal(9)
+                    VatTaxCode = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    AmountWithoutTax = reader.GetDecimal(5),
+                    VatRate = reader.GetDecimal(6),
+                    VatAmount = reader.GetDecimal(7),
+                    SalesTaxCode = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                    SalesTaxRate = reader.GetDecimal(9),
+                    SalesTaxAmount = reader.GetDecimal(10),
+                    LineTotal = reader.GetDecimal(11)
                 });
             }
             await _context.Database.CloseConnectionAsync();
@@ -319,20 +329,22 @@ namespace BIS.ERP.Services
                     RecalculateLine(line);
                     await _context.Database.ExecuteSqlRawAsync($@"
                         INSERT INTO ""{LinesTableName}""
-                        (""Id"", ""invoice_id"", ""line_number"", ""name"", ""account_code"",
-                         ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"",
+                        (""Id"", ""invoice_id"", ""line_number"", ""name"", ""account_code"", ""vat_tax_code"",
+                         ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"",
                          ""line_total"", ""CreatedAt"", ""UpdatedAt"")
-                        VALUES (@lineId, @invoiceId, @lineNumber, @name, @account,
-                                @amountWithoutTax, @vatRate, @vatAmount, @salesTaxRate, @salesTaxAmount,
+                        VALUES (@lineId, @invoiceId, @lineNumber, @name, @account, @vatTaxCode,
+                                @amountWithoutTax, @vatRate, @vatAmount, @salesTaxCode, @salesTaxRate, @salesTaxAmount,
                                 @lineTotal, NOW(), NOW())",
                         new NpgsqlParameter("@lineId", line.Id == Guid.Empty ? Guid.NewGuid() : line.Id),
                         new NpgsqlParameter("@invoiceId", id),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
                         new NpgsqlParameter("@name", line.Name),
                         new NpgsqlParameter("@account", (object?)line.AccountCode ?? DBNull.Value),
+                        new NpgsqlParameter("@vatTaxCode", (object?)line.VatTaxCode ?? DBNull.Value),
                         new NpgsqlParameter("@amountWithoutTax", line.AmountWithoutTax),
                         new NpgsqlParameter("@vatRate", line.VatRate),
                         new NpgsqlParameter("@vatAmount", line.VatAmount),
+                        new NpgsqlParameter("@salesTaxCode", (object?)line.SalesTaxCode ?? DBNull.Value),
                         new NpgsqlParameter("@salesTaxRate", line.SalesTaxRate),
                         new NpgsqlParameter("@salesTaxAmount", line.SalesTaxAmount),
                         new NpgsqlParameter("@lineTotal", line.LineTotal));
@@ -427,10 +439,8 @@ namespace BIS.ERP.Services
 
         public static void RecalculateLine(InvoiceLineRow line)
         {
-            if (line.VatRate > 0 && line.VatAmount == 0 && line.AmountWithoutTax > 0)
-                line.VatAmount = Math.Round(line.AmountWithoutTax * line.VatRate / 100m, 2);
-            if (line.SalesTaxRate > 0 && line.SalesTaxAmount == 0 && line.AmountWithoutTax > 0)
-                line.SalesTaxAmount = Math.Round(line.AmountWithoutTax * line.SalesTaxRate / 100m, 2);
+            line.VatAmount = Math.Round(line.AmountWithoutTax * line.VatRate / 100m, 2);
+            line.SalesTaxAmount = Math.Round(line.AmountWithoutTax * line.SalesTaxRate / 100m, 2);
             line.LineTotal = line.AmountWithoutTax + line.VatAmount + line.SalesTaxAmount;
         }
 

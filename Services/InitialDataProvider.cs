@@ -10,8 +10,7 @@ namespace BIS.ERP.Services
         {
             var accounts = new List<ChartOfAccount>();
 
-            // Контрольные счета для кассовых ордеров и автопроверки проводок.
-            accounts.Add(new ChartOfAccount { Code = "3010", Name = "Касса", AccountType = "Active", Description = "Счет кассы для приходных и расходных кассовых ордеров", Level = 1 });
+            // Контрольные корреспондирующие счета для автопроверки проводок.
             accounts.Add(new ChartOfAccount { Code = "4010", Name = "Расчеты с поставщиками", AccountType = "Passive", Description = "Корреспондирующий счет для оплаты поставщикам", Level = 1 });
             accounts.Add(new ChartOfAccount { Code = "6010", Name = "Доходы от реализации", AccountType = "Passive", Description = "Корреспондирующий счет для поступления оплаты от покупателей", Level = 1 });
             accounts.Add(new ChartOfAccount { Code = "6810", Name = "Расчеты с персоналом по оплате труда", AccountType = "Passive", Description = "Корреспондирующий счет для выплаты заработной платы", Level = 1 });

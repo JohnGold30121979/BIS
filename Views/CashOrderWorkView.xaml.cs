@@ -536,7 +536,7 @@ namespace BIS.ERP.Views
                 DocumentType = _documentMetadata.Name,
                 DebitAccount = selected.DebitAccount,
                 CreditAccount = selected.CreditAccount,
-                CorrespondentAccount = selected.DebitAccount == "3010" ? selected.CreditAccount : selected.CreditAccount == "3010" ? selected.DebitAccount : selected.CorrespondentAccountName,
+                CorrespondentAccount = ResolveCorrespondentAccount(selected),
                 Direction = selected.IsPosted ? "Проводка документа" : "Документ еще не проведен",
                 Amount = selected.Amount,
                 AmountCurrency = selected.AmountInCurrency,
@@ -549,6 +549,21 @@ namespace BIS.ERP.Views
             var dialog = new PostingDetailsDialog(posting);
             dialog.Owner = Window.GetWindow(this);
             dialog.ShowDialog();
+        }
+
+        private string ResolveCorrespondentAccount(CashOrderRow selected)
+        {
+            if (_documentMetadata.Name.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+                return string.IsNullOrWhiteSpace(selected.CreditAccount)
+                    ? selected.CorrespondentAccountName
+                    : selected.CreditAccount;
+
+            if (_documentMetadata.Name.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+                return string.IsNullOrWhiteSpace(selected.DebitAccount)
+                    ? selected.CorrespondentAccountName
+                    : selected.DebitAccount;
+
+            return selected.CorrespondentAccountName;
         }
 
         private void DataGrid_LoadingRow(object sender, DataGridRowEventArgs e)

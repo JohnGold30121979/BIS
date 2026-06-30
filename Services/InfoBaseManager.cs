@@ -94,6 +94,7 @@ public class InfoBaseManager
             var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
             using var dbContext = new AppDbContext(connectionString);
             await dbContext.Database.EnsureCreatedAsync();
+            await new RuntimeSchemaFixService(dbContext).EnsureAsync();
 
             var infoBase = new InfoBase
             {

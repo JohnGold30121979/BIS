@@ -53,7 +53,7 @@ namespace BIS.ERP.Services
             const string sql = @"
                 CREATE TABLE IF NOT EXISTS ""LocalizationEntries"" (
                     ""Id"" uuid PRIMARY KEY,
-                    ""Culture"" varchar(10) NOT NULL,
+                    ""Culture"" varchar(40) NOT NULL,
                     ""Key"" varchar(200) NOT NULL,
                     ""Value"" text NOT NULL,
                     ""Category"" varchar(50) NOT NULL,

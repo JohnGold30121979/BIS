@@ -977,8 +977,8 @@ namespace BIS.ERP.Services
 
         public async Task<Report?> GetReportAsync(Guid reportId)
         {
-            await new PrintFormService(_context).EnsureSchemaAsync();
             return await _context.Set<Report>()
+                .AsNoTracking()
                 .Include(r => r.Fields)
                 .Include(r => r.Filters)
                 .Include(r => r.Groups)
@@ -1109,20 +1109,28 @@ namespace BIS.ERP.Services
         // Удаление отчета
         public async Task DeleteReportAsync(Guid reportId)
         {
-            var report = await _context.Reports
-                .Include(r => r.Fields)
-                .Include(r => r.Filters)
-                .Include(r => r.ElementMappings)
-                .FirstOrDefaultAsync(r => r.Id == reportId);
+            await using var transaction = await _context.Database.BeginTransactionAsync();
 
-            if (report != null)
-            {
-                _context.ReportFields.RemoveRange(report.Fields);
-                _context.ReportFilters.RemoveRange(report.Filters);
-                _context.ReportElementMappings.RemoveRange(report.ElementMappings);
-                _context.Reports.Remove(report);
-                await _context.SaveChangesAsync();
-            }
+            await _context.ReportFields
+                .Where(item => item.ReportId == reportId)
+                .ExecuteDeleteAsync();
+            await _context.ReportFilters
+                .Where(item => item.ReportId == reportId)
+                .ExecuteDeleteAsync();
+            await _context.ReportGroups
+                .Where(item => item.ReportId == reportId)
+                .ExecuteDeleteAsync();
+            await _context.ReportElementMappings
+                .Where(item => item.ReportId == reportId)
+                .ExecuteDeleteAsync();
+            await _context.Set<ReportHeaderFooter>()
+                .Where(item => item.ReportId == reportId)
+                .ExecuteDeleteAsync();
+            await _context.Reports
+                .Where(item => item.Id == reportId)
+                .ExecuteDeleteAsync();
+
+            await transaction.CommitAsync();
         }
     }
 }

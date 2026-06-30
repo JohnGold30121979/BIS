@@ -27,6 +27,7 @@ namespace BIS.ERP.Views
         private ObservableCollection<ReportFilter> _reportFilters;
         public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
+        public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
         private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
         public ReportDesignerWindow(Report report = null)
@@ -59,7 +60,7 @@ namespace BIS.ERP.Views
 
                 if (report != null)
                 {
-                    LoadReport(report);
+                    await LoadReportAsync(report);
                 }
 
                 DataSourceCombo.SelectionChanged += OnDataSourceChanged;
@@ -100,13 +101,10 @@ namespace BIS.ERP.Views
             if (selected?.Tag is MetadataObject catalog)
             {
                 await LoadAvailableFields(catalog);
-
-                // ПРИНУДИТЕЛЬНО ОБНОВЛЯЕМ UI
-                AvailableFields.Items.Refresh();
             }
             else
             {
-                AvailableFields.ItemsSource = null;
+                AvailableSourceFields.Clear();
                 AvailableDataFields.Clear();
             }
         }
@@ -125,33 +123,52 @@ namespace BIS.ERP.Views
                 }
             }
 
-            // ОБНОВЛЯЕМ ЧЕРЕЗ DISPATCHER
-            await Dispatcher.InvokeAsync(() =>
+            CommitDesignerGridEdits();
+
+            AvailableSourceFields.Clear();
+            AvailableDataFields.Clear();
+            AvailableFilterFields.Clear();
+
+            foreach (var field in fields)
             {
-                AvailableDataFields.Clear();
-                foreach (var field in fields)
-                    AvailableDataFields.Add(field);
+                AvailableSourceFields.Add(field);
+                AvailableDataFields.Add(field);
+            }
 
-                foreach (var field in GetPrintFormComputedFields())
-                    AvailableDataFields.Add(field);
+            foreach (var field in GetPrintFormComputedFields())
+                AvailableDataFields.Add(field);
 
-                AvailableFields.ItemsSource = fields;
-                AvailableFilterFields.Clear();
-
-                foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            {
+                AvailableFilterFields.Add(new FieldDef
                 {
-                    AvailableFilterFields.Add(new FieldDef
-                    {
-                        Name = field.Name,
-                        DbColumnName = field.DbColumnName,
-                        Type = field.FieldType
-                    });
-                }
+                    Name = field.Name,
+                    DbColumnName = field.DbColumnName,
+                    Type = field.FieldType
+                });
+            }
 
-                // Принудительное обновление
-                AvailableFields.Items.Refresh();
-                ElementMappingGrid.Items.Refresh();
-            });
+            await Task.CompletedTask;
+        }
+
+        private void CommitDesignerGridEdits()
+        {
+            TryCommitGrid(ReportFieldsGrid);
+            TryCommitGrid(ElementMappingGrid);
+            TryCommitGrid(NativeElementsGrid);
+        }
+
+        private static void TryCommitGrid(DataGrid grid)
+        {
+            try
+            {
+                grid.CommitEdit(DataGridEditingUnit.Cell, true);
+                grid.CommitEdit(DataGridEditingUnit.Row, true);
+            }
+            catch (InvalidOperationException)
+            {
+                // Смена источника данных не должна падать из-за промежуточного режима редактирования грида.
+            }
         }
 
         private void ConfigureFieldColumns()
@@ -172,12 +189,12 @@ namespace BIS.ERP.Views
             };
         }
 
-        private void OnFieldDoubleClick(object sender, MouseButtonEventArgs e)
+        private async void OnFieldDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            AddSelectedField();
+            await AddSelectedFieldAsync();
         }
 
-        private void AddSelectedField()
+        private async Task AddSelectedFieldAsync()
         {
             var field = AvailableFields.SelectedItem as FieldDef;
             if (field != null && !_reportFields.Any(f => f.FieldName == field.DbColumnName))
@@ -195,12 +212,12 @@ namespace BIS.ERP.Views
 
                 if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                 {
-                    _ = LoadAvailableFields(catalog);
+                    await LoadAvailableFields(catalog);
                 }
             }
         }
 
-        private void OnRemoveFieldClick(object sender, RoutedEventArgs e)
+        private async void OnRemoveFieldClick(object sender, RoutedEventArgs e)
         {
             var button = sender as Button;
             var field = button?.DataContext as ReportField;
@@ -210,7 +227,7 @@ namespace BIS.ERP.Views
 
                 if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                 {
-                    _ = LoadAvailableFields(catalog);
+                    await LoadAvailableFields(catalog);
                 }
             }
         }
@@ -250,7 +267,7 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void LoadReport(Report report)
+        private async Task LoadReportAsync(Report report)
         {
             _currentReport = report;
             ReportNameBox.Text = report.Name;
@@ -321,7 +338,7 @@ namespace BIS.ERP.Views
                 var catalog = _availableCatalogs.FirstOrDefault(c => c.Id == report.DataSourceId);
                 if (catalog != null)
                 {
-                    _ = LoadAvailableFields(catalog);
+                    await LoadAvailableFields(catalog);
                 }
             }
 
@@ -334,7 +351,7 @@ namespace BIS.ERP.Views
 
             if (!string.IsNullOrWhiteSpace(report.Template))
             {
-                _ = LoadFrxElementMappings(report.Template, report.ElementMappings);
+                await LoadFrxElementMappings(report.Template, report.ElementMappings);
                 LoadNativeTemplateFromReport(report);
             }
             else
@@ -784,12 +801,12 @@ namespace BIS.ERP.Views
                 var fileBytes = File.ReadAllBytes(openDialog.FileName);
 
                 // Парсим FRX
-                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                var printFormService = new PrintFormService(context);
-                var templateJson = await printFormService.ParseFrxFileAsync(fileBytes, openDialog.FileName);
+                var templateJson = await PrintFormService.ParseFrxFileTemplateAsync(fileBytes, openDialog.FileName);
 
                 if (!string.IsNullOrEmpty(templateJson))
                 {
+                    CommitDesignerGridEdits();
+
                     // ЗАПОЛНЯЕМ ПОЛЕ
                     TemplateTextBox.Text = templateJson;
 
@@ -808,26 +825,30 @@ namespace BIS.ERP.Views
 
                     // ИЗВЛЕКАЕМ ПОЛЯ ИЗ ШАБЛОНА И ЗАПОЛНЯЕМ ИМИ ТАБЛИЦУ ПОЛЕЙ
                     var extractedFields = PrintFormService.ExtractReportFieldsFromTemplate(templateJson);
-                    _reportFields.Clear();
-                    int fieldOrder = 1;
-                    foreach (var field in extractedFields)
+                    ReportFieldsGrid.ItemsSource = null;
+                    try
                     {
-                        field.Order = fieldOrder++;
-                        _reportFields.Add(field);
+                        _reportFields.Clear();
+                        int fieldOrder = 1;
+                        foreach (var field in extractedFields)
+                        {
+                            field.Order = fieldOrder++;
+                            _reportFields.Add(field);
+                        }
                     }
-                    ReportFieldsGrid.Items.Refresh();
-
-                    var nativeTemplate = PrintFormService.DeserializePrintTemplate(templateJson);
+                    finally
+                    {
+                        ReportFieldsGrid.ItemsSource = _reportFields;
+                    }
 
                     // ЗАПОЛНЯЕМ ТАБЛИЦУ СООТВЕТСТВИЙ ЭЛЕМЕНТОВ МАКЕТА
                     await LoadFrxElementMappings(templateJson);
-                    LoadNativeTemplate(nativeTemplate);
-                    WarnIfTemplateHasOnlyGeometry(nativeTemplate, showDialog: true);
+                    DeferNativeTemplate(templateJson, showWarning: true);
 
                     // Также обновляем список доступных полей, убирая уже добавленные
                     if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                     {
-                        _ = LoadAvailableFields(catalog);
+                        await LoadAvailableFields(catalog);
                     }
 
                     StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей: {_reportFields.Count}";
@@ -866,53 +887,60 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                _frxElementMappings.Clear();
-                var savedByElementOrder = (savedMappings ?? Array.Empty<ReportElementMapping>())
-                    .GroupBy(item => item.ElementOrder)
-                    .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
-                int order = 0;
-                foreach (var element in template.Elements.OrderBy(e => e.Order))
+                try
                 {
-                    // Пропускаем линии, рамки и пустые тексты
-                    if (element.Type is "Line" or "Box" or "Picture")
-                        continue;
-
-                    var elementText = string.IsNullOrWhiteSpace(element.Expression)
-                        ? PrintFormService.CleanFoxText(element.Text)
-                        : element.Expression;
-
-                    if (string.IsNullOrWhiteSpace(elementText) || elementText == "+" || elementText == "-")
-                        continue;
-
-                    savedByElementOrder.TryGetValue(element.Order, out var saved);
-                    _frxElementMappings.Add(new FrXElementMappingViewModel
+                    ElementMappingGrid.ItemsSource = null;
+                    _frxElementMappings.Clear();
+                    var savedByElementOrder = (savedMappings ?? Array.Empty<ReportElementMapping>())
+                        .GroupBy(item => item.ElementOrder)
+                        .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+                    int order = 0;
+                    foreach (var element in template.Elements.OrderBy(e => e.Order))
                     {
-                        Id = saved?.Id ?? Guid.NewGuid(),
-                        ElementOrder = element.Order,
-                        ElementType = element.Type,
-                        ElementText = elementText,
-                        ElementExpression = element.Expression,
-                        BandType = element.BandType,
-                        Left = element.Left,
-                        Top = element.Top,
-                        Width = element.Width,
-                        Height = element.Height,
-                        FontName = element.FontName,
-                        FontSize = element.FontSize,
-                        Bold = element.Bold,
-                        Italic = element.Italic,
-                        Alignment = element.Alignment,
-                        Order = order++,
-                        MappedFieldName = saved?.MappedFieldName ?? string.Empty,
-                        MappedDisplayName = saved?.MappedDisplayName ?? string.Empty,
-                        DataSource = saved?.DataSource ?? string.Empty,
-                        FormatString = saved?.FormatString ?? string.Empty,
-                        IsVisible = saved?.IsVisible ?? true,
-                        CustomText = saved?.CustomText ?? string.Empty
-                    });
+                        // Пропускаем линии, рамки и пустые тексты
+                        if (element.Type is "Line" or "Box" or "Picture")
+                            continue;
+
+                        var elementText = string.IsNullOrWhiteSpace(element.Expression)
+                            ? PrintFormService.CleanFoxText(element.Text)
+                            : element.Expression;
+
+                        if (string.IsNullOrWhiteSpace(elementText) || elementText == "+" || elementText == "-")
+                            continue;
+
+                        savedByElementOrder.TryGetValue(element.Order, out var saved);
+                        _frxElementMappings.Add(new FrXElementMappingViewModel
+                        {
+                            Id = saved?.Id ?? Guid.NewGuid(),
+                            ElementOrder = element.Order,
+                            ElementType = element.Type,
+                            ElementText = elementText,
+                            ElementExpression = element.Expression,
+                            BandType = element.BandType,
+                            Left = element.Left,
+                            Top = element.Top,
+                            Width = element.Width,
+                            Height = element.Height,
+                            FontName = element.FontName,
+                            FontSize = element.FontSize,
+                            Bold = element.Bold,
+                            Italic = element.Italic,
+                            Alignment = element.Alignment,
+                            Order = order++,
+                            MappedFieldName = saved?.MappedFieldName ?? string.Empty,
+                            MappedDisplayName = saved?.MappedDisplayName ?? string.Empty,
+                            DataSource = saved?.DataSource ?? string.Empty,
+                            FormatString = saved?.FormatString ?? string.Empty,
+                            IsVisible = saved?.IsVisible ?? true,
+                            CustomText = saved?.CustomText ?? string.Empty
+                        });
+                    }
+                }
+                finally
+                {
+                    ElementMappingGrid.ItemsSource = _frxElementMappings;
                 }
 
-                ElementMappingGrid.Items.Refresh();
                 UpdateMappingPreview();
 
                 if (_frxElementMappings.Count > 0)

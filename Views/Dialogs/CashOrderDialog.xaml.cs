@@ -18,7 +18,7 @@ namespace BIS.ERP.Views
         private Guid _selectedCorrAccountId;
         private string _selectedCorrAccountCode = string.Empty;
         private Guid _selectedCashDeskId;
-        private string _selectedCashDeskCode = "3010";
+        private string _selectedCashDeskCode = string.Empty;
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
@@ -85,6 +85,8 @@ namespace BIS.ERP.Views
                         {
                             CashDeskCombo.SelectedItem = data.CashDesks.First();
                             _selectedCashDeskId = data.CashDesks.First().Id;
+                            _selectedCashDeskCode = data.CashDesks.First().AccountCode;
+                            CashDeskAccountBox.Text = _selectedCashDeskCode;
                         }
                     }
                     else if (data.Record != null)
@@ -337,7 +339,7 @@ namespace BIS.ERP.Views
 
                 // Получаем кассу
                 string cashDeskId = string.Empty;
-                string cashDeskCode = ResolveCashDeskAccountCode(_selectedCashDeskCode, _accountAnalytics);
+                string cashDeskCode = _selectedCashDeskCode;
 
                 if (CashDeskCombo.SelectedItem is CashDeskItem cashDesk)
                 {
@@ -345,6 +347,21 @@ namespace BIS.ERP.Views
                     cashDeskCode = cashDesk.AccountCode;
                     _selectedCashDeskId = cashDesk.Id;
                     _selectedCashDeskCode = cashDesk.AccountCode;
+                }
+                else
+                {
+                    MessageBox.Show("Выберите кассу.", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    CashDeskCombo.Focus();
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(cashDeskCode))
+                {
+                    MessageBox.Show("У выбранной кассы не указан счет. Откройте справочник касс и заполните поле \"Счет\".", "Ошибка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    CashDeskCombo.Focus();
+                    return;
                 }
 
                 // Получаем корреспондирующий счет
@@ -603,20 +620,18 @@ namespace BIS.ERP.Views
             string? accountCode,
             AccountAnalyticsRegistry accountAnalytics)
         {
-            if (!string.IsNullOrWhiteSpace(accountCode) &&
-                accountAnalytics.FindAccount(accountCode) != null)
-            {
-                return accountCode.Trim();
-            }
+            if (string.IsNullOrWhiteSpace(accountCode))
+                return string.Empty;
 
-            var defaultCashAccount = accountAnalytics.Accounts.FirstOrDefault(account =>
-                    account.Code.Equals("3010", StringComparison.OrdinalIgnoreCase)) ??
-                accountAnalytics.Accounts.FirstOrDefault(account =>
-                    account.Code.StartsWith("301", StringComparison.OrdinalIgnoreCase) ||
-                    account.DisplayName.Contains("Касса", StringComparison.OrdinalIgnoreCase));
+            var account = accountAnalytics.FindAccount(accountCode);
+            return account?.Code ?? NormalizeAccountCodeText(accountCode);
+        }
 
-            return defaultCashAccount?.Code ??
-                   (!string.IsNullOrWhiteSpace(accountCode) ? accountCode.Trim() : "3010");
+        private static string NormalizeAccountCodeText(string accountCode)
+        {
+            var text = accountCode.Trim();
+            var separatorIndex = text.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? text[..separatorIndex].Trim() : text;
         }
 
         private static void SelectComboByRecordValue(ComboBox comboBox, Dictionary<string, object> record, string fieldName)
@@ -713,7 +728,7 @@ namespace BIS.ERP.Views
 
     public class CashDeskItem : ReferenceItem
     {
-        public string AccountCode { get; set; } = "3010";
+        public string AccountCode { get; set; } = string.Empty;
         public string CashNumber { get; set; } = string.Empty;
         public string CurrencyName { get; set; } = string.Empty;
         public string DisplayNameWithAccount =>

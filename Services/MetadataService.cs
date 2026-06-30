@@ -895,7 +895,7 @@ namespace BIS.ERP.Services
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);
-            var previousRecord = IsPostingsDocument(metadata)
+            var previousRecord = IsPostingsDocument(metadata) || IsCashDeskCatalog(metadata)
                 ? await GetRecordDataAsync(metadata.TableName, recordId)
                 : null;
 
@@ -931,6 +931,12 @@ namespace BIS.ERP.Services
                     metadata,
                     previousRecord,
                     await GetRecordDataAsync(metadata.TableName, recordId));
+            }
+            else if (IsCashDeskCatalog(metadata))
+            {
+                var currentRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+                var accountCode = await ResolveAccountCodeValueAsync(GetStringValue(currentRecord, "code", "Счет"));
+                await SyncCashDeskAccountReferencesAsync(recordId, accountCode);
             }
         }
 
@@ -1822,17 +1828,17 @@ namespace BIS.ERP.Services
             // Получаем ID кассы
             TryGetGuid(recordData, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk");
 
-            if (cashDeskId != Guid.Empty)
-                System.Diagnostics.Debug.WriteLine($"CashDeskId: {cashDeskId}");
+            if (cashDeskId == Guid.Empty)
+                throw new Exception("Для проведения кассового документа выберите кассу.");
+
+            System.Diagnostics.Debug.WriteLine($"CashDeskId: {cashDeskId}");
 
             // Получаем корреспондирующий счёт
             TryGetGuid(recordData, out var corrAccountId, "correspondent_account", "Корр. счет", "Корр. счёт");
             var corrAccountCode = GetStringValue(recordData, "correspondent_account", "Корр. счет", "Корр. счёт");
-            var cashAccountCode = cashDeskId != Guid.Empty
-                ? await GetCashDeskAccountCodeAsync(cashDeskId)
-                : "3010";
+            var cashAccountCode = await GetCashDeskAccountCodeAsync(cashDeskId);
             if (string.IsNullOrWhiteSpace(cashAccountCode))
-                cashAccountCode = "3010";
+                throw new Exception("У выбранной кассы не указан счет. Откройте справочник касс и заполните поле \"Счет\".");
 
             // Старые записи могут содержать конкретную кассу. Новые документы работают по счету,
             // поэтому остаток справочника касс обновляем только когда касса явно указана.
@@ -1913,14 +1919,12 @@ namespace BIS.ERP.Services
                 description = recordData["Примечание"].ToString();
 
             // Получаем код нашего счёта
-            string ourAccountCode = "3010";
+            string ourAccountCode = string.Empty;
             if (recordData.ContainsKey("our_account_id") && recordData["our_account_id"] != null)
             {
                 if (Guid.TryParse(recordData["our_account_id"].ToString(), out var ourAccountId))
                 {
                     ourAccountCode = await GetAccountCodeById(ourAccountId);
-                    if (string.IsNullOrEmpty(ourAccountCode))
-                        ourAccountCode = "3010";
                 }
                 else
                 {
@@ -1932,14 +1936,14 @@ namespace BIS.ERP.Services
                 if (Guid.TryParse(recordData["Наш счет"].ToString(), out var ourAccountId))
                 {
                     ourAccountCode = await GetAccountCodeById(ourAccountId);
-                    if (string.IsNullOrEmpty(ourAccountCode))
-                        ourAccountCode = "3010";
                 }
                 else
                 {
                     ourAccountCode = recordData["Наш счет"].ToString();
                 }
             }
+            if (string.IsNullOrWhiteSpace(ourAccountCode))
+                throw new Exception("Для платежного поручения укажите наш счет.");
 
             // Получаем корреспондирующий счёт
             string corrAccountCode = "";
@@ -1968,7 +1972,7 @@ namespace BIS.ERP.Services
 
             if (string.IsNullOrEmpty(corrAccountCode))
             {
-                corrAccountCode = isOutgoing ? "4010" : "6010";
+                throw new Exception("Для платежного поручения укажите корреспондирующий счет.");
             }
 
             // Определяем счета для проводки
@@ -2003,15 +2007,7 @@ namespace BIS.ERP.Services
 
                 if (string.IsNullOrEmpty(documentType))
                 {
-                    // Автоопределение типа
-                    if (debitAccount == "3010" && creditAccount != "3010")
-                        documentType = "Приходный кассовый ордер";
-                    else if (creditAccount == "3010" && debitAccount != "3010")
-                        documentType = "Расходный кассовый ордер";
-                    else if (debitAccount == "3010" || creditAccount == "3010")
-                        documentType = "Кассовая операция";
-                    else
-                        documentType = "Банковская операция";
+                    documentType = "Бухгалтерская проводка";
                 }
 
                 var sql = @"
@@ -2147,12 +2143,61 @@ namespace BIS.ERP.Services
                     connectionOpened = true;
                 }
 
-                return (await command.ExecuteScalarAsync())?.ToString() ?? string.Empty;
+                return await ResolveAccountCodeValueAsync((await command.ExecuteScalarAsync())?.ToString());
             }
             finally
             {
                 if (connectionOpened)
                     await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private async Task<string> ResolveAccountCodeValueAsync(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var text = value.Trim();
+            if (Guid.TryParse(text, out var accountId))
+                return await GetAccountCodeById(accountId);
+
+            var separatorIndex = text.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? text[..separatorIndex].Trim() : text;
+        }
+
+        private async Task SyncCashDeskAccountReferencesAsync(Guid cashDeskId, string accountCode)
+        {
+            if (string.IsNullOrWhiteSpace(accountCode))
+                return;
+
+            var documents = await _context.MetadataObjects
+                .Where(item => item.ObjectType == "Document" &&
+                    (item.Name == "Приходный кассовый ордер" || item.Name == "Расходный кассовый ордер"))
+                .ToListAsync();
+
+            foreach (var document in documents)
+            {
+                var isReceipt = document.Name == "Приходный кассовый ордер";
+                var accountColumn = isReceipt ? "debit_account" : "credit_account";
+                var tableName = QuoteIdentifier(document.TableName);
+
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE {tableName}
+                    SET ""{accountColumn}"" = @accountCode, ""UpdatedAt"" = NOW()
+                    WHERE ""cash_desk_id"" = @cashDeskId;",
+                    new NpgsqlParameter("@accountCode", accountCode),
+                    new NpgsqlParameter("@cashDeskId", cashDeskId));
+
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE doc_postings AS posting
+                    SET {accountColumn} = @accountCode, ""UpdatedAt"" = NOW()
+                    FROM {tableName} AS document
+                    WHERE posting.document_type = @documentType
+                      AND posting.doc_number = document.""doc_number""
+                      AND document.""cash_desk_id"" = @cashDeskId;",
+                    new NpgsqlParameter("@accountCode", accountCode),
+                    new NpgsqlParameter("@documentType", document.Name),
+                    new NpgsqlParameter("@cashDeskId", cashDeskId));
             }
         }
 
@@ -2599,6 +2644,12 @@ namespace BIS.ERP.Services
         {
             return metadata.ObjectType == "Document" &&
                    metadata.Name.Equals("Проводки", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCashDeskCatalog(MetadataObject metadata)
+        {
+            return metadata.ObjectType == "Catalog" &&
+                   metadata.Name.Equals("Кассы", StringComparison.OrdinalIgnoreCase);
         }
 
         private static MetadataField? FindDocumentNumberField(MetadataObject metadata)

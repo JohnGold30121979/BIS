@@ -159,7 +159,8 @@
                     <Border Grid.Column="0" Background="#F0F4F8" Margin="0,0,10,0">
                         <StackPanel Margin="10">
                             <TextBlock Text="📋 Доступные поля" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
-                            <ListBox x:Name="AvailableFields" Height="500" 
+                            <ListBox x:Name="AvailableFields" Height="500"
+                                     ItemsSource="{Binding AvailableSourceFields}"
                                      MouseDoubleClick="OnFieldDoubleClick"
                                      SelectionMode="Extended">
                                 <ListBox.ItemTemplate>

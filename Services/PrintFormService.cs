@@ -44,6 +44,12 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsDefault"" boolean NOT NULL DEFAULT false;
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""SourceFormat"" varchar(30) NOT NULL DEFAULT 'Native';
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""TemplateVersion"" integer NOT NULL DEFAULT 1;
+                ALTER TABLE ""Reports"" ALTER COLUMN ""DataSourceType"" TYPE varchar(40);
+                ALTER TABLE ""Reports"" ALTER COLUMN ""ReportType"" TYPE varchar(80);
+                ALTER TABLE ""Reports"" ALTER COLUMN ""SourceFormat"" TYPE varchar(40);
+                ALTER TABLE ""Reports"" ALTER COLUMN ""PageOrientation"" TYPE varchar(20);
+                ALTER TABLE ""Reports"" ALTER COLUMN ""Icon"" TYPE varchar(20);
+                ALTER TABLE ""Reports"" ALTER COLUMN ""Code"" TYPE varchar(120);
                 CREATE TABLE IF NOT EXISTS ""ReportElementMappings"" (
                     ""Id"" uuid NOT NULL,
                     ""ReportId"" uuid NOT NULL,
@@ -673,7 +679,8 @@ namespace BIS.ERP.Services
             invoiceService.Configure(metadata);
             var invoice = await invoiceService.GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Счет-фактура для печати не найден.");
-            var data = BuildInvoicePrintData(invoice, metadata.Name);
+            var (issuer, recipient) = await LoadInvoicePartiesAsync(invoice, metadata.Name);
+            var data = BuildInvoicePrintData(invoice, metadata.Name, issuer, recipient);
             var mappings = await LoadElementMappingsAsync(report);
 
             if (!string.IsNullOrWhiteSpace(report.Template))
@@ -763,7 +770,45 @@ namespace BIS.ERP.Services
             return data;
         }
 
-        private static CashOrderPrintData BuildInvoicePrintData(InvoiceDocument invoice, string documentName)
+        private async Task<(OrganizationPrintInfo Issuer, OrganizationPrintInfo Recipient)> LoadInvoicePartiesAsync(
+            InvoiceDocument invoice,
+            string documentName)
+        {
+            var selectedOrganization = OrganizationPrintInfo.FromName(invoice.OrganizationId, invoice.OrganizationName);
+            var primaryOrganization = OrganizationPrintInfo.Empty;
+
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Организации");
+            if (catalog != null)
+            {
+                var rows = await new MetadataService(_context).GetCatalogDataAsync(catalog.Id);
+                var selectedRow = rows.FirstOrDefault(row =>
+                    invoice.OrganizationId.HasValue &&
+                    TryGetRowId(row, out var rowId) &&
+                    rowId == invoice.OrganizationId.Value);
+                var primaryRow = rows.FirstOrDefault(IsPrimaryOrganization) ?? rows.FirstOrDefault();
+
+                if (selectedRow != null)
+                    selectedOrganization = BuildOrganizationPrintInfo(selectedRow);
+                if (primaryRow != null)
+                    primaryOrganization = BuildOrganizationPrintInfo(primaryRow);
+            }
+
+            if (primaryOrganization.IsEmpty)
+                primaryOrganization = selectedOrganization;
+            if (selectedOrganization.IsEmpty)
+                selectedOrganization = primaryOrganization;
+
+            return InvoiceDocumentTypes.IsSales(documentName)
+                ? (primaryOrganization, selectedOrganization)
+                : (selectedOrganization, primaryOrganization);
+        }
+
+        private static CashOrderPrintData BuildInvoicePrintData(
+            InvoiceDocument invoice,
+            string documentName,
+            OrganizationPrintInfo issuer,
+            OrganizationPrintInfo recipient)
         {
             var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             void AddExtra(string key, object? value)
@@ -771,6 +816,74 @@ namespace BIS.ERP.Services
                 var normalized = NormalizeFieldName(key);
                 extra[key] = value ?? string.Empty;
                 extra[normalized] = value ?? string.Empty;
+            }
+
+            void AddOrganizationAliases(string prefix, OrganizationPrintInfo organization)
+            {
+                AddExtra($"{prefix}_name", organization.DisplayName);
+                AddExtra($"{prefix}_full_name", organization.FullName);
+                AddExtra($"{prefix}_inn", organization.Inn);
+                AddExtra($"{prefix}_okpo", organization.Okpo);
+                AddExtra($"{prefix}_address", organization.Address);
+                AddExtra($"{prefix}_phone", organization.Phone);
+                AddExtra($"{prefix}_email", organization.Email);
+                AddExtra($"{prefix}_bank", organization.Bank);
+                AddExtra($"{prefix}_bank_account", organization.BankAccount);
+                AddExtra($"{prefix}_bic", organization.Bic);
+                AddExtra($"{prefix}_director", organization.Director);
+                AddExtra($"{prefix}_chief_accountant", organization.ChiefAccountant);
+            }
+
+            void AddFactOrganizationAliases(string side, OrganizationPrintInfo organization)
+            {
+                var name = string.IsNullOrWhiteSpace(organization.FullName)
+                    ? organization.DisplayName
+                    : organization.FullName;
+                foreach (var factPrefix in new[] { $"fact_{side}", $"fact.{side}", side })
+                {
+                    AddExtra($"{factPrefix}_NAME_ORG", name);
+                    AddExtra($"{factPrefix}_ORG", name);
+                    AddExtra($"{factPrefix}_INN", organization.Inn);
+                    AddExtra($"{factPrefix}_OKPO", organization.Okpo);
+                    AddExtra($"{factPrefix}_ADR", organization.Address);
+                    AddExtra($"{factPrefix}_PHONE", organization.Phone);
+                    AddExtra($"{factPrefix}_EMAIL", organization.Email);
+                    AddExtra($"{factPrefix}_BANK", organization.Bank);
+                    AddExtra($"{factPrefix}_NAM_BANK", organization.Bank);
+                    AddExtra($"{factPrefix}_RS", organization.BankAccount);
+                    AddExtra($"{factPrefix}_RSCH", organization.BankAccount);
+                    AddExtra($"{factPrefix}_BIK", organization.Bic);
+                    AddExtra($"{factPrefix}_MFO", organization.Bic);
+                    AddExtra($"{factPrefix}_DIR", organization.Director);
+                    AddExtra($"{factPrefix}_BUH", organization.ChiefAccountant);
+                    AddExtra($"{factPrefix}_RNI", string.Empty);
+                }
+            }
+
+            void AddLegacyOrganizationAliases(string side, OrganizationPrintInfo organization)
+            {
+                var name = string.IsNullOrWhiteSpace(organization.FullName)
+                    ? organization.DisplayName
+                    : organization.FullName;
+                AddExtra($"{side}_NAME_ORG", name);
+                AddExtra($"{side}_ORG", name);
+                AddExtra($"{side}_IN", organization.Inn);
+                AddExtra($"{side}_INN", organization.Inn);
+                AddExtra($"{side}_OKPO", organization.Okpo);
+                AddExtra($"{side}_ADR", organization.Address);
+                AddExtra($"{side}_AD", organization.Address);
+                AddExtra($"{side}_NAM_BANK", organization.Bank);
+                AddExtra($"{side}_BANK", organization.Bank);
+                AddExtra($"{side}_RS", organization.BankAccount);
+                AddExtra($"{side}_R", organization.BankAccount);
+                AddExtra($"{side}_RC", string.Empty);
+                AddExtra($"{side}_RNI", string.Empty);
+                AddExtra($"{side}_M", organization.Bic);
+                AddExtra($"{side}_BIK", organization.Bic);
+                AddExtra($"{side}_TEL", organization.Phone);
+                AddExtra($"{side}_PHONE", organization.Phone);
+                AddExtra($"{side}_DIR", organization.Director);
+                AddExtra($"{side}_BUH", organization.ChiefAccountant);
             }
 
             AddExtra("esf_number", invoice.EsfNumber);
@@ -785,6 +898,49 @@ namespace BIS.ERP.Services
             AddExtra("sales_tax_total", invoice.SalesTaxTotal);
             AddExtra("total_amount", invoice.TotalAmount);
             AddExtra("is_posted", invoice.IsPosted ? "Да" : "Нет");
+            AddExtra("fact_SER_BL", invoice.EsfNumber);
+            AddExtra("fact.SER_BL", invoice.EsfNumber);
+            AddExtra("fact_NOM_BL", invoice.DocNumber);
+            AddExtra("fact.NOM_BL", invoice.DocNumber);
+            AddExtra("fact_D_SALE", invoice.DocDate);
+            AddExtra("fact.D_SALE", invoice.DocDate);
+            AddExtra("fact_SVDATE", invoice.DocDate);
+            AddExtra("fact.SVDATE", invoice.DocDate);
+            AddExtra("fact_DT_KOR", string.Empty);
+            AddExtra("fact.DT_KOR", string.Empty);
+            AddExtra("fact_bl_kor", string.Empty);
+            AddExtra("fact.bl_kor", string.Empty);
+            AddExtra("fact_PATENT", string.Empty);
+            AddExtra("fact.PATENT", string.Empty);
+            AddOrganizationAliases("issuer", issuer);
+            AddOrganizationAliases("seller", issuer);
+            AddOrganizationAliases("recipient", recipient);
+            AddOrganizationAliases("buyer", recipient);
+            AddFactOrganizationAliases("C", issuer);
+            AddFactOrganizationAliases("D", recipient);
+            AddLegacyOrganizationAliases("C", issuer);
+            AddLegacyOrganizationAliases("D", recipient);
+            AddExtra("P_M", recipient.Bic);
+            AddExtra("fact_NAME_SALE", invoice.DeliveryKind);
+            AddExtra("fact.NAME_SALE", invoice.DeliveryKind);
+            AddExtra("fact_NAME_OP", invoice.PaymentKind);
+            AddExtra("fact.NAME_OP", invoice.PaymentKind);
+            AddExtra("fact_TXT_KOR", invoice.Basis);
+            AddExtra("fact.TXT_KOR", invoice.Basis);
+            AddExtra("curFACTSW.00", invoice.AmountWithoutTax);
+            AddExtra("curFACTSW.sum", invoice.TotalAmount);
+            AddExtra("curFACTSW.ndc", invoice.VatTotal);
+            AddExtra("curFACTSW.nalog", invoice.SalesTaxTotal);
+            AddExtra("irfactsw.ndc", invoice.VatTotal);
+            AddExtra("irfactsw.nalog", invoice.SalesTaxTotal);
+            var firstLine = invoice.Lines.FirstOrDefault();
+            AddExtra("curFACTSW.K_MAT", firstLine?.AccountCode ?? string.Empty);
+            AddExtra("curFACTSW.NAME_MAT", firstLine?.Name ?? string.Empty);
+            AddExtra("curFACTSW.ED_IZ", string.Empty);
+            AddExtra("curFACTSW.KOL", firstLine == null ? 0 : 1);
+            AddExtra("curFACTSW.CENA", firstLine?.AmountWithoutTax ?? 0);
+            AddExtra("curFACTSW.PR_NDC", firstLine?.VatRate ?? 0);
+            AddExtra("curFACTSW.PR_OP", firstLine?.SalesTaxRate ?? 0);
 
             for (var index = 0; index < invoice.Lines.Count; index++)
             {
@@ -797,6 +953,11 @@ namespace BIS.ERP.Services
                 AddExtra($"line{number}_vat", line.VatAmount);
                 AddExtra($"line{number}_sales_tax", line.SalesTaxAmount);
                 AddExtra($"line{number}_total", line.LineTotal);
+                AddExtra($"curFACTSW{number}.name", line.Name);
+                AddExtra($"curFACTSW{number}.account", line.AccountCode);
+                AddExtra($"curFACTSW{number}.sum", line.AmountWithoutTax);
+                AddExtra($"curFACTSW{number}.ndc", line.VatAmount);
+                AddExtra($"curFACTSW{number}.nalog", line.SalesTaxAmount);
             }
 
             return new CashOrderPrintData
@@ -804,8 +965,10 @@ namespace BIS.ERP.Services
                 DocumentName = documentName,
                 Number = invoice.DocNumber,
                 Date = invoice.DocDate,
-                Organization = invoice.OrganizationName,
-                Person = invoice.OrganizationName,
+                Organization = issuer.DisplayName,
+                Inn = issuer.Inn,
+                Okpo = issuer.Okpo,
+                Person = recipient.DisplayName,
                 CorrespondentAccount = invoice.CounterpartyAccountCode,
                 DebitAccount = invoice.CounterpartyAccountCode,
                 CreditAccount = string.Empty,
@@ -817,6 +980,37 @@ namespace BIS.ERP.Services
                 ExtraFields = extra
             };
         }
+
+        private static OrganizationPrintInfo BuildOrganizationPrintInfo(Dictionary<string, object> row)
+        {
+            var id = TryGetRowId(row, out var rowId) ? rowId : (Guid?)null;
+            var shortName = GetString(row, "Наименование", "name");
+            var fullName = GetString(row, "Полное наименование", "full_name");
+            var displayName = string.IsNullOrWhiteSpace(fullName) ? shortName : fullName;
+            var address = GetString(row, "Юридический адрес", "legal_address", "Фактический адрес", "actual_address");
+
+            return new OrganizationPrintInfo(
+                id,
+                string.IsNullOrWhiteSpace(displayName) ? shortName : displayName,
+                fullName,
+                shortName,
+                GetString(row, "ИНН", "inn"),
+                GetString(row, "ОКПО", "okpo"),
+                address,
+                GetString(row, "Телефон", "phone"),
+                GetString(row, "Email", "email"),
+                GetString(row, "Банк", "bank_name"),
+                GetString(row, "Расчетный счет", "bank_account"),
+                GetString(row, "БИК", "bic"),
+                GetString(row, "Руководитель", "director"),
+                GetString(row, "Главный бухгалтер", "chief_accountant"));
+        }
+
+        private static bool IsPrimaryOrganization(Dictionary<string, object> row) =>
+            GetBoolean(row, "Первичная организация", "is_primary");
+
+        private static bool TryGetRowId(Dictionary<string, object> row, out Guid id) =>
+            Guid.TryParse(GetString(row, "Id"), out id);
 
         private async Task<string> ResolveAccountCodeAsync(string value)
         {
@@ -843,7 +1037,7 @@ namespace BIS.ERP.Services
         private async Task<CashDeskPrintInfo> ResolveCashDeskAsync(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
-                return new CashDeskPrintInfo(string.Empty, "3010");
+                return new CashDeskPrintInfo(string.Empty, string.Empty);
 
             if (!Guid.TryParse(value, out var id))
                 return new CashDeskPrintInfo(value, await ResolveAccountCodeAsync(value));
@@ -1191,7 +1385,14 @@ namespace BIS.ERP.Services
                 return EvaluateFoxExpression(element.Expression, data);
             }
 
-            return ReplacePlaceholders(UnquoteFoxText(element.Text), data, string.Empty);
+            var text = UnquoteFoxText(element.Text);
+            if (LooksLikeFoxExpression(text))
+            {
+                var value = EvaluateFoxExpression(text, data);
+                return string.Equals(value, text, StringComparison.OrdinalIgnoreCase) ? string.Empty : value;
+            }
+
+            return ReplacePlaceholders(text, data, string.Empty);
         }
 
         private static string ReplacePlaceholders(string text, CashOrderPrintData data, string formatString)
@@ -1254,7 +1455,7 @@ namespace BIS.ERP.Services
             if (data.ExtraFields.Count == 0)
                 return null;
 
-            var direct = (fieldName ?? string.Empty).Trim().Trim('{', '}');
+            var direct = (fieldName ?? string.Empty).Trim().Trim('{', '}', '(', ')');
             if (data.ExtraFields.TryGetValue(direct, out var value))
                 return value;
             if (data.ExtraFields.TryGetValue(normalized, out value))
@@ -1266,7 +1467,7 @@ namespace BIS.ERP.Services
 
         private static string NormalizeFieldName(string fieldName)
         {
-            var value = (fieldName ?? string.Empty).Trim().Trim('{', '}').ToLowerInvariant();
+            var value = (fieldName ?? string.Empty).Trim().Trim('{', '}', '(', ')').ToLowerInvariant();
             return value switch
             {
                 "номер" or "номер документа" => "number",
@@ -1302,8 +1503,122 @@ namespace BIS.ERP.Services
         private static string EvaluateFoxExpression(string expression, CashOrderPrintData data)
         {
             if (string.IsNullOrWhiteSpace(expression)) return string.Empty;
-            var normalized = expression.Trim();
+            var normalized = expression.Trim().Trim('{', '}');
             var lower = normalized.ToLowerInvariant();
+
+            if (IsQuotedFoxLiteral(normalized))
+                return UnquoteFoxText(normalized);
+
+            var concatParts = SplitFoxTopLevel(normalized, '+');
+            if (concatParts.Count > 1)
+            {
+                var values = concatParts.Select(part => EvaluateFoxExpression(part, data)).ToList();
+                if (values.Count > 0 && values.All(TryParseFoxDecimal))
+                    return values.Sum(ParseFoxDecimal).ToString("N2");
+                return string.Concat(values);
+            }
+
+            if (TryParseFoxFunction(normalized, out var functionName, out var arguments))
+            {
+                if (functionName.Equals("iif", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 3)
+                    return EvaluateFoxCondition(arguments[0], data)
+                        ? EvaluateFoxExpression(arguments[1], data)
+                        : EvaluateFoxExpression(arguments[2], data);
+
+                if ((functionName.Equals("alltrim", StringComparison.OrdinalIgnoreCase) ||
+                     functionName.Equals("alltr", StringComparison.OrdinalIgnoreCase) ||
+                     functionName.Equals("trim", StringComparison.OrdinalIgnoreCase)) &&
+                    arguments.Count >= 1)
+                    return EvaluateFoxExpression(arguments[0], data).Trim();
+
+                if ((functionName.Equals("substr", StringComparison.OrdinalIgnoreCase) ||
+                     functionName.Equals("subs", StringComparison.OrdinalIgnoreCase)) &&
+                    arguments.Count >= 2)
+                {
+                    var value = EvaluateFoxExpression(arguments[0], data);
+                    var start = Math.Max(0, ParseFoxInteger(arguments[1], data) - 1);
+                    if (start >= value.Length)
+                        return string.Empty;
+                    if (arguments.Count < 3)
+                        return value[start..];
+                    var length = ParseFoxInteger(arguments[2], data);
+                    return length <= 0 ? string.Empty : value.Substring(start, Math.Min(length, value.Length - start));
+                }
+
+                if (functionName.Equals("left", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 2)
+                {
+                    var value = EvaluateFoxExpression(arguments[0], data);
+                    var length = ParseFoxInteger(arguments[1], data);
+                    return length <= 0 ? string.Empty : value[..Math.Min(length, value.Length)];
+                }
+
+                if (functionName.Equals("right", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 2)
+                {
+                    var value = EvaluateFoxExpression(arguments[0], data);
+                    var length = ParseFoxInteger(arguments[1], data);
+                    return length <= 0 ? string.Empty : value[^Math.Min(length, value.Length)..];
+                }
+
+                if (functionName.Equals("str", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
+                {
+                    var value = EvaluateFoxExpression(arguments[0], data);
+                    if (arguments.Count >= 2)
+                    {
+                        var width = ParseFoxInteger(arguments[1], data);
+                        if (width > value.Length)
+                            value = value.PadLeft(width);
+                    }
+                    return value;
+                }
+
+                if (functionName.Equals("dtoc", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
+                    return EvaluateFoxExpression(arguments[0], data);
+
+                if ((functionName.Equals("tran", StringComparison.OrdinalIgnoreCase) ||
+                     functionName.Equals("transform", StringComparison.OrdinalIgnoreCase)) &&
+                    arguments.Count >= 1)
+                    return EvaluateFoxExpression(arguments[0], data);
+
+                if (functionName.Equals("empty", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
+                    return string.IsNullOrWhiteSpace(EvaluateFoxExpression(arguments[0], data)) ? ".T." : ".F.";
+
+                if (functionName.Equals("day", StringComparison.OrdinalIgnoreCase))
+                    return data.Date.Day.ToString(CultureInfo.InvariantCulture);
+                if (functionName.Equals("month", StringComparison.OrdinalIgnoreCase))
+                    return data.Date.Month.ToString(CultureInfo.InvariantCulture);
+                if (functionName.Equals("year", StringComparison.OrdinalIgnoreCase))
+                    return data.Date.Year.ToString(CultureInfo.InvariantCulture);
+            }
+
+            var wrapped = Regex.Match(normalized, @"(?i)^(?:alltrim|alltr|trim)\((.+)\)$");
+            if (wrapped.Success)
+                return EvaluateFoxExpression(wrapped.Groups[1].Value, data);
+
+            var left = Regex.Match(normalized, @"(?i)^left\((.+),\s*(\d+)\)$");
+            if (left.Success)
+            {
+                var value = EvaluateFoxExpression(left.Groups[1].Value, data);
+                var length = int.Parse(left.Groups[2].Value);
+                return value[..Math.Min(length, value.Length)];
+            }
+
+            var substr = Regex.Match(normalized, @"(?i)^(?:substr|subs)\((.+),\s*(\d+)(?:,\s*(\d+))?\)$");
+            if (substr.Success)
+            {
+                var value = EvaluateFoxExpression(substr.Groups[1].Value, data);
+                var start = Math.Max(0, int.Parse(substr.Groups[2].Value) - 1);
+                if (start >= value.Length)
+                    return string.Empty;
+                if (!substr.Groups[3].Success)
+                    return value[start..];
+                var length = int.Parse(substr.Groups[3].Value);
+                return value.Substring(start, Math.Min(length, value.Length - start));
+            }
+
+            var directValue = GetPrintDataValue(data, normalized, string.Empty);
+            if (!string.IsNullOrWhiteSpace(directValue))
+                return directValue;
+
             if (lower.Contains("day(date") && lower.Contains("year(date"))
                 return data.Date.ToString("dd MMMM yyyy 'г.'", new CultureInfo("ru-RU"));
             if (lower.Contains("msum1"))
@@ -1344,13 +1659,148 @@ namespace BIS.ERP.Services
                 ["nval1"] = "KGS", ["nakl1"] = string.Empty, ["dovn1"] = string.Empty,
                 ["dovd1"] = string.Empty, ["dovf1"] = string.Empty
             };
+            foreach (var extra in data.ExtraFields)
+            {
+                var key = NormalizeFieldName(extra.Key);
+                if (!variables.ContainsKey(key))
+                    variables[key] = FormatPlainValue(extra.Value);
+            }
             if (variables.TryGetValue(normalized, out var direct)) return direct;
+            var normalizedKey = NormalizeFieldName(normalized);
+            if (variables.TryGetValue(normalizedKey, out direct)) return direct;
             foreach (var (name, value) in variables.OrderByDescending(item => item.Key.Length))
-                normalized = Regex.Replace(normalized, $@"\b{Regex.Escape(name)}\b", value.Replace("$", "$$"), RegexOptions.IgnoreCase);
+                normalized = Regex.Replace(normalized, $@"(?<![\w.]){Regex.Escape(name)}(?![\w.])", value.Replace("$", "$$"), RegexOptions.IgnoreCase);
             normalized = Regex.Replace(normalized, @"(?i)alltrim\(([^()]*)\)", "$1");
+            normalized = Regex.Replace(normalized, @"(?i)alltr\(([^()]*)\)", "$1");
             normalized = Regex.Replace(normalized, @"(?i)str\(([^,()]+)(?:,[^()]*)?\)", "$1");
             normalized = normalized.Replace("'+'", string.Empty).Replace("+", string.Empty).Replace("'", string.Empty).Replace("\"", string.Empty);
-            return normalized.Trim();
+            normalized = normalized.Trim();
+            return LooksLikeFoxExpression(normalized) ? string.Empty : normalized;
+        }
+
+        private static bool EvaluateFoxCondition(string expression, CashOrderPrintData data)
+        {
+            var value = (expression ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+            var notEmpty = Regex.Match(value, @"(?i)^!\s*empty\((.+)\)$");
+            if (notEmpty.Success)
+                return !string.IsNullOrWhiteSpace(EvaluateFoxExpression(notEmpty.Groups[1].Value, data));
+            var empty = Regex.Match(value, @"(?i)^empty\((.+)\)$");
+            if (empty.Success)
+                return string.IsNullOrWhiteSpace(EvaluateFoxExpression(empty.Groups[1].Value, data));
+            if (value.Equals(".T.", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("true", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (value.Equals(".F.", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            var comparison = Regex.Match(value, @"(?i)^(.+?)\s*(==|=|<>|#|!=)\s*(.+)$");
+            if (comparison.Success)
+            {
+                var left = EvaluateFoxExpression(comparison.Groups[1].Value, data);
+                var right = EvaluateFoxExpression(comparison.Groups[3].Value, data);
+                var equals = string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+                return comparison.Groups[2].Value is "<>" or "#" or "!=" ? !equals : equals;
+            }
+
+            return !string.IsNullOrWhiteSpace(EvaluateFoxExpression(value, data));
+        }
+
+        private static bool TryParseFoxDecimal(string value) =>
+            decimal.TryParse(value, NumberStyles.Any, CultureInfo.CurrentCulture, out _) ||
+            decimal.TryParse(value?.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out _);
+
+        private static decimal ParseFoxDecimal(string value)
+        {
+            if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.CurrentCulture, out var current))
+                return current;
+            return decimal.TryParse(value?.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out var invariant)
+                ? invariant
+                : 0;
+        }
+
+        private static int ParseFoxInteger(string expression, CashOrderPrintData data)
+        {
+            var value = EvaluateFoxExpression(expression, data);
+            return int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : int.TryParse((expression ?? string.Empty).Trim(), out parsed) ? parsed : 0;
+        }
+
+        private static bool IsQuotedFoxLiteral(string value)
+        {
+            var text = (value ?? string.Empty).Trim();
+            return text.Length >= 2 &&
+                   ((text[0] == '"' && text[^1] == '"') || (text[0] == '\'' && text[^1] == '\''));
+        }
+
+        private static bool LooksLikeFoxExpression(string value)
+        {
+            var text = (value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+            if (Regex.IsMatch(text, @"(?i)\b(?:substr|subs|alltrim|alltr|trim|iif|str|dtoc|day|month|year)\s*\("))
+                return true;
+            if (Regex.IsMatch(text, @"(?i)\b(?:fact|curFACTSW|irfactsw)[._][A-Za-z0-9_]+\b"))
+                return true;
+            if (Regex.IsMatch(text, @"^[A-Z]{1,4}_[A-Z0-9_]+$"))
+                return true;
+            return false;
+        }
+
+        private static List<string> SplitFoxTopLevel(string value, char delimiter)
+        {
+            var result = new List<string>();
+            var start = 0;
+            var depth = 0;
+            var quote = '\0';
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var character = value[i];
+                if (quote != '\0')
+                {
+                    if (character == quote)
+                        quote = '\0';
+                    continue;
+                }
+
+                if (character is '\'' or '"')
+                {
+                    quote = character;
+                    continue;
+                }
+
+                if (character == '(')
+                    depth++;
+                else if (character == ')' && depth > 0)
+                    depth--;
+                else if (character == delimiter && depth == 0)
+                {
+                    result.Add(value[start..i].Trim());
+                    start = i + 1;
+                }
+            }
+
+            if (start == 0)
+                return new List<string> { value };
+
+            result.Add(value[start..].Trim());
+            return result;
+        }
+
+        private static string FormatPlainValue(object? value)
+        {
+            return value switch
+            {
+                DateTime date => date.ToString("dd.MM.yyyy"),
+                decimal number => number.ToString("N2"),
+                double number => number.ToString("N2"),
+                float number => number.ToString("N2"),
+                _ => value?.ToString() ?? string.Empty
+            };
         }
 
         private static string UnquoteFoxText(string value)
@@ -1380,6 +1830,30 @@ namespace BIS.ERP.Services
                 if (!string.IsNullOrWhiteSpace(value)) return value;
             }
             return string.Empty;
+        }
+
+        private static bool GetBoolean(Dictionary<string, object> row, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                var pair = row.FirstOrDefault(item => item.Key.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (pair.Value is bool boolValue)
+                    return boolValue;
+
+                var value = pair.Value?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(value))
+                    continue;
+
+                if (bool.TryParse(value, out var parsed))
+                    return parsed;
+
+                if (value.Equals("да", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                    value.Equals("1", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         private static decimal GetDecimal(Dictionary<string, object> row, params string[] names) =>
@@ -1440,6 +1914,11 @@ namespace BIS.ERP.Services
         // Парсинг FRX-файла (макет FoxPro) с использованием FrxParser
         public async Task<string> ParseFrxFileAsync(byte[] fileData, string fileName)
         {
+            return await ParseFrxFileTemplateAsync(fileData, fileName);
+        }
+
+        public static async Task<string> ParseFrxFileTemplateAsync(byte[] fileData, string fileName)
+        {
             try
             {
                 // Создаем временный файл
@@ -1494,6 +1973,7 @@ namespace BIS.ERP.Services
                     return fields;
 
                 int order = 0;
+                var seenFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var element in template.Elements.OrderBy(e => e.Order))
                 {
                     // Пропускаем линии и рамки — они не являются полями данных
@@ -1504,36 +1984,17 @@ namespace BIS.ERP.Services
                         ? element.Text
                         : element.Expression;
 
-                    // Очищаем от кавычек и лишнего
-                    if (!string.IsNullOrWhiteSpace(fieldName))
-                    {
-                        fieldName = fieldName.Trim('"', '\'', ' ', '=');
-                        // Пропускаем пустые или состоящие только из пробелов/знаков
-                        if (string.IsNullOrWhiteSpace(fieldName) || fieldName == "+" || fieldName == "-")
-                            continue;
-                    }
-                    else
-                    {
+                    if (!TryNormalizeExtractedReportField(fieldName, out var normalizedField, out var displayName))
                         continue;
-                    }
-
-                    var displayName = element.Type == "Text"
-                        ? element.Text?.Trim('"', '\'', ' ')
-                        : fieldName;
-
-                    if (!string.IsNullOrWhiteSpace(displayName))
-                    {
-                        displayName = displayName.Trim('"', '\'', ' ');
-                        if (string.IsNullOrWhiteSpace(displayName))
-                            displayName = fieldName;
-                    }
+                    if (!seenFields.Add(normalizedField))
+                        continue;
 
                     fields.Add(new ReportField
                     {
                         Id = Guid.NewGuid(),
-                        FieldName = fieldName,
-                        DisplayName = displayName ?? fieldName,
-                        Width = Math.Max(1, (int)Math.Round(element.Width)),
+                        FieldName = normalizedField,
+                        DisplayName = displayName,
+                        Width = Math.Max(90, (int)Math.Round(element.Width)),
                         Alignment = element.Alignment.ToLower(),
                         IsVisible = true,
                         Order = order++
@@ -1546,6 +2007,156 @@ namespace BIS.ERP.Services
             }
 
             return fields;
+        }
+
+        private static bool TryNormalizeExtractedReportField(string rawFieldName, out string fieldName, out string displayName)
+        {
+            fieldName = string.Empty;
+            displayName = string.Empty;
+
+            var expression = (rawFieldName ?? string.Empty).Trim().Trim('"', '\'', ' ', '=', '{', '}');
+            if (string.IsNullOrWhiteSpace(expression) || expression is "+" or "-")
+                return false;
+
+            var token = ExtractFoxDataToken(expression);
+            if (string.IsNullOrWhiteSpace(token))
+                return false;
+
+            fieldName = token;
+            displayName = GetFriendlyReportFieldName(token);
+            return true;
+        }
+
+        private static string ExtractFoxDataToken(string expression)
+        {
+            var value = (expression ?? string.Empty).Trim().Trim('"', '\'', ' ', '=', '{', '}');
+            for (var i = 0; i < 8; i++)
+            {
+                if (!TryParseFoxFunction(value, out var functionName, out var arguments) || arguments.Count == 0)
+                    break;
+
+                if (functionName.Equals("alltrim", StringComparison.OrdinalIgnoreCase) ||
+                    functionName.Equals("alltr", StringComparison.OrdinalIgnoreCase) ||
+                    functionName.Equals("trim", StringComparison.OrdinalIgnoreCase) ||
+                    functionName.Equals("substr", StringComparison.OrdinalIgnoreCase) ||
+                    functionName.Equals("subs", StringComparison.OrdinalIgnoreCase) ||
+                    functionName.Equals("left", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = arguments[0].Trim();
+                    continue;
+                }
+
+                break;
+            }
+
+            var direct = value.Trim().Trim('"', '\'', ' ', '=', '{', '}');
+            if (Regex.IsMatch(direct, @"^[A-Za-z][A-Za-z0-9]*[._][A-Za-z0-9_]+$"))
+                return direct;
+
+            var match = Regex.Match(direct, @"(?i)\b(?:fact|curFACTSW|irfactsw)[._][A-Za-z0-9_]+\b");
+            return match.Success ? match.Value : string.Empty;
+        }
+
+        private static bool TryParseFoxFunction(string expression, out string functionName, out List<string> arguments)
+        {
+            functionName = string.Empty;
+            arguments = new List<string>();
+
+            var value = (expression ?? string.Empty).Trim();
+            var openIndex = value.IndexOf('(');
+            if (openIndex <= 0 || !value.EndsWith(")", StringComparison.Ordinal))
+                return false;
+
+            functionName = value[..openIndex].Trim();
+            if (string.IsNullOrWhiteSpace(functionName) ||
+                !Regex.IsMatch(functionName, @"^[A-Za-z][A-Za-z0-9_]*$"))
+                return false;
+
+            var inner = value.Substring(openIndex + 1, value.Length - openIndex - 2);
+            arguments = SplitFoxArguments(inner);
+            return true;
+        }
+
+        private static List<string> SplitFoxArguments(string value)
+        {
+            var result = new List<string>();
+            var start = 0;
+            var depth = 0;
+            var quote = '\0';
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var character = value[i];
+                if (quote != '\0')
+                {
+                    if (character == quote)
+                        quote = '\0';
+                    continue;
+                }
+
+                if (character is '\'' or '"')
+                {
+                    quote = character;
+                    continue;
+                }
+
+                if (character == '(')
+                    depth++;
+                else if (character == ')' && depth > 0)
+                    depth--;
+                else if (character == ',' && depth == 0)
+                {
+                    result.Add(value[start..i].Trim());
+                    start = i + 1;
+                }
+            }
+
+            result.Add(value[start..].Trim());
+            return result;
+        }
+
+        private static string GetFriendlyReportFieldName(string fieldName)
+        {
+            var normalized = (fieldName ?? string.Empty).Trim();
+            var organizationMatch = Regex.Match(normalized, @"(?i)^fact[._]([CD])[_\.]([A-Z0-9_]+)$");
+            if (organizationMatch.Success)
+            {
+                var organization = organizationMatch.Groups[1].Value.Equals("C", StringComparison.OrdinalIgnoreCase)
+                    ? "Организация А"
+                    : "Организация Б";
+                var property = organizationMatch.Groups[2].Value.ToUpperInvariant() switch
+                {
+                    "NAME_ORG" or "ORG" => "наименование",
+                    "INN" => "ИНН",
+                    "OKPO" => "ОКПО",
+                    "ADR" => "адрес",
+                    "PHONE" => "телефон",
+                    "EMAIL" => "email",
+                    "BANK" => "банк",
+                    "RS" => "расчетный счет",
+                    "BIK" => "БИК",
+                    "DIR" => "руководитель",
+                    "BUH" => "главный бухгалтер",
+                    _ => organizationMatch.Groups[2].Value
+                };
+                return $"{organization} - {property}";
+            }
+
+            var upper = normalized.ToUpperInvariant();
+            return upper switch
+            {
+                "FACT.SER_BL" or "FACT_SER_BL" => "Счет-фактура - серия/ЭСФ",
+                "FACT.NOM_BL" or "FACT_NOM_BL" => "Счет-фактура - номер",
+                "FACT.D_SALE" or "FACT_D_SALE" => "Счет-фактура - дата",
+                "FACT.NAME_SALE" or "FACT_NAME_SALE" => "Счет-фактура - вид поставки",
+                "FACT.NAME_OP" or "FACT_NAME_OP" => "Счет-фактура - вид оплаты",
+                "FACT.TXT_KOR" or "FACT_TXT_KOR" => "Счет-фактура - основание",
+                "CURFACTSW.SUM" => "Итого",
+                "CURFACTSW.NDC" => "НДС",
+                "CURFACTSW.NALOG" => "Налог с продаж",
+                "CURFACTSW.00" => "Сумма без налогов",
+                _ => normalized
+            };
         }
 
         public static PrintFormTemplate DeserializePrintTemplate(string templateJson)
@@ -1625,6 +2236,60 @@ namespace BIS.ERP.Services
             public string Basis { get; init; } = string.Empty;
             public string Note { get; init; } = string.Empty;
             public Dictionary<string, object> ExtraFields { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private sealed record OrganizationPrintInfo(
+            Guid? Id,
+            string DisplayName,
+            string FullName,
+            string ShortName,
+            string Inn,
+            string Okpo,
+            string Address,
+            string Phone,
+            string Email,
+            string Bank,
+            string BankAccount,
+            string Bic,
+            string Director,
+            string ChiefAccountant)
+        {
+            public static OrganizationPrintInfo Empty { get; } = new(
+                null,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty);
+
+            public bool IsEmpty =>
+                string.IsNullOrWhiteSpace(DisplayName) &&
+                string.IsNullOrWhiteSpace(Inn) &&
+                string.IsNullOrWhiteSpace(Okpo);
+
+            public static OrganizationPrintInfo FromName(Guid? id, string name) => new(
+                id,
+                name ?? string.Empty,
+                name ?? string.Empty,
+                name ?? string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty,
+                string.Empty);
         }
 
         private readonly record struct CashDeskPrintInfo(string DisplayName, string Account);

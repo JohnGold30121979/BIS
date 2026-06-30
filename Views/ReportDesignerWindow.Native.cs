@@ -35,12 +35,20 @@ namespace BIS.ERP.Views
         private double _nativeDragStartTop;
         private double _nativeResizeStartWidth;
         private double _nativeResizeStartHeight;
+        private bool _suspendNativeRender;
+        private string? _deferredNativeTemplateJson;
+        private bool _deferredNativeTemplateWarning;
 
         private void InitializeNativeDesignerState()
         {
             NativeElementsGrid.ItemsSource = _nativeElements;
-            _nativeElements.CollectionChanged += (_, _) => RenderNativeDesigner();
+            _nativeElements.CollectionChanged += (_, _) =>
+            {
+                if (!_suspendNativeRender)
+                    RenderNativeDesigner();
+            };
             NativeAlignmentCombo.SelectedIndex = 0;
+            NativeDesignerTab.AddHandler(Selector.SelectedEvent, new RoutedEventHandler(OnNativeDesignerTabSelected));
             LoadNativeTemplate(PrintFormService.CreateBlankNativeTemplate());
         }
 
@@ -65,7 +73,31 @@ namespace BIS.ERP.Views
                 new FieldDef { Name = "Сумма прописью", DbColumnName = "amount_in_words", Type = "Computed" },
                 new FieldDef { Name = "Основание", DbColumnName = "basis", Type = "Computed" },
                 new FieldDef { Name = "Примечание", DbColumnName = "note", Type = "Computed" },
-                new FieldDef { Name = "Валюта", DbColumnName = "currency", Type = "Computed" }
+                new FieldDef { Name = "Валюта", DbColumnName = "currency", Type = "Computed" },
+                new FieldDef { Name = "Счет-фактура - номер", DbColumnName = "fact.NOM_BL", Type = "Computed" },
+                new FieldDef { Name = "Счет-фактура - серия/ЭСФ", DbColumnName = "fact.SER_BL", Type = "Computed" },
+                new FieldDef { Name = "Счет-фактура - дата", DbColumnName = "fact.D_SALE", Type = "Computed" },
+                new FieldDef { Name = "Счет-фактура - основание", DbColumnName = "fact.TXT_KOR", Type = "Computed" },
+                new FieldDef { Name = "Организация А - наименование", DbColumnName = "fact.C_NAME_ORG", Type = "Computed" },
+                new FieldDef { Name = "Организация А - ИНН", DbColumnName = "fact.C_INN", Type = "Computed" },
+                new FieldDef { Name = "Организация А - ОКПО", DbColumnName = "fact.C_OKPO", Type = "Computed" },
+                new FieldDef { Name = "Организация А - адрес", DbColumnName = "fact.C_ADR", Type = "Computed" },
+                new FieldDef { Name = "Организация А - телефон", DbColumnName = "fact.C_PHONE", Type = "Computed" },
+                new FieldDef { Name = "Организация А - банк", DbColumnName = "fact.C_BANK", Type = "Computed" },
+                new FieldDef { Name = "Организация А - расчетный счет", DbColumnName = "fact.C_RS", Type = "Computed" },
+                new FieldDef { Name = "Организация А - БИК", DbColumnName = "fact.C_BIK", Type = "Computed" },
+                new FieldDef { Name = "Организация А - руководитель", DbColumnName = "fact.C_DIR", Type = "Computed" },
+                new FieldDef { Name = "Организация А - главный бухгалтер", DbColumnName = "fact.C_BUH", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - наименование", DbColumnName = "fact.D_NAME_ORG", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - ИНН", DbColumnName = "fact.D_INN", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - ОКПО", DbColumnName = "fact.D_OKPO", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - адрес", DbColumnName = "fact.D_ADR", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - телефон", DbColumnName = "fact.D_PHONE", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - банк", DbColumnName = "fact.D_BANK", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - расчетный счет", DbColumnName = "fact.D_RS", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - БИК", DbColumnName = "fact.D_BIK", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - руководитель", DbColumnName = "fact.D_DIR", Type = "Computed" },
+                new FieldDef { Name = "Организация Б - главный бухгалтер", DbColumnName = "fact.D_BUH", Type = "Computed" }
             };
         }
 
@@ -79,38 +111,65 @@ namespace BIS.ERP.Views
         {
             if (!string.IsNullOrWhiteSpace(report.Template))
             {
-                try
-                {
-                    var template = PrintFormService.DeserializePrintTemplate(report.Template);
-                    if (template != null)
-                    {
-                        LoadNativeTemplate(template);
-                        WarnIfTemplateHasOnlyGeometry(template, showDialog: false);
-                        return;
-                    }
-                }
-                catch
-                {
-                    // Невалидный JSON не должен блокировать открытие конструктора.
-                }
+                DeferNativeTemplate(report.Template, showWarning: false);
+                return;
             }
 
             LoadNativeTemplate(PrintFormService.CreateBlankNativeTemplate());
         }
 
+        private void DeferNativeTemplate(string templateJson, bool showWarning)
+        {
+            _deferredNativeTemplateJson = templateJson;
+            _deferredNativeTemplateWarning = showWarning;
+            _nativeElements.Clear();
+            NativeDesignerCanvas?.Children.Clear();
+        }
+
+        private void OnNativeDesignerTabSelected(object sender, RoutedEventArgs e)
+        {
+            LoadDeferredNativeTemplateIfNeeded();
+        }
+
+        private void LoadDeferredNativeTemplateIfNeeded()
+        {
+            if (string.IsNullOrWhiteSpace(_deferredNativeTemplateJson))
+                return;
+
+            try
+            {
+                var template = PrintFormService.DeserializePrintTemplate(_deferredNativeTemplateJson);
+                _deferredNativeTemplateJson = null;
+                LoadNativeTemplate(template);
+                WarnIfTemplateHasOnlyGeometry(template, _deferredNativeTemplateWarning);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Ошибка загрузки нативного макета: {ex.Message}";
+            }
+        }
+
         private void LoadNativeTemplate(PrintFormTemplate template)
         {
+            _deferredNativeTemplateJson = null;
             _nativeTemplate = template;
             if (string.IsNullOrWhiteSpace(_nativeTemplate.SourceFormat))
                 _nativeTemplate.SourceFormat = "Native";
 
-            _nativeElements.Clear();
-            foreach (var element in _nativeTemplate.Elements.OrderBy(item => item.Order))
+            _suspendNativeRender = true;
+            NativeElementsGrid.ItemsSource = null;
+            try
             {
-                _nativeElements.Add(NativeReportElementViewModel.FromElement(element));
+                _nativeElements.Clear();
+                foreach (var element in _nativeTemplate.Elements.OrderBy(item => item.Order))
+                    _nativeElements.Add(NativeReportElementViewModel.FromElement(element));
+            }
+            finally
+            {
+                NativeElementsGrid.ItemsSource = _nativeElements;
+                _suspendNativeRender = false;
             }
 
-            NativeElementsGrid.Items.Refresh();
             RenderNativeDesigner();
             SelectNativeElement(_nativeElements.FirstOrDefault());
         }
@@ -147,6 +206,8 @@ namespace BIS.ERP.Views
         private void SyncNativeTemplateToTemplateBoxIfNeeded()
         {
             if (IsPrintFormCheck.IsChecked != true)
+                return;
+            if (!string.IsNullOrWhiteSpace(_deferredNativeTemplateJson))
                 return;
 
             _nativeTemplate.SourceFormat = GetSelectedReportType() == "FoxProLayout"

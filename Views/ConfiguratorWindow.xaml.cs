@@ -15,6 +15,7 @@ using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows.Data;
 
 namespace BIS.ERP.Views
@@ -28,11 +29,22 @@ namespace BIS.ERP.Views
         private List<Report> _reports;
         private bool _isLoading = false;
         private AppDbContext _context;
+        private bool _closeForModeSwitch;
 
         public ConfiguratorWindow()
         {
             InitializeComponent();
             this.Loaded += async (s, e) => await LoadMetadata();
+            this.Closing += OnWindowClosing;
+        }
+
+        private void OnWindowClosing(object? sender, CancelEventArgs e)
+        {
+            if (ApplicationExitService.IsShuttingDown || _closeForModeSwitch)
+                return;
+
+            e.Cancel = true;
+            ApplicationExitService.ConfirmAndShutdown(this);
         }
 
         private async Task LoadMetadata()
@@ -50,6 +62,7 @@ namespace BIS.ERP.Views
                 Title = $"{systemConfiguration.SystemName} - Конфигуратор";
 
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                await new RuntimeSchemaFixService(_context).EnsureAsync();
                 await new SystemConfigurationService(_context).GetAsync();
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);
@@ -1249,7 +1262,8 @@ namespace BIS.ERP.Views
 
         private async Task<Report> LoadFullReportAsync(Report report)
         {
-            return await _reportService.GetReportAsync(report.Id) ?? report;
+            await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            return await new ReportService(context).GetReportAsync(report.Id) ?? report;
         }
 
         private async Task DeleteSelectedReport(Report? report = null)
@@ -1343,7 +1357,7 @@ namespace BIS.ERP.Views
                 var fullReport = await LoadFullReportAsync(_selectedReport);
                 var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
-                    _ = LoadMetadata();
+                    await LoadMetadata();
             }
         }
 
@@ -1519,6 +1533,7 @@ namespace BIS.ERP.Views
         {
             var modeWindow = new InfoBaseSelectionWindow();
             modeWindow.Show();
+            _closeForModeSwitch = true;
             this.Close();
         }
 
@@ -1538,10 +1553,7 @@ namespace BIS.ERP.Views
 
         private void OnExitClick(object sender, RoutedEventArgs e)
         {
-            var result = MessageBox.Show("Завершить работу приложения?", "Выход",
-                MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result == MessageBoxResult.Yes)
-                Application.Current.Shutdown();
+            ApplicationExitService.ConfirmAndShutdown(this);
         }
 
         private void OnAboutClick(object sender, RoutedEventArgs e)

@@ -22,6 +22,8 @@ namespace BIS.ERP.Models
         public string Name { get; set; } = string.Empty;
         public string AccountCode { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
+        public string VatTaxCode { get; set; } = string.Empty;
+        public string SalesTaxCode { get; set; } = string.Empty;
         public decimal AmountWithoutTax { get; set; }
         public decimal VatRate { get; set; }
         public decimal VatAmount { get; set; }

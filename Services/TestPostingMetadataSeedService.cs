@@ -75,10 +75,10 @@ public sealed class TestPostingMetadataSeedService
     {
         var scenarios = new[]
         {
-            new Scenario("KO-001", "ПКО: поступление оплаты от покупателей", "Приходный кассовый ордер", 15000m, "6010", "3010", "6010"),
-            new Scenario("KO-002", "РКО: оплата поставщикам", "Расходный кассовый ордер", 8000m, "4010", "4010", "3010"),
-            new Scenario("KO-003", "РКО: выплата заработной платы", "Расходный кассовый ордер", 25000m, "6810", "6810", "3010"),
-            new Scenario("KO-004", "РКО: выдача подотчетному лицу", "Расходный кассовый ордер", 5000m, "6850", "6850", "3010")
+            new Scenario("KO-001", "ПКО: поступление оплаты от покупателей", "Приходный кассовый ордер", 15000m, "6010", "Счет кассы", "6010"),
+            new Scenario("KO-002", "РКО: оплата поставщикам", "Расходный кассовый ордер", 8000m, "4010", "4010", "Счет кассы"),
+            new Scenario("KO-003", "РКО: выплата заработной платы", "Расходный кассовый ордер", 25000m, "6810", "6810", "Счет кассы"),
+            new Scenario("KO-004", "РКО: выдача подотчетному лицу", "Расходный кассовый ордер", 5000m, "6850", "6850", "Счет кассы")
         };
 
         foreach (var scenario in scenarios)
@@ -134,6 +134,10 @@ public sealed class TestPostingMetadataSeedService
             return;
 
         var accountIds = await LoadAccountIdsAsync(chart.TableName);
+        var cashDeskId = await LoadFirstCashDeskIdAsync();
+        if (cashDeskId == Guid.Empty)
+            return;
+
         var index = 1;
         foreach (var scenario in scenarios.Where(item => item.CreatePosting))
         {
@@ -156,6 +160,7 @@ public sealed class TestPostingMetadataSeedService
                 ["Основание"] = scenario.Name,
                 ["Примечание"] = "Тестовая проводка при создании инфобазы",
                 ["Проведён"] = false,
+                ["Касса"] = cashDeskId.ToString(),
                 ["Корр. счет"] = accountId.ToString()
             };
 
@@ -227,7 +232,7 @@ public sealed class TestPostingMetadataSeedService
         try
         {
             using var command = connection.CreateCommand();
-            command.CommandText = $@"SELECT ""Id"", ""code"" FROM ""{chartTableName}"" WHERE ""code"" IN ('3010','4010','6010','6810','6850');";
+            command.CommandText = $@"SELECT ""Id"", ""code"" FROM ""{chartTableName}"" WHERE ""code"" IN ('4010','6010','6810','6850');";
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
                 result[reader.GetString(1)] = reader.GetGuid(0);
@@ -239,6 +244,40 @@ public sealed class TestPostingMetadataSeedService
         }
 
         return result;
+    }
+
+    private async Task<Guid> LoadFirstCashDeskIdAsync()
+    {
+        var cashDeskCatalog = await _context.MetadataObjects
+            .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Кассы");
+        if (cashDeskCatalog == null)
+            return Guid.Empty;
+
+        var connection = _context.Database.GetDbConnection();
+        var opened = false;
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await _context.Database.OpenConnectionAsync();
+            opened = true;
+        }
+
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = $@"
+                SELECT ""Id""
+                FROM ""{cashDeskCatalog.TableName}""
+                WHERE NULLIF(TRIM(COALESCE(""code""::text, '')), '') IS NOT NULL
+                ORDER BY ""CreatedAt""
+                LIMIT 1;";
+            var result = await command.ExecuteScalarAsync();
+            return Guid.TryParse(result?.ToString(), out var id) ? id : Guid.Empty;
+        }
+        finally
+        {
+            if (opened)
+                await _context.Database.CloseConnectionAsync();
+        }
     }
 
     private async Task<bool> PostingExistsAsync(string number, string documentType)

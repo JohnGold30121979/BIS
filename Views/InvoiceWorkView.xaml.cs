@@ -30,6 +30,7 @@ namespace BIS.ERP.Views
             var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             _invoiceService = new InvoiceService(context);
             _invoiceService.Configure(_documentMetadata);
+            await _invoiceService.EnsureSchemaAsync();
             await LoadDataAsync();
         }
 

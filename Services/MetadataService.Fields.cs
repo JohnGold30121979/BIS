@@ -111,6 +111,16 @@ public partial class MetadataService
                     IsRequired = false,
                     Order = 3,
                     MetadataObjectId = metadataObjectId
+                },
+                new MetadataField
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Активен",
+                    DbColumnName = "is_active",
+                    FieldType = "Bool",
+                    IsRequired = true,
+                    Order = 4,
+                    MetadataObjectId = metadataObjectId
                 }
             };
     }
@@ -1518,7 +1528,7 @@ public partial class MetadataService
             Name = "Код",
             DbColumnName = "code",
             FieldType = "String",
-            Length = 10,
+            Length = 50,
             IsRequired = true,
             IsUnique = true,
             Order = 1,
@@ -1793,8 +1803,11 @@ public partial class MetadataService
             Id = Guid.NewGuid(),
             Name = "Счет",
             DbColumnName = "code",
-            FieldType = "String",
-            Length = 20,
+            FieldType = "Reference",
+            ReferenceCatalog = "План счетов",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            Length = 80,
             IsRequired = true,
             IsUnique = true,
             Order = 2,
@@ -2339,7 +2352,7 @@ public partial class MetadataService
             Name = "Код",
             DbColumnName = "code",
             FieldType = "String",
-            Length = 10,
+            Length = 50,
             IsRequired = true,
             IsUnique = true,
             Order = 1,
@@ -2402,7 +2415,7 @@ public partial class MetadataService
             Name = "Код",
             DbColumnName = "code",
             FieldType = "String",
-            Length = 10,
+            Length = 50,
             IsRequired = true,
             IsUnique = true,
             Order = 1,

@@ -20,7 +20,15 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Guid? _editId;
         private readonly ObservableCollection<EditableInvoiceLine> _lines = new();
         private List<Dictionary<string, object>> _accounts = new();
+        private readonly Dictionary<string, ReferenceOption> _vatTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ReferenceOption> _salesTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
+        private string _selectedHeaderAccountCode = string.Empty;
+        private bool _isRecalculating;
         private bool _isPosted;
+
+        public ObservableCollection<ReferenceOption> AccountItems { get; } = new();
+        public ObservableCollection<ReferenceOption> VatTaxItems { get; } = new();
+        public ObservableCollection<ReferenceOption> SalesTaxItems { get; } = new();
 
         public InvoiceEditDialog(
             MetadataObject document,
@@ -33,6 +41,7 @@ namespace BIS.ERP.Views.Dialogs
             _metadataService = metadataService;
             _invoiceService = invoiceService;
             _editId = editId;
+            DataContext = this;
             DialogTitle.Text = editId.HasValue
                 ? $"Редактирование: {document.Name}"
                 : $"Новый документ: {document.Name}";
@@ -45,6 +54,7 @@ namespace BIS.ERP.Views.Dialogs
             try
             {
                 Cursor = System.Windows.Input.Cursors.Wait;
+                await _invoiceService.EnsureSchemaAsync();
                 var catalogs = await _metadataService.GetCatalogsAsync();
                 var organizationsCatalog = catalogs.FirstOrDefault(item => item.Name == "Организации");
                 if (organizationsCatalog != null)
@@ -59,11 +69,15 @@ namespace BIS.ERP.Views.Dialogs
 
                 var accountsCatalog = catalogs.FirstOrDefault(item => item.Name.StartsWith("План счетов"));
                 if (accountsCatalog != null)
+                {
                     _accounts = await _metadataService.GetCatalogDataAsync(accountsCatalog.Id);
+                    FillAccountItems(_accounts);
+                }
 
-                PaymentKindCombo.ItemsSource = new[] { "безналичными", "наличными", "бартер" };
-                DeliveryKindCombo.ItemsSource = new[] { "Облагаемые", "Освобожденные", "Экспорт" };
-                SupplyKindCombo.ItemsSource = new[] { "Облагаемые", "Освобожденные" };
+                PaymentKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Виды оплаты");
+                DeliveryKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Виды поставки");
+                SupplyKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Типы поставки");
+                await LoadTaxItemsAsync(catalogs);
 
                 if (_editId.HasValue)
                 {
@@ -79,11 +93,11 @@ namespace BIS.ERP.Views.Dialogs
                     NumberBox.Text = invoice.DocNumber;
                     DatePicker.SelectedDate = invoice.DocDate;
                     EsfNumberBox.Text = invoice.EsfNumber;
-                    AccountBox.Text = invoice.CounterpartyAccountCode;
+                    SetHeaderAccount(invoice.CounterpartyAccountCode);
                     BasisBox.Text = invoice.Basis;
-                    PaymentKindCombo.Text = invoice.PaymentKind;
-                    DeliveryKindCombo.Text = invoice.DeliveryKind;
-                    SupplyKindCombo.Text = invoice.SupplyKind;
+                    SelectStoredComboValue(PaymentKindCombo, invoice.PaymentKind);
+                    SelectStoredComboValue(DeliveryKindCombo, invoice.DeliveryKind);
+                    SelectStoredComboValue(SupplyKindCombo, invoice.SupplyKind);
 
                     if (invoice.OrganizationId.HasValue)
                     {
@@ -99,15 +113,18 @@ namespace BIS.ERP.Views.Dialogs
 
                     foreach (var line in invoice.Lines)
                     {
-                        _lines.Add(new EditableInvoiceLine
+                        AddLine(new EditableInvoiceLine
                         {
                             Id = line.Id,
                             LineNumber = line.LineNumber,
                             Name = line.Name,
                             AccountCode = line.AccountCode,
+                            AccountDisplayName = GetAccountDisplayName(line.AccountCode),
+                            VatTaxCode = ResolveTaxCode(line.VatTaxCode, line.VatRate, VatTaxItems),
                             AmountWithoutTax = line.AmountWithoutTax,
                             VatRate = line.VatRate,
                             VatAmount = line.VatAmount,
+                            SalesTaxCode = ResolveTaxCode(line.SalesTaxCode, line.SalesTaxRate, SalesTaxItems),
                             SalesTaxRate = line.SalesTaxRate,
                             SalesTaxAmount = line.SalesTaxAmount
                         });
@@ -121,10 +138,10 @@ namespace BIS.ERP.Views.Dialogs
                 {
                     DatePicker.SelectedDate = DateTime.Today;
                     NumberBox.Text = await _invoiceService.GenerateDocumentNumberAsync();
-                    AccountBox.Text = InvoiceDocumentTypes.IsSales(_document.Name) ? "14100000" : "31100000";
-                    PaymentKindCombo.SelectedIndex = 0;
-                    DeliveryKindCombo.SelectedIndex = 0;
-                    SupplyKindCombo.SelectedIndex = 0;
+                    SetHeaderAccount(GetDefaultAccountCode());
+                    SelectComboValue(PaymentKindCombo, "TRANSFER");
+                    SelectComboValue(DeliveryKindCombo, "TAXABLE");
+                    SelectComboValue(SupplyKindCombo, "TAXABLE");
                 }
 
                 RecalculateTotals();
@@ -151,6 +168,167 @@ namespace BIS.ERP.Views.Dialogs
             LinesGrid.IsReadOnly = true;
         }
 
+        private void FillAccountItems(IEnumerable<Dictionary<string, object>> accounts)
+        {
+            AccountItems.Clear();
+            foreach (var account in accounts
+                         .Select(row => new ReferenceOption(
+                             GetRowValue(row, "Код", "code"),
+                             BuildCodeName(GetRowValue(row, "Код", "code"), GetRowValue(row, "Наименование", "name"))))
+                         .Where(item => !string.IsNullOrWhiteSpace(item.Value))
+                         .OrderBy(item => item.Value))
+            {
+                AccountItems.Add(account);
+            }
+        }
+
+        private async Task<List<ReferenceOption>> LoadReferenceOptionsAsync(
+            IEnumerable<MetadataObject> catalogs,
+            string catalogName)
+        {
+            var catalog = catalogs.FirstOrDefault(item => item.Name.Equals(catalogName, StringComparison.OrdinalIgnoreCase));
+            if (catalog == null)
+                return new List<ReferenceOption>();
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            return rows
+                .Where(IsActiveRow)
+                .Select(row => new ReferenceOption(
+                    GetRowValue(row, "Код", "code"),
+                    BuildReferenceDisplayName(GetRowValue(row, "Код", "code"), GetRowValue(row, "Наименование", "name")),
+                    GetDecimal(row, "Ставка", "rate")))
+                .Where(item => !string.IsNullOrWhiteSpace(item.Value))
+                .OrderBy(item => item.DisplayName)
+                .ToList();
+        }
+
+        private async Task LoadTaxItemsAsync(IEnumerable<MetadataObject> catalogs)
+        {
+            VatTaxItems.Clear();
+            SalesTaxItems.Clear();
+            _vatTaxesByCode.Clear();
+            _salesTaxesByCode.Clear();
+
+            var taxes = await LoadReferenceOptionsAsync(catalogs, "Налоги");
+            foreach (var tax in taxes.Where(item =>
+                         item.Value.StartsWith("NDS", StringComparison.OrdinalIgnoreCase) ||
+                         item.DisplayName.Contains("НДС", StringComparison.OrdinalIgnoreCase) ||
+                         item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase)))
+            {
+                VatTaxItems.Add(tax);
+                _vatTaxesByCode[tax.Value] = tax;
+            }
+
+            foreach (var tax in taxes.Where(item =>
+                         item.Value.Equals("SALES_TAX", StringComparison.OrdinalIgnoreCase) ||
+                         item.DisplayName.Contains("продаж", StringComparison.OrdinalIgnoreCase) ||
+                         item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase)))
+            {
+                SalesTaxItems.Add(tax);
+                _salesTaxesByCode[tax.Value] = tax;
+            }
+        }
+
+        private void AddLine(EditableInvoiceLine line)
+        {
+            if (string.IsNullOrWhiteSpace(line.AccountDisplayName))
+                line.AccountDisplayName = GetAccountDisplayName(line.AccountCode);
+
+            line.PropertyChanged += OnEditableLineChanged;
+            _lines.Add(line);
+        }
+
+        private void OnEditableLineChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (_isRecalculating || sender is not EditableInvoiceLine line)
+                return;
+
+            if (e.PropertyName == nameof(EditableInvoiceLine.VatTaxCode))
+                ApplyTaxRate(line, line.VatTaxCode, _vatTaxesByCode, isVat: true);
+            if (e.PropertyName == nameof(EditableInvoiceLine.SalesTaxCode))
+                ApplyTaxRate(line, line.SalesTaxCode, _salesTaxesByCode, isVat: false);
+
+            if (e.PropertyName is nameof(EditableInvoiceLine.AmountWithoutTax)
+                or nameof(EditableInvoiceLine.VatRate)
+                or nameof(EditableInvoiceLine.SalesTaxRate)
+                or nameof(EditableInvoiceLine.VatTaxCode)
+                or nameof(EditableInvoiceLine.SalesTaxCode))
+            {
+                RecalculateTotals();
+            }
+        }
+
+        private void ApplyTaxRate(
+            EditableInvoiceLine line,
+            string taxCode,
+            IReadOnlyDictionary<string, ReferenceOption> taxes,
+            bool isVat)
+        {
+            if (!taxes.TryGetValue(taxCode ?? string.Empty, out var tax))
+                return;
+
+            _isRecalculating = true;
+            try
+            {
+                if (isVat)
+                    line.VatRate = tax.Rate;
+                else
+                    line.SalesTaxRate = tax.Rate;
+            }
+            finally
+            {
+                _isRecalculating = false;
+            }
+        }
+
+        private string GetDefaultAccountCode()
+        {
+            var preferred = InvoiceDocumentTypes.IsSales(_document.Name) ? "14100000" : "31100000";
+            return AccountItems.Any(item => item.Value.Equals(preferred, StringComparison.OrdinalIgnoreCase))
+                ? preferred
+                : AccountItems.FirstOrDefault()?.Value ?? preferred;
+        }
+
+        private static string ResolveTaxCode(string storedCode, decimal rate, IEnumerable<ReferenceOption> options)
+        {
+            if (!string.IsNullOrWhiteSpace(storedCode) &&
+                options.Any(item => item.Value.Equals(storedCode, StringComparison.OrdinalIgnoreCase)))
+                return storedCode;
+
+            return options.FirstOrDefault(item => item.Rate == rate)?.Value
+                   ?? options.FirstOrDefault(item => item.Rate == 0)?.Value
+                   ?? string.Empty;
+        }
+
+        private static void SelectComboValue(ComboBox comboBox, string preferredValue)
+        {
+            comboBox.SelectedValue = preferredValue;
+            if (comboBox.SelectedIndex < 0 && comboBox.Items.Count > 0)
+                comboBox.SelectedIndex = 0;
+        }
+
+        private static void SelectStoredComboValue(ComboBox comboBox, string storedValue)
+        {
+            if (string.IsNullOrWhiteSpace(storedValue))
+            {
+                if (comboBox.Items.Count > 0)
+                    comboBox.SelectedIndex = 0;
+                return;
+            }
+
+            foreach (var item in comboBox.Items.OfType<ReferenceOption>())
+            {
+                if (item.Value.Equals(storedValue, StringComparison.OrdinalIgnoreCase) ||
+                    item.DisplayName.Contains(storedValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    comboBox.SelectedItem = item;
+                    return;
+                }
+            }
+
+            comboBox.SelectedValue = storedValue;
+        }
+
         private void OnSelectAccountClick(object sender, RoutedEventArgs e)
         {
             if (_accounts.Count == 0)
@@ -160,16 +338,45 @@ namespace BIS.ERP.Views.Dialogs
             dialog.Owner = this;
             if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
             {
-                AccountBox.Text = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
+                SetHeaderAccount(dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty);
+            }
+        }
+
+        private void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
+        {
+            if (_isPosted || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
+                return;
+
+            var dialog = new AccountSelectionDialog(_accounts)
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
+            {
+                var accountCode = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
+                line.AccountCode = accountCode;
+                line.AccountDisplayName = GetAccountDisplayName(accountCode);
             }
         }
 
         private void OnAddLineClick(object sender, RoutedEventArgs e)
         {
-            _lines.Add(new EditableInvoiceLine
+            AddLine(new EditableInvoiceLine
             {
                 LineNumber = _lines.Count + 1,
-                VatRate = 12
+                VatTaxCode = VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Value
+                             ?? VatTaxItems.FirstOrDefault()?.Value
+                             ?? string.Empty,
+                VatRate = VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Rate
+                          ?? VatTaxItems.FirstOrDefault()?.Rate
+                          ?? 0,
+                SalesTaxCode = SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Value
+                               ?? SalesTaxItems.FirstOrDefault()?.Value
+                               ?? string.Empty,
+                SalesTaxRate = SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Rate
+                               ?? SalesTaxItems.FirstOrDefault()?.Rate
+                               ?? 0
             });
             RecalculateTotals();
         }
@@ -180,6 +387,7 @@ namespace BIS.ERP.Views.Dialogs
                 return;
 
             _lines.Remove(selected);
+            selected.PropertyChanged -= OnEditableLineChanged;
             var lineNumber = 1;
             foreach (var line in _lines)
                 line.LineNumber = lineNumber++;
@@ -240,9 +448,11 @@ namespace BIS.ERP.Views.Dialogs
         private void RecalculateTotals()
         {
             foreach (var line in _lines)
+            {
                 InvoiceService.RecalculateLine(line);
+                line.NotifyCalculatedProperties();
+            }
 
-            LinesGrid.Items.Refresh();
             var document = BuildDocumentFromForm();
             InvoiceService.RecalculateTotals(document);
             TotalWithoutTaxText.Text = document.AmountWithoutTax.ToString("N2");
@@ -300,10 +510,12 @@ namespace BIS.ERP.Views.Dialogs
                 DocDate = DatePicker.SelectedDate ?? DateTime.Today,
                 EsfNumber = EsfNumberBox.Text.Trim(),
                 OrganizationId = organizationId,
-                CounterpartyAccountCode = AccountBox.Text.Trim(),
-                PaymentKind = PaymentKindCombo.Text?.Trim() ?? string.Empty,
-                DeliveryKind = DeliveryKindCombo.Text?.Trim() ?? string.Empty,
-                SupplyKind = SupplyKindCombo.Text?.Trim() ?? string.Empty,
+                CounterpartyAccountCode = string.IsNullOrWhiteSpace(_selectedHeaderAccountCode)
+                    ? AccountBox.Text.Trim()
+                    : _selectedHeaderAccountCode,
+                PaymentKind = GetSelectedReferenceValue(PaymentKindCombo),
+                DeliveryKind = GetSelectedReferenceValue(DeliveryKindCombo),
+                SupplyKind = GetSelectedReferenceValue(SupplyKindCombo),
                 Basis = BasisBox.Text.Trim(),
                 Lines = _lines.Select(line => new InvoiceLineRow
                 {
@@ -311,9 +523,11 @@ namespace BIS.ERP.Views.Dialogs
                     LineNumber = line.LineNumber,
                     Name = line.Name,
                     AccountCode = line.AccountCode,
+                    VatTaxCode = line.VatTaxCode,
                     AmountWithoutTax = line.AmountWithoutTax,
                     VatRate = line.VatRate,
                     VatAmount = line.VatAmount,
+                    SalesTaxCode = line.SalesTaxCode,
                     SalesTaxRate = line.SalesTaxRate,
                     SalesTaxAmount = line.SalesTaxAmount
                 }).ToList()
@@ -325,6 +539,78 @@ namespace BIS.ERP.Views.Dialogs
             DialogResult = false;
             Close();
         }
+
+        private static string GetSelectedReferenceValue(ComboBox comboBox)
+        {
+            return comboBox.SelectedValue?.ToString()
+                   ?? (comboBox.SelectedItem as ReferenceOption)?.Value
+                   ?? comboBox.Text?.Trim()
+                   ?? string.Empty;
+        }
+
+        private static string GetRowValue(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var pair = row.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                var value = pair.Value?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+            return string.Empty;
+        }
+
+        private static decimal GetDecimal(Dictionary<string, object> row, params string[] keys)
+        {
+            return decimal.TryParse(GetRowValue(row, keys), out var value) ? value : 0;
+        }
+
+        private static bool IsActiveRow(Dictionary<string, object> row)
+        {
+            var value = GetRowValue(row, "Активен", "is_active");
+            return string.IsNullOrWhiteSpace(value) ||
+                   value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("да", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("1", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildCodeName(string code, string name)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+                return name;
+            if (string.IsNullOrWhiteSpace(name))
+                return code;
+            return $"{code} - {name}";
+        }
+
+        private static string BuildReferenceDisplayName(string code, string name)
+        {
+            return string.IsNullOrWhiteSpace(name) ? code : name;
+        }
+
+        private void SetHeaderAccount(string accountCode)
+        {
+            _selectedHeaderAccountCode = accountCode?.Trim() ?? string.Empty;
+            AccountBox.Text = GetAccountDisplayName(_selectedHeaderAccountCode);
+        }
+
+        private string GetAccountDisplayName(string accountCode)
+        {
+            if (string.IsNullOrWhiteSpace(accountCode))
+                return string.Empty;
+
+            var account = _accounts.FirstOrDefault(row =>
+                string.Equals(GetRowValue(row, "Код", "code"), accountCode, StringComparison.OrdinalIgnoreCase));
+
+            if (account == null)
+                return accountCode;
+
+            return BuildCodeName(
+                GetRowValue(account, "Код", "code"),
+                GetRowValue(account, "Наименование", "name"));
+        }
+
+        public sealed record ReferenceOption(string Value, string DisplayName, decimal Rate = 0);
 
         private sealed class OrganizationItem
         {
@@ -348,6 +634,19 @@ namespace BIS.ERP.Views.Dialogs
                 set { base.AccountCode = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccountCode))); }
             }
 
+            private string _accountDisplayName = string.Empty;
+            public string AccountDisplayName
+            {
+                get => _accountDisplayName;
+                set { _accountDisplayName = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(AccountDisplayName))); }
+            }
+
+            public new string VatTaxCode
+            {
+                get => base.VatTaxCode;
+                set { base.VatTaxCode = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VatTaxCode))); }
+            }
+
             public new decimal AmountWithoutTax
             {
                 get => base.AmountWithoutTax;
@@ -366,6 +665,12 @@ namespace BIS.ERP.Views.Dialogs
                 set { base.VatAmount = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VatAmount))); }
             }
 
+            public new string SalesTaxCode
+            {
+                get => base.SalesTaxCode;
+                set { base.SalesTaxCode = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SalesTaxCode))); }
+            }
+
             public new decimal SalesTaxRate
             {
                 get => base.SalesTaxRate;
@@ -376,6 +681,19 @@ namespace BIS.ERP.Views.Dialogs
             {
                 get => base.SalesTaxAmount;
                 set { base.SalesTaxAmount = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SalesTaxAmount))); }
+            }
+
+            public new decimal LineTotal
+            {
+                get => base.LineTotal;
+                set { base.LineTotal = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LineTotal))); }
+            }
+
+            public void NotifyCalculatedProperties()
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(VatAmount)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SalesTaxAmount)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LineTotal)));
             }
         }
     }

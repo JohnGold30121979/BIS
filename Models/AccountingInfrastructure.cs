@@ -81,7 +81,7 @@ namespace BIS.ERP.Models
     public class LocalizationEntry
     {
         [Key] public Guid Id { get; set; } = Guid.NewGuid();
-        [MaxLength(10)] public string Culture { get; set; } = "ru-RU";
+        [MaxLength(40)] public string Culture { get; set; } = "ru-RU";
         [MaxLength(200)] public string Key { get; set; } = string.Empty;
         public string Value { get; set; } = string.Empty;
         [MaxLength(50)] public string Category { get; set; } = "System";

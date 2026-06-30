@@ -57,6 +57,7 @@ namespace BIS.ERP
         private bool _isLoadingReport = false;
         private Point _dragStartPoint;
         private NavigationItem _draggedItem;
+        private bool _closeForModeSwitch;
 
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
@@ -69,6 +70,16 @@ namespace BIS.ERP
             NavigationItems = new ObservableCollection<NavigationItem>();
             NavigationTree.ItemsSource = NavigationItems;
             this.Loaded += OnLoaded;
+            this.Closing += OnWindowClosing;
+        }
+
+        private void OnWindowClosing(object? sender, CancelEventArgs e)
+        {
+            if (ApplicationExitService.IsShuttingDown || _closeForModeSwitch)
+                return;
+
+            e.Cancel = true;
+            ApplicationExitService.ConfirmAndShutdown(this);
         }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -101,6 +112,7 @@ namespace BIS.ERP
                     _userAccessService = new UserAccessService(context);
                     _moduleMetadataService = new ModuleMetadataService(context);
 
+                    await new RuntimeSchemaFixService(context).EnsureAsync();
                     await _accountingPeriodService.EnsureSchemaAsync();
                     await _userAccessService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
@@ -976,7 +988,7 @@ namespace BIS.ERP
             if (result == MessageBoxResult.Yes)
             {
                 _authService.Logout();
-                Application.Current.Shutdown();
+                ApplicationExitService.ShutdownNow();
             }
         }
 
@@ -990,6 +1002,7 @@ namespace BIS.ERP
                 _authService.Logout();
                 var modeWindow = new InfoBaseSelectionWindow();
                 modeWindow.Show();
+                _closeForModeSwitch = true;
                 this.Close();
             }
         }

@@ -672,9 +672,13 @@ namespace BIS.ERP.Services
                 else if (field.DbColumnName?.Equals("code", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     field.Name = "Счет";
+                    field.FieldType = "Reference";
+                    field.ReferenceCatalog = "План счетов";
+                    field.DisplayPattern = "{Код} - {Наименование}";
+                    field.DisplayFields = "Код,Наименование";
                     field.Order = 2;
                     field.IsRequired = true;
-                    field.Length = 20;
+                    field.Length = 80;
                 }
                 else if (field.DbColumnName?.Equals("currency_id", StringComparison.OrdinalIgnoreCase) == true)
                 {
@@ -715,6 +719,10 @@ namespace BIS.ERP.Services
 
             try
             {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    ALTER TABLE ""{catalog.TableName}""
+                    ALTER COLUMN ""code"" TYPE varchar(80);");
+
                 await _context.Database.ExecuteSqlRawAsync($@"
                     UPDATE ""{catalog.TableName}""
                     SET ""cash_number"" = COALESCE(NULLIF(""cash_number"", ''), '1')
