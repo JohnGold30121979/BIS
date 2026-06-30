@@ -40,6 +40,7 @@ namespace BIS.ERP.Services
                 var memoPath = Path.ChangeExtension(frxPath, ".FRT");
                 var records = ReadVisualFoxProRecords(frxPath);
                 var template = BuildVisualFoxProTemplateFull(report, records, frxPath);
+                FrxRecognitionProfileService.ApplyImportProfile(template);
                 // Сохраняем полную структуру
                 var fullData = new FrxFullData
                 {
@@ -180,6 +181,7 @@ namespace BIS.ERP.Services
             // Пробуем как PrintFormTemplate
             if (TryDeserializeTemplate(document.RootElement, out var readyTemplate))
             {
+                FrxRecognitionProfileService.ApplyImportProfile(readyTemplate);
                 FillReportFromTemplate(report, readyTemplate);
                 report.FrxXml = JsonSerializer.Serialize(readyTemplate);
                 return report;
@@ -191,6 +193,7 @@ namespace BIS.ERP.Services
                 throw new InvalidOperationException("JSON не содержит элементов макета FoxPro.");
 
             var template = BuildVisualFoxProTemplate(report, records);
+            FrxRecognitionProfileService.ApplyImportProfile(template);
             report.FrxXml = JsonSerializer.Serialize(template);
             return report;
         }

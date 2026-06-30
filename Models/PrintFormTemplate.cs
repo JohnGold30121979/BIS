@@ -6,6 +6,8 @@ namespace BIS.ERP.Models
     {
         public string SourceFormat { get; set; } = "FoxProFRX";
         public string OriginalFileName { get; set; } = string.Empty;
+        public string RecognitionProfileCode { get; set; } = string.Empty;
+        public bool LayoutNormalized { get; set; }
         public double PageWidth { get; set; } = 210;
         public double PageHeight { get; set; } = 297;
         public List<PrintFormBand> Bands { get; set; } = new();

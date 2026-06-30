@@ -1,0 +1,45 @@
+{
+  "profiles": [
+    {
+      "code": "foxpro_cash_receipt_order",
+      "name": "Visual FoxPro - Приходный кассовый ордер",
+      "fileNamePatterns": [ "pr_pri4.frx" ],
+      "requiredExpressions": [ "iif(ko1=1,sum,sum_v)", "Msum1", "DOK1" ],
+      "defaultVariables": {
+        "ko1": "1",
+        "LL": "70",
+        "sha": "",
+        "sha1": "",
+        "sha2": ""
+      },
+      "layout": {
+        "normalizeBandTops": true,
+        "compactVerticalGaps": true,
+        "desiredVerticalGap": 700,
+        "minGapToCompact": 1500
+      },
+      "alignmentOverrides": [
+        { "expressionPattern": "^(DEB|CRED|iif\\(ko1=1,sum,sum_v\\))$", "alignment": "Center" },
+        { "expressionPattern": "^alltrim\\(DOK1\\)$", "alignment": "Center" }
+      ]
+    },
+    {
+      "code": "foxpro_invoice_kg",
+      "name": "Visual FoxPro - Счет-фактура КР",
+      "fileNamePatterns": [ "pr_fak16.frx" ],
+      "requiredExpressions": [ "fact.C_INN", "fact.D_INN", "curFACTSW" ],
+      "defaultVariables": {
+        "sha": "",
+        "sha1": "",
+        "sha2": ""
+      },
+      "layout": {
+        "normalizeBandTops": true,
+        "compactVerticalGaps": false,
+        "desiredVerticalGap": 700,
+        "minGapToCompact": 1500
+      },
+      "alignmentOverrides": []
+    }
+  ]
+}

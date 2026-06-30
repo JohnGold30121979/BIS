@@ -1201,7 +1201,7 @@ namespace BIS.ERP.Services
             CashOrderPrintData data,
             IReadOnlyCollection<ReportElementMapping> mappings)
         {
-            var layoutTemplate = CompactImportedTemplateVerticalGaps(template);
+            var layoutTemplate = FrxRecognitionProfileService.PrepareForRendering(template);
             var width = Math.Max(1000, layoutTemplate.PageWidth);
             var height = Math.Max(1000, layoutTemplate.PageHeight);
             var useCompactScale = width < 5000 && height < 5000;
@@ -1509,6 +1509,10 @@ namespace BIS.ERP.Services
             if (IsQuotedFoxLiteral(normalized))
                 return UnquoteFoxText(normalized);
 
+            var variables = BuildFoxVariables(data);
+            if (TryResolveFoxVariable(variables, normalized, out var variableValue))
+                return variableValue;
+
             var concatParts = SplitFoxTopLevel(normalized, '+');
             if (concatParts.Count > 1)
             {
@@ -1573,6 +1577,9 @@ namespace BIS.ERP.Services
 
                 if (functionName.Equals("dtoc", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
                     return EvaluateFoxExpression(arguments[0], data);
+
+                if (functionName.Equals("mr", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
+                    return GetRussianMonthName(ParseFoxInteger(arguments[0], data));
 
                 if ((functionName.Equals("tran", StringComparison.OrdinalIgnoreCase) ||
                      functionName.Equals("transform", StringComparison.OrdinalIgnoreCase)) &&
@@ -1647,27 +1654,7 @@ namespace BIS.ERP.Services
             if (lower.Contains("iif(") && lower.Contains("sum"))
                 return $"{data.Amount:N2}";
 
-            var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["nfil1"] = data.Organization, ["inn1"] = data.Inn, ["okpo1"] = data.Okpo,
-                ["dok1"] = data.Number, ["date1"] = data.Date.ToString("dd.MM.yyyy"),
-                ["deb"] = data.DebitAccount, ["deb1"] = GetAccountCode(data.DebitAccount),
-                ["cred"] = data.CreditAccount, ["cred1"] = GetAccountCode(data.CreditAccount),
-                ["sum"] = $"{data.Amount:N2}", ["sum1"] = $"{data.Amount:N2}", ["sum_v"] = $"{data.Amount:N2}",
-                ["tex1"] = data.Basis, ["fio"] = data.Person, ["fiop1"] = data.Person,
-                ["namep1"] = data.Person, ["kodp1"] = string.Empty, ["kurs_v"] = "1,00",
-                ["nval1"] = "KGS", ["nakl1"] = string.Empty, ["dovn1"] = string.Empty,
-                ["dovd1"] = string.Empty, ["dovf1"] = string.Empty
-            };
-            foreach (var extra in data.ExtraFields)
-            {
-                var key = NormalizeFieldName(extra.Key);
-                if (!variables.ContainsKey(key))
-                    variables[key] = FormatPlainValue(extra.Value);
-            }
-            if (variables.TryGetValue(normalized, out var direct)) return direct;
-            var normalizedKey = NormalizeFieldName(normalized);
-            if (variables.TryGetValue(normalizedKey, out direct)) return direct;
+            if (TryResolveFoxVariable(variables, normalized, out var direct)) return direct;
             foreach (var (name, value) in variables.OrderByDescending(item => item.Key.Length))
                 normalized = Regex.Replace(normalized, $@"(?<![\w.]){Regex.Escape(name)}(?![\w.])", value.Replace("$", "$$"), RegexOptions.IgnoreCase);
             normalized = Regex.Replace(normalized, @"(?i)alltrim\(([^()]*)\)", "$1");
@@ -1676,6 +1663,101 @@ namespace BIS.ERP.Services
             normalized = normalized.Replace("'+'", string.Empty).Replace("+", string.Empty).Replace("'", string.Empty).Replace("\"", string.Empty);
             normalized = normalized.Trim();
             return LooksLikeFoxExpression(normalized) ? string.Empty : normalized;
+        }
+
+        private static Dictionary<string, string> BuildFoxVariables(CashOrderPrintData data)
+        {
+            var currencyAmount = data.AmountInCurrency == 0 ? data.Amount : data.AmountInCurrency;
+            var variables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["nfil1"] = data.Organization,
+                ["inn1"] = data.Inn,
+                ["okpo1"] = data.Okpo,
+                ["dok1"] = data.Number,
+                ["date1"] = data.Date.ToString("dd.MM.yyyy"),
+                ["deb"] = GetAccountCode(data.DebitAccount),
+                ["deb1"] = GetAccountCode(data.DebitAccount),
+                ["cred"] = GetAccountCode(data.CreditAccount),
+                ["cred1"] = GetAccountCode(data.CreditAccount),
+                ["sum"] = $"{data.Amount:N2}",
+                ["sum1"] = $"{data.Amount:N2}",
+                ["sum_v"] = $"{currencyAmount:N2}",
+                ["msum1"] = data.AmountInWords,
+                ["tex1"] = data.Basis,
+                ["fio"] = data.Person,
+                ["fiop1"] = data.Person,
+                ["namep1"] = data.Person,
+                ["kodp1"] = string.Empty,
+                ["kurs_v"] = "1,00",
+                ["nval1"] = "KGS",
+                ["nakl1"] = string.Empty,
+                ["dovn1"] = string.Empty,
+                ["dovd1"] = string.Empty,
+                ["dovf1"] = string.Empty
+            };
+
+            foreach (var pair in FrxRecognitionProfileService.GetDefaultVariables())
+                variables[pair.Key] = pair.Value;
+
+            foreach (var extra in data.ExtraFields)
+            {
+                var rawKey = (extra.Key ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(rawKey))
+                    variables[rawKey] = FormatPlainValue(extra.Value);
+
+                var normalizedKey = NormalizeFieldName(extra.Key);
+                if (!string.IsNullOrWhiteSpace(normalizedKey))
+                    variables[normalizedKey] = FormatPlainValue(extra.Value);
+            }
+
+            return variables;
+        }
+
+        private static bool TryResolveFoxVariable(
+            IReadOnlyDictionary<string, string> variables,
+            string expression,
+            out string value)
+        {
+            value = string.Empty;
+            var key = (expression ?? string.Empty).Trim().Trim('{', '}', '(', ')');
+            if (string.IsNullOrWhiteSpace(key))
+                return false;
+
+            if (variables.TryGetValue(key, out value))
+                return true;
+
+            var normalizedKey = NormalizeFieldName(key);
+            if (variables.TryGetValue(normalizedKey, out value))
+                return true;
+
+            if (TryParseFoxDecimal(key))
+            {
+                value = key;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string GetRussianMonthName(int month)
+        {
+            var months = new[]
+            {
+                string.Empty,
+                "января",
+                "февраля",
+                "марта",
+                "апреля",
+                "мая",
+                "июня",
+                "июля",
+                "августа",
+                "сентября",
+                "октября",
+                "ноября",
+                "декабря"
+            };
+            return month is >= 1 and <= 12 ? months[month] : string.Empty;
         }
 
         private static bool EvaluateFoxCondition(string expression, CashOrderPrintData data)
@@ -1724,9 +1806,17 @@ namespace BIS.ERP.Services
         private static int ParseFoxInteger(string expression, CashOrderPrintData data)
         {
             var value = EvaluateFoxExpression(expression, data);
-            return int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : int.TryParse((expression ?? string.Empty).Trim(), out parsed) ? parsed : 0;
+            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) ||
+                int.TryParse(value, NumberStyles.Any, CultureInfo.CurrentCulture, out parsed))
+                return parsed;
+
+            if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var decimalValue) ||
+                decimal.TryParse(value?.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out decimalValue) ||
+                decimal.TryParse(value, NumberStyles.Any, CultureInfo.CurrentCulture, out decimalValue))
+                return (int)decimalValue;
+
+            var raw = (expression ?? string.Empty).Trim();
+            return int.TryParse(raw, out parsed) ? parsed : 0;
         }
 
         private static bool IsQuotedFoxLiteral(string value)
@@ -1942,6 +2032,7 @@ namespace BIS.ERP.Services
 
                 // Получаем PrintFormTemplate из FrxReport
                 var template = parser.GetPrintTemplate(frxReport);
+                FrxRecognitionProfileService.ApplyImportProfile(template);
 
                 // Сериализуем в JSON
                 var json = JsonSerializer.Serialize(template, new JsonSerializerOptions
@@ -2163,12 +2254,13 @@ namespace BIS.ERP.Services
         {
             if (string.IsNullOrWhiteSpace(templateJson))
                 return new PrintFormTemplate();
-            return new FrxParser().GetPrintTemplate(new FrxReport
+            var template = new FrxParser().GetPrintTemplate(new FrxReport
             {
                 Id = Guid.NewGuid(),
                 Name = "Template",
                 FrxXml = templateJson
             });
+            return FrxRecognitionProfileService.ApplyImportProfile(template);
         }
 
         public static string CleanFoxText(string input)
