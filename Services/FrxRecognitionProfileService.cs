@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using BIS.ERP.Models;
 
@@ -10,8 +9,7 @@ namespace BIS.ERP.Services
 {
     internal static class FrxRecognitionProfileService
     {
-        private const string ProfilesRelativePath = "ReportRecognition/frx-recognition-profiles.json";
-        private static readonly Lazy<IReadOnlyList<FrxRecognitionProfile>> Profiles = new(LoadProfiles);
+        private static readonly Lazy<IReadOnlyList<FrxRecognitionProfile>> Profiles = new(GetFallbackProfiles);
 
         public static PrintFormTemplate ApplyImportProfile(PrintFormTemplate template)
         {
@@ -253,28 +251,6 @@ namespace BIS.ERP.Services
             };
         }
 
-        private static IReadOnlyList<FrxRecognitionProfile> LoadProfiles()
-        {
-            try
-            {
-                var file = Path.Combine(AppContext.BaseDirectory, ProfilesRelativePath);
-                if (File.Exists(file))
-                {
-                    var container = JsonSerializer.Deserialize<FrxRecognitionProfileContainer>(
-                        File.ReadAllText(file),
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    if (container?.Profiles.Count > 0)
-                        return container.Profiles;
-                }
-            }
-            catch
-            {
-                // При поврежденной базе правил используем безопасные встроенные профили.
-            }
-
-            return GetFallbackProfiles();
-        }
-
         private static IReadOnlyList<FrxRecognitionProfile> GetFallbackProfiles() => new[]
         {
             new FrxRecognitionProfile
@@ -325,11 +301,6 @@ namespace BIS.ERP.Services
                 }
             }
         };
-
-        private sealed class FrxRecognitionProfileContainer
-        {
-            public List<FrxRecognitionProfile> Profiles { get; set; } = new();
-        }
 
         private sealed class FrxRecognitionProfile
         {

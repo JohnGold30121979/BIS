@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock x:Name="DialogTitle" Grid.Row="0" FontSize="18" FontWeight="Bold" Margin="0,0,0,12"/>
@@ -38,12 +39,12 @@
             </StackPanel>
 
             <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Номер ЭСФ"/>
-                <TextBox x:Name="EsfNumberBox" Height="28"/>
+                <TextBlock Text="Кому"/>
+                <ComboBox x:Name="OrganizationCombo" Height="28" DisplayMemberPath="DisplayName"/>
             </StackPanel>
             <StackPanel Grid.Row="1" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Организация"/>
-                <ComboBox x:Name="OrganizationCombo" Height="28" DisplayMemberPath="DisplayName"/>
+                <TextBlock Text="Номер ЭСФ"/>
+                <TextBox x:Name="EsfNumberBox" Height="28"/>
             </StackPanel>
 
             <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,10,8">
@@ -54,7 +55,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="AccountBox" Height="28" IsReadOnly="True"/>
-                    <Button Grid.Column="1" Content="..." Width="32" Height="28" Margin="4,0,0,0" Click="OnSelectAccountClick"/>
+                    <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="..." Width="32" Height="28" Margin="4,0,0,0" Click="OnSelectAccountClick"/>
                 </Grid>
             </StackPanel>
             <StackPanel Grid.Row="2" Grid.Column="1" Margin="10,0,0,8">
@@ -80,8 +81,8 @@
         <DataGrid x:Name="LinesGrid" Grid.Row="2" AutoGenerateColumns="False"
                   CanUserAddRows="False" SelectionChanged="OnLineSelectionChanged">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                <DataGridTemplateColumn Header="Затр. счет" Width="210">
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="2.4*"/>
+                <DataGridTemplateColumn Header="Затр. счет" Width="190">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
@@ -126,14 +127,14 @@
         </DataGrid>
 
         <WrapPanel Grid.Row="3" Margin="0,8,0,8">
-            <Button Content="Добавить строку" Width="120" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
+            <Button x:Name="AddLineButton" Content="Добавить строку" Width="120" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
             <Button x:Name="DeleteLineButton" Content="Удалить строку" Width="120" Height="32" Margin="0,0,8,0"
                     IsEnabled="False" Click="OnDeleteLineClick"/>
             <Button x:Name="LinePostingsButton" Content="Проводки по строке" Width="140" Height="32" Margin="0,0,8,0"
                     IsEnabled="False" Click="OnLinePostingsClick"/>
             <Button x:Name="AllPostingsButton" Content="Все проводки" Width="120" Height="32" Margin="0,0,8,0"
                     IsEnabled="False" Click="OnAllPostingsClick"/>
-            <Button Content="Пересчет" Width="100" Height="32" Click="OnRecalculateClick"/>
+            <Button x:Name="RecalculateButton" Content="Пересчет" Width="100" Height="32" Click="OnRecalculateClick"/>
         </WrapPanel>
 
         <Grid Grid.Row="4" Margin="0,0,0,10">
@@ -161,10 +162,14 @@
             </StackPanel>
         </Grid>
 
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Запись" Width="100" Height="35" Margin="0,0,10,0"
+        <TextBlock x:Name="ModeHintText" Grid.Row="5"
+                   Text="Режим просмотра: изменения недоступны. Для изменения используйте кнопку «Редактировать» или «Корректировка»."
+                   Foreground="#7F8C8D" FontStyle="Italic" Visibility="Collapsed" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="SaveButton" Content="Запись" Width="100" Height="35" Margin="0,0,10,0"
                     Background="#27AE60" Foreground="White" Click="OnSaveClick"/>
-            <Button Content="Отмена" Width="100" Height="35"
+            <Button x:Name="CancelButton" Content="Отмена" Width="100" Height="35"
                     Background="#95A5A6" Foreground="White" Click="OnCancelClick"/>
         </StackPanel>
     </Grid>

@@ -2,8 +2,6 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
-using System.Windows.Navigation;
-using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace BIS.ERP.Views
@@ -11,35 +9,24 @@ namespace BIS.ERP.Views
     public partial class PdfPreviewWindow : Window
     {
         private readonly byte[] _pdfData;
-        private string _tempFilePath;
-        private bool _isClosingAfterCancelledNavigation;
-        private readonly DispatcherTimer _navigationStateTimer;
+        private string _tempFilePath = string.Empty;
 
         public PdfPreviewWindow(byte[] pdfData)
         {
             InitializeComponent();
             _pdfData = pdfData;
             Loaded += OnLoaded;
-            PdfViewer.Navigated += OnPdfViewerNavigated;
-            PdfViewer.LoadCompleted += OnPdfViewerLoadCompleted;
-            _navigationStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
-            _navigationStateTimer.Tick += (_, _) => CloseIfCancelledPreviewPage(null);
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
             try
             {
-                // Сохраняем во временный файл
-                _tempFilePath = Path.Combine(Path.GetTempPath(), $"BIS_{Guid.NewGuid()}.pdf");
-                File.WriteAllBytes(_tempFilePath, _pdfData);
+                EnsureTempPdfFile();
 
-                // Показываем PDF в WebBrowser
-                PdfViewer.Navigate(new Uri(_tempFilePath));
-                _navigationStateTimer.Start();
-
-                // Устанавливаем заголовок окна
                 Title = $"Предпросмотр - {Path.GetFileName(_tempFilePath)}";
+                PreviewStatusText.Text = "PDF сформирован. Открываю документ во внешнем просмотрщике...";
+                OpenPdfExternally(showError: false);
             }
             catch (Exception ex)
             {
@@ -49,42 +36,36 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void OnPdfViewerNavigated(object sender, NavigationEventArgs e)
+        private void OnOpenClick(object sender, RoutedEventArgs e)
         {
-            CloseIfCancelledPreviewPage(e.Uri?.ToString());
+            OpenPdfExternally(showError: true);
         }
 
-        private void OnPdfViewerLoadCompleted(object sender, NavigationEventArgs e)
-        {
-            CloseIfCancelledPreviewPage(e.Uri?.ToString());
-        }
-
-        private void CloseIfCancelledPreviewPage(string? uriText)
-        {
-            if (_isClosingAfterCancelledNavigation)
-                return;
-
-            var sourceText = PdfViewer.Source?.ToString() ?? string.Empty;
-            var combined = $"{uriText} {sourceText} {GetBrowserDocumentTitle()}";
-            if (!combined.Contains("navcancl", StringComparison.OrdinalIgnoreCase) &&
-                !combined.Contains("navigation canceled", StringComparison.OrdinalIgnoreCase) &&
-                !combined.Contains("отмен", StringComparison.OrdinalIgnoreCase))
-                return;
-
-            _isClosingAfterCancelledNavigation = true;
-            Dispatcher.BeginInvoke(new Action(Close));
-        }
-
-        private string GetBrowserDocumentTitle()
+        private void OpenPdfExternally(bool showError)
         {
             try
             {
-                dynamic document = PdfViewer.Document;
-                return document?.Title ?? string.Empty;
+                EnsureTempPdfFile();
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = _tempFilePath,
+                    UseShellExecute = true
+                });
+                PreviewStatusText.Text = $"PDF открыт во внешнем просмотрщике.\nФайл предпросмотра: {_tempFilePath}";
             }
-            catch
+            catch (Exception ex)
             {
-                return string.Empty;
+                PreviewStatusText.Text =
+                    "Не удалось автоматически открыть PDF. Сохраните файл и откройте его вручную.";
+                if (showError)
+                {
+                    MessageBox.Show(
+                        $"Не удалось открыть PDF: {ex.Message}",
+                        "Предпросмотр PDF",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
             }
         }
 
@@ -105,7 +86,7 @@ namespace BIS.ERP.Views
             {
                 try
                 {
-                    File.Copy(_tempFilePath, saveDialog.FileName, overwrite: true);
+                    File.WriteAllBytes(saveDialog.FileName, _pdfData);
                     MessageBox.Show($"PDF сохранён:\n{saveDialog.FileName}", "Успех",
                         MessageBoxButton.OK, MessageBoxImage.Information);
                 }
@@ -122,6 +103,8 @@ namespace BIS.ERP.Views
         {
             try
             {
+                EnsureTempPdfFile();
+
                 var psi = new ProcessStartInfo
                 {
                     FileName = _tempFilePath,
@@ -144,16 +127,28 @@ namespace BIS.ERP.Views
             Close();
         }
 
+        private void EnsureTempPdfFile()
+        {
+            if (string.IsNullOrWhiteSpace(_tempFilePath))
+            {
+                var previewDirectory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "BIS.ERP",
+                    "Preview");
+                Directory.CreateDirectory(previewDirectory);
+                _tempFilePath = Path.Combine(previewDirectory, $"BIS_{Guid.NewGuid():N}.pdf");
+            }
+
+            if (!File.Exists(_tempFilePath))
+                File.WriteAllBytes(_tempFilePath, _pdfData);
+        }
+
         protected override void OnClosed(EventArgs e)
         {
             base.OnClosed(e);
             // Удаляем временный файл
             try
             {
-                PdfViewer.Navigated -= OnPdfViewerNavigated;
-                PdfViewer.LoadCompleted -= OnPdfViewerLoadCompleted;
-                _navigationStateTimer.Stop();
-                PdfViewer.Navigate("about:blank");
                 if (!string.IsNullOrEmpty(_tempFilePath) && File.Exists(_tempFilePath))
                     File.Delete(_tempFilePath);
             }

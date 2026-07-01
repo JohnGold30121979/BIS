@@ -27,8 +27,6 @@
                     Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
             <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="35" Margin="0,0,10,5"
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
-            <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,5"
-                    Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
             <Button x:Name="AllPostingsButton" Content="📒 Все проводки" Width="130" Height="35" Margin="0,0,10,5"
                     Background="#16A085" Foreground="White" IsEnabled="False" Click="OnAllPostingsClick"/>
             <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
@@ -38,14 +36,14 @@
         </WrapPanel>
 
         <DataGrid x:Name="InvoicesGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
-                  SelectionChanged="OnInvoiceSelectionChanged" AlternatingRowBackground="#F5F5F5">
+                  SelectionChanged="OnInvoiceSelectionChanged" MouseDoubleClick="OnInvoiceDoubleClick"
+                  AlternatingRowBackground="#F5F5F5">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
                 <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" Width="*"/>
                 <DataGridTextColumn Header="Сумма в сом" Binding="{Binding TotalAmount, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="200"/>
-                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -66,6 +64,11 @@
         <StatusBar Grid.Row="5" Margin="0,10,0,0">
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Готово" Foreground="Gray"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="Подсказка: двойной щелчок по счет-фактуре открывает просмотр без изменения данных."
+                           Foreground="Gray"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

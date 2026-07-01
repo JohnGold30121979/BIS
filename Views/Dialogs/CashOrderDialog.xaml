@@ -33,7 +33,20 @@
 
             <!-- Row 1: Номер -->
             <TextBlock Grid.Row="1" Grid.Column="0" Text="Номер:" VerticalAlignment="Center"/>
-            <TextBox x:Name="NumberBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="30" IsReadOnly="True" Background="LightGray"/>
+            <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="NumberBox" Grid.Column="0" Height="30" IsReadOnly="True" Background="LightGray"/>
+                <CheckBox x:Name="AllowNumberEditCheckBox"
+                          Grid.Column="1"
+                          Content="изменить"
+                          Margin="8,0,0,0"
+                          VerticalAlignment="Center"
+                          Checked="AllowNumberEditCheckBox_Changed"
+                          Unchecked="AllowNumberEditCheckBox_Changed"/>
+            </Grid>
 
             <!-- Row 2: Дата -->
             <TextBlock Grid.Row="2" Grid.Column="0" Text="Дата:" VerticalAlignment="Center"/>

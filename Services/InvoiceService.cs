@@ -255,6 +255,40 @@ namespace BIS.ERP.Services
             return await _metadataService.GetNextDocumentNumberAsync(metadata.Name);
         }
 
+        public async Task<Guid?> FindInvoiceIdAsync(string documentNumber, DateTime? documentDate = null)
+        {
+            var normalizedNumber = MetadataService.NormalizeLegacyDocumentNumber(documentNumber);
+            if (string.IsNullOrWhiteSpace(normalizedNumber))
+                return null;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE ""doc_number"" = @number";
+
+            if (documentDate.HasValue)
+                sql += @" AND DATE(""doc_date"") = DATE(@date)";
+
+            sql += @" ORDER BY ""UpdatedAt"" DESC LIMIT 1";
+
+            await using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.Add(new NpgsqlParameter("@number", normalizedNumber));
+            if (documentDate.HasValue)
+                command.Parameters.Add(new NpgsqlParameter("@date", documentDate.Value.Date));
+
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                var value = await command.ExecuteScalarAsync();
+                return value is Guid id ? id : null;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
         public async Task<Guid> SaveInvoiceAsync(InvoiceDocument invoice, Guid? existingId = null)
         {
             RecalculateTotals(invoice);
@@ -351,6 +385,12 @@ namespace BIS.ERP.Services
                 }
 
                 await transaction.CommitAsync();
+                await new EventLogService(_context).LogAsync(
+                    isNew ? "Create" : "Update",
+                    "Document",
+                    DocumentName,
+                    id,
+                    new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
                 return id;
             }
             catch
@@ -370,6 +410,12 @@ namespace BIS.ERP.Services
             await _context.Database.ExecuteSqlRawAsync(
                 $@"DELETE FROM ""{HeaderTableName}"" WHERE ""Id"" = @id;",
                 new NpgsqlParameter("@id", invoiceId));
+            await new EventLogService(_context).LogAsync(
+                "Delete",
+                "Document",
+                DocumentName,
+                invoiceId,
+                new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
         }
 
         public async Task PostInvoiceAsync(Guid invoiceId)
@@ -429,6 +475,12 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@id", invoiceId));
 
                 await transaction.CommitAsync();
+                await new EventLogService(_context).LogAsync(
+                    "Post",
+                    "Document",
+                    DocumentName,
+                    invoiceId,
+                    new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
             }
             catch
             {

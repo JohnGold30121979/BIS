@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 
 namespace BIS.ERP.Views
 {
@@ -127,6 +128,9 @@ namespace BIS.ERP.Views
             var selected = PostingsGrid.SelectedItem as Dictionary<string, object>;
             if (selected == null) return;
 
+            if (await TryOpenInvoiceFromPostingAsync(selected, isReadOnly: false))
+                return;
+
             if (selected.ContainsKey("Id") && selected["Id"] != null)
             {
                 var id = Guid.Parse(selected["Id"].ToString());
@@ -174,6 +178,146 @@ namespace BIS.ERP.Views
                 PostingsGrid.SelectedItem = searchDialog.SelectedPosting;
                 PostingsGrid.ScrollIntoView(searchDialog.SelectedPosting);
             }
+        }
+
+        private async void PostingsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            var selected = PostingsGrid.SelectedItem as Dictionary<string, object>;
+            if (selected == null)
+                return;
+
+            if (await TryOpenInvoiceFromPostingAsync(selected, isReadOnly: true))
+                return;
+
+            var dialog = new PostingDetailsDialog(BuildPostingViewModel(selected));
+            dialog.Owner = Window.GetWindow(this);
+            dialog.ShowDialog();
+        }
+
+        private async Task<bool> TryOpenInvoiceFromPostingAsync(
+            Dictionary<string, object> posting,
+            bool isReadOnly)
+        {
+            var documentType = GetRowString(posting, "Тип документа", "document_type");
+            if (!InvoiceDocumentTypes.IsSales(documentType) && !InvoiceDocumentTypes.IsPurchase(documentType))
+                return false;
+
+            var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(
+                GetRowString(posting, "Номер документа", "doc_number"));
+            if (string.IsNullOrWhiteSpace(documentNumber))
+            {
+                MessageBox.Show("В проводке не указан номер счет-фактуры.", "Счет-фактура",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return true;
+            }
+
+            var documents = await _metadataService.GetDocumentsAsync();
+            var invoiceMetadata = documents.FirstOrDefault(document =>
+                document.Name.Equals(documentType, StringComparison.OrdinalIgnoreCase));
+            if (invoiceMetadata == null)
+            {
+                MessageBox.Show($"Метаданные документа «{documentType}» не найдены.", "Счет-фактура",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return true;
+            }
+
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var invoiceService = new InvoiceService(context);
+            invoiceService.Configure(invoiceMetadata);
+            await invoiceService.EnsureSchemaAsync();
+
+            var documentDate = GetRowDate(posting, "Дата", "posting_date");
+            var invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber, documentDate);
+            if (!invoiceId.HasValue && documentDate.HasValue)
+                invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber);
+            if (!invoiceId.HasValue)
+            {
+                MessageBox.Show($"Счет-фактура №{documentNumber} не найдена.", "Счет-фактура",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return true;
+            }
+
+            var dialog = new InvoiceEditDialog(
+                invoiceMetadata,
+                _metadataService,
+                invoiceService,
+                invoiceId.Value,
+                isReadOnly);
+            dialog.Owner = Window.GetWindow(this);
+
+            if (dialog.ShowDialog() == true && !isReadOnly)
+                await LoadData();
+
+            return true;
+        }
+
+        private static PostingViewModel BuildPostingViewModel(Dictionary<string, object> row)
+        {
+            return new PostingViewModel
+            {
+                Id = GetRowGuid(row, "Id"),
+                Date = GetRowDate(row, "Дата", "posting_date") ?? DateTime.Today,
+                DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(
+                    GetRowString(row, "Номер документа", "doc_number")),
+                DocumentType = GetRowString(row, "Тип документа", "document_type"),
+                DebitAccount = GetRowString(row, "Дебет", "debit_account"),
+                CreditAccount = GetRowString(row, "Кредит", "credit_account"),
+                Amount = GetRowDecimal(row, "Сумма в сом", "amount_kgs"),
+                AmountCurrency = GetRowDecimal(row, "Сумма в валюте", "amount_currency"),
+                Currency = GetRowString(row, "Валюта", "currency_id"),
+                Organization = GetRowString(row, "Организация", "organization_id"),
+                Employee = GetRowString(row, "Сотрудник", "employee_id"),
+                Note = GetRowString(row, "Примечание", "description"),
+                CreatedAt = GetRowDate(row, "CreatedAt"),
+                IsActive = GetRowBool(row, "Активен", "is_active", defaultValue: true)
+            };
+        }
+
+        private static string GetRowString(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var pair = row.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                var value = pair.Value?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+
+            return string.Empty;
+        }
+
+        private static DateTime? GetRowDate(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var pair = row.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (pair.Value is DateTime date)
+                    return date;
+                if (DateTime.TryParse(pair.Value?.ToString(), out date))
+                    return date;
+            }
+
+            return null;
+        }
+
+        private static decimal GetRowDecimal(Dictionary<string, object> row, params string[] keys)
+        {
+            return decimal.TryParse(GetRowString(row, keys), out var value) ? value : 0m;
+        }
+
+        private static Guid GetRowGuid(Dictionary<string, object> row, params string[] keys)
+        {
+            return Guid.TryParse(GetRowString(row, keys), out var value) ? value : Guid.Empty;
+        }
+
+        private static bool GetRowBool(Dictionary<string, object> row, string firstKey, string secondKey, bool defaultValue)
+        {
+            var value = GetRowString(row, firstKey, secondKey);
+            if (string.IsNullOrWhiteSpace(value))
+                return defaultValue;
+            return value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("да", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("1", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

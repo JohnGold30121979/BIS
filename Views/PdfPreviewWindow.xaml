@@ -20,8 +20,33 @@
                        Foreground="{DynamicResource AppPrimaryTextBrush}"/>
         </Border>
 
-        <!-- PDF Viewer -->
-        <WebBrowser x:Name="PdfViewer" Grid.Row="1" Margin="10"/>
+        <!-- PDF Preview Host -->
+        <Border Grid.Row="1" Margin="10" Padding="24"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                Background="White">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="620">
+                <TextBlock Text="PDF сформирован"
+                           FontSize="22"
+                           FontWeight="Bold"
+                           Foreground="#2C3E50"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,10"/>
+                <TextBlock x:Name="PreviewStatusText"
+                           Text="Документ будет открыт во внешнем просмотрщике PDF."
+                           FontSize="14"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           Foreground="#5D6D7E"
+                           Margin="0,0,0,18"/>
+                <Button Content="Открыть PDF"
+                        Width="150"
+                        Height="36"
+                        Background="#34495E"
+                        Foreground="White"
+                        Click="OnOpenClick"/>
+            </StackPanel>
+        </Border>
 
         <!-- Панель кнопок -->
         <Border Grid.Row="2" Background="{DynamicResource AppHeaderBackgroundBrush}" Padding="10">

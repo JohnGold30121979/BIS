@@ -160,6 +160,38 @@ namespace BIS.ERP.Views
                     System.Diagnostics.Debug.WriteLine($"Ошибка загрузки счетов: {ex.Message}");
                 }
 
+                // 6. Специальная загрузка касс, чтобы в списках не показывался GUID.
+                try
+                {
+                    if (catalogsDict.TryGetValue("Кассы", out var cashCatalog))
+                    {
+                        var cashData = await _metadataService.GetCatalogDataAsync(cashCatalog.Id);
+                        var cashDict = new Dictionary<Guid, string>();
+                        foreach (var cash in cashData)
+                        {
+                            if (cash.TryGetValue("Id", out var cashIdObj) &&
+                                cashIdObj != null &&
+                                Guid.TryParse(cashIdObj.ToString(), out var cashId))
+                            {
+                                var name = GetRowString(cash, "Наименование кассы", "Наименование", "name", "Код", "code");
+                                var account = CashOrderDialog.ResolveCashDeskAccountCode(
+                                    GetRowString(cash, "Счет", "Счет кассы", "code", "Код"),
+                                    accountAnalytics);
+                                cashDict[cashId] = string.IsNullOrWhiteSpace(account)
+                                    ? name
+                                    : $"{name} (счет {account})";
+                            }
+                        }
+
+                        referenceCache["Касса"] = cashDict;
+                        referenceCache["cash_desk_id"] = cashDict;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки касс: {ex.Message}");
+                }
+
                 // ---- Создание списка строк ----
                 var rows = new List<CashOrderRow>();
 
@@ -207,7 +239,7 @@ namespace BIS.ERP.Views
                         AmountInCurrency = row.TryGetValue("Сумма в валюте", out var curObj) && curObj != DBNull.Value && curObj != null
                             ? Convert.ToDecimal(curObj)
                             : 0,
-                        CashDeskId = row.TryGetValue("Касса", out var cashIdObj) && cashIdObj != DBNull.Value ? cashIdObj?.ToString() : ""
+                        CashDeskId = TryGetValue(row, out var cashIdObj, "Касса", "cash_desk_id") && cashIdObj != DBNull.Value ? cashIdObj?.ToString() : ""
                     };
 
                     // ---- Загрузка Reference полей через кэш ----
@@ -242,10 +274,11 @@ namespace BIS.ERP.Views
                     }
 
                     // Касса
-                    if (row.TryGetValue("Касса", out var cashObj) && cashObj != DBNull.Value && cashObj != null)
+                    if (TryGetValue(row, out var cashObj, "Касса", "cash_desk_id") && cashObj != DBNull.Value && cashObj != null)
                     {
                         if (Guid.TryParse(cashObj.ToString(), out var cashId) &&
-                            referenceCache.TryGetValue("Касса", out var cashDict) &&
+                            (referenceCache.TryGetValue("Касса", out var cashDict) ||
+                             referenceCache.TryGetValue("cash_desk_id", out cashDict)) &&
                             cashDict.TryGetValue(cashId, out var cashName))
                         {
                             newRow.CashDeskName = cashName;
@@ -336,6 +369,33 @@ namespace BIS.ERP.Views
                     fieldName, rows, accountFields, registry, referenceCatalog)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+        }
+
+        private static bool TryGetValue(Dictionary<string, object> row, out object? value, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out value))
+                    return true;
+            }
+
+            value = null;
+            return false;
+        }
+
+        private static string GetRowString(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                {
+                    var text = value.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                        return text;
+                }
+            }
+
+            return string.Empty;
         }
 
         private async void OnAddClick(object sender, RoutedEventArgs e)

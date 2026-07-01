@@ -37,6 +37,7 @@
         <!-- Таблица проводок -->
         <DataGrid x:Name="PostingsGrid" Grid.Row="2" AutoGenerateColumns="False" 
           IsReadOnly="True" SelectionChanged="PostingsGrid_SelectionChanged"
+          MouseDoubleClick="PostingsGrid_MouseDoubleClick"
           AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="100"/>
@@ -62,6 +63,11 @@
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
                 <TextBlock x:Name="ProgressText" Text="" Foreground="Blue"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="Подсказка: двойной щелчок открывает просмотр; для счет-фактур корректировка откроет сам документ."
+                           Foreground="Gray"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

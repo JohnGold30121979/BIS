@@ -42,7 +42,6 @@ namespace BIS.ERP.Views
             var hasSelection = selected != null;
             EditButton.IsEnabled = hasSelection && selected?.IsPosted == false;
             DeleteButton.IsEnabled = hasSelection && selected?.IsPosted == false;
-            PostButton.IsEnabled = hasSelection && selected?.IsPosted == false;
             AllPostingsButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
         }
@@ -101,16 +100,26 @@ namespace BIS.ERP.Views
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
+            var selected = SelectedInvoice;
+            if (selected != null)
+                await OpenInvoiceDialogAsync(selected.Id, isReadOnly: false);
+        }
+
+        private async void OnInvoiceDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            var selected = SelectedInvoice;
+            if (selected != null)
+                await OpenInvoiceDialogAsync(selected.Id, isReadOnly: true);
+        }
+
+        private async Task OpenInvoiceDialogAsync(Guid invoiceId, bool isReadOnly)
+        {
             if (_invoiceService == null)
                 return;
 
-            var selected = SelectedInvoice;
-            if (selected == null)
-                return;
-
-            var dialog = new InvoiceEditDialog(_documentMetadata, _metadataService, _invoiceService, selected.Id);
+            var dialog = new InvoiceEditDialog(_documentMetadata, _metadataService, _invoiceService, invoiceId, isReadOnly);
             dialog.Owner = Window.GetWindow(this);
-            if (dialog.ShowDialog() == true)
+            if (dialog.ShowDialog() == true && !isReadOnly)
                 await LoadDataAsync();
         }
 
@@ -135,37 +144,6 @@ namespace BIS.ERP.Views
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message, "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private async void OnPostClick(object sender, RoutedEventArgs e)
-        {
-            if (_invoiceService == null)
-                return;
-
-            var selected = SelectedInvoice;
-            if (selected == null)
-                return;
-
-            if (MessageBox.Show("Провести выбранный счет-фактуру и сформировать проводки?",
-                    "Подтверждение", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-                return;
-
-            try
-            {
-                StatusText.Text = "Проведение...";
-                await _invoiceService.PostInvoiceAsync(selected.Id);
-                await LoadDataAsync();
-                MessageBox.Show("Документ проведён. Проводки сформированы.", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Ошибка проведения", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                StatusText.Text = "Готово";
             }
         }
 

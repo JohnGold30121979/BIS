@@ -133,6 +133,8 @@ namespace BIS.ERP.Views
                     }
 
                     UpdateAccountControlledFieldsVisibility();
+                    AmountBox.Focus();
+                    AmountBox.SelectAll();
                 });
 
                 _isDataLoaded = true;
@@ -489,6 +491,18 @@ namespace BIS.ERP.Views
         {
             DialogResult = false;
             Close();
+        }
+
+        private void AllowNumberEditCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            var canEdit = AllowNumberEditCheckBox.IsChecked == true;
+            NumberBox.IsReadOnly = !canEdit;
+            NumberBox.Background = canEdit ? System.Windows.Media.Brushes.White : System.Windows.Media.Brushes.LightGray;
+            if (canEdit)
+            {
+                NumberBox.Focus();
+                NumberBox.SelectAll();
+            }
         }
 
         private void ApplySelectedCorrAccount(object accountValue)

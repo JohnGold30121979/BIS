@@ -18,6 +18,7 @@ namespace BIS.ERP.Views.Dialogs
         private readonly MetadataService _metadataService;
         private readonly InvoiceService _invoiceService;
         private readonly Guid? _editId;
+        private readonly bool _isReadOnlyMode;
         private readonly ObservableCollection<EditableInvoiceLine> _lines = new();
         private List<Dictionary<string, object>> _accounts = new();
         private readonly Dictionary<string, ReferenceOption> _vatTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
@@ -34,15 +35,19 @@ namespace BIS.ERP.Views.Dialogs
             MetadataObject document,
             MetadataService metadataService,
             InvoiceService invoiceService,
-            Guid? editId = null)
+            Guid? editId = null,
+            bool isReadOnly = false)
         {
             InitializeComponent();
             _document = document;
             _metadataService = metadataService;
             _invoiceService = invoiceService;
             _editId = editId;
+            _isReadOnlyMode = isReadOnly;
             DataContext = this;
-            DialogTitle.Text = editId.HasValue
+            DialogTitle.Text = isReadOnly && editId.HasValue
+                ? $"Просмотр: {document.Name}"
+                : editId.HasValue
                 ? $"Редактирование: {document.Name}"
                 : $"Новый документ: {document.Name}";
             LinesGrid.ItemsSource = _lines;
@@ -145,6 +150,8 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 RecalculateTotals();
+                if (_isReadOnlyMode)
+                    DisableReadOnlyMode();
             }
             catch (Exception ex)
             {
@@ -159,13 +166,30 @@ namespace BIS.ERP.Views.Dialogs
         private void DisableEditing()
         {
             NumberBox.IsReadOnly = true;
+            DatePicker.IsEnabled = false;
             EsfNumberBox.IsReadOnly = true;
             BasisBox.IsReadOnly = true;
             OrganizationCombo.IsEnabled = false;
             PaymentKindCombo.IsEnabled = false;
             DeliveryKindCombo.IsEnabled = false;
             SupplyKindCombo.IsEnabled = false;
+            HeaderAccountButton.IsEnabled = false;
             LinesGrid.IsReadOnly = true;
+            AddLineButton.IsEnabled = false;
+            DeleteLineButton.IsEnabled = false;
+            RecalculateButton.IsEnabled = false;
+            SaveButton.Content = "Закрыть";
+        }
+
+        private void DisableReadOnlyMode()
+        {
+            DisableEditing();
+            AddLineButton.Visibility = Visibility.Collapsed;
+            DeleteLineButton.Visibility = Visibility.Collapsed;
+            RecalculateButton.Visibility = Visibility.Collapsed;
+            SaveButton.Content = "Закрыть";
+            CancelButton.Visibility = Visibility.Collapsed;
+            ModeHintText.Visibility = Visibility.Visible;
         }
 
         private void FillAccountItems(IEnumerable<Dictionary<string, object>> accounts)
@@ -195,7 +219,7 @@ namespace BIS.ERP.Views.Dialogs
                 .Where(IsActiveRow)
                 .Select(row => new ReferenceOption(
                     GetRowValue(row, "Код", "code"),
-                    BuildReferenceDisplayName(GetRowValue(row, "Код", "code"), GetRowValue(row, "Наименование", "name")),
+                    BuildReferenceDisplayName(GetRowValue(row, "Наименование", "name"), GetDecimal(row, "Ставка", "rate")),
                     GetDecimal(row, "Ставка", "rate")))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Value))
                 .OrderBy(item => item.DisplayName)
@@ -331,6 +355,9 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnSelectAccountClick(object sender, RoutedEventArgs e)
         {
+            if (_isReadOnlyMode)
+                return;
+
             if (_accounts.Count == 0)
                 return;
 
@@ -344,7 +371,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
         {
-            if (_isPosted || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
+            if (_isReadOnlyMode || _isPosted || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
                 return;
 
             var dialog = new AccountSelectionDialog(_accounts)
@@ -362,27 +389,43 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnAddLineClick(object sender, RoutedEventArgs e)
         {
-            AddLine(new EditableInvoiceLine
+            if (_isReadOnlyMode)
+                return;
+
+            var previous = _lines.LastOrDefault();
+            var line = new EditableInvoiceLine
             {
                 LineNumber = _lines.Count + 1,
-                VatTaxCode = VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Value
+                Name = previous?.Name ?? string.Empty,
+                AccountCode = previous?.AccountCode ?? string.Empty,
+                AccountDisplayName = previous?.AccountDisplayName ?? string.Empty,
+                VatTaxCode = previous?.VatTaxCode
+                             ?? VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Value
                              ?? VatTaxItems.FirstOrDefault()?.Value
                              ?? string.Empty,
-                VatRate = VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Rate
+                VatRate = previous?.VatRate
+                          ?? VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Rate
                           ?? VatTaxItems.FirstOrDefault()?.Rate
                           ?? 0,
-                SalesTaxCode = SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Value
+                SalesTaxCode = previous?.SalesTaxCode
+                               ?? SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Value
                                ?? SalesTaxItems.FirstOrDefault()?.Value
                                ?? string.Empty,
-                SalesTaxRate = SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Rate
+                SalesTaxRate = previous?.SalesTaxRate
+                               ?? SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Rate
                                ?? SalesTaxItems.FirstOrDefault()?.Rate
                                ?? 0
-            });
+            };
+            AddLine(line);
             RecalculateTotals();
+            FocusAmountCell(line);
         }
 
         private void OnDeleteLineClick(object sender, RoutedEventArgs e)
         {
+            if (_isReadOnlyMode)
+                return;
+
             if (LinesGrid.SelectedItem is not EditableInvoiceLine selected)
                 return;
 
@@ -443,7 +486,11 @@ namespace BIS.ERP.Views.Dialogs
             dialog.ShowDialog();
         }
 
-        private void OnRecalculateClick(object sender, RoutedEventArgs e) => RecalculateTotals();
+        private void OnRecalculateClick(object sender, RoutedEventArgs e)
+        {
+            if (!_isReadOnlyMode)
+                RecalculateTotals();
+        }
 
         private void RecalculateTotals()
         {
@@ -463,7 +510,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
-            if (_isPosted)
+            if (_isReadOnlyMode || _isPosted)
             {
                 Close();
                 return;
@@ -583,9 +630,24 @@ namespace BIS.ERP.Views.Dialogs
             return $"{code} - {name}";
         }
 
-        private static string BuildReferenceDisplayName(string code, string name)
+        private void FocusAmountCell(EditableInvoiceLine line)
         {
-            return string.IsNullOrWhiteSpace(name) ? code : name;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                LinesGrid.SelectedItem = line;
+                LinesGrid.CurrentCell = new DataGridCellInfo(line, LinesGrid.Columns[2]);
+                LinesGrid.ScrollIntoView(line, LinesGrid.Columns[2]);
+                LinesGrid.BeginEdit();
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        private static string BuildReferenceDisplayName(string name, decimal rate)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return rate > 0 ? $"{rate:N2}%" : string.Empty;
+            if (rate > 0 && !name.Contains('%'))
+                return $"{name} ({rate:N2}%)";
+            return name;
         }
 
         private void SetHeaderAccount(string accountCode)
