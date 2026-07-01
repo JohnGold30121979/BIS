@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Создание информационной базы"
         Width="500" 
-        Height="600"
+        Height="640"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -44,6 +44,12 @@
                         <TextBlock Text="Название базы" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
                         <TextBox x:Name="NameBox" Height="35" Padding="10" FontSize="13" 
                                  Margin="0,0,0,15" TextChanged="OnNameChanged"
+                                 Background="White" BorderBrush="#E0E0E0" BorderThickness="1"
+                                 Foreground="#2C3E50" FontWeight="Normal"/>
+
+                        <TextBlock Text="Начальная версия патча" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                        <TextBox x:Name="PatchVersionBox" Height="35" Padding="10" FontSize="13"
+                                 Margin="0,0,0,15"
                                  Background="White" BorderBrush="#E0E0E0" BorderThickness="1"
                                  Foreground="#2C3E50" FontWeight="Normal"/>
 

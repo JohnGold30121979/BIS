@@ -32,7 +32,7 @@ namespace BIS.ERP.ViewModels
         public bool IsEmpty => !HasInfoBases;
         public string ConnectionPath => SelectedInfoBase == null
             ? "Выберите информационную базу"
-            : $"Сервер: {SelectedInfoBase.Host}:{SelectedInfoBase.Port}; База: {SelectedInfoBase.DatabaseName}";
+            : $"Сервер: {SelectedInfoBase.Host}:{SelectedInfoBase.Port}; База: {SelectedInfoBase.DatabaseName}; {SelectedInfoBase.PatchVersionDisplay}";
 
         public event EventHandler<bool>? OpenMainWindowRequested;
         public event EventHandler? CloseRequested;

@@ -41,7 +41,7 @@ namespace BIS.ERP.Models
 
         public bool IsActive { get; set; }
 
-        [MaxLength(20)]
+        [MaxLength(50)]
         public string? Version { get; set; }
 
         // Строка подключения
@@ -54,6 +54,11 @@ namespace BIS.ERP.Models
 
         [NotMapped]
         public string TypeName => string.IsNullOrEmpty(Type) ? "Универсальная" : Type;
+
+        [NotMapped]
+        public string PatchVersionDisplay => string.IsNullOrWhiteSpace(Version)
+            ? "Патч: не указан"
+            : $"Патч: {Version}";
 
         // Отображаемое имя (без хэша)
         [NotMapped]

@@ -8,6 +8,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -29,8 +30,78 @@ namespace BIS.ERP.Services
 
         public async Task ExportAsync(string filePath)
         {
+            var package = await BuildPackageAsync();
+            var json = JsonSerializer.Serialize(package, JsonOptions);
+            await File.WriteAllTextAsync(filePath, json);
+        }
+
+        public async Task ExportEncryptedAsync(string filePath)
+        {
+            var package = await BuildPackageAsync();
+            var json = JsonSerializer.Serialize(package, JsonOptions);
+            var encrypted = BisPackageCryptoService.Protect(
+                Encoding.UTF8.GetBytes(json),
+                "BIS.Configuration");
+            await File.WriteAllBytesAsync(filePath, encrypted);
+        }
+
+        public async Task<ConfigurationPackage> ImportAsync(string filePath)
+        {
+            var json = await File.ReadAllTextAsync(filePath);
+            return await ImportJsonAsync(json);
+        }
+
+        public async Task<ConfigurationPackage> ImportEncryptedOrJsonAsync(string filePath)
+        {
+            var bytes = await File.ReadAllBytesAsync(filePath);
+            var json = BisPackageCryptoService.IsEncryptedPackage(bytes)
+                ? Encoding.UTF8.GetString(BisPackageCryptoService.Unprotect(bytes, "BIS.Configuration"))
+                : await File.ReadAllTextAsync(filePath);
+
+            return await ImportJsonAsync(json);
+        }
+
+        private async Task<ConfigurationPackage> ImportJsonAsync(string json)
+        {
+            var package = JsonSerializer.Deserialize<ConfigurationPackage>(json, JsonOptions)
+                ?? throw new InvalidOperationException("Файл конфигурации пустой или поврежден.");
+
+            if (!string.Equals(package.Format, "BIS.Configuration", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Файл не является выгрузкой конфигурации BIS.");
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                await ReplaceMetadataAsync(package.MetadataObjects);
+                await ReplaceReportsAsync(package.Reports);
+                await ReplaceSystemConfigurationAsync(package.SystemConfigurations);
+                await ReplaceModulesAsync(package.Modules, package.ModuleItems);
+                await _context.SaveChangesAsync();
+
+                var metadataService = new MetadataService(_context);
+                foreach (var obj in package.MetadataObjects.Where(item => !string.IsNullOrWhiteSpace(item.TableName)))
+                    await metadataService.CreateDynamicTableAsync(obj);
+
+                foreach (var table in package.TableData)
+                    await ReplaceTableDataAsync(table);
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            return package;
+        }
+
+        private async Task<ConfigurationPackage> BuildPackageAsync()
+        {
             await new ModuleMetadataService(_context).EnsureSchemaAsync();
             await new PrintFormService(_context).EnsureSchemaAsync();
+            await new BisPatchService(_context).EnsureSchemaAsync();
+
             var metadata = await _context.MetadataObjects
                 .AsNoTracking()
                 .Include(item => item.Fields)
@@ -70,43 +141,6 @@ namespace BIS.ERP.Services
                     TableName = obj.TableName,
                     Rows = await ReadTableAsync(obj.TableName)
                 });
-            }
-
-            var json = JsonSerializer.Serialize(package, JsonOptions);
-            await File.WriteAllTextAsync(filePath, json);
-        }
-
-        public async Task<ConfigurationPackage> ImportAsync(string filePath)
-        {
-            var json = await File.ReadAllTextAsync(filePath);
-            var package = JsonSerializer.Deserialize<ConfigurationPackage>(json, JsonOptions)
-                ?? throw new InvalidOperationException("Файл конфигурации пустой или поврежден.");
-
-            if (!string.Equals(package.Format, "BIS.Configuration", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Файл не является выгрузкой конфигурации BIS.");
-
-            await using var transaction = await _context.Database.BeginTransactionAsync();
-            try
-            {
-                await ReplaceMetadataAsync(package.MetadataObjects);
-                await ReplaceReportsAsync(package.Reports);
-                await ReplaceSystemConfigurationAsync(package.SystemConfigurations);
-                await ReplaceModulesAsync(package.Modules, package.ModuleItems);
-                await _context.SaveChangesAsync();
-
-                var metadataService = new MetadataService(_context);
-                foreach (var obj in package.MetadataObjects.Where(item => !string.IsNullOrWhiteSpace(item.TableName)))
-                    await metadataService.CreateDynamicTableAsync(obj);
-
-                foreach (var table in package.TableData)
-                    await ReplaceTableDataAsync(table);
-
-                await transaction.CommitAsync();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
             }
 
             return package;

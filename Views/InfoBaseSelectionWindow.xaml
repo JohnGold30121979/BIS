@@ -85,6 +85,8 @@
                                            Foreground="#2C3E50"/>
                                                 <TextBlock Text="Информационная база" FontSize="11" 
                                            Foreground="#7F8C8D" Margin="0,2,0,0"/>
+                                                <TextBlock Text="{Binding PatchVersionDisplay}" FontSize="11"
+                                           Foreground="#2980B9" Margin="0,2,0,0"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>

@@ -14,6 +14,9 @@ namespace BIS.ERP.Views
         public string Username => UsernameBox.Text;
         public string Password => PasswordBox.Password;
         public string DatabaseName => DatabaseBox.Text.Trim();
+        public string InitialPatchVersion => string.IsNullOrWhiteSpace(PatchVersionBox.Text)
+            ? InfoBaseManager.DefaultPatchVersion
+            : PatchVersionBox.Text.Trim();
         public bool AttachExisting => (ModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "Attach";
         public bool CreateTestPostings => CreateTestPostingsCheckBox.IsChecked == true;
 
@@ -30,6 +33,7 @@ namespace BIS.ERP.Views
             UsernameBox.Text = settings.Username;
             PasswordBox.Password = settings.Password;
             CreateTestPostingsCheckBox.IsChecked = settings.CreateTestPostingsForNewInfoBases;
+            PatchVersionBox.Text = InfoBaseManager.DefaultPatchVersion;
 
             GenerateDatabaseName();
         }
@@ -187,8 +191,8 @@ namespace BIS.ERP.Views
 
                 // Создаем базу с описанием
                 var newBase = AttachExisting
-                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password)
-                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, CreateTestPostings);
+                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion)
+                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, CreateTestPostings, InitialPatchVersion);
 
                 // Обновляем описание для отображения
                 if (newBase != null)

@@ -12,6 +12,8 @@ namespace BIS.ERP.Services;
 
 public class InfoBaseManager
 {
+    public const string DefaultPatchVersion = "1.0.0";
+
     private readonly AppDbContext _masterContext;
     private InfoBase? _currentInfoBase;
 
@@ -19,6 +21,7 @@ public class InfoBaseManager
     {
         _masterContext = new AppDbContext();
         EnsureMasterDatabaseExists();
+        EnsureMasterSchema();
     }
 
     private void EnsureMasterDatabaseExists()
@@ -49,9 +52,21 @@ public class InfoBaseManager
         }
     }
 
+    private void EnsureMasterSchema()
+    {
+        _masterContext.Database.ExecuteSqlRaw(@"
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""Version"" varchar(50);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""Version"" TYPE varchar(50);
+            UPDATE ""InfoBases"" SET ""Version"" = @version WHERE ""Version"" IS NULL OR ""Version"" = '';",
+            new NpgsqlParameter("@version", DefaultPatchVersion));
+    }
+
     public async Task<List<InfoBase>> GetInfoBasesAsync()
     {
-        return await _masterContext.InfoBases.ToListAsync();
+        var bases = await _masterContext.InfoBases.OrderBy(item => item.Name).ToListAsync();
+        foreach (var infoBase in bases)
+            await RefreshInfoBasePatchVersionAsync(infoBase, createBaselineWhenMissing: true);
+        return bases;
     }
 
     public async Task<InfoBase?> GetCurrentInfoBaseAsync()
@@ -71,14 +86,16 @@ public class InfoBaseManager
             settings.Port,
             settings.Username,
             settings.Password,
-            createTestPostings: settings.CreateTestPostingsForNewInfoBases);
+            createTestPostings: settings.CreateTestPostingsForNewInfoBases,
+            patchVersion: DefaultPatchVersion);
     }
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
     string host, int port, string username, string password, string? databaseName = null,
-    bool createTestPostings = true)
+    bool createTestPostings = true, string? patchVersion = null)
     {
         var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
+        var normalizedPatchVersion = NormalizePatchVersion(patchVersion);
         if (!System.Text.RegularExpressions.Regex.IsMatch(dbName, "^[a-zA-Z0-9_]+$"))
             throw new ArgumentException("Имя базы данных может содержать только латинские буквы, цифры и знак подчеркивания.");
 
@@ -109,7 +126,7 @@ public class InfoBaseManager
                 Password = password,
                 CreatedAt = DateTime.UtcNow,
                 IsActive = false,
-                Version = "1.0"
+                Version = normalizedPatchVersion
             };
 
             // В InfoBaseManager.CreateInfoBaseAsync
@@ -119,6 +136,7 @@ public class InfoBaseManager
             await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
             await new PrintFormService(dbContext).SeedCashOrderFormsAsync();
             await new TestPostingMetadataSeedService(dbContext).EnsureAsync(createTestPostings);
+            await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
 
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();
@@ -209,7 +227,8 @@ public class InfoBaseManager
     }
 
     public async Task<InfoBase> AttachInfoBaseAsync(
-        string name, string host, int port, string databaseName, string username, string password)
+        string name, string host, int port, string databaseName, string username, string password,
+        string? patchVersion = null)
     {
         if (!await TestConnectionAsync(host, port, databaseName, username, password))
             throw new InvalidOperationException("Не удалось подключиться к указанной базе данных.");
@@ -231,12 +250,25 @@ public class InfoBaseManager
                     "Указанная база доступна, но не содержит структуру BIS ERP. Создайте новую базу или выберите существующую базу BIS ERP.");
         }
 
+        var normalizedPatchVersion = NormalizePatchVersion(patchVersion);
+        await using (var dbContext = new AppDbContext(connectionString))
+        {
+            var patchService = new BisPatchService(dbContext);
+            var currentPatchVersion = await patchService.GetCurrentPatchVersionAsync();
+            if (string.IsNullOrWhiteSpace(currentPatchVersion))
+            {
+                await patchService.EnsureBaselinePatchAsync(normalizedPatchVersion);
+                currentPatchVersion = normalizedPatchVersion;
+            }
+            normalizedPatchVersion = currentPatchVersion;
+        }
+
         var infoBase = new InfoBase
         {
             Name = name.Trim(), Description = name.Trim(), Type = "Universal",
             Host = host.Trim(), Port = port, DatabaseName = databaseName.Trim(),
             Username = username.Trim(), Password = password, IsActive = false,
-            Version = "1.0", CreatedAt = DateTime.UtcNow
+            Version = normalizedPatchVersion, CreatedAt = DateTime.UtcNow
         };
         await _masterContext.InfoBases.AddAsync(infoBase);
         await _masterContext.SaveChangesAsync();
@@ -258,6 +290,50 @@ public class InfoBaseManager
         await _masterContext.SaveChangesAsync();
         if (_currentInfoBase?.Id == id)
             _currentInfoBase = infoBase;
+    }
+
+    public async Task RefreshCurrentInfoBaseVersionAsync()
+    {
+        var current = await GetCurrentInfoBaseAsync();
+        if (current != null)
+            await RefreshInfoBasePatchVersionAsync(current, createBaselineWhenMissing: true);
+    }
+
+    private async Task RefreshInfoBasePatchVersionAsync(
+        InfoBase infoBase,
+        bool createBaselineWhenMissing)
+    {
+        try
+        {
+            await using var dbContext = new AppDbContext(infoBase.ConnectionString);
+            var patchService = new BisPatchService(dbContext);
+            var version = await patchService.GetCurrentPatchVersionAsync();
+            if (string.IsNullOrWhiteSpace(version) && createBaselineWhenMissing)
+            {
+                version = NormalizePatchVersion(infoBase.Version);
+                await patchService.EnsureBaselinePatchAsync(version);
+            }
+
+            if (!string.IsNullOrWhiteSpace(version) &&
+                !string.Equals(infoBase.Version, version, StringComparison.OrdinalIgnoreCase))
+            {
+                infoBase.Version = version;
+                await _masterContext.SaveChangesAsync();
+                if (_currentInfoBase?.Id == infoBase.Id)
+                    _currentInfoBase.Version = version;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"Не удалось обновить версию патча инфобазы {infoBase.Name}: {ex.Message}");
+        }
+    }
+
+    private static string NormalizePatchVersion(string? version)
+    {
+        var normalized = string.IsNullOrWhiteSpace(version) ? DefaultPatchVersion : version.Trim();
+        return normalized.Length > 50 ? normalized[..50] : normalized;
     }
 
     public async Task<AppDbContext> GetCurrentDbContextAsync()

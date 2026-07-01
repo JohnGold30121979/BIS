@@ -64,6 +64,7 @@ namespace BIS.ERP.Views
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 await new RuntimeSchemaFixService(_context).EnsureAsync();
                 await new SystemConfigurationService(_context).GetAsync();
+                await new BisPatchService(_context).EnsureSchemaAsync();
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
@@ -1455,15 +1456,19 @@ namespace BIS.ERP.Views
                 var dialog = new SaveFileDialog
                 {
                     Title = "Выгрузить конфигурацию",
-                    Filter = "BIS configuration (*.bisconfig.json)|*.bisconfig.json|JSON (*.json)|*.json",
-                    FileName = $"bis_configuration_{DateTime.Now:yyyyMMdd_HHmm}.bisconfig.json"
+                    Filter = "BIS encrypted configuration (*.bisconfig)|*.bisconfig|Legacy JSON (*.bisconfig.json)|*.bisconfig.json|JSON (*.json)|*.json",
+                    FileName = $"bis_configuration_{DateTime.Now:yyyyMMdd_HHmm}.bisconfig"
                 };
 
                 if (dialog.ShowDialog(this) != true)
                     return;
 
                 Mouse.OverrideCursor = Cursors.Wait;
-                await new ConfigurationExchangeService(_context).ExportAsync(dialog.FileName);
+                var exchange = new ConfigurationExchangeService(_context);
+                if (dialog.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    await exchange.ExportAsync(dialog.FileName);
+                else
+                    await exchange.ExportEncryptedAsync(dialog.FileName);
                 MessageBox.Show("Конфигурация выгружена.", "Выгрузка конфигурации",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -1488,7 +1493,7 @@ namespace BIS.ERP.Views
                 var dialog = new OpenFileDialog
                 {
                     Title = "Загрузить конфигурацию",
-                    Filter = "BIS configuration (*.bisconfig.json)|*.bisconfig.json|JSON (*.json)|*.json|Все файлы (*.*)|*.*",
+                    Filter = "BIS configuration (*.bisconfig;*.bisconfig.json)|*.bisconfig;*.bisconfig.json|Encrypted BIS (*.bisconfig)|*.bisconfig|JSON (*.json)|*.json|Все файлы (*.*)|*.*",
                     Multiselect = false
                 };
 
@@ -1505,7 +1510,7 @@ namespace BIS.ERP.Views
                     return;
 
                 Mouse.OverrideCursor = Cursors.Wait;
-                var package = await new ConfigurationExchangeService(_context).ImportAsync(dialog.FileName);
+                var package = await new ConfigurationExchangeService(_context).ImportEncryptedOrJsonAsync(dialog.FileName);
                 await LoadMetadata();
                 MessageBox.Show(
                     $"Конфигурация загружена.\nОбъектов: {package.MetadataObjects.Count}\nОтчетов: {package.Reports.Count}\nТаблиц данных: {package.TableData.Count}",
@@ -1521,6 +1526,24 @@ namespace BIS.ERP.Views
             finally
             {
                 Mouse.OverrideCursor = null;
+            }
+        }
+
+        private async void OnPatchesClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_context == null)
+                    _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+
+                var dialog = new PatchManagerDialog(_context) { Owner = this };
+                dialog.ShowDialog();
+                await LoadMetadata();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия патчей: {ex.Message}", "Патчи",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
