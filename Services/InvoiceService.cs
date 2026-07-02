@@ -295,6 +295,7 @@ namespace BIS.ERP.Services
             RecalculateTotals(invoice);
             var id = existingId ?? Guid.NewGuid();
             var isNew = !existingId.HasValue;
+            var existing = isNew ? null : await GetInvoiceAsync(id);
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -325,9 +326,8 @@ namespace BIS.ERP.Services
                 }
                 else
                 {
-                    var existing = await GetInvoiceAsync(id);
-                    if (existing?.IsPosted == true)
-                        throw new InvalidOperationException("Проведённый документ нельзя изменять.");
+                    if (existing != null)
+                        await DeletePostingsAsync(existing.DocNumber);
 
                     await _context.Database.ExecuteSqlRawAsync($@"
                         UPDATE ""{HeaderTableName}""
@@ -336,7 +336,7 @@ namespace BIS.ERP.Services
                             ""payment_kind"" = @payment, ""delivery_kind"" = @delivery, ""supply_kind"" = @supply,
                             ""basis"" = @basis, ""amount_without_tax"" = @amountWithoutTax,
                             ""vat_total"" = @vatTotal, ""sales_tax_total"" = @salesTaxTotal,
-                            ""amount"" = @amount, ""UpdatedAt"" = NOW()
+                            ""amount"" = @amount, ""is_posted"" = false, ""UpdatedAt"" = NOW()
                         WHERE ""Id"" = @id",
                         new NpgsqlParameter("@id", id),
                         new NpgsqlParameter("@number", invoice.DocNumber),

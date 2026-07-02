@@ -92,7 +92,8 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBox Text="{Binding AccountDisplayName}" IsReadOnly="True" Height="24"/>
                                 <Button Grid.Column="1" Content="..." Width="28" Height="24" Margin="4,0,0,0"
-                                        Tag="{Binding}" Click="OnSelectLineAccountClick"/>
+                                        Tag="{Binding}" Click="OnSelectLineAccountClick"
+                                        IsEnabled="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}}"/>
                             </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
@@ -104,7 +105,8 @@
                             <ComboBox ItemsSource="{Binding DataContext.VatTaxItems, RelativeSource={RelativeSource AncestorType=Window}}"
                                       DisplayMemberPath="DisplayName" SelectedValuePath="Value"
                                       SelectedValue="{Binding VatTaxCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      IsTextSearchEnabled="True"/>
+                                      IsTextSearchEnabled="True"
+                                      IsEnabled="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}}"/>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
@@ -116,7 +118,8 @@
                             <ComboBox ItemsSource="{Binding DataContext.SalesTaxItems, RelativeSource={RelativeSource AncestorType=Window}}"
                                       DisplayMemberPath="DisplayName" SelectedValuePath="Value"
                                       SelectedValue="{Binding SalesTaxCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      IsTextSearchEnabled="True"/>
+                                      IsTextSearchEnabled="True"
+                                      IsEnabled="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}}"/>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>

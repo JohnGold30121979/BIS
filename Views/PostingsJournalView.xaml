@@ -151,7 +151,7 @@
             </StatusBarItem>
             <Separator/>
             <StatusBarItem>
-                <TextBlock Text="Подсказка: двойной щелчок по строке открывает подробности проводки." Foreground="Gray"/>
+                <TextBlock Text="Подсказка: двойной щелчок открывает счет-фактуру в просмотре или подробности проводки." Foreground="Gray"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

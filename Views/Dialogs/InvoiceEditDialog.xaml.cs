@@ -12,7 +12,7 @@ using BIS.ERP.Views;
 
 namespace BIS.ERP.Views.Dialogs
 {
-    public partial class InvoiceEditDialog : Window
+    public partial class InvoiceEditDialog : Window, INotifyPropertyChanged
     {
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
@@ -26,10 +26,25 @@ namespace BIS.ERP.Views.Dialogs
         private string _selectedHeaderAccountCode = string.Empty;
         private bool _isRecalculating;
         private bool _isPosted;
+        private bool _isInvoiceEditingEnabled = true;
         private const string DefaultSalesCounterpartyAccount = "14100000";
         private const string DefaultPurchaseCounterpartyAccount = "31100000";
         private const string DefaultSalesLineAccount = "61100000";
         private const string DefaultPurchaseLineAccount = "16100000";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public bool IsInvoiceEditingEnabled
+        {
+            get => _isInvoiceEditingEnabled;
+            private set
+            {
+                if (_isInvoiceEditingEnabled == value)
+                    return;
+                _isInvoiceEditingEnabled = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInvoiceEditingEnabled)));
+            }
+        }
 
         public ObservableCollection<ReferenceOption> AccountItems { get; } = new();
         public ObservableCollection<ReferenceOption> VatTaxItems { get; } = new();
@@ -140,8 +155,6 @@ namespace BIS.ERP.Views.Dialogs
                     }
 
                     AllPostingsButton.IsEnabled = true;
-                    if (_isPosted)
-                        DisableEditing();
                 }
                 else
                 {
@@ -169,6 +182,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void DisableEditing()
         {
+            IsInvoiceEditingEnabled = false;
             NumberBox.IsReadOnly = true;
             DatePicker.IsEnabled = false;
             EsfNumberBox.IsReadOnly = true;
@@ -389,7 +403,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
         {
-            if (_isReadOnlyMode || _isPosted || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
+            if (_isReadOnlyMode || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
                 return;
 
             var dialog = new AccountSelectionDialog(_accounts)
@@ -468,7 +482,7 @@ namespace BIS.ERP.Views.Dialogs
         private void OnLineSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             var hasSelection = LinesGrid.SelectedItem != null;
-            DeleteLineButton.IsEnabled = hasSelection && !_isPosted;
+            DeleteLineButton.IsEnabled = hasSelection && !_isReadOnlyMode;
             LinePostingsButton.IsEnabled = hasSelection && _editId.HasValue && _isPosted;
         }
 
@@ -538,7 +552,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
-            if (_isReadOnlyMode || _isPosted)
+            if (_isReadOnlyMode)
             {
                 Close();
                 return;

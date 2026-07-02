@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 
 namespace BIS.ERP.Views
 {
@@ -151,15 +152,80 @@ namespace BIS.ERP.Views
                 StatusText.Text = selected.DetailHint;
         }
 
-        private void PostingsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        private async void PostingsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             var selected = PostingsGrid.SelectedItem as PostingViewModel;
             if (selected == null)
                 return;
 
+            if (await TryOpenInvoiceFromPostingAsync(selected))
+                return;
+
             var dialog = new PostingDetailsDialog(selected);
             dialog.Owner = Window.GetWindow(this);
             dialog.ShowDialog();
+        }
+
+        private async Task<bool> TryOpenInvoiceFromPostingAsync(PostingViewModel posting)
+        {
+            if (!InvoiceDocumentTypes.IsSales(posting.DocumentType) &&
+                !InvoiceDocumentTypes.IsPurchase(posting.DocumentType))
+                return false;
+
+            var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(posting.DocumentNumber);
+            if (string.IsNullOrWhiteSpace(documentNumber))
+            {
+                MessageBox.Show("В проводке не указан номер счет-фактуры.", "Счет-фактура",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return true;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var metadataService = new MetadataService(context);
+                var documents = await metadataService.GetDocumentsAsync();
+                var invoiceMetadata = documents.FirstOrDefault(document =>
+                    document.Name.Equals(posting.DocumentType, StringComparison.OrdinalIgnoreCase));
+
+                if (invoiceMetadata == null)
+                {
+                    MessageBox.Show($"Метаданные документа «{posting.DocumentType}» не найдены.", "Счет-фактура",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return true;
+                }
+
+                var invoiceService = new InvoiceService(context);
+                invoiceService.Configure(invoiceMetadata);
+                await invoiceService.EnsureSchemaAsync();
+
+                var invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber, posting.Date);
+                if (!invoiceId.HasValue)
+                    invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber);
+
+                if (!invoiceId.HasValue)
+                {
+                    MessageBox.Show($"Счет-фактура №{documentNumber} не найдена.", "Счет-фактура",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return true;
+                }
+
+                var dialog = new InvoiceEditDialog(
+                    invoiceMetadata,
+                    metadataService,
+                    invoiceService,
+                    invoiceId.Value,
+                    isReadOnly: true);
+                dialog.Owner = Window.GetWindow(this);
+                dialog.ShowDialog();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия счет-фактуры: {ex.Message}", "Счет-фактура",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return true;
+            }
         }
     }
 }

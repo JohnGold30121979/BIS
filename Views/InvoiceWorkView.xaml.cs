@@ -40,7 +40,7 @@ namespace BIS.ERP.Views
         {
             var selected = SelectedInvoice;
             var hasSelection = selected != null;
-            EditButton.IsEnabled = hasSelection && selected?.IsPosted == false;
+            EditButton.IsEnabled = hasSelection;
             DeleteButton.IsEnabled = hasSelection && selected?.IsPosted == false;
             AllPostingsButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
