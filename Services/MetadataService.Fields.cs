@@ -1156,23 +1156,61 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Должность",
-            DbColumnName = "position",
-            FieldType = "String",
-            Length = 100,
+            Name = "Должность (справочник)",
+            DbColumnName = "position_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "Должности",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
             IsRequired = false,
+            IsUnique = false,
             Order = 6,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Подразделение",
-            DbColumnName = "department",
+            Name = "Должность (текст)",
+            DbColumnName = "position_text",
             FieldType = "String",
-            Length = 100,
+            Length = 200,
             IsRequired = false,
             Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Подразделение",
+            DbColumnName = "department_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "Подразделения",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            IsRequired = false,
+            IsUnique = false,
+            Order = 8,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Дата рождения",
+            DbColumnName = "birth_date",
+            FieldType = "DateTime",
+            IsRequired = false,
+            Order = 9,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Адрес",
+            DbColumnName = "address",
+            FieldType = "String",
+            Length = 500,
+            IsRequired = false,
+            Order = 10,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1182,7 +1220,7 @@ public partial class MetadataService
             DbColumnName = "hire_date",
             FieldType = "DateTime",
             IsRequired = false,
-            Order = 8,
+            Order = 11,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1192,7 +1230,7 @@ public partial class MetadataService
             DbColumnName = "termination_date",
             FieldType = "DateTime",
             IsRequired = false,
-            Order = 9,
+            Order = 12,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1203,7 +1241,7 @@ public partial class MetadataService
             FieldType = "String",
             Length = 20,
             IsRequired = false,
-            Order = 10,
+            Order = 13,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1214,7 +1252,7 @@ public partial class MetadataService
             FieldType = "String",
             Length = 50,
             IsRequired = false,
-            Order = 11,
+            Order = 14,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1225,7 +1263,7 @@ public partial class MetadataService
             FieldType = "String",
             Length = 100,
             IsRequired = false,
-            Order = 12,
+            Order = 15,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1236,7 +1274,39 @@ public partial class MetadataService
             FieldType = "String",
             Length = 50,
             IsRequired = false,
-            Order = 13,
+            Order = 16,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Паспорт №/ID",
+            DbColumnName = "passport_number",
+            FieldType = "String",
+            Length = 80,
+            IsRequired = false,
+            Order = 17,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Кем выдан",
+            DbColumnName = "passport_issued_by",
+            FieldType = "String",
+            Length = 300,
+            IsRequired = false,
+            Order = 18,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Дата выдачи",
+            DbColumnName = "passport_issue_date",
+            FieldType = "DateTime",
+            IsRequired = false,
+            Order = 19,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1246,7 +1316,7 @@ public partial class MetadataService
             DbColumnName = "is_active",
             FieldType = "Bool",
             IsRequired = false,
-            Order = 14,
+            Order = 20,
             MetadataObjectId = metadataObjectId
         }
       };
@@ -1357,6 +1427,60 @@ public partial class MetadataService
                 Order = 4,
                 MetadataObjectId = metadataObjectId
            }
+        };
+    }
+
+    // Поля для справочника "Должности"
+    private List<MetadataField> GetPositionFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Код",
+                DbColumnName = "code",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Наименование",
+                DbColumnName = "name",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Примечание",
+                DbColumnName = "description",
+                FieldType = "String",
+                Length = 500,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Активен",
+                DbColumnName = "is_active",
+                FieldType = "Bool",
+                IsRequired = true,
+                Order = 4,
+                MetadataObjectId = metadataObjectId
+            }
         };
     }
 

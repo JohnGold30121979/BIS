@@ -770,6 +770,35 @@ namespace BIS.ERP.Services
 
         #endregion
 
+        // Начальные данные для справочника "Должности"
+        private async Task AddPositionDataToTable(MetadataObject catalog)
+        {
+            var positions = new[]
+            {
+                new { code = "DIR", name = "Директор", description = "Генеральный директор", is_active = true },
+                new { code = "ACCT", name = "Бухгалтер", description = "Главный бухгалтер", is_active = true },
+                new { code = "ECON", name = "Экономист", description = "Экономист", is_active = true }
+            };
+
+            foreach (var position in positions)
+            {
+                var sql = $@"
+            INSERT INTO ""{catalog.TableName}"" 
+            (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+            VALUES (
+                '{Guid.NewGuid()}',
+                '{position.code}',
+                '{position.name.Replace("'", "''")}',
+                '{position.description?.Replace("'", "''") ?? ""}',
+                {position.is_active.ToString().ToLower()},
+                NOW(),
+                NOW()
+            )";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+            System.Diagnostics.Debug.WriteLine($"Добавлено должностей: {positions.Length}");
+        }
+
         private static string EscapeSql(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");

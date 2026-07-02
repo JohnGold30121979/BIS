@@ -649,7 +649,7 @@ namespace BIS.ERP
                     case "EmployeesCatalog":
                         var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
                         var employeeService = new EmployeeService(dbContext, _metadataService);
-                        var employeesView = new EmployeesCatalogView(employeeService);
+                        var employeesView = new EmployeesCatalogView(employeeService, _metadataService);
                         _navigation.NavigateTo(employeesView);
                         break;
 

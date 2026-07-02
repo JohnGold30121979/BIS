@@ -4,6 +4,7 @@ using BIS.ERP.Services;
 using Microsoft.Win32;
 using System;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -40,6 +41,93 @@ namespace BIS.ERP.Views.Dialogs
             {
                 StatusText.Text = "Ошибка загрузки истории";
                 MessageBox.Show($"Ошибка загрузки истории патчей: {ex.Message}", "Патчи",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        private async void OnBuildPatchClick(object sender, RoutedEventArgs e)
+        {
+            var folderDialog = new OpenFolderDialog
+            {
+                Title = "Выберите папку с файлами патча"
+            };
+
+            if (folderDialog.ShowDialog(this) != true)
+                return;
+
+            BisPatchManifest manifest;
+            var manifestExists = File.Exists(Path.Combine(folderDialog.FolderName, "manifest.json"));
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                StatusText.Text = "Подготовка параметров патча...";
+                manifest = await _patchService.CreateManifestForFolderAsync(folderDialog.FolderName);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка подготовки патча";
+                MessageBox.Show($"Ошибка подготовки параметров патча: {ex.Message}", "Патчи",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+
+            var settingsDialog = new PatchBuildSettingsDialog(manifest, !manifestExists)
+            {
+                Owner = this
+            };
+            if (settingsDialog.ShowDialog() != true)
+            {
+                StatusText.Text = "Сборка патча отменена";
+                return;
+            }
+
+            manifest = settingsDialog.Manifest;
+            var saveDialog = new SaveFileDialog
+            {
+                Title = "Сохранить BIS-патч",
+                Filter = "BIS patch (*.bispatch)|*.bispatch",
+                FileName = $"{manifest.PatchId}.bispatch",
+                AddExtension = true,
+                DefaultExt = ".bispatch"
+            };
+
+            if (saveDialog.ShowDialog(this) != true)
+                return;
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                StatusText.Text = manifestExists
+                    ? "Сборка патча..."
+                    : "Сборка патча с автоматическим manifest.json...";
+                await _patchService.CreatePatchFromFolderAsync(folderDialog.FolderName, saveDialog.FileName, manifest);
+                var info = await _patchService.InspectPatchAsync(saveDialog.FileName);
+
+                StatusText.Text = $"Патч собран: {info.Manifest.PatchId}";
+                MessageBox.Show(
+                    $"Патч собран успешно.\n\n" +
+                    $"Файл: {saveDialog.FileName}\n" +
+                    $"Патч: {info.Manifest.PatchId}\n" +
+                    $"Версия: {info.Manifest.Version}\n" +
+                    $"Манифест: {(manifestExists ? "из папки" : "создан автоматически")}\n" +
+                    $"Файлов внутри: {info.Entries.Count}\n" +
+                    $"Контрольная сумма: {info.Checksum[..Math.Min(12, info.Checksum.Length)]}...",
+                    "Патчи",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка сборки патча";
+                MessageBox.Show($"Ошибка сборки патча: {ex.Message}", "Патчи",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally

@@ -409,6 +409,44 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task EnsureEmployeesCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m =>
+                    m.ObjectType == "Catalog" &&
+                    m.Name == "Сотрудники (Списочный состав)");
+
+            if (catalog == null)
+                return;
+
+            var existingNames = catalog.Fields
+                .Select(field => field.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingColumns = catalog.Fields
+                .Select(field => field.DbColumnName)
+                .Where(column => !string.IsNullOrWhiteSpace(column))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetEmployeeCatalogFields(catalog.Id))
+            {
+                if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+
+                catalog.Fields.Add(field);
+                existingNames.Add(field.Name);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         // Основные средства
         private async Task CreateAssetsCatalog(MetadataConfiguration config)
         {
@@ -795,6 +833,62 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Подразделения': {ex.Message}");
+            }
+        }
+
+        // Справочник "Должности"
+        private async Task CreatePositionsCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Должности",
+                    TableName = "catalog_positions",
+                    ObjectType = "Catalog",
+                    Description = "Справочник должностей",
+                    Icon = "👔",
+                    Order = 14,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetPositionFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddPositionDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Должности' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Должности': {ex.Message}");
+            }
+        }
+
+        private async Task EnsurePositionCatalogDataAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(m => m.Name == "Должности" && m.ObjectType == "Catalog");
+
+            if (catalog == null)
+                return;
+
+            // Проверяем, есть ли данные
+            var checkSql = $"SELECT COUNT(*) FROM \"{catalog.TableName}\"";
+            using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
+            checkCommand.CommandText = checkSql;
+            await _context.Database.OpenConnectionAsync();
+            var count = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+            await _context.Database.CloseConnectionAsync();
+
+            // Если данных нет, добавляем
+            if (count == 0)
+            {
+                await AddPositionDataToTable(catalog);
+                System.Diagnostics.Debug.WriteLine("Добавлены начальные данные в справочник 'Должности'");
             }
         }
 

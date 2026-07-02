@@ -15,12 +15,14 @@ namespace BIS.ERP.Views
     public partial class EmployeesCatalogView : UserControl
     {
         private readonly EmployeeService _employeeService;
+        private readonly MetadataService _metadataService;
         private ObservableCollection<Employee> _employees = new();
 
-        public EmployeesCatalogView(EmployeeService employeeService)
+        public EmployeesCatalogView(EmployeeService employeeService, MetadataService metadataService)
         {
             InitializeComponent();
             _employeeService = employeeService;
+            _metadataService = metadataService;
             Loaded += OnLoaded;
         }
 
@@ -68,7 +70,7 @@ namespace BIS.ERP.Views
         // Обработчики для кнопок (имена из XAML)
         private async void AddButton_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new EmployeeDialog();
+            var dialog = new EmployeeDialog(null, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
             if (dialog.ShowDialog() == true)
@@ -85,7 +87,7 @@ namespace BIS.ERP.Views
             var selected = EmployeesGrid.SelectedItem as Employee;
             if (selected == null) return;
 
-            var dialog = new EmployeeDialog(selected);
+            var dialog = new EmployeeDialog(selected, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
             if (dialog.ShowDialog() == true)

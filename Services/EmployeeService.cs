@@ -38,25 +38,59 @@ namespace BIS.ERP.Services
             if (catalogId == Guid.Empty) return new List<Employee>();
 
             var data = await _metadataService.GetCatalogDataAsync(catalogId);
+            var catalogs = await _metadataService.GetCatalogsAsync();
+            var positionMap = await LoadReferenceMapAsync(catalogs, "Должности");
+            var departmentMap = await LoadReferenceMapAsync(catalogs, "Подразделения");
             var employees = new List<Employee>();
 
             foreach (var row in data)
             {
-                employees.Add(new Employee
+                var employee = new Employee
                 {
                     Id = row.ContainsKey("Id") ? Guid.Parse(row["Id"].ToString()) : Guid.NewGuid(),
                     PersonnelNumber = GetStringValue(row, "Табельный номер"),
                     FullName = GetStringValue(row, "ФИО"),
-                    Position = GetStringValue(row, "Должность"),
-                    Department = GetStringValue(row, "Подразделение"),
+                    PositionText = GetStringValue(row, "Должность (текст)"),
                     HireDate = GetDateValue(row, "Дата приема"),
                     TerminationDate = GetDateValue(row, "Дата увольнения"),
                     Status = GetStringValue(row, "Статус", "Активен"),
                     Phone = GetStringValue(row, "Телефон"),
                     Email = GetStringValue(row, "Email"),
                     TaxId = GetStringValue(row, "ИНН"),
+                    PassportNumber = GetStringValue(row, "Паспорт №/ID"),
+                    PassportIssuedBy = GetStringValue(row, "Кем выдан"),
+                    PassportIssueDate = GetDateValue(row, "Дата выдачи"),
+                    BirthDate = GetDateValue(row, "Дата рождения"),
+                    Address = GetStringValue(row, "Адрес"),
+                    Notes = GetStringValue(row, "Примечание"),
                     IsActive = GetStringValue(row, "Статус", "Активен") == "Активен"
-                });
+                };
+
+                // Загружаем PositionId если есть
+                if (row.ContainsKey("Должность (справочник)") && row["Должность (справочник)"] != null && row["Должность (справочник)"] != DBNull.Value)
+                {
+                    if (Guid.TryParse(row["Должность (справочник)"].ToString(), out var positionId))
+                    {
+                        employee.PositionId = positionId;
+                        employee.PositionDisplay = positionMap.GetValueOrDefault(positionId, string.Empty);
+                    }
+                }
+
+                // Загружаем DepartmentId если есть
+                if (row.ContainsKey("Подразделение") && row["Подразделение"] != null && row["Подразделение"] != DBNull.Value)
+                {
+                    if (Guid.TryParse(row["Подразделение"].ToString(), out var departmentId))
+                    {
+                        employee.DepartmentId = departmentId;
+                        employee.Department = departmentMap.GetValueOrDefault(departmentId, string.Empty);
+                    }
+                    else
+                    {
+                        employee.Department = GetStringValue(row, "Подразделение");
+                    }
+                }
+
+                employees.Add(employee);
             }
 
             return employees.OrderBy(e => e.PersonnelNumber).ToList();
@@ -70,18 +104,25 @@ namespace BIS.ERP.Services
 
             var data = new Dictionary<string, object>
             {
-                ["Код"] = employee.PersonnelNumber,           // ← добавляем
-                ["Наименование"] = employee.FullName,         // ← ОБЯЗАТЕЛЬНОЕ поле!
+                ["Код"] = employee.PersonnelNumber,
+                ["Наименование"] = employee.FullName,
                 ["Табельный номер"] = employee.PersonnelNumber,
                 ["ФИО"] = employee.FullName,
-                ["Должность"] = employee.Position,
-                ["Подразделение"] = employee.Department,
-                ["Дата приема"] = employee.HireDate,
-                ["Дата увольнения"] = employee.TerminationDate,
+                ["Должность (справочник)"] = employee.PositionId ?? (object)DBNull.Value,
+                ["Должность (текст)"] = GetPositionTextForStorage(employee),
+                ["Подразделение"] = employee.DepartmentId ?? (object)DBNull.Value,
+                ["Дата рождения"] = employee.BirthDate ?? (object)DBNull.Value,
+                ["Дата приема"] = employee.HireDate ?? (object)DBNull.Value,
+                ["Дата увольнения"] = employee.TerminationDate ?? (object)DBNull.Value,
+                ["Адрес"] = employee.Address ?? (object)DBNull.Value,
+                ["Примечание"] = employee.Notes ?? (object)DBNull.Value,
                 ["Статус"] = employee.Status,
                 ["Телефон"] = employee.Phone,
                 ["Email"] = employee.Email,
-                ["ИНН"] = employee.TaxId
+                ["ИНН"] = employee.TaxId,
+                ["Паспорт №/ID"] = employee.PassportNumber,
+                ["Кем выдан"] = ToUpperOrDbNull(employee.PassportIssuedBy),
+                ["Дата выдачи"] = employee.PassportIssueDate ?? (object)DBNull.Value
             };
 
             var recordId = await _metadataService.CreateDynamicRecordAsync(catalogId, data);
@@ -97,18 +138,25 @@ namespace BIS.ERP.Services
 
             var data = new Dictionary<string, object>
             {
-                ["Код"] = employee.PersonnelNumber,           // ← добавляем
-                ["Наименование"] = employee.FullName,         // ← ОБЯЗАТЕЛЬНОЕ поле!
+                ["Код"] = employee.PersonnelNumber,
+                ["Наименование"] = employee.FullName,
                 ["Табельный номер"] = employee.PersonnelNumber,
                 ["ФИО"] = employee.FullName,
-                ["Должность"] = employee.Position,
-                ["Подразделение"] = employee.Department,
-                ["Дата приема"] = employee.HireDate,
-                ["Дата увольнения"] = employee.TerminationDate,
+                ["Должность (справочник)"] = employee.PositionId ?? (object)DBNull.Value,
+                ["Должность (текст)"] = GetPositionTextForStorage(employee),
+                ["Подразделение"] = employee.DepartmentId ?? (object)DBNull.Value,
+                ["Дата рождения"] = employee.BirthDate ?? (object)DBNull.Value,
+                ["Дата приема"] = employee.HireDate ?? (object)DBNull.Value,
+                ["Дата увольнения"] = employee.TerminationDate ?? (object)DBNull.Value,
+                ["Адрес"] = employee.Address ?? (object)DBNull.Value,
+                ["Примечание"] = employee.Notes ?? (object)DBNull.Value,
                 ["Статус"] = employee.Status,
                 ["Телефон"] = employee.Phone,
                 ["Email"] = employee.Email,
-                ["ИНН"] = employee.TaxId
+                ["ИНН"] = employee.TaxId,
+                ["Паспорт №/ID"] = employee.PassportNumber,
+                ["Кем выдан"] = ToUpperOrDbNull(employee.PassportIssuedBy),
+                ["Дата выдачи"] = employee.PassportIssueDate ?? (object)DBNull.Value
             };
 
             await _metadataService.UpdateDynamicRecordAsync(catalogId, employee.Id, data);
@@ -149,7 +197,9 @@ namespace BIS.ERP.Services
                 e.PersonnelNumber.Contains(searchText) ||
                 e.FullName.Contains(searchText) ||
                 e.Position.Contains(searchText) ||
-                e.Department.Contains(searchText)
+                e.Department.Contains(searchText) ||
+                e.PassportNumber.Contains(searchText) ||
+                e.PassportIssuedBy.Contains(searchText)
             ).ToList();
         }
 
@@ -175,7 +225,9 @@ namespace BIS.ERP.Services
 
         private string GetStringValue(Dictionary<string, object> row, string key, string defaultValue = "")
         {
-            return row.ContainsKey(key) && row[key] != null ? row[key].ToString() : defaultValue;
+            return row.ContainsKey(key) && row[key] != null && row[key] != DBNull.Value
+                ? row[key].ToString()
+                : defaultValue;
         }
 
         private DateTime? GetDateValue(Dictionary<string, object> row, string key)
@@ -185,6 +237,58 @@ namespace BIS.ERP.Services
                 return Convert.ToDateTime(row[key]);
             }
             return null;
+        }
+
+        private static object GetPositionTextForStorage(Employee employee)
+        {
+            var text = employee.PositionText;
+            if (string.IsNullOrWhiteSpace(text) && !employee.PositionId.HasValue)
+                text = employee.PositionDisplay;
+
+            return string.IsNullOrWhiteSpace(text) ? DBNull.Value : text;
+        }
+
+        private static object ToUpperOrDbNull(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? DBNull.Value
+                : value.Trim().ToUpperInvariant();
+        }
+
+        private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(
+            List<MetadataObject> catalogs,
+            string catalogName)
+        {
+            var catalog = catalogs.FirstOrDefault(c =>
+                c.ObjectType == "Catalog" &&
+                c.Name.Equals(catalogName, StringComparison.OrdinalIgnoreCase));
+
+            if (catalog == null)
+                return new Dictionary<Guid, string>();
+
+            var displayField = new MetadataField
+            {
+                DisplayPattern = "{Наименование}",
+                DisplayFields = "Наименование"
+            };
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            return rows
+                .Where(row => TryGetGuid(row.GetValueOrDefault("Id"), out _))
+                .ToDictionary(
+                    row => Guid.Parse(row["Id"].ToString()!),
+                    row => ReferenceDisplayHelper.BuildDisplayValue(row, displayField));
+        }
+
+        private static bool TryGetGuid(object? value, out Guid id)
+        {
+            if (value is Guid guid)
+            {
+                id = guid;
+                return true;
+            }
+
+            return Guid.TryParse(value?.ToString(), out id);
         }
     }
 }

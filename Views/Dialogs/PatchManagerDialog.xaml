@@ -18,6 +18,8 @@
         </StackPanel>
 
         <WrapPanel Grid.Row="1" Margin="0,0,0,10">
+            <Button Content="Собрать патч..." Width="130" Height="34" Margin="0,0,8,0"
+                    Background="#8E44AD" Foreground="White" Click="OnBuildPatchClick"/>
             <Button Content="Загрузить патч..." Width="140" Height="34" Margin="0,0,8,0"
                     Background="#27AE60" Foreground="White" Click="OnApplyPatchClick"/>
             <Button Content="Обновить" Width="100" Height="34" Margin="0,0,8,0"

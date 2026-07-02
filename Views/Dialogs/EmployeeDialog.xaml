@@ -2,69 +2,108 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Сотрудник"
-        Height="550" Width="500"
+        Height="780" Width="620"
+        Language="ru-RU"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
 
-    <Grid Margin="10">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="120"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
 
-        <TextBlock Grid.Row="0" Grid.Column="0" Text="Табельный номер:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtPersonnelNumber" Grid.Row="0" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Табельный номер:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtPersonnelNumber" Grid.Row="0" Grid.Column="1" Height="30" Margin="0,5"/>
 
-        <TextBlock Grid.Row="1" Grid.Column="0" Text="ФИО:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtFullName" Grid.Row="1" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="ФИО:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtFullName" Grid.Row="1" Grid.Column="1" Height="30" Margin="0,5"/>
 
-        <TextBlock Grid.Row="2" Grid.Column="0" Text="Должность:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtPosition" Grid.Row="2" Grid.Column="1" Height="30" Margin="0,5"/>
+            <!-- Должность с чекбоксом -->
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Должность:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,5">
+                <CheckBox x:Name="chkManualPosition" Content="Вручную" VerticalAlignment="Center" 
+                          Checked="chkManualPosition_Checked" Unchecked="chkManualPosition_Checked" Margin="0,0,10,0"/>
+                <ComboBox x:Name="cmbPosition" Width="200" Height="30" DisplayMemberPath="DisplayName" 
+                          SelectedValuePath="Id" IsEditable="False"/>
+                <TextBox x:Name="txtPosition" Width="200" Height="30" Margin="5,0,0,0" Visibility="Collapsed"/>
+            </StackPanel>
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Text="Подразделение:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtDepartment" Grid.Row="3" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Подразделение:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <ComboBox x:Name="cmbDepartment" Grid.Row="3" Grid.Column="1" Height="30" Margin="0,5" 
+                      DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Дата приема:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <DatePicker x:Name="dpHireDate" Grid.Row="4" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Дата рождения:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <DatePicker x:Name="dpBirthDate" Grid.Row="4" Grid.Column="1" Height="30" Margin="0,5"
+                        SelectedDateFormat="Short"/>
 
-        <TextBlock Grid.Row="5" Grid.Column="0" Text="Дата увольнения:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <DatePicker x:Name="dpTerminationDate" Grid.Row="5" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Дата приема:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <DatePicker x:Name="dpHireDate" Grid.Row="5" Grid.Column="1" Height="30" Margin="0,5"
+                        SelectedDateFormat="Short"/>
 
-        <TextBlock Grid.Row="6" Grid.Column="0" Text="Статус:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <ComboBox x:Name="cmbStatus" Grid.Row="6" Grid.Column="1" Height="30" Margin="0,5" SelectedIndex="0">
-            <ComboBoxItem Content="Активен"/>
-            <ComboBoxItem Content="Уволен"/>
-            <ComboBoxItem Content="В отпуске"/>
-            <ComboBoxItem Content="Декрет"/>
-        </ComboBox>
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Дата увольнения:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <DatePicker x:Name="dpTerminationDate" Grid.Row="6" Grid.Column="1" Height="30" Margin="0,5"
+                        SelectedDateFormat="Short"/>
 
-        <TextBlock Grid.Row="7" Grid.Column="0" Text="Телефон:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtPhone" Grid.Row="7" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Статус:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <ComboBox x:Name="cmbStatus" Grid.Row="7" Grid.Column="1" Height="30" Margin="0,5" SelectedIndex="0">
+                <ComboBoxItem Content="Активен"/>
+                <ComboBoxItem Content="Уволен"/>
+                <ComboBoxItem Content="В отпуске"/>
+                <ComboBoxItem Content="Декрет"/>
+            </ComboBox>
 
-        <TextBlock Grid.Row="8" Grid.Column="0" Text="Email:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtEmail" Grid.Row="8" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="Телефон:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtPhone" Grid.Row="8" Grid.Column="1" Height="30" Margin="0,5"/>
 
-        <TextBlock Grid.Row="9" Grid.Column="0" Text="ИНН:" VerticalAlignment="Center" FontWeight="Bold"/>
-        <TextBox x:Name="txtTaxId" Grid.Row="9" Grid.Column="1" Height="30" Margin="0,5"/>
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="Email:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtEmail" Grid.Row="9" Grid.Column="1" Height="30" Margin="0,5"/>
 
-        <StackPanel Grid.Row="11" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-            <Button Content="✅ Сохранить" Click="OnSaveClick" Width="100" Height="35" Margin="5"
-                    Background="#4CAF50" Foreground="White"/>
-            <Button Content="❌ Отмена" Click="OnCancelClick" Width="100" Height="35" Margin="5"/>
-        </StackPanel>
-    </Grid>
+            <TextBlock Grid.Row="10" Grid.Column="0" Text="ИНН:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtTaxId" Grid.Row="10" Grid.Column="1" Height="30" Margin="0,5"/>
+
+            <TextBlock Grid.Row="11" Grid.Column="0" Text="Паспорт №/ID:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtPassportNumber" Grid.Row="11" Grid.Column="1" Height="30" Margin="0,5"/>
+
+            <TextBlock Grid.Row="12" Grid.Column="0" Text="Кем выдан:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtPassportIssuedBy" Grid.Row="12" Grid.Column="1" Height="30" Margin="0,5"
+                     TextChanged="UppercaseTextBox_TextChanged"/>
+
+            <TextBlock Grid.Row="13" Grid.Column="0" Text="Дата выдачи:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <DatePicker x:Name="dpPassportIssueDate" Grid.Row="13" Grid.Column="1" Height="30" Margin="0,5"
+                        SelectedDateFormat="Short"/>
+
+            <TextBlock Grid.Row="14" Grid.Column="0" Text="Адрес:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtAddress" Grid.Row="14" Grid.Column="1" Height="30" Margin="0,5"/>
+
+            <TextBlock Grid.Row="15" Grid.Column="0" Text="Примечания:" VerticalAlignment="Center" FontWeight="Bold"/>
+            <TextBox x:Name="txtNotes" Grid.Row="15" Grid.Column="1" Height="30" Margin="0,5"/>
+
+            <StackPanel Grid.Row="16" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button Content="✅ Сохранить" Click="OnSaveClick" Width="100" Height="35" Margin="5"
+                        Background="#4CAF50" Foreground="White"/>
+                <Button Content="❌ Отмена" Click="OnCancelClick" Width="100" Height="35" Margin="5"/>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
 </Window>

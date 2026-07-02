@@ -556,6 +556,7 @@ namespace BIS.ERP.Services
             {
                 await EnsureChartOfAccountsCatalogStructureAsync();
                 await EnsureOrganizationsCatalogStructureAsync();
+                await EnsureEmployeesCatalogStructureAsync();
                 await EnsureCashDesksCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
             }
@@ -689,11 +690,11 @@ namespace BIS.ERP.Services
 
         private string FormatSqlValue(object value, string fieldType)
         {
-            if (value == null) return "NULL";
+            if (value == null || value == DBNull.Value) return "NULL";
 
             return fieldType switch
             {
-                "String" => $"'{value.ToString().Replace("'", "''")}'",
+                "String" => $"'{value.ToString()?.Replace("'", "''")}'",
                 "DateTime" => $"'{Convert.ToDateTime(value):yyyy-MM-dd HH:mm:ss}'",
                 "Bool" => Convert.ToBoolean(value) ? "TRUE" : "FALSE",
                 "Int" => Convert.ToInt32(value).ToString(),
@@ -752,6 +753,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Сотрудники (Списочный состав)"))
                     await CreateEmployeesCatalog(config);
+                await EnsureEmployeesCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Основные средства"))
                     await CreateAssetsCatalog(config);
@@ -816,6 +818,9 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Типы поставки"))
                     await CreateDeliveryTypeCatalog(config);
+
+                if (!existingCatalogs.Contains("Должности"))
+                    await CreatePositionsCatalog(config);
 
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
                 await EnsureStandardReportTemplatesAsync(config);
