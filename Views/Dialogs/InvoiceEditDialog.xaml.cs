@@ -26,6 +26,10 @@ namespace BIS.ERP.Views.Dialogs
         private string _selectedHeaderAccountCode = string.Empty;
         private bool _isRecalculating;
         private bool _isPosted;
+        private const string DefaultSalesCounterpartyAccount = "14100000";
+        private const string DefaultPurchaseCounterpartyAccount = "31100000";
+        private const string DefaultSalesLineAccount = "61100000";
+        private const string DefaultPurchaseLineAccount = "16100000";
 
         public ObservableCollection<ReferenceOption> AccountItems { get; } = new();
         public ObservableCollection<ReferenceOption> VatTaxItems { get; } = new();
@@ -143,7 +147,7 @@ namespace BIS.ERP.Views.Dialogs
                 {
                     DatePicker.SelectedDate = DateTime.Today;
                     NumberBox.Text = await _invoiceService.GenerateDocumentNumberAsync();
-                    SetHeaderAccount(GetDefaultAccountCode());
+                    SetHeaderAccount(GetDefaultHeaderAccountCode());
                     SelectComboValue(PaymentKindCombo, "TRANSFER");
                     SelectComboValue(DeliveryKindCombo, "TAXABLE");
                     SelectComboValue(SupplyKindCombo, "TAXABLE");
@@ -305,12 +309,26 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
-        private string GetDefaultAccountCode()
+        private string GetDefaultHeaderAccountCode()
         {
-            var preferred = InvoiceDocumentTypes.IsSales(_document.Name) ? "14100000" : "31100000";
+            var preferred = InvoiceDocumentTypes.IsSales(_document.Name)
+                ? DefaultSalesCounterpartyAccount
+                : DefaultPurchaseCounterpartyAccount;
             return AccountItems.Any(item => item.Value.Equals(preferred, StringComparison.OrdinalIgnoreCase))
                 ? preferred
                 : AccountItems.FirstOrDefault()?.Value ?? preferred;
+        }
+
+        private string GetDefaultLineAccountCode()
+        {
+            var preferred = InvoiceDocumentTypes.IsSales(_document.Name)
+                ? DefaultSalesLineAccount
+                : DefaultPurchaseLineAccount;
+            return !IsSameAccount(preferred, _selectedHeaderAccountCode) &&
+                   AccountItems.Any(item => item.Value.Equals(preferred, StringComparison.OrdinalIgnoreCase))
+                ? preferred
+                : AccountItems.FirstOrDefault(item => !IsSameAccount(item.Value, _selectedHeaderAccountCode))?.Value
+                  ?? preferred;
         }
 
         private static string ResolveTaxCode(string storedCode, decimal rate, IEnumerable<ReferenceOption> options)
@@ -382,6 +400,15 @@ namespace BIS.ERP.Views.Dialogs
             if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
             {
                 var accountCode = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
+                if (IsSameAccount(accountCode, _selectedHeaderAccountCode))
+                {
+                    accountCode = GetDefaultLineAccountCode();
+                    MessageBox.Show(
+                        "Счет стороны А не должен совпадать со счетом стороны Б. Подставлен счет по умолчанию.",
+                        "Проверка счетов",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
                 line.AccountCode = accountCode;
                 line.AccountDisplayName = GetAccountDisplayName(accountCode);
             }
@@ -393,12 +420,13 @@ namespace BIS.ERP.Views.Dialogs
                 return;
 
             var previous = _lines.LastOrDefault();
+            var accountCode = ResolveLineAccountCode(previous?.AccountCode);
             var line = new EditableInvoiceLine
             {
                 LineNumber = _lines.Count + 1,
                 Name = previous?.Name ?? string.Empty,
-                AccountCode = previous?.AccountCode ?? string.Empty,
-                AccountDisplayName = previous?.AccountDisplayName ?? string.Empty,
+                AccountCode = accountCode,
+                AccountDisplayName = GetAccountDisplayName(accountCode),
                 VatTaxCode = previous?.VatTaxCode
                              ?? VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Value
                              ?? VatTaxItems.FirstOrDefault()?.Value
@@ -569,7 +597,7 @@ namespace BIS.ERP.Views.Dialogs
                     Id = line.Id,
                     LineNumber = line.LineNumber,
                     Name = line.Name,
-                    AccountCode = line.AccountCode,
+                    AccountCode = ResolveLineAccountCode(line.AccountCode),
                     VatTaxCode = line.VatTaxCode,
                     AmountWithoutTax = line.AmountWithoutTax,
                     VatRate = line.VatRate,
@@ -654,6 +682,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             _selectedHeaderAccountCode = accountCode?.Trim() ?? string.Empty;
             AccountBox.Text = GetAccountDisplayName(_selectedHeaderAccountCode);
+            EnsureLineAccountsDoNotMatchHeader();
         }
 
         private string GetAccountDisplayName(string accountCode)
@@ -670,6 +699,33 @@ namespace BIS.ERP.Views.Dialogs
             return BuildCodeName(
                 GetRowValue(account, "Код", "code"),
                 GetRowValue(account, "Наименование", "name"));
+        }
+
+        private string ResolveLineAccountCode(string? accountCode)
+        {
+            var normalized = accountCode?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalized) || IsSameAccount(normalized, _selectedHeaderAccountCode))
+                return GetDefaultLineAccountCode();
+            return normalized;
+        }
+
+        private void EnsureLineAccountsDoNotMatchHeader()
+        {
+            foreach (var line in _lines.Where(line =>
+                         string.IsNullOrWhiteSpace(line.AccountCode) ||
+                         IsSameAccount(line.AccountCode, _selectedHeaderAccountCode)))
+            {
+                var accountCode = GetDefaultLineAccountCode();
+                line.AccountCode = accountCode;
+                line.AccountDisplayName = GetAccountDisplayName(accountCode);
+            }
+        }
+
+        private static bool IsSameAccount(string? left, string? right)
+        {
+            return !string.IsNullOrWhiteSpace(left) &&
+                   !string.IsNullOrWhiteSpace(right) &&
+                   left.Trim().Equals(right.Trim(), StringComparison.OrdinalIgnoreCase);
         }
 
         public sealed record ReferenceOption(string Value, string DisplayName, decimal Rate = 0);

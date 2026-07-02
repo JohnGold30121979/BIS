@@ -559,6 +559,7 @@ namespace BIS.ERP.Services
                 await EnsureEmployeesCatalogStructureAsync();
                 await EnsureCashDesksCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
+                await EnsurePositionCatalogDataAsync();
             }
             catch (Exception ex)
             {
@@ -821,6 +822,15 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Должности"))
                     await CreatePositionsCatalog(config);
+
+                if (!existingCatalogs.Contains("Авансовые платежи"))
+                    await CreateAdvancePaymentsCatalog(config);
+
+                if (!existingCatalogs.Contains("Настройка доступа к счетам"))
+                    await CreateAccountAccessCatalog(config);
+
+                if (!existingCatalogs.Contains("Расчет курсовой разницы"))
+                    await CreateExchangeRateDiffCatalog(config);
 
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
                 await EnsureStandardReportTemplatesAsync(config);

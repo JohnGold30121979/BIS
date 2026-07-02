@@ -12,8 +12,9 @@ namespace BIS.ERP.Services
     public class InvoiceService
     {
         private const string DefaultPurchaseAccount = "31100000";
+        private const string DefaultPurchaseLineAccount = "16100000";
         private const string DefaultSalesAccount = "14100000";
-        private const string DefaultSalesRevenueAccount = "60100000";
+        private const string DefaultSalesRevenueAccount = "61100000";
         private const string VatPayableAccount = "34300000";
         private const string VatRecoverableAccount = "24000000";
         private const string SalesTaxAccount = "34900000";
@@ -385,19 +386,24 @@ namespace BIS.ERP.Services
                 }
 
                 await transaction.CommitAsync();
-                await new EventLogService(_context).LogAsync(
-                    isNew ? "Create" : "Update",
-                    "Document",
-                    DocumentName,
-                    id,
-                    new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
-                return id;
             }
             catch
             {
                 await transaction.RollbackAsync();
                 throw;
             }
+
+            await new EventLogService(_context).LogAsync(
+                isNew ? "Create" : "Update",
+                "Document",
+                DocumentName,
+                id,
+                new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
+
+            // По требованиям заказчика у счет-фактуры нет отдельной кнопки проведения:
+            // запись документа сразу должна сформировать бухгалтерские проводки.
+            await PostInvoiceAsync(id);
+            return id;
         }
 
         public async Task DeleteInvoiceAsync(Guid invoiceId)
@@ -441,8 +447,9 @@ namespace BIS.ERP.Services
                 foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
                 {
                     var lineAccount = string.IsNullOrWhiteSpace(line.AccountCode)
-                        ? InvoiceDocumentTypes.IsSales(DocumentName) ? DefaultSalesRevenueAccount : DefaultPurchaseAccount
+                        ? GetDefaultLineAccount()
                         : line.AccountCode.Trim();
+                    lineAccount = NormalizeLineAccountForPosting(counterpartyAccount, lineAccount);
                     var lineDescription = BuildLineDescription(invoice, line);
 
                     if (line.AmountWithoutTax > 0)
@@ -489,6 +496,49 @@ namespace BIS.ERP.Services
             }
         }
 
+        public async Task<int> EnsureSavedInvoicesPostedAsync()
+        {
+            var ids = new List<Guid>();
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE COALESCE(""is_posted"", false) = false
+                ORDER BY ""doc_date"", ""doc_number""";
+
+            await using (var command = _context.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = sql;
+                await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    await using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                        ids.Add(reader.GetGuid(0));
+                }
+                finally
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
+
+            var postedCount = 0;
+            foreach (var id in ids)
+            {
+                try
+                {
+                    await PostInvoiceAsync(id);
+                    postedCount++;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Ошибка автоматического проведения счет-фактуры {id}: {ex.Message}");
+                }
+            }
+
+            return postedCount;
+        }
+
         public static void RecalculateLine(InvoiceLineRow line)
         {
             line.VatAmount = Math.Round(line.AmountWithoutTax * line.VatRate / 100m, 2);
@@ -512,7 +562,11 @@ namespace BIS.ERP.Services
             if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit))
                 throw new InvalidOperationException("Не удалось сформировать проводку: не указаны счета.");
             if (debit.Equals(credit, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Проводка не может иметь одинаковые счета дебета и кредита.");
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Пропущена проводка счет-фактуры {invoice.DocNumber}: одинаковые счета дебета и кредита {debit}. {description}");
+                return;
+            }
 
             await _context.Database.ExecuteSqlRawAsync(@"
                 INSERT INTO ""doc_postings""
@@ -530,6 +584,30 @@ namespace BIS.ERP.Services
                 new NpgsqlParameter("@amount", amount),
                 new NpgsqlParameter("@description", description),
                 new NpgsqlParameter("@org", (object?)invoice.OrganizationId ?? DBNull.Value));
+        }
+
+        private string NormalizeLineAccountForPosting(string counterpartyAccount, string lineAccount)
+        {
+            if (!lineAccount.Equals(counterpartyAccount, StringComparison.OrdinalIgnoreCase))
+                return lineAccount;
+
+            if (InvoiceDocumentTypes.IsSales(DocumentName))
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Счет строки счет-фактуры совпал со счетом расчетов ({lineAccount}). Для реализации использован счет доходов {DefaultSalesRevenueAccount}.");
+                return DefaultSalesRevenueAccount;
+            }
+
+            System.Diagnostics.Debug.WriteLine(
+                $"Счет строки счет-фактуры совпал со счетом расчетов ({lineAccount}). Для поступления использован счет товаров {DefaultPurchaseLineAccount}.");
+            return DefaultPurchaseLineAccount;
+        }
+
+        private string GetDefaultLineAccount()
+        {
+            return InvoiceDocumentTypes.IsSales(DocumentName)
+                ? DefaultSalesRevenueAccount
+                : DefaultPurchaseLineAccount;
         }
 
         private async Task DeletePostingsAsync(string docNumber)

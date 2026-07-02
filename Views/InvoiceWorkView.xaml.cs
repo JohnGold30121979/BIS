@@ -54,10 +54,13 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Загрузка...";
+                var postedCount = await _invoiceService.EnsureSavedInvoicesPostedAsync();
                 var invoices = await _invoiceService.GetInvoicesAsync();
                 InvoicesGrid.ItemsSource = invoices;
                 LinesGrid.ItemsSource = null;
-                StatusText.Text = $"Загружено документов: {invoices.Count}";
+                StatusText.Text = postedCount > 0
+                    ? $"Загружено документов: {invoices.Count}; автоматически проведено: {postedCount}"
+                    : $"Загружено документов: {invoices.Count}";
                 UpdateButtonsState();
             }
             catch (Exception ex)

@@ -223,6 +223,7 @@ namespace BIS.ERP
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingSetup", Name = "Настройка учета", Icon = "⚙", Type = "AccountingSetup" });
+                    financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
                 }
 
@@ -676,6 +677,13 @@ namespace BIS.ERP
                         var postingService = new PostingService(journalContext);
                         var journalView = new PostingsJournalView(postingService);
                         _navigation.NavigateTo(journalView);
+                        break;
+
+                    case "MutualSettlements":
+                        var msdbContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        var msMetadataService = new MetadataService(msdbContext);
+                        var msView = new MutualSettlementsView(msMetadataService);
+                        _navigation.NavigateTo(msView);
                         break;
 
                     case "PostingsDocument":

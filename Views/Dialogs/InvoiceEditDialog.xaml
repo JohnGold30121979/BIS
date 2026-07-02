@@ -48,7 +48,7 @@
             </StackPanel>
 
             <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Счет"/>
+                <TextBlock Text="Счет стороны Б"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -82,7 +82,7 @@
                   CanUserAddRows="False" SelectionChanged="OnLineSelectionChanged">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="2.4*"/>
-                <DataGridTemplateColumn Header="Затр. счет" Width="190">
+                <DataGridTemplateColumn Header="Счет стороны А" Width="190">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
