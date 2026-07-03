@@ -803,5 +803,35 @@ namespace BIS.ERP.Services
         {
             return (value ?? string.Empty).Replace("'", "''");
         }
+
+        private async Task AddSiteDataToTable(MetadataObject catalog)
+        {
+            var sites = new[]
+            {
+                new { code = "01", name = "Цех основной", desc = "Основной производственный цех", active = true },
+                new { code = "02", name = "Склад", desc = "Склад готовой продукции", active = true },
+                new { code = "03", name = "Администрация", desc = "Административный участок", active = true },
+                new { code = "04", name = "Торговый зал", desc = "Торговый зал / магазин", active = true },
+                new { code = "05", name = "Транспортный цех", desc = "Транспортный участок", active = true }
+            };
+
+            foreach (var site in sites)
+            {
+                var sql = $@"
+                    INSERT INTO ""{catalog.TableName}""
+                    (""Id"", ""site_code"", ""site_name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                    VALUES (
+                        '{Guid.NewGuid()}',
+                        '{site.code}',
+                        '{site.name.Replace("'", "''")}',
+                        '{site.desc.Replace("'", "''")}',
+                        {site.active.ToString().ToLower()},
+                        NOW(),
+                        NOW()
+                    )";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+            System.Diagnostics.Debug.WriteLine($"Добавлено участков: {sites.Length}");
+        }
     }
 }

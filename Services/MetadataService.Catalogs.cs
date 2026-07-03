@@ -530,6 +530,7 @@ namespace BIS.ERP.Services
                 await _context.MetadataObjects.AddAsync(catalog);
                 await _context.SaveChangesAsync();
                 await CreateTableForCatalogAsync(catalog);
+                await AddSiteDataToTable(catalog);
                 System.Diagnostics.Debug.WriteLine("Справочник 'Участки' создан");
             }
             catch (Exception ex)
