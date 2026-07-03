@@ -12,6 +12,7 @@ namespace BIS.ERP.Models
         [MaxLength(2000)] public string CompanyDetails { get; set; } = string.Empty;
         [MaxLength(160)] public string Email { get; set; } = string.Empty;
         [MaxLength(80)] public string Phone { get; set; } = string.Empty;
+        [MaxLength(1000)] public string AppUpdateUrl { get; set; } = string.Empty;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 }

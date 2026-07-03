@@ -34,7 +34,8 @@ namespace BIS.ERP.Services
             string description,
             string companyDetails,
             string email,
-            string phone)
+            string phone,
+            string appUpdateUrl)
         {
             var configuration = await GetAsync();
             configuration.SystemName = string.IsNullOrWhiteSpace(systemName) ? "BIS ERP" : systemName.Trim();
@@ -43,6 +44,7 @@ namespace BIS.ERP.Services
             configuration.CompanyDetails = companyDetails?.Trim() ?? string.Empty;
             configuration.Email = email?.Trim() ?? string.Empty;
             configuration.Phone = phone?.Trim() ?? string.Empty;
+            configuration.AppUpdateUrl = appUpdateUrl?.Trim() ?? string.Empty;
             configuration.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
         }
@@ -56,11 +58,13 @@ namespace BIS.ERP.Services
                 ""CompanyDetails"" varchar(2000) NOT NULL DEFAULT '',
                 ""Email"" varchar(160) NOT NULL DEFAULT '',
                 ""Phone"" varchar(80) NOT NULL DEFAULT '',
+                ""AppUpdateUrl"" varchar(1000) NOT NULL DEFAULT '',
                 ""UpdatedAt"" timestamp with time zone NOT NULL
             );
             ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Description"" varchar(1000) NOT NULL DEFAULT '';
             ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""CompanyDetails"" varchar(2000) NOT NULL DEFAULT '';
             ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Email"" varchar(160) NOT NULL DEFAULT '';
-            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Phone"" varchar(80) NOT NULL DEFAULT '';");
+            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""Phone"" varchar(80) NOT NULL DEFAULT '';
+            ALTER TABLE ""SystemConfigurations"" ADD COLUMN IF NOT EXISTS ""AppUpdateUrl"" varchar(1000) NOT NULL DEFAULT '';");
     }
 }

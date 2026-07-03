@@ -1,0 +1,57 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.AppUpdateManagerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Обновления программы" Height="560" Width="980"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock Text="Обновления программы" FontSize="20" FontWeight="Bold"/>
+            <TextBlock x:Name="DescriptionText"
+                       Text="Сборка и установка зашифрованных пакетов .bisapp для файлов приложения."
+                       Foreground="#6C7A89" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <WrapPanel Grid.Row="1" Margin="0,0,0,10">
+            <Button Content="Собрать .bisapp..." Width="145" Height="34" Margin="0,0,8,0"
+                    Background="#8E44AD" Foreground="White" Click="OnBuildUpdateClick"/>
+            <Button Content="Загрузить .bisapp..." Width="150" Height="34" Margin="0,0,8,0"
+                    Background="#27AE60" Foreground="White" Click="OnApplyUpdateClick"/>
+            <Button Content="Обновить" Width="100" Height="34" Margin="0,0,8,0"
+                    Background="#3498DB" Foreground="White" Click="OnRefreshClick"/>
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#7F8C8D"/>
+        </WrapPanel>
+
+        <DataGrid x:Name="UpdatesGrid" Grid.Row="2"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  SelectionMode="Single"
+                  AlternatingRowBackground="#F8F9FA">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Обновление" Binding="{Binding UpdateId}" Width="170"/>
+                <DataGridTextColumn Header="Версия" Binding="{Binding Version}" Width="90"/>
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="220"/>
+                <DataGridTextColumn Header="Статус" Binding="{Binding Status}" Width="110"/>
+                <DataGridTextColumn Header="Применено" Binding="{Binding AppliedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
+                <DataGridTextColumn Header="Пользователь" Binding="{Binding AppliedBy}" Width="120"/>
+                <DataGridTextColumn Header="Ошибка" Binding="{Binding Error}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <DockPanel Grid.Row="3" Margin="0,10,0,0">
+            <TextBlock DockPanel.Dock="Left"
+                       Text="Формат: зашифрованный .bisapp. Перед установкой убедитесь, что у пользователей закрыта программа."
+                       Foreground="#7F8C8D" VerticalAlignment="Center"/>
+            <Button DockPanel.Dock="Right" Content="Закрыть" Width="100" Height="34"
+                    Background="#95A5A6" Foreground="White" Click="OnCloseClick"/>
+        </DockPanel>
+    </Grid>
+</Window>

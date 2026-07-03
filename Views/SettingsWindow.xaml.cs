@@ -38,6 +38,7 @@ namespace BIS.ERP.Views
                 CompanyDetailsBox.Text = configuration.CompanyDetails;
                 EmailBox.Text = configuration.Email;
                 PhoneBox.Text = configuration.Phone;
+                AppUpdateUrlBox.Text = configuration.AppUpdateUrl;
             };
         }
 
@@ -104,7 +105,8 @@ namespace BIS.ERP.Views
                 DescriptionBox.Text,
                 CompanyDetailsBox.Text,
                 EmailBox.Text,
-                PhoneBox.Text);
+                PhoneBox.Text,
+                AppUpdateUrlBox.Text);
             _settings.CreateTestPostingsForNewInfoBases = CreateTestPostingsCheckBox.IsChecked == true;
             _settings.Save();
             DialogResult = true;

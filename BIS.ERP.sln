@@ -5,6 +5,8 @@ VisualStudioVersion = 18.6.11822.322 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BIS.ERP", "BIS.ERP.csproj", "{64DDEEB8-7582-6E00-6D7B-8E6471B848EA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BIS.ERP.Updater", "..\BIS.ERP.Updater\BIS.ERP.Updater.csproj", "{E6A73B4A-AC60-4B45-922D-59B2279D9E2A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{64DDEEB8-7582-6E00-6D7B-8E6471B848EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{64DDEEB8-7582-6E00-6D7B-8E6471B848EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{64DDEEB8-7582-6E00-6D7B-8E6471B848EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E6A73B4A-AC60-4B45-922D-59B2279D9E2A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E6A73B4A-AC60-4B45-922D-59B2279D9E2A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E6A73B4A-AC60-4B45-922D-59B2279D9E2A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E6A73B4A-AC60-4B45-922D-59B2279D9E2A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

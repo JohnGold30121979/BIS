@@ -49,6 +49,12 @@
                                 <TextBox x:Name="PhoneBox" Height="36" Padding="8,5"/>
                             </StackPanel>
                         </Grid>
+                        <TextBlock Text="Ссылка проверки обновлений программы" Margin="0,14,0,5"/>
+                        <TextBox x:Name="AppUpdateUrlBox" Height="36" Padding="8,5"
+                                 ToolTip="Можно указать URL на update.json или прямую ссылку на .bisapp"/>
+                        <TextBlock Text="Поддерживается прямая ссылка на .bisapp или JSON-фид с PackageUrl."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                   FontSize="11" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Border>
 

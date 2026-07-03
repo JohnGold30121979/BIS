@@ -3,6 +3,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
     <Nullable>enable</Nullable>
     <NoWarn>$(NoWarn);CS0108;CS1998;CS4014;CS8600;CS8601;CS8602;CS8603;CS8604;CS8612;CS8618;CS8625;EF1002</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -47,5 +50,32 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
   </ItemGroup>
+
+  <Target Name="BuildUpdater" BeforeTargets="Build"
+          Condition="Exists('..\BIS.ERP.Updater\BIS.ERP.Updater.csproj')">
+    <MSBuild Projects="..\BIS.ERP.Updater\BIS.ERP.Updater.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+  </Target>
+
+  <Target Name="CopyUpdaterToOutput" AfterTargets="Build"
+          Condition="Exists('..\BIS.ERP.Updater\bin\$(Configuration)\net8.0-windows\BIS.ERP.Updater.exe')">
+    <ItemGroup>
+      <UpdaterOutput Include="..\BIS.ERP.Updater\bin\$(Configuration)\net8.0-windows\BIS.ERP.Updater.exe" />
+      <UpdaterOutput Include="..\BIS.ERP.Updater\bin\$(Configuration)\net8.0-windows\BIS.ERP.Updater.dll" />
+      <UpdaterOutput Include="..\BIS.ERP.Updater\bin\$(Configuration)\net8.0-windows\BIS.ERP.Updater.deps.json" />
+      <UpdaterOutput Include="..\BIS.ERP.Updater\bin\$(Configuration)\net8.0-windows\BIS.ERP.Updater.runtimeconfig.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(UpdaterOutput)"
+          DestinationFolder="$(TargetDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishUpdater" AfterTargets="Publish"
+          Condition="'$(PublishDir)' != '' And Exists('..\BIS.ERP.Updater\BIS.ERP.Updater.csproj')">
+    <MSBuild Projects="..\BIS.ERP.Updater\BIS.ERP.Updater.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(PublishDir)" />
+  </Target>
 
 </Project>

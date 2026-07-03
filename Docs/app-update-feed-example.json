@@ -1,0 +1,12 @@
+{
+  "Format": "BIS.AppUpdateFeed",
+  "FormatVersion": 1,
+  "UpdateId": "2026-07-03-120000-bis-erp-2-0-0",
+  "Version": "2.0.0",
+  "Name": "BIS ERP 2.0.0",
+  "Description": "Обновление программы: исправления интерфейса, отчетов и механизма обновления.",
+  "PackageUrl": "BIS.ERP-2.0.0.bisapp",
+  "Checksum": "",
+  "MinAppVersion": "1.0.0",
+  "PublishedAt": "2026-07-03T12:00:00Z"
+}

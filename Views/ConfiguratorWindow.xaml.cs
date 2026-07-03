@@ -1642,6 +1642,20 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void OnAppUpdatesClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dialog = new AppUpdateManagerDialog { Owner = this };
+                dialog.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия обновлений программы: {ex.Message}", "Обновления программы",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadMetadata();
