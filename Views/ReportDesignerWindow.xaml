@@ -389,13 +389,53 @@
                                       SelectedValuePath="DbColumnName"/>
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="X/Y:" VerticalAlignment="Center"/>
                             <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal">
-                                <TextBox x:Name="NativeLeftBox" Width="72" Height="28" Margin="0,3,6,3"/>
-                                <TextBox x:Name="NativeTopBox" Width="72" Height="28" Margin="0,3"/>
+                                <Grid Width="82" Height="30" Margin="0,3,8,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NativeLeftBox" Height="28" VerticalContentAlignment="Center"/>
+                                    <UniformGrid Grid.Column="1" Rows="2">
+                                        <Button Content="+" Padding="0" FontSize="9" Tag="Left:+1" Click="OnNativeGeometrySpinClick"/>
+                                        <Button Content="-" Padding="0" FontSize="9" Tag="Left:-1" Click="OnNativeGeometrySpinClick"/>
+                                    </UniformGrid>
+                                </Grid>
+                                <Grid Width="82" Height="30" Margin="0,3,0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NativeTopBox" Height="28" VerticalContentAlignment="Center"/>
+                                    <UniformGrid Grid.Column="1" Rows="2">
+                                        <Button Content="+" Padding="0" FontSize="9" Tag="Top:+1" Click="OnNativeGeometrySpinClick"/>
+                                        <Button Content="-" Padding="0" FontSize="9" Tag="Top:-1" Click="OnNativeGeometrySpinClick"/>
+                                    </UniformGrid>
+                                </Grid>
                             </StackPanel>
                             <TextBlock Grid.Row="4" Grid.Column="0" Text="Ш/В:" VerticalAlignment="Center"/>
                             <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
-                                <TextBox x:Name="NativeWidthBox" Width="72" Height="28" Margin="0,3,6,3"/>
-                                <TextBox x:Name="NativeHeightBox" Width="72" Height="28" Margin="0,3"/>
+                                <Grid Width="82" Height="30" Margin="0,3,8,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NativeWidthBox" Height="28" VerticalContentAlignment="Center"/>
+                                    <UniformGrid Grid.Column="1" Rows="2">
+                                        <Button Content="+" Padding="0" FontSize="9" Tag="Width:+1" Click="OnNativeGeometrySpinClick"/>
+                                        <Button Content="-" Padding="0" FontSize="9" Tag="Width:-1" Click="OnNativeGeometrySpinClick"/>
+                                    </UniformGrid>
+                                </Grid>
+                                <Grid Width="82" Height="30" Margin="0,3,0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="20"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="NativeHeightBox" Height="28" VerticalContentAlignment="Center"/>
+                                    <UniformGrid Grid.Column="1" Rows="2">
+                                        <Button Content="+" Padding="0" FontSize="9" Tag="Height:+1" Click="OnNativeGeometrySpinClick"/>
+                                        <Button Content="-" Padding="0" FontSize="9" Tag="Height:-1" Click="OnNativeGeometrySpinClick"/>
+                                    </UniformGrid>
+                                </Grid>
                             </StackPanel>
                             <TextBlock Grid.Row="5" Grid.Column="0" Text="Шрифт:" VerticalAlignment="Center"/>
                             <TextBox x:Name="NativeFontBox" Grid.Row="5" Grid.Column="1" Height="28" Margin="0,3"/>

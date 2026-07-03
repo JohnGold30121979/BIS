@@ -1292,7 +1292,7 @@ namespace BIS.ERP.Services
         }
 
 
-        // Создание проводок по правилам       
+        // Создание проводок по правил
         public async Task<List<Dictionary<string, object>>> GeneratePostingsAsync(Guid metadataId, Guid recordId)
         {
             var postings = new List<Dictionary<string, object>>();
@@ -1357,7 +1357,7 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        // Получение данных записи       
+        // Получение данных записи
         private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId)
         {
             var result = new Dictionary<string, object>();
@@ -1400,7 +1400,7 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        // Обновление поля записи        
+        // Обновление поля записи
         private async Task UpdateRecordFieldAsync(string tableName, Guid recordId, string fieldName, object value)
         {
             var formattedValue = FormatSqlValue(value, "Unknown");
@@ -1671,7 +1671,7 @@ namespace BIS.ERP.Services
         }
 
 
-        // Провести документ (ПКО или РКО)       
+        // Провести документ (ПКО или РКО)
         public async Task PostDocumentAsync(Guid documentId, Guid recordId)
         {
             await using var transaction = await _context.Database.BeginTransactionAsync();

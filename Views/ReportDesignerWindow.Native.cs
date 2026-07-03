@@ -759,6 +759,46 @@ namespace BIS.ERP.Views
             return true;
         }
 
+        private void OnNativeGeometrySpinClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedNativeElement == null || sender is not Button { Tag: string tag })
+                return;
+
+            var parts = tag.Split(':');
+            if (parts.Length != 2 || !double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var direction))
+                return;
+
+            var step = GetNativeGeometryStep() * direction;
+            switch (parts[0])
+            {
+                case "Left":
+                    SetNativeElementPosition(_selectedNativeElement, _selectedNativeElement.Left + step, _selectedNativeElement.Top);
+                    break;
+                case "Top":
+                    SetNativeElementPosition(_selectedNativeElement, _selectedNativeElement.Left, _selectedNativeElement.Top + step);
+                    break;
+                case "Width":
+                    SetNativeElementSize(_selectedNativeElement, _selectedNativeElement.Width + step, _selectedNativeElement.Height);
+                    break;
+                case "Height":
+                    SetNativeElementSize(_selectedNativeElement, _selectedNativeElement.Width, _selectedNativeElement.Height + step);
+                    break;
+            }
+
+            NativeElementsGrid.Items.Refresh();
+            NativeDesignerCanvas.Focus();
+            e.Handled = true;
+        }
+
+        private static double GetNativeGeometryStep()
+        {
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+                return 100;
+            if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift)
+                return 10;
+            return 1;
+        }
+
         private void OnAddNativeElementClick(object sender, RoutedEventArgs e)
         {
             AddNativeElement("Text", "Новый элемент", string.Empty, 500, 70);
