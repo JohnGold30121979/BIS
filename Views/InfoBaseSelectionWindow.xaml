@@ -110,28 +110,12 @@
                         <Button x:Name="WorkModeButton" Content="💼 Рабочий режим" 
                                 Height="40" Margin="0,5" Command="{Binding StartWorkModeCommand}"
                                 Background="#27AE60" Foreground="White" FontWeight="Bold"
-                                Cursor="Hand">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                                Cursor="Hand"/>
 
                         <Button x:Name="ConfigModeButton" Content="⚙️ Конфигуратор" 
                                 Height="40" Margin="0,5" Command="{Binding StartConfigModeCommand}"
                                 Background="#3498DB" Foreground="White" FontWeight="Bold"
-                                Cursor="Hand">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="6">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                                Cursor="Hand"/>
 
                         <Separator Margin="0,15" Background="#E0E0E0" Height="1"/>
 
@@ -141,58 +125,22 @@
                         <Button x:Name="AddButton" Content="➕ Добавить..." 
                                 Height="35" Margin="0,5" Command="{Binding AddCommand}"
                                 Background="Transparent" BorderBrush="#27AE60" BorderThickness="1"
-                                Foreground="#27AE60" Cursor="Hand">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="5"
-                                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                                Foreground="#27AE60" Cursor="Hand"/>
 
                         <Button x:Name="EditButton" Content="✏️ Изменить..." 
                                 Height="35" Margin="0,5" Command="{Binding EditCommand}"
                                 Background="Transparent" BorderBrush="#3498DB" BorderThickness="1"
-                                Foreground="#3498DB" Cursor="Hand">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="5"
-                                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                                Foreground="#3498DB" Cursor="Hand"/>
 
                         <Button x:Name="DeleteButton" Content="🗑️ Удалить" 
                                 Height="35" Margin="0,5" Command="{Binding DeleteCommand}"
                                 Background="Transparent" BorderBrush="#E74C3C" BorderThickness="1"
-                                Foreground="#E74C3C" Cursor="Hand">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="5"
-                                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                                Foreground="#E74C3C" Cursor="Hand"/>
 
                         <Button x:Name="SettingsButton" Content="🔧 Настройка..." 
                                 Height="35" Margin="0,5" Command="{Binding SettingsCommand}"
                                 Background="Transparent" BorderBrush="#9B59B6" BorderThickness="1"
-                                Foreground="#9B59B6" Cursor="Hand">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="5"
-                                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
-                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
+                                Foreground="#9B59B6" Cursor="Hand"/>
                     </StackPanel>
                 </Border>
             </Grid>
@@ -204,15 +152,7 @@
                                Foreground="#7F8C8D" FontSize="11" VerticalAlignment="Center"/>
                     <Button x:Name="ExitButton" Content="🚪 Выход" Width="80" Height="30" 
                             HorizontalAlignment="Right" Command="{Binding ExitCommand}"
-                            Background="#E74C3C" Foreground="White" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border Background="{TemplateBinding Background}" CornerRadius="5">
-                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
+                            Background="#E74C3C" Foreground="White" Cursor="Hand"/>
                 </Grid>
             </Border>
         </Grid>

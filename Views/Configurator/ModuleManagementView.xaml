@@ -8,7 +8,9 @@
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <TextBlock Text="Модули" FontSize="16" FontWeight="SemiBold" Margin="4,2,0,10"/>
-                <ListBox x:Name="ModulesList" Grid.Row="1" DisplayMemberPath="Name" SelectionChanged="OnModuleSelected"/>
+                <ListBox x:Name="ModulesList" Grid.Row="1" DisplayMemberPath="Name" SelectionChanged="OnModuleSelected"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                     <Button Content="Добавить" Width="105" Height="34" Click="OnAddClick"
                             Background="#27AE60" Foreground="White"/>
@@ -56,7 +58,12 @@
 
                 <TabControl Grid.Row="2">
                     <TabItem Header="Документы">
-                        <DataGrid x:Name="DocumentsGrid" AutoGenerateColumns="False" CanUserAddRows="False">
+                        <DataGrid x:Name="DocumentsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  EnableRowVirtualization="True"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling">
                             <DataGrid.Columns>
                                 <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
                                 <DataGridTextColumn Header="Документ" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
@@ -65,7 +72,12 @@
                         </DataGrid>
                     </TabItem>
                     <TabItem Header="Отчеты">
-                        <DataGrid x:Name="ReportsGrid" AutoGenerateColumns="False" CanUserAddRows="False">
+                        <DataGrid x:Name="ReportsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
+                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  EnableRowVirtualization="True"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling">
                             <DataGrid.Columns>
                                 <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
                                 <DataGridTextColumn Header="Отчет" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>

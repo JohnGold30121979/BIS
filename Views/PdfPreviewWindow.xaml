@@ -53,37 +53,13 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="💾 Сохранить PDF" Width="120" Height="35" Margin="5"
                         Background="#27AE60" Foreground="White" Click="OnSaveClick"
-                        Cursor="Hand">
-                    <Button.Template>
-                        <ControlTemplate TargetType="Button">
-                            <Border Background="{TemplateBinding Background}" CornerRadius="4">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            </Border>
-                        </ControlTemplate>
-                    </Button.Template>
-                </Button>
+                        Cursor="Hand"/>
                 <Button Content="🖨 Печать" Width="100" Height="35" Margin="5"
                         Background="#3498DB" Foreground="White" Click="OnPrintClick"
-                        Cursor="Hand">
-                    <Button.Template>
-                        <ControlTemplate TargetType="Button">
-                            <Border Background="{TemplateBinding Background}" CornerRadius="4">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            </Border>
-                        </ControlTemplate>
-                    </Button.Template>
-                </Button>
+                        Cursor="Hand"/>
                 <Button Content="❌ Закрыть" Width="100" Height="35" Margin="5"
                         Background="#E74C3C" Foreground="White" Click="OnCloseClick"
-                        Cursor="Hand">
-                    <Button.Template>
-                        <ControlTemplate TargetType="Button">
-                            <Border Background="{TemplateBinding Background}" CornerRadius="4">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            </Border>
-                        </ControlTemplate>
-                    </Button.Template>
-                </Button>
+                        Cursor="Hand"/>
             </StackPanel>
         </Border>
     </Grid>

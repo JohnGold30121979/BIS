@@ -49,41 +49,134 @@
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300" MinWidth="200"/>
+                <ColumnDefinition Width="330" MinWidth="260"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
             <!-- Левая панель -->
-            <Border Grid.Column="0" Background="{DynamicResource AppSidebarBackgroundBrush}">
+            <Border Grid.Column="0" Background="{DynamicResource ConfiguratorSidebarBackgroundBrush}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Background="{DynamicResource AppHeaderBackgroundBrush}" Padding="15">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock x:Name="SystemIconText" FontSize="20" Margin="0,0,8,0"/>
-                                <TextBlock x:Name="SystemNameText" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource AppPrimaryTextBrush}"/>
-                            </StackPanel>
-                            <TextBlock Text="Режим конфигуратора" FontSize="11" Foreground="#7F8C8D"/>
-                        </StackPanel>
+                    <Border Grid.Row="0" Background="{DynamicResource ConfiguratorHeaderBackgroundBrush}" Padding="16">
+                        <Border Background="{DynamicResource ConfiguratorSidebarCardBrush}"
+                                CornerRadius="14" Padding="14" BorderThickness="1"
+                                BorderBrush="{DynamicResource AppBorderBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="44" Height="44" CornerRadius="12"
+                                        Background="{DynamicResource ConfiguratorTreeItemSelectedBrush}"
+                                        VerticalAlignment="Top" Margin="0,0,12,0">
+                                    <TextBlock x:Name="SystemIconText" FontSize="22"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="White"/>
+                                </Border>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock x:Name="SystemNameText" FontSize="20" FontWeight="Bold"
+                                               Foreground="{DynamicResource ConfiguratorTreeItemForegroundBrush}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="Режим конфигуратора" FontSize="11"
+                                               Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"
+                                               Margin="0,2,0,8"/>
+                                    <Border Background="{DynamicResource ConfiguratorPatchBadgeBackgroundBrush}"
+                                            CornerRadius="10" Padding="8,3" HorizontalAlignment="Left">
+                                        <TextBlock x:Name="PatchVersionText" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource ConfiguratorPatchBadgeForegroundBrush}"
+                                                   Text="Патч: -"/>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                     </Border>
 
                     <ScrollViewer x:Name="LeftNavigationScrollViewer" Grid.Row="1"
                                   VerticalScrollBarVisibility="Auto"
                                   PreviewMouseWheel="OnLeftNavigationPreviewMouseWheel">
                         <StackPanel>
-                            <TreeView x:Name="MetadataTree" Background="{DynamicResource AppSidebarBackgroundBrush}"
-                                      Foreground="{DynamicResource AppPrimaryTextBrush}" BorderThickness="0"
-                                      Margin="0,10,0,0"
+                            <TreeView x:Name="MetadataTree" Background="{DynamicResource ConfiguratorSidebarBackgroundBrush}"
+                                      Foreground="{DynamicResource ConfiguratorTreeItemForegroundBrush}" BorderThickness="0"
+                                      Margin="10,12,10,0" Padding="0,2"
                                       SelectedItemChanged="OnTreeSelectedChanged"
                                       MouseRightButtonUp="OnTreeRightClick"
                                       PreviewMouseWheel="OnLeftNavigationPreviewMouseWheel">
                                 <TreeView.Resources>
-                                    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#34495E"/>
+                                    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2F80C9"/>
+                                    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#2F80C9"/>
+                                    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="White"/>
+                                    <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="White"/>
+                                    <Style TargetType="{x:Type TreeViewItem}">
+                                        <Setter Property="Foreground" Value="{DynamicResource ConfiguratorTreeItemForegroundBrush}"/>
+                                        <Setter Property="FontSize" Value="13"/>
+                                        <Setter Property="Padding" Value="8,7"/>
+                                        <Setter Property="Margin" Value="0,2"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="{x:Type TreeViewItem}">
+                                                    <StackPanel>
+                                                        <Border x:Name="ItemBorder" Background="Transparent"
+                                                                CornerRadius="9" Padding="{TemplateBinding Padding}">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="18"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <ToggleButton x:Name="Expander" Width="16" Height="16"
+                                                                              VerticalAlignment="Center"
+                                                                              IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
+                                                                              ClickMode="Press"
+                                                                              Background="Transparent" BorderThickness="0"
+                                                                              Foreground="{TemplateBinding Foreground}">
+                                                                    <TextBlock x:Name="ExpanderGlyph" Text="›"
+                                                                               FontSize="16" FontWeight="Bold"
+                                                                               HorizontalAlignment="Center"
+                                                                               VerticalAlignment="Center"/>
+                                                                </ToggleButton>
+                                                                <ContentPresenter Grid.Column="1" x:Name="PART_Header"
+                                                                                  ContentSource="Header"
+                                                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                                  VerticalAlignment="Center"/>
+                                                            </Grid>
+                                                        </Border>
+                                                        <ItemsPresenter x:Name="ItemsHost" Margin="20,2,0,0"/>
+                                                    </StackPanel>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="HasItems" Value="False">
+                                                            <Setter TargetName="Expander" Property="Visibility" Value="Hidden"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsExpanded" Value="False">
+                                                            <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsExpanded" Value="True">
+                                                            <Setter TargetName="ExpanderGlyph" Property="Text" Value="⌄"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ConfiguratorTreeItemHoverBrush}"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ConfiguratorTreeItemSelectedBrush}"/>
+                                                            <Setter Property="Foreground" Value="White"/>
+                                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                                        </Trigger>
+                                                        <MultiTrigger>
+                                                            <MultiTrigger.Conditions>
+                                                                <Condition Property="IsSelected" Value="True"/>
+                                                                <Condition Property="IsSelectionActive" Value="False"/>
+                                                            </MultiTrigger.Conditions>
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ConfiguratorTreeItemSelectedBrush}"/>
+                                                            <Setter Property="Foreground" Value="White"/>
+                                                        </MultiTrigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
                                     <ContextMenu x:Key="ReportContextMenu">
                                         <MenuItem Header="📊 Открыть в конструкторе" Click="OnOpenReportDesignerClick"/>
                                         <Separator/>
@@ -156,7 +249,7 @@
                         </StackPanel>
                     </Border>
 
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer x:Name="PropertiesScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <Border Background="White" CornerRadius="8" Padding="20">
                             <StackPanel x:Name="PropertiesPanel">
                                 <Border Background="#F8F9FA" CornerRadius="6" Padding="20">

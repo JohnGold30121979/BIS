@@ -30,12 +30,14 @@ namespace BIS.ERP.Views
         private bool _isLoading = false;
         private AppDbContext _context;
         private bool _closeForModeSwitch;
+        private FrameworkElement? _fixedPropertiesContent;
 
         public ConfiguratorWindow()
         {
             InitializeComponent();
             this.Loaded += async (s, e) => await LoadMetadata();
             this.Closing += OnWindowClosing;
+            PropertiesScrollViewer.SizeChanged += (_, _) => UpdateFixedPropertiesContentHeight();
         }
 
         private void OnWindowClosing(object? sender, CancelEventArgs e)
@@ -58,13 +60,18 @@ namespace BIS.ERP.Views
 
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
-                SystemIconText.Text = systemConfiguration.Icon;
+                SystemIconText.Text = GetSystemIcon(systemConfiguration.Icon);
                 Title = $"{systemConfiguration.SystemName} - Конфигуратор";
 
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 await new RuntimeSchemaFixService(_context).EnsureAsync();
                 await new SystemConfigurationService(_context).GetAsync();
-                await new BisPatchService(_context).EnsureSchemaAsync();
+                var patchService = new BisPatchService(_context);
+                await patchService.EnsureSchemaAsync();
+                var patchVersion = await patchService.GetCurrentPatchVersionAsync();
+                PatchVersionText.Text = string.IsNullOrWhiteSpace(patchVersion)
+                    ? "Патч: не применен"
+                    : $"Патч: {patchVersion}";
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
@@ -104,18 +111,20 @@ namespace BIS.ERP.Views
             var rootItem = new TreeViewItem
             {
                 Header = "📁 Метаданные",
-                IsExpanded = true,
-                Foreground = Brushes.White
+                IsExpanded = true
             };
 
             // Справочники
             var catalogsItem = new TreeViewItem
             {
                 Header = "📚 Справочники",
-                IsExpanded = true,
-                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+                IsExpanded = true
             };
-            catalogsItem.Selected += (s, e) => ShowCatalogsList();
+            catalogsItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowCatalogsList();
+            };
 
             if (_catalogs != null && _catalogs.Any())
             {
@@ -124,10 +133,13 @@ namespace BIS.ERP.Views
                     var catalogItem = new TreeViewItem
                     {
                         Header = $"{catalog.Icon} {catalog.Name}",
-                        Tag = catalog,
-                        Foreground = Brushes.White
+                        Tag = catalog
                     };
-                    catalogItem.Selected += (s, e) => ShowCatalogEditor(catalog);
+                    catalogItem.Selected += (s, e) =>
+                    {
+                        e.Handled = true;
+                        ShowCatalogEditor(catalog);
+                    };
                     catalogsItem.Items.Add(catalogItem);
                 }
             }
@@ -136,10 +148,13 @@ namespace BIS.ERP.Views
             var documentsItem = new TreeViewItem
             {
                 Header = "📄 Документы",
-                IsExpanded = true,
-                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+                IsExpanded = true
             };
-            documentsItem.Selected += (s, e) => ShowDocumentsList();
+            documentsItem.Selected += async (s, e) =>
+            {
+                e.Handled = true;
+                await ShowDocumentsList();
+            };
 
             if (_documents != null && _documents.Any())
             {
@@ -148,10 +163,13 @@ namespace BIS.ERP.Views
                     var docItem = new TreeViewItem
                     {
                         Header = $"{doc.Icon} {doc.Name}",
-                        Tag = doc,
-                        Foreground = Brushes.White
+                        Tag = doc
                     };
-                    docItem.Selected += (s, e) => ShowDocumentEditor(doc);
+                    docItem.Selected += (s, e) =>
+                    {
+                        e.Handled = true;
+                        ShowDocumentEditor(doc);
+                    };
                     documentsItem.Items.Add(docItem);
                 }
             }
@@ -160,8 +178,7 @@ namespace BIS.ERP.Views
             var reportsItem = new TreeViewItem
             {
                 Header = "📊 Отчеты и печатные формы",
-                IsExpanded = true,
-                Foreground = (Brush)new BrushConverter().ConvertFrom("#BDC3C7")
+                IsExpanded = true
             };
 
             if (_reports != null && _reports.Any())
@@ -171,10 +188,13 @@ namespace BIS.ERP.Views
                     var reportItem = new TreeViewItem
                     {
                         Header = $"{report.Icon} {report.Name}{(report.IsActive ? string.Empty : " [отключен]")}",
-                        Tag = report,
-                        Foreground = Brushes.White
+                        Tag = report
                     };
-                    reportItem.Selected += (s, e) => ShowReportEditor(report);
+                    reportItem.Selected += (s, e) =>
+                    {
+                        e.Handled = true;
+                        ShowReportEditor(report);
+                    };
                     reportItem.Tag = report;
                     reportItem.ContextMenu = (ContextMenu)MetadataTree.Resources["ReportContextMenu"];
                     reportsItem.Items.Add(reportItem);
@@ -184,19 +204,25 @@ namespace BIS.ERP.Views
             rootItem.Items.Add(catalogsItem);
             var modulesItem = new TreeViewItem
             {
-                Header = "Модули и разделы",
-                Foreground = Brushes.White
+                Header = "Модули и разделы"
             };
-            modulesItem.Selected += (s, e) => ShowModulesEditor();
+            modulesItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowModulesEditor();
+            };
             rootItem.Items.Add(modulesItem);
             rootItem.Items.Add(documentsItem);
             rootItem.Items.Add(reportsItem);
             var translationsItem = new TreeViewItem
             {
-                Header = "🌐 Переводы интерфейса",
-                Foreground = Brushes.White
+                Header = "🌐 Переводы интерфейса"
             };
-            translationsItem.Selected += (s, e) => ShowTranslationsEditor();
+            translationsItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowTranslationsEditor();
+            };
             rootItem.Items.Add(translationsItem);
             MetadataTree.Items.Add(rootItem);
         }
@@ -205,16 +231,48 @@ namespace BIS.ERP.Views
         {
             if (_context == null)
                 return;
+            SetPropertiesScrollEnabled(false);
             EditorTitle.Text = "Модули и разделы";
             EditorDescription.Text = "Состав документов и отчетов рабочего интерфейса";
             PropertiesPanel.Children.Clear();
-            PropertiesPanel.Children.Add(new BIS.ERP.Views.Configurator.ModuleManagementView(_context));
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(
+                new BIS.ERP.Views.Configurator.ModuleManagementView(_context)));
+        }
+
+        private FrameworkElement CreateFixedPropertiesHost(UIElement content)
+        {
+            var host = new Grid
+            {
+                MinHeight = 360
+            };
+            host.Children.Add(content);
+            _fixedPropertiesContent = host;
+            UpdateFixedPropertiesContentHeight();
+            return host;
+        }
+
+        private void SetPropertiesScrollEnabled(bool enabled)
+        {
+            _fixedPropertiesContent = null;
+            PropertiesScrollViewer.VerticalScrollBarVisibility = enabled
+                ? ScrollBarVisibility.Auto
+                : ScrollBarVisibility.Disabled;
+        }
+
+        private void UpdateFixedPropertiesContentHeight()
+        {
+            if (_fixedPropertiesContent == null || PropertiesScrollViewer.ActualHeight <= 80)
+                return;
+
+            // Учитываем Padding=20 у внутренней белой панели, чтобы внешний ScrollViewer не перехватывал прокрутку.
+            _fixedPropertiesContent.Height = Math.Max(360, PropertiesScrollViewer.ActualHeight - 42);
         }
 
         private void OnModulesClick(object sender, RoutedEventArgs e) => ShowModulesEditor();
 
         private async void ShowTranslationsEditor()
         {
+            SetPropertiesScrollEnabled(true);
             if (_context == null)
                 return;
 
@@ -389,6 +447,7 @@ namespace BIS.ERP.Views
         // ОТОБРАЖЕНИЕ СПИСКОВ
         private void ShowCatalogsList()
         {
+            SetPropertiesScrollEnabled(true);
             EditorTitle.Text = "📚 Справочники";
             EditorDescription.Text = "Список справочников в системе";
             PropertiesPanel.Children.Clear();
@@ -420,6 +479,7 @@ namespace BIS.ERP.Views
         // Добавьте отладку в метод ShowDocumentsList
         private async Task ShowDocumentsList()
         {
+            SetPropertiesScrollEnabled(true);
             EditorTitle.Text = "📄 Документы";
             EditorDescription.Text = "Управление документами";
             PropertiesPanel.Children.Clear();
@@ -649,6 +709,7 @@ namespace BIS.ERP.Views
 
         private async Task ShowOperationsList()
         {
+            SetPropertiesScrollEnabled(true);
             EditorTitle.Text = "📋 Операции";
             EditorDescription.Text = "Список всех операций";
             PropertiesPanel.Children.Clear();
@@ -694,6 +755,7 @@ namespace BIS.ERP.Views
         // Показ деталей документа
         private async Task ShowDynamicDocumentDetails(DynamicDocument doc)
         {
+            SetPropertiesScrollEnabled(true);
             var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             var documentService = new DocumentService(context);
 
@@ -812,11 +874,14 @@ namespace BIS.ERP.Views
 
         private void ShowCatalogEditor(MetadataObject obj)
         {
+            SetPropertiesScrollEnabled(true);
             EditorTitle.Text = $"✏️ Редактирование: {obj.Name}";
             EditorDescription.Text = $"Таблица: {obj.TableName} | Тип: {(obj.ObjectType == "Catalog" ? "Справочник" : "Документ")}";
             PropertiesPanel.Children.Clear();
 
             var mainPanel = new StackPanel();
+            mainPanel.Children.Add(CreateBackToMetadataListButton(obj));
+
             var tabControl = new TabControl { Margin = new Thickness(0, 0, 0, 10) };
 
             // ==================== ВКЛАДКА "ОСНОВНЫЕ" ====================
@@ -1160,8 +1225,38 @@ namespace BIS.ERP.Views
             ShowCatalogEditor(obj); // Используем тот же редактор, так как функционал одинаковый
         }      
 
+        private Button CreateBackToMetadataListButton(MetadataObject obj)
+        {
+            var isDocument = obj.ObjectType == "Document";
+            var button = new Button
+            {
+                Content = isDocument ? "← К списку документов" : "← К списку справочников",
+                Height = 34,
+                MinWidth = 190,
+                Padding = new Thickness(14, 0, 14, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 0, 14),
+                Cursor = Cursors.Hand
+            };
+
+            button.SetResourceReference(Control.BackgroundProperty, "ConfiguratorSidebarCardBrush");
+            button.SetResourceReference(Control.ForegroundProperty, "ConfiguratorTreeItemForegroundBrush");
+            button.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
+
+            button.Click += async (_, _) =>
+            {
+                if (isDocument)
+                    await ShowDocumentsList();
+                else
+                    ShowCatalogsList();
+            };
+
+            return button;
+        }
+
         private void ShowReportEditor(Report report)
         {
+            SetPropertiesScrollEnabled(true);
             _selectedReport = report;
             DeleteReportMenuItem.IsEnabled = true;
 
@@ -1591,8 +1686,13 @@ namespace BIS.ERP.Views
                 return;
             var configuration = await new SystemConfigurationService().GetAsync();
             SystemNameText.Text = configuration.SystemName;
-            SystemIconText.Text = configuration.Icon;
+            SystemIconText.Text = GetSystemIcon(configuration.Icon);
             Title = $"{configuration.SystemName} - Конфигуратор";
+        }
+
+        private static string GetSystemIcon(string? icon)
+        {
+            return string.IsNullOrWhiteSpace(icon) ? "⚙" : icon.Trim();
         }
 
 

@@ -22,6 +22,13 @@
     <SolidColorBrush x:Key="AppDisabledButtonBackgroundBrush" Color="#3B4258"/>
     <SolidColorBrush x:Key="AppDisabledButtonForegroundBrush" Color="#C3CAD7"/>
     <SolidColorBrush x:Key="AppDisabledButtonBorderBrush" Color="#56617A"/>
+    <SolidColorBrush x:Key="AppButtonBackgroundBrush" Color="#2C344A"/>
+    <SolidColorBrush x:Key="AppButtonForegroundBrush" Color="#F2F6FB"/>
+    <SolidColorBrush x:Key="AppButtonBorderBrush" Color="#53617A"/>
+    <SolidColorBrush x:Key="AppButtonHoverOverlayBrush" Color="#18FFFFFF"/>
+    <SolidColorBrush x:Key="AppButtonPressedOverlayBrush" Color="#26000000"/>
+    <SolidColorBrush x:Key="AppButtonFocusBorderBrush" Color="#4AA3DF"/>
+    <CornerRadius x:Key="AppButtonCornerRadius">9</CornerRadius>
 
     <SolidColorBrush x:Key="AppPrimaryTextBrush" Color="#ECF0F1"/>
     <SolidColorBrush x:Key="AppSecondaryTextBrush" Color="#95A5A6"/>
@@ -32,6 +39,16 @@
 
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#2A3A4A"/>
     <Color x:Key="AppHighlightColor">#2A3A4A</Color>
+
+    <SolidColorBrush x:Key="ConfiguratorSidebarBackgroundBrush" Color="#151923"/>
+    <SolidColorBrush x:Key="ConfiguratorHeaderBackgroundBrush" Color="#0A0D14"/>
+    <SolidColorBrush x:Key="ConfiguratorSidebarCardBrush" Color="#232A3D"/>
+    <SolidColorBrush x:Key="ConfiguratorTreeItemForegroundBrush" Color="#F0F4FA"/>
+    <SolidColorBrush x:Key="ConfiguratorTreeGroupForegroundBrush" Color="#9DAAC0"/>
+    <SolidColorBrush x:Key="ConfiguratorTreeItemHoverBrush" Color="#303A52"/>
+    <SolidColorBrush x:Key="ConfiguratorTreeItemSelectedBrush" Color="#2878B8"/>
+    <SolidColorBrush x:Key="ConfiguratorPatchBadgeBackgroundBrush" Color="#20344B"/>
+    <SolidColorBrush x:Key="ConfiguratorPatchBadgeForegroundBrush" Color="#D9ECFF"/>
 
     <Style TargetType="Window">
         <Setter Property="Background" Value="{DynamicResource AppWindowBackgroundBrush}"/>
@@ -65,36 +82,64 @@
         </Style.Triggers>
     </Style>
     <Style TargetType="Button">
-        <Setter Property="Padding" Value="12,6"/>
-        <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
-        <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+        <Setter Property="Padding" Value="14,7"/>
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Background" Value="{DynamicResource AppButtonBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AppButtonForegroundBrush}"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AppButtonBorderBrush}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}"
+                    <Border x:Name="ButtonBorder"
+                            Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4">
-                        <ContentPresenter x:Name="ButtonContent" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                          Margin="{TemplateBinding Padding}"
-                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{DynamicResource AppButtonCornerRadius}"
+                            RenderTransformOrigin="0.5,0.5"
+                            SnapsToDevicePixels="True">
+                        <Border.RenderTransform>
+                            <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        </Border.RenderTransform>
+                        <Grid>
+                            <Border x:Name="ButtonOverlay"
+                                    Background="Transparent"
+                                    CornerRadius="{DynamicResource AppButtonCornerRadius}"
+                                    Opacity="0"/>
+                            <ContentPresenter x:Name="ButtonContent"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              Margin="{TemplateBinding Padding}"
+                                              RecognizesAccessKey="True"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AppButtonFocusBorderBrush}"/>
+                        </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.9"/>
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AppButtonFocusBorderBrush}"/>
+                            <Setter TargetName="ButtonOverlay" Property="Background" Value="{DynamicResource AppButtonHoverOverlayBrush}"/>
+                            <Setter TargetName="ButtonOverlay" Property="Opacity" Value="1"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.78"/>
+                            <Setter TargetName="ButtonOverlay" Property="Background" Value="{DynamicResource AppButtonPressedOverlayBrush}"/>
+                            <Setter TargetName="ButtonOverlay" Property="Opacity" Value="1"/>
+                            <Setter TargetName="ButtonBorder" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="0.985" ScaleY="0.985"/>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource AppDisabledButtonBackgroundBrush}"/>
                             <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AppDisabledButtonBorderBrush}"/>
                             <Setter TargetName="ButtonContent" Property="TextElement.Foreground" Value="{DynamicResource AppDisabledButtonForegroundBrush}"/>
-                            <Setter TargetName="ButtonBorder" Property="Opacity" Value="1"/>
+                            <Setter TargetName="ButtonOverlay" Property="Opacity" Value="0"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
