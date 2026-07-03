@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using BIS.ERP.Models;
@@ -15,6 +16,7 @@ namespace BIS.ERP.Views
         private readonly Dictionary<string, Control> _controls;
         private readonly MetadataService _metadataService;
         private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
+        private AccountAnalyticsRegistry? _accountAnalytics;
 
         public Dictionary<string, object> ItemData => _itemData;
 
@@ -40,6 +42,7 @@ namespace BIS.ERP.Views
 
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
                 foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
                 {
@@ -54,6 +57,13 @@ namespace BIS.ERP.Views
                     if (TryCreateChartOfAccountsChoiceControl(field, existingData, out var choiceControl))
                     {
                         inputControl = choiceControl;
+                    }
+                    else if (ShouldUseAccountPicker(field))
+                    {
+                        inputControl = AccountPickerControlFactory.Create(
+                            _accountAnalytics!,
+                            GetExistingValue(field, existingData),
+                            this);
                     }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
                     else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -78,6 +88,27 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 throw;
             }
+        }
+
+        private bool ShouldUseAccountPicker(MetadataField field)
+        {
+            return AccountAnalyticsRules.IsAccountSelectorField(field) &&
+                   _accountAnalytics?.Accounts.Count > 0;
+        }
+
+        private static object? GetExistingValue(MetadataField field, Dictionary<string, object> existingData)
+        {
+            if (existingData == null)
+                return null;
+
+            if (existingData.TryGetValue(field.Name, out var byName))
+                return byName;
+
+            if (!string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                existingData.TryGetValue(field.DbColumnName, out var byColumn))
+                return byColumn;
+
+            return null;
         }
 
         // Универсальное создание ComboBox для любого Reference поля       
@@ -121,11 +152,13 @@ namespace BIS.ERP.Views
 
             comboBox.ItemsSource = items;
 
-            // Выбираем существующее значение
-            if (existingData != null && existingData.ContainsKey(field.Name) && existingData[field.Name] != null)
+            // Выбираем существующее значение: поддерживаем и Id, и уже отображенное значение.
+            var existingValue = GetExistingValue(field, existingData)?.ToString();
+            if (!string.IsNullOrWhiteSpace(existingValue))
             {
-                var existingId = existingData[field.Name].ToString();
-                var selectedItem = items.FirstOrDefault(i => i.Id.ToString() == existingId);
+                var selectedItem = items.FirstOrDefault(i =>
+                    string.Equals(i.Id.ToString(), existingValue, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(i.DisplayName, existingValue, StringComparison.OrdinalIgnoreCase));
                 if (selectedItem != null)
                     comboBox.SelectedItem = selectedItem;
             }
@@ -442,7 +475,11 @@ namespace BIS.ERP.Views
                     var control = _controls[field.Name];
                     object value = null;
 
-                    if (control is ComboBox comboBox)
+                    if (control is UserControl && AccountPickerControlFactory.GetSelectedAccount(control) != null)
+                    {
+                        value = AccountPickerControlFactory.GetSelectedAccountValue(field, control);
+                    }
+                    else if (control is ComboBox comboBox)
                     {
                         if (comboBox.SelectedItem is ReferenceItem selectedItem)
                             value = selectedItem.Id.ToString();

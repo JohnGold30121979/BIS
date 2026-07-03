@@ -12,14 +12,18 @@ public partial class MetadataService
         return new List<MetadataField>
         {
             new MetadataField { Id = Guid.NewGuid(), Name = "Код", DbColumnName = "code", FieldType = "String", Length = 50, IsRequired = true, IsUnique = true, Order = 1, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Наименование", DbColumnName = "name", FieldType = "String", Length = 200, IsRequired = true, Order = 2, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Счет дебета", DbColumnName = "debit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 3, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Счет кредита", DbColumnName = "credit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 4, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "АРМ", DbColumnName = "arm_code", FieldType = "String", Length = 50, IsRequired = false, Order = 5, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Взаиморасчеты", DbColumnName = "use_settlements", FieldType = "Bool", IsRequired = true, Order = 6, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Формировать проводки", DbColumnName = "generate_postings", FieldType = "Bool", IsRequired = true, Order = 7, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", IsRequired = true, Order = 8, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Примечание", DbColumnName = "description", FieldType = "String", Length = 500, IsRequired = false, Order = 9, MetadataObjectId = metadataObjectId }
+            new MetadataField { Id = Guid.NewGuid(), Name = "Вид расчета", DbColumnName = "name", FieldType = "String", Length = 250, IsRequired = true, Order = 2, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Орг", DbColumnName = "use_organizations", FieldType = "Bool", IsRequired = true, Order = 3, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Таб №", DbColumnName = "use_personnel", FieldType = "Bool", IsRequired = true, Order = 4, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Валюта", DbColumnName = "use_currency", FieldType = "Bool", IsRequired = true, Order = 5, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Остаток брать из АРМ", DbColumnName = "arm_code", FieldType = "String", Length = 50, IsRequired = false, Order = 6, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Дебет", DbColumnName = "debit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 7, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Кредит", DbColumnName = "credit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 8, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во взаиморасчетах", DbColumnName = "use_settlements", FieldType = "Bool", IsRequired = true, Order = 9, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Формировать проводки авансовых платежей", DbColumnName = "generate_postings", FieldType = "Bool", IsRequired = true, Order = 10, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во внутренних взаиморасчетах", DbColumnName = "use_internal_settlements", FieldType = "Bool", IsRequired = true, Order = 11, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", IsRequired = true, Order = 12, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Примечание", DbColumnName = "description", FieldType = "String", Length = 500, IsRequired = false, Order = 13, MetadataObjectId = metadataObjectId }
         };
     }
 
@@ -55,12 +59,13 @@ public partial class MetadataService
     {
         try
         {
+            var catalogId = Guid.NewGuid();
             var catalog = new MetadataObject
             {
-                Id = Guid.NewGuid(), Name = "Авансовые платежи", TableName = "catalog_advance_payments",
+                Id = catalogId, Name = "Авансовые платежи", TableName = "catalog_advance_payments",
                 ObjectType = "Catalog", Description = "Справочник пар счетов для учета авансовых платежей",
                 Icon = "💳", Order = 20, IsSystem = true, MetadataConfigId = config.Id,
-                Fields = GetAdvancePaymentFields(Guid.NewGuid())
+                Fields = GetAdvancePaymentFields(catalogId)
             };
             await _context.MetadataObjects.AddAsync(catalog);
             await _context.SaveChangesAsync();
@@ -71,6 +76,158 @@ public partial class MetadataService
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Авансовые платежи': {ex.Message}");
+        }
+    }
+
+    private async Task EnsureAdvancePaymentsCatalogStructureAsync()
+    {
+        var catalog = await _context.MetadataObjects
+            .Include(metadata => metadata.Fields)
+            .FirstOrDefaultAsync(metadata => metadata.ObjectType == "Catalog" && metadata.Name == "Авансовые платежи");
+
+        if (catalog == null)
+            return;
+
+        foreach (var field in catalog.Fields)
+            NormalizeAdvancePaymentField(field);
+
+        var existingColumns = catalog.Fields
+            .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+            .Select(field => field.DbColumnName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in GetAdvancePaymentFields(catalog.Id))
+        {
+            if (existingColumns.Contains(field.DbColumnName))
+                continue;
+
+            field.Id = Guid.NewGuid();
+            field.MetadataObjectId = catalog.Id;
+            await _context.MetadataFields.AddAsync(field);
+            await AddColumnToTableAsync(catalog.TableName, field);
+            catalog.Fields.Add(field);
+            existingColumns.Add(field.DbColumnName);
+        }
+
+        await _context.SaveChangesAsync();
+        await NormalizeAdvancePaymentRowsAsync(catalog);
+    }
+
+    private static void NormalizeAdvancePaymentField(MetadataField field)
+    {
+        if (field.DbColumnName?.Equals("name", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Вид расчета";
+            field.FieldType = "String";
+            field.Length = Math.Max(field.Length, 250);
+            field.IsRequired = true;
+            field.Order = 2;
+        }
+        else if (field.DbColumnName?.Equals("use_organizations", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Орг";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 3;
+        }
+        else if (field.DbColumnName?.Equals("use_personnel", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Таб №";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 4;
+        }
+        else if (field.DbColumnName?.Equals("use_currency", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Валюта";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 5;
+        }
+        else if (field.DbColumnName?.Equals("arm_code", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Остаток брать из АРМ";
+            field.FieldType = "String";
+            field.Length = Math.Max(field.Length, 50);
+            field.Order = 6;
+        }
+        else if (field.DbColumnName?.Equals("debit_account", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Дебет";
+            field.FieldType = "Reference";
+            field.ReferenceCatalog = "План счетов";
+            field.DisplayPattern = "{Код} - {Наименование}";
+            field.DisplayFields = "Код,Наименование";
+            field.IsRequired = true;
+            field.Order = 7;
+        }
+        else if (field.DbColumnName?.Equals("credit_account", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Кредит";
+            field.FieldType = "Reference";
+            field.ReferenceCatalog = "План счетов";
+            field.DisplayPattern = "{Код} - {Наименование}";
+            field.DisplayFields = "Код,Наименование";
+            field.IsRequired = true;
+            field.Order = 8;
+        }
+        else if (field.DbColumnName?.Equals("use_settlements", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Участвует во взаиморасчетах";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 9;
+        }
+        else if (field.DbColumnName?.Equals("generate_postings", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Формировать проводки авансовых платежей";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 10;
+        }
+        else if (field.DbColumnName?.Equals("use_internal_settlements", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Участвует во внутренних взаиморасчетах";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 11;
+        }
+        else if (field.DbColumnName?.Equals("is_active", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Активен";
+            field.FieldType = "Bool";
+            field.IsRequired = true;
+            field.Order = 12;
+        }
+        else if (field.DbColumnName?.Equals("description", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Примечание";
+            field.FieldType = "String";
+            field.Length = Math.Max(field.Length, 500);
+            field.Order = 13;
+        }
+    }
+
+    private async Task NormalizeAdvancePaymentRowsAsync(MetadataObject catalog)
+    {
+        try
+        {
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{catalog.TableName}""
+                SET
+                    ""use_organizations"" = COALESCE(""use_organizations"", true),
+                    ""use_personnel"" = COALESCE(""use_personnel"", false),
+                    ""use_currency"" = COALESCE(""use_currency"", false),
+                    ""arm_code"" = COALESCE(NULLIF(""arm_code"", ''), 'ФИНАНСЫ'),
+                    ""use_settlements"" = COALESCE(""use_settlements"", true),
+                    ""generate_postings"" = COALESCE(""generate_postings"", true),
+                    ""use_internal_settlements"" = COALESCE(""use_internal_settlements"", false),
+                    ""is_active"" = COALESCE(""is_active"", true)
+                WHERE true;");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации справочника 'Авансовые платежи': {ex.Message}");
         }
     }
 
@@ -126,15 +283,22 @@ public partial class MetadataService
     {
         var items = new[]
         {
-            new { code = "AP01", name = "Авансы поставщикам (1610/1110)", debit = "1610", credit = "1110", arm = "Finance", settlements = true, postings = false },
-            new { code = "AP02", name = "Авансы от покупателей (1110/4410)", debit = "1110", credit = "4410", arm = "Finance", settlements = true, postings = false },
-            new { code = "AP03", name = "Подотчетные лица (1630/1110)", debit = "1630", credit = "1110", arm = "Finance", settlements = true, postings = false }
+            new { code = "AP01", name = "Расчеты с заказчиками (сом)", debit = "14100000", credit = "32200000", arm = "ФИНАНСЫ", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
+            new { code = "AP02", name = "Расчеты по налогу на прибыль", debit = "15300000", credit = "34100000", arm = "ФИНАНСЫ", organizations = false, personnel = false, currency = false, settlements = false, postings = true, internalSettlements = false },
+            new { code = "AP03", name = "Расчеты с сотрудниками", debit = "15200000", credit = "35200000", arm = "ФИНАНСЫ", organizations = false, personnel = true, currency = false, settlements = false, postings = true, internalSettlements = false }
         };
         foreach (var item in items)
         {
             await _context.Database.ExecuteSqlRawAsync($@"
-                INSERT INTO ""{catalog.TableName}"" (""Id"",""code"",""name"",""debit_account"",""credit_account"",""arm_code"",""use_settlements"",""generate_postings"",""is_active"",""CreatedAt"",""UpdatedAt"")
-                VALUES ('{Guid.NewGuid()}','{item.code}','{item.name.Replace("'","''")}','{item.debit}','{item.credit}','{item.arm}',{item.settlements.ToString().ToLower()},{item.postings.ToString().ToLower()},true,NOW(),NOW())");
+                INSERT INTO ""{catalog.TableName}""
+                    (""Id"",""code"",""name"",""use_organizations"",""use_personnel"",""use_currency"",
+                     ""arm_code"",""debit_account"",""credit_account"",""use_settlements"",
+                     ""generate_postings"",""use_internal_settlements"",""is_active"",""CreatedAt"",""UpdatedAt"")
+                VALUES
+                    ('{Guid.NewGuid()}','{item.code}','{item.name.Replace("'","''")}',
+                     {item.organizations.ToString().ToLower()},{item.personnel.ToString().ToLower()},{item.currency.ToString().ToLower()},
+                     '{item.arm}','{item.debit}','{item.credit}',{item.settlements.ToString().ToLower()},
+                     {item.postings.ToString().ToLower()},{item.internalSettlements.ToString().ToLower()},true,NOW(),NOW())");
         }
     }
 

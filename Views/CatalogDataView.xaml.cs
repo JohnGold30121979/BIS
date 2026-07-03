@@ -19,7 +19,7 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _catalog;
         private readonly MetadataService _metadataService;
         private DataTable _dataTable;
-        private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
+        private Dictionary<string, Dictionary<string, string>> _referenceCache;
         private Dictionary<string, MetadataObject> _catalogsDict;
         private static readonly IValueConverter AccountTypeConverter = new AccountTypeDisplayConverter();
         private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
@@ -30,7 +30,7 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _catalog = catalog;
             _metadataService = metadataService;
-            _referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
+            _referenceCache = new Dictionary<string, Dictionary<string, string>>();
 
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
@@ -39,6 +39,9 @@ namespace BIS.ERP.Views
 
         private bool IsChartOfAccountsCatalog =>
             string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase);
+
+        private bool IsAdvancePaymentsCatalog =>
+            string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
@@ -94,14 +97,10 @@ namespace BIS.ERP.Views
                         // Если поле ссылается на справочник - подставляем DisplayName
                         if (!string.IsNullOrEmpty(field.ReferenceCatalog) && _referenceCache.TryGetValue(field.Name, out var dict))
                         {
-                            if (rawValue != DBNull.Value && rawValue != null && Guid.TryParse(rawValue.ToString(), out var guid))
-                            {
-                                dataRow[field.Name] = dict.ContainsKey(guid) ? dict[guid] : rawValue.ToString();
-                            }
-                            else
-                            {
-                                dataRow[field.Name] = rawValue;
-                            }
+                            var key = NormalizeReferenceKey(rawValue);
+                            dataRow[field.Name] = !string.IsNullOrWhiteSpace(key) && dict.TryGetValue(key, out var displayValue)
+                                ? displayValue
+                                : rawValue;
                         }
                         else
                         {
@@ -127,7 +126,7 @@ namespace BIS.ERP.Views
                 {
                     Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
-                    Width = IsChartOfAccountsCatalog ? 125 : 150,
+                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 125 : 150,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -135,7 +134,7 @@ namespace BIS.ERP.Views
                 {
                     Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
-                    Width = IsChartOfAccountsCatalog ? 125 : 150,
+                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 125 : 150,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -169,22 +168,41 @@ namespace BIS.ERP.Views
                     continue;
 
                 var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
-                var dict = new Dictionary<Guid, string>();
+                var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var row in refData)
                 {
-                    if (!row.ContainsKey("Id") || row["Id"] == null)
-                        continue;
-
-                    var id = Guid.Parse(row["Id"].ToString());
-
                     // Универсальное форматирование через шаблон из метаданных
                     var displayValue = GetDisplayValueFromRow(row, field, refCatalog.Name);
-                    dict[id] = displayValue;
+                    foreach (var key in GetReferenceLookupKeys(row))
+                    {
+                        if (!dict.ContainsKey(key))
+                            dict[key] = displayValue;
+                    }
                 }
 
                 _referenceCache[field.Name] = dict;
             }
+        }
+
+        private static IEnumerable<string> GetReferenceLookupKeys(Dictionary<string, object> row)
+        {
+            foreach (var keyName in new[] { "Id", "Код", "code", "Code", "Счет", "account_code" })
+            {
+                var key = NormalizeReferenceKey(row.GetValueOrDefault(keyName));
+                if (!string.IsNullOrWhiteSpace(key))
+                    yield return key;
+            }
+        }
+
+        private static string NormalizeReferenceKey(object value)
+        {
+            if (value == null || value == DBNull.Value)
+                return string.Empty;
+
+            var text = value.ToString()?.Trim() ?? string.Empty;
+            var separatorIndex = text.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? text[..separatorIndex].Trim() : text;
         }
 
         /// <summary>
@@ -284,12 +302,14 @@ namespace BIS.ERP.Views
 
         private object CreateColumnHeader(string fieldName)
         {
-            if (!IsChartOfAccountsCatalog)
+            if (!IsChartOfAccountsCatalog && !IsAdvancePaymentsCatalog)
                 return fieldName;
 
             return new TextBlock
             {
-                Text = GetChartOfAccountsColumnHeader(fieldName),
+                Text = IsAdvancePaymentsCatalog
+                    ? GetAdvancePaymentsColumnHeader(fieldName)
+                    : GetChartOfAccountsColumnHeader(fieldName),
                 ToolTip = fieldName,
                 TextAlignment = TextAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -298,6 +318,28 @@ namespace BIS.ERP.Views
 
         private DataGridLength GetColumnWidth(MetadataField field)
         {
+            if (IsAdvancePaymentsCatalog)
+            {
+                var advanceWidth = field.Name switch
+                {
+                    "Код" => 70,
+                    "Орг" => 55,
+                    "Таб №" => 60,
+                    "Валюта" => 70,
+                    "Остаток брать из АРМ" => 80,
+                    "Дебет" => 130,
+                    "Кредит" => 130,
+                    "Участвует во взаиморасчетах" => 85,
+                    "Формировать проводки авансовых платежей" => 85,
+                    "Участвует во внутренних взаиморасчетах" => 90,
+                    "Вид расчета" => 260,
+                    "Активен" => 70,
+                    _ => field.FieldType == "Bool" ? 65 : 120
+                };
+
+                return new DataGridLength(advanceWidth, DataGridLengthUnitType.Pixel);
+            }
+
             if (!IsChartOfAccountsCatalog)
                 return new DataGridLength(1, DataGridLengthUnitType.Star);
 
@@ -329,6 +371,9 @@ namespace BIS.ERP.Views
 
         private double GetColumnMinWidth(MetadataField field)
         {
+            if (IsAdvancePaymentsCatalog)
+                return field.FieldType == "Bool" ? 45 : 70;
+
             if (!IsChartOfAccountsCatalog)
                 return 100;
 
@@ -345,6 +390,11 @@ namespace BIS.ERP.Views
 
         private TextAlignment GetColumnTextAlignment(MetadataField field)
         {
+            if (IsAdvancePaymentsCatalog)
+                return field.FieldType == "Bool" || field.Name == "Код"
+                    ? TextAlignment.Center
+                    : TextAlignment.Left;
+
             if (!IsChartOfAccountsCatalog)
                 return TextAlignment.Left;
 
@@ -385,6 +435,20 @@ namespace BIS.ERP.Views
             };
         }
 
+        private string GetAdvancePaymentsColumnHeader(string fieldName)
+        {
+            return fieldName switch
+            {
+                "Остаток брать из АРМ" => "АРМ",
+                "Участвует во взаиморасчетах" => "Разн. расч.",
+                "Формировать проводки авансовых платежей" => "Анал. плат.",
+                "Участвует во внутренних взаиморасчетах" => "Внут. расч.",
+                "Дата создания" => "Создан",
+                "Дата изменения" => "Изменен",
+                _ => fieldName
+            };
+        }
+
         private Binding CreateColumnBinding(MetadataField field)
         {
             var binding = new Binding(field.Name);
@@ -392,6 +456,10 @@ namespace BIS.ERP.Views
             if (IsChartOfAccountsCatalog && field.Name == "Тип счета")
             {
                 binding.Converter = AccountTypeConverter;
+            }
+            else if (IsAdvancePaymentsCatalog && field.FieldType == "Bool" && field.Name != "Активен")
+            {
+                binding.Converter = LinkFlagConverter;
             }
             else if (field.FieldType == "Bool" && (!IsChartOfAccountsCatalog || field.Name == "Активен"))
             {

@@ -1656,6 +1656,20 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void OnFoxProAnalysisClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var dialog = new FoxProAnalysisDialog { Owner = this };
+                dialog.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия анализа FoxPro: {ex.Message}", "Анализ FoxPro",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadMetadata();

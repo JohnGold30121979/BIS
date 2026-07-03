@@ -558,6 +558,7 @@ namespace BIS.ERP.Services
                 await EnsureOrganizationsCatalogStructureAsync();
                 await EnsureEmployeesCatalogStructureAsync();
                 await EnsureCashDesksCatalogStructureAsync();
+                await EnsureAdvancePaymentsCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
                 await EnsurePositionCatalogDataAsync();
             }
@@ -825,6 +826,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Авансовые платежи"))
                     await CreateAdvancePaymentsCatalog(config);
+                await EnsureAdvancePaymentsCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Настройка доступа к счетам"))
                     await CreateAccountAccessCatalog(config);

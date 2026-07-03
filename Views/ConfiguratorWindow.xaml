@@ -17,6 +17,7 @@
             <MenuItem Header="Файл">
                 <MenuItem Header="Выгрузить конфигурацию..." Click="OnExportConfigurationClick"/>
                 <MenuItem Header="Загрузить конфигурацию..." Click="OnImportConfigurationClick"/>
+                <MenuItem Header="Анализ FoxPro-проекта..." Click="OnFoxProAnalysisClick"/>
                 <MenuItem Header="Патчи инфобазы..." Click="OnPatchesClick"/>
                 <MenuItem Header="Обновления программы..." Click="OnAppUpdatesClick"/>
                 <MenuItem Header="Настройки системы..." Click="OnSettingsClick"/>
@@ -227,6 +228,9 @@
                                 <Button x:Name="ImportDbfButton" Content="📁 Импорт из DBF"
                                         Background="#3498DB" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnImportDbfClick"/>
+                                <Button x:Name="FoxProAnalysisButton" Content="Анализ FoxPro"
+                                        Background="#1F618D" Foreground="White" Height="35" Margin="0,5,0,0"
+                                        Click="OnFoxProAnalysisClick"/>
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
