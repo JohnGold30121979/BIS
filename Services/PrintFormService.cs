@@ -394,7 +394,7 @@ namespace BIS.ERP.Services
                 var y = tableTop + rowHeight * row + 22;
                 Add("Text", row.ToString(CultureInfo.InvariantCulture), "", tableLeft + 10, y, widths[0] - 20, 40, 8.5, false, "Center");
                 Add("Expression", "", $"line{row}_name", tableLeft + widths[0] + 10, y, widths[1] - 20, 40, 8.5);
-                Add("Expression", "", $"line{row}_account", tableLeft + widths[0] + widths[1] + 10, y, widths[2] - 20, 40, 8.5);
+                Add("Expression", "", $"line{row}_account_name", tableLeft + widths[0] + widths[1] + 10, y, widths[2] - 20, 40, 8.5);
                 Add("Expression", "", $"line{row}_amount_without_tax", tableLeft + widths[0] + widths[1] + widths[2] + 10, y, widths[3] - 20, 40, 8.5, false, "Right");
                 Add("Expression", "", $"line{row}_vat", tableLeft + widths[0] + widths[1] + widths[2] + widths[3] + 10, y, widths[4] - 20, 40, 8.5, false, "Right");
                 Add("Expression", "", $"line{row}_sales_tax", tableLeft + widths[0] + widths[1] + widths[2] + widths[3] + widths[4] + 10, y, widths[5] - 20, 40, 8.5, false, "Right");
@@ -1418,8 +1418,8 @@ namespace BIS.ERP.Services
                 "person" or "employee_id" or "responsible_person_id" or "fio" or "fiop1" or "namep1" => data.Person,
                 "cash_desk" or "cash_desk_id" or "cash" => data.CashDesk,
                 "correspondent_account" or "corr_account" or "account" => data.CorrespondentAccount,
-                "debit_account" or "debit" or "deb" => GetAccountCode(data.DebitAccount),
-                "credit_account" or "credit" or "cred" => GetAccountCode(data.CreditAccount),
+                "debit_account" or "debit" or "deb" => GetAccountDisplayName(data.DebitAccount),
+                "credit_account" or "credit" or "cred" => GetAccountDisplayName(data.CreditAccount),
                 "debit_code" or "deb1" => GetAccountCode(data.DebitAccount),
                 "credit_code" or "cred1" => GetAccountCode(data.CreditAccount),
                 "amount" or "sum" or "sum1" => data.Amount,
@@ -1905,6 +1905,16 @@ namespace BIS.ERP.Services
         {
             var match = Regex.Match(value ?? string.Empty, @"\b\d{3,}\b");
             return match.Success ? match.Value : value;
+        }
+
+        private static string GetAccountDisplayName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+            // If value is already a display name with code prefix (e.g. "11100000 - Денежные средства"),
+            // extract just the display name part after " - " or " – "
+            var match = Regex.Match(value, @"[-–]\s*(.+)$");
+            return match.Success ? match.Groups[1].Value.Trim() : GetAccountCode(value);
         }
 
         private static string EscapeXml(string value) => (value ?? string.Empty)

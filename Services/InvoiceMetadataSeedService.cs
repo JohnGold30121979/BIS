@@ -132,9 +132,11 @@ namespace BIS.ERP.Services
 
             if (catalogs.TryGetValue("Виды поставки", out var supplyKinds))
             {
-                await InsertRowIfMissingAsync(supplyKinds.TableName, "TAXABLE", "Облагаемые");
-                await InsertRowIfMissingAsync(supplyKinds.TableName, "EXEMPT", "Освобожденные");
-                await InsertRowIfMissingAsync(supplyKinds.TableName, "EXPORT", "Экспорт");
+                await InsertRowIfMissingAsync(supplyKinds.TableName, "REMNANTS_2009", "Остатки до 2009", sortOrder: 1);
+                await InsertRowIfMissingAsync(supplyKinds.TableName, "ZERO_SUPPLY", "Нулевые поставки", sortOrder: 2);
+                await InsertRowIfMissingAsync(supplyKinds.TableName, "EXEMPT_SUPPLY", "Освобожденные поставки", sortOrder: 3);
+                await InsertRowIfMissingAsync(supplyKinds.TableName, "TAXABLE_SUPPLY", "Облагаемые поставки", sortOrder: 4);
+                await InsertRowIfMissingAsync(supplyKinds.TableName, "NON_TAXABLE_SUPPLY", "Необлагаемые поставки", sortOrder: 5);
             }
 
             if (catalogs.TryGetValue("Типы поставки", out var deliveryTypes))
