@@ -19,10 +19,9 @@ namespace BIS.ERP.Views
 {
     public partial class ReportDesignerWindow
     {
-        private double NativeDesignerScale =>
-            _nativeTemplate.PageWidth > 10000 || _nativeTemplate.PageHeight > 10000
-                ? 0.012
-                : 0.28;
+        private const double NativeDesignerBaseScale = 0.28;
+        private double _nativeZoomMultiplier = 1.0;
+        private double NativeDesignerScale => NativeDesignerBaseScale * _nativeZoomMultiplier;
         private readonly ObservableCollection<NativeReportElementViewModel> _nativeElements = new();
         private PrintFormTemplate _nativeTemplate = PrintFormService.CreateBlankNativeTemplate();
         private NativeReportElementViewModel? _selectedNativeElement;
@@ -50,6 +49,30 @@ namespace BIS.ERP.Views
             NativeAlignmentCombo.SelectedIndex = 0;
             NativeDesignerTab.AddHandler(Selector.SelectedEvent, new RoutedEventHandler(OnNativeDesignerTabSelected));
             LoadNativeTemplate(PrintFormService.CreateBlankNativeTemplate());
+            NativeZoomSlider.Value = 5;
+            NativeZoomLabel.Text = "5%";
+        }
+
+        private void OnNativeZoomChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (NativeDesignerCanvas == null || NativeZoomLabel == null || NativeZoomSlider == null)
+                return;
+
+            _nativeZoomMultiplier = e.NewValue / 100.0;
+            NativeZoomLabel.Text = $"{e.NewValue:F0}%";
+            RenderNativeDesigner();
+        }
+
+        private void OnNativeDesignerMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (NativeDesignerCanvas == null || NativeZoomSlider == null || NativeZoomLabel == null)
+                return;
+
+            e.Handled = true;
+
+            var delta = e.Delta > 0 ? 5 : -5;
+            var newValue = Math.Clamp(NativeZoomSlider.Value + delta, NativeZoomSlider.Minimum, NativeZoomSlider.Maximum);
+            NativeZoomSlider.Value = newValue;
         }
 
         private IEnumerable<FieldDef> GetPrintFormComputedFields()
