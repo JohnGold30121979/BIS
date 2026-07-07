@@ -24,6 +24,8 @@ namespace BIS.ERP.Models
         [MaxLength(50)] public string AccountCode { get; set; } = string.Empty;
         [Column(TypeName = "numeric(18,2)")] public decimal Debit { get; set; }
         [Column(TypeName = "numeric(18,2)")] public decimal Credit { get; set; }
+        public Guid? SourcePeriodId { get; set; }
+        public bool IsSystemGenerated { get; set; }
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 

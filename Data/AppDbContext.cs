@@ -181,6 +181,7 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<AccountingPeriod>().HasIndex(period => new { period.StartDate, period.EndDate }).IsUnique();
         modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => new { balance.BalanceDate, balance.AccountCode }).IsUnique();
+        modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => balance.SourcePeriodId);
         modelBuilder.Entity<AccountTurnoverSnapshot>().HasIndex(snapshot => new { snapshot.PeriodId, snapshot.AccountCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLine>().HasIndex(line => new { line.ReportCode, line.LineCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLineAccount>().HasIndex(link => new { link.LineId, link.AccountCode }).IsUnique();

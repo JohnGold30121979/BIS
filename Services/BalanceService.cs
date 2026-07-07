@@ -21,8 +21,7 @@ namespace BIS.ERP.Services
         {
             var periodStart = startDate.Date;
             var periodEndExclusive = endDate.Date.AddDays(1);
-            var postings = await new PostingService(_context)
-                .GetAllPostingsAsync(null, periodEndExclusive.AddTicks(-1));
+            var postings = await GetAccountingPostingsAsync(null, periodEndExclusive.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var utcStart = DateTime.SpecifyKind(periodStart, DateTimeKind.Utc);
             var openingBalances = (await _context.AccountOpeningBalances.AsNoTracking()
@@ -42,6 +41,7 @@ namespace BIS.ERP.Services
 
             return accountCodes.Select(code =>
             {
+                accounts.TryGetValue(code, out var account);
                 openingBalances.TryGetValue(code, out var initialBalance);
                 var openingFrom = initialBalance?.BalanceDate.Date ?? DateTime.MinValue;
                 var openingDebit = (initialBalance?.Debit ?? 0) + postings
@@ -59,16 +59,18 @@ namespace BIS.ERP.Services
 
                 var openingNet = openingDebit - openingCredit;
                 var closingNet = openingNet + turnoverDebit - turnoverCredit;
+                var openingBalance = SplitBalanceByType(account?.Type, openingNet);
+                var closingBalance = SplitBalanceByType(account?.Type, closingNet);
                 return new TurnoverBalance
                 {
                     AccountCode = code,
-                    AccountName = accounts.TryGetValue(code, out var account) ? account.Name : code,
-                    OpeningDebit = Math.Max(openingNet, 0),
-                    OpeningCredit = Math.Max(-openingNet, 0),
+                    AccountName = account?.Name ?? code,
+                    OpeningDebit = openingBalance.Debit,
+                    OpeningCredit = openingBalance.Credit,
                     TurnoverDebit = turnoverDebit,
                     TurnoverCredit = turnoverCredit,
-                    ClosingDebit = Math.Max(closingNet, 0),
-                    ClosingCredit = Math.Max(-closingNet, 0)
+                    ClosingDebit = closingBalance.Debit,
+                    ClosingCredit = closingBalance.Credit
                 };
             }).ToList();
         }
@@ -77,7 +79,7 @@ namespace BIS.ERP.Services
         {
             var start = new DateTime(year, 1, 1);
             var end = start.AddYears(1);
-            var postings = await new PostingService(_context).GetAllPostingsAsync(start, end.AddTicks(-1));
+            var postings = await GetAccountingPostingsAsync(start, end.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var annualBalances = (await GetTurnoverBalanceAsync(start, end.AddDays(-1)))
                 .ToDictionary(balance => balance.AccountCode, StringComparer.OrdinalIgnoreCase);
@@ -120,7 +122,7 @@ namespace BIS.ERP.Services
 
         public async Task<EnterpriseBalance> GetEnterpriseBalanceAsync(DateTime date)
         {
-            var postings = await new PostingService(_context).GetAllPostingsAsync(null, date.Date.AddDays(1).AddTicks(-1));
+            var postings = await GetAccountingPostingsAsync(null, date.Date.AddDays(1).AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var result = new EnterpriseBalance();
             var configuredLines = await LoadConfiguredLinesAsync("Balance");
@@ -198,8 +200,7 @@ namespace BIS.ERP.Services
         public async Task<FinancialResults> GetFinancialResultsAsync(DateTime startDate, DateTime endDate)
         {
             var endExclusive = endDate.Date.AddDays(1);
-            var postings = await new PostingService(_context)
-                .GetAllPostingsAsync(startDate.Date, endExclusive.AddTicks(-1));
+            var postings = await GetAccountingPostingsAsync(startDate.Date, endExclusive.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var result = new FinancialResults();
             var configuredLines = await LoadConfiguredLinesAsync("ProfitLoss");
@@ -331,11 +332,25 @@ namespace BIS.ERP.Services
                 });
             }
 
-            var postings = await new PostingService(_context).GetAllPostingsAsync(startDate.Date, endDate.Date.AddDays(1).AddTicks(-1));
+            var postings = await GetAccountingPostingsAsync(startDate.Date, endDate.Date.AddDays(1).AddTicks(-1));
             result.PostingCount = postings.Count;
-            result.DebitTurnover = postings.Sum(posting => posting.Amount);
-            result.CreditTurnover = postings.Sum(posting => posting.Amount);
+            result.DebitTurnover = postings
+                .Where(posting => !string.IsNullOrWhiteSpace(posting.DebitAccount))
+                .Sum(posting => posting.Amount);
+            result.CreditTurnover = postings
+                .Where(posting => !string.IsNullOrWhiteSpace(posting.CreditAccount))
+                .Sum(posting => posting.Amount);
             return result;
+        }
+
+        private Task<List<PostingViewModel>> GetAccountingPostingsAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null)
+        {
+            return new PostingService(_context).GetAllPostingsAsync(
+                startDate,
+                endDate,
+                includeImportedDocuments: false);
         }
 
         private static decimal CalculateCurrentFinancialResult(
@@ -444,6 +459,16 @@ namespace BIS.ERP.Services
             return false;
         }
 
+        private static BalanceSides SplitBalanceByType(string? accountType, decimal balance)
+        {
+            return NormalizeAccountType(accountType) switch
+            {
+                NormalizedAccountType.Active => new BalanceSides(balance, 0m),
+                NormalizedAccountType.Passive => new BalanceSides(0m, balance),
+                _ => new BalanceSides(Math.Max(balance, 0m), Math.Max(-balance, 0m))
+            };
+        }
+
         private sealed class AccountInfo
         {
             public string Code { get; init; } = string.Empty;
@@ -452,8 +477,35 @@ namespace BIS.ERP.Services
         }
 
         private static bool IsPassiveType(string value) =>
-            value.Equals("Passive", StringComparison.OrdinalIgnoreCase) ||
-            value.Equals("Пассивный", StringComparison.OrdinalIgnoreCase);
+            NormalizeAccountType(value) == NormalizedAccountType.Passive;
+
+        private static NormalizedAccountType NormalizeAccountType(string? value)
+        {
+            var normalized = value?.Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "active" => NormalizedAccountType.Active,
+                "активный" => NormalizedAccountType.Active,
+                "1" => NormalizedAccountType.Active,
+                "passive" => NormalizedAccountType.Passive,
+                "пассивный" => NormalizedAccountType.Passive,
+                "2" => NormalizedAccountType.Passive,
+                "activepassive" => NormalizedAccountType.ActivePassive,
+                "активно-пассивный" => NormalizedAccountType.ActivePassive,
+                "0" => NormalizedAccountType.ActivePassive,
+                "3" => NormalizedAccountType.ActivePassive,
+                _ => NormalizedAccountType.ActivePassive
+            };
+        }
+
+        private readonly record struct BalanceSides(decimal Debit, decimal Credit);
+
+        private enum NormalizedAccountType
+        {
+            Active,
+            Passive,
+            ActivePassive
+        }
 
         private sealed class ConfiguredLine
         {

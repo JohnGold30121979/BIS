@@ -27,11 +27,13 @@
                                 Background="#27AE60" Foreground="White" Click="OnSaveOpeningsClick"/>
                     </StackPanel>
                     <DataGrid x:Name="OpeningGrid" Grid.Row="1" AutoGenerateColumns="False"
-                              CanUserAddRows="False" SelectionMode="Single">
+                              CanUserAddRows="False" SelectionMode="Single"
+                              BeginningEdit="OnOpeningGridBeginningEdit">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Дата остатка" Binding="{Binding BalanceDate, StringFormat=dd.MM.yyyy}" Width="120"/>
                             <DataGridTextColumn Header="Счет" Binding="{Binding AccountCode}" IsReadOnly="True" Width="120"/>
                             <DataGridTextColumn Header="Наименование" Binding="{Binding AccountName}" IsReadOnly="True" Width="*"/>
+                            <DataGridTextColumn Header="Источник" Binding="{Binding SourceDescription}" IsReadOnly="True" Width="200"/>
                             <DataGridTextColumn Header="Дебет" Binding="{Binding Debit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
                             <DataGridTextColumn Header="Кредит" Binding="{Binding Credit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
                         </DataGrid.Columns>

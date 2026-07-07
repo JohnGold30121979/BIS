@@ -32,8 +32,14 @@ namespace BIS.ERP.Services
                     ""Id"" uuid PRIMARY KEY, ""BalanceDate"" timestamp with time zone NOT NULL,
                     ""AccountCode"" varchar(50) NOT NULL, ""Debit"" numeric(18,2) NOT NULL,
                     ""Credit"" numeric(18,2) NOT NULL, ""UpdatedAt"" timestamp with time zone NOT NULL);
+                ALTER TABLE ""AccountOpeningBalances""
+                    ADD COLUMN IF NOT EXISTS ""SourcePeriodId"" uuid NULL;
+                ALTER TABLE ""AccountOpeningBalances""
+                    ADD COLUMN IF NOT EXISTS ""IsSystemGenerated"" boolean NOT NULL DEFAULT false;
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountOpeningBalances_Date_Account""
                     ON ""AccountOpeningBalances"" (""BalanceDate"", ""AccountCode"");
+                CREATE INDEX IF NOT EXISTS ""IX_AccountOpeningBalances_SourcePeriodId""
+                    ON ""AccountOpeningBalances"" (""SourcePeriodId"");
                 CREATE TABLE IF NOT EXISTS ""AccountTurnoverSnapshots"" (
                     ""Id"" uuid PRIMARY KEY, ""PeriodId"" uuid NOT NULL, ""AccountCode"" varchar(50) NOT NULL,
                     ""AccountName"" varchar(300) NOT NULL, ""OpeningDebit"" numeric(18,2) NOT NULL,
@@ -107,6 +113,9 @@ namespace BIS.ERP.Services
 
         public async Task CloseAsync(Guid periodId)
         {
+            await EnsureSchemaAsync();
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
             var period = await _context.AccountingPeriods.FindAsync(periodId)
                 ?? throw new InvalidOperationException("Учетный период не найден");
             if (period.Status != "Collected")
@@ -119,22 +128,29 @@ namespace BIS.ERP.Services
             if (Math.Abs(openingDifference) >= 0.01m || Math.Abs(turnoverDifference) >= 0.01m ||
                 Math.Abs(closingDifference) >= 0.01m)
                 throw new InvalidOperationException("Период не закрыт: контроль дебета и кредита не пройден.");
+            await CarryForwardClosingBalancesAsync(period, snapshots);
             period.Status = "Closed";
             period.IsLocked = true;
             period.ClosedAt = DateTime.UtcNow;
             period.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
 
         public async Task ReopenAsync(Guid periodId)
         {
+            await EnsureSchemaAsync();
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+
             var period = await _context.AccountingPeriods.FindAsync(periodId)
                 ?? throw new InvalidOperationException("Учетный период не найден");
+            await RemoveGeneratedOpeningBalancesAsync(period.Id);
             period.Status = "Open";
             period.IsLocked = false;
             period.ClosedAt = null;
             period.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
 
         public async Task<AccountingPeriod?> FindAsync(DateTime startDate, DateTime endDate)
@@ -154,6 +170,23 @@ namespace BIS.ERP.Services
                 period.IsLocked && utcDate >= period.StartDate && utcDate <= period.EndDate);
             if (locked)
                 throw new InvalidOperationException($"Период, содержащий дату {date:dd.MM.yyyy}, закрыт. Изменение документов запрещено.");
+        }
+
+        public async Task EnsureOpeningBalanceCanBeModifiedAsync(DateTime balanceDate)
+        {
+            await EnsureSchemaAsync();
+            var utcDate = DateTime.SpecifyKind(balanceDate.Date, DateTimeKind.Utc);
+            var blockingPeriod = await _context.AccountingPeriods.AsNoTracking()
+                .Where(period => period.IsLocked && period.EndDate >= utcDate)
+                .OrderBy(period => period.StartDate)
+                .FirstOrDefaultAsync();
+            if (blockingPeriod != null)
+            {
+                throw new InvalidOperationException(
+                    $"Остаток на дату {balanceDate:dd.MM.yyyy} влияет на закрытый период " +
+                    $"{blockingPeriod.StartDate:dd.MM.yyyy} - {blockingPeriod.EndDate:dd.MM.yyyy}. " +
+                    "Сначала откройте этот период.");
+            }
         }
 
         private async Task SynchronizeTaxJournalAsync(DateTime startDate, DateTime endDate)
@@ -194,6 +227,89 @@ namespace BIS.ERP.Services
                     await _context.FinancialReportLines.AddAsync(line);
             }
             await _context.SaveChangesAsync();
+        }
+
+        private async Task CarryForwardClosingBalancesAsync(
+            AccountingPeriod period,
+            IReadOnlyCollection<AccountTurnoverSnapshot> snapshots)
+        {
+            var nextPeriodStart = DateTime.SpecifyKind(period.EndDate.Date.AddDays(1), DateTimeKind.Utc);
+            var updatedAt = DateTime.UtcNow;
+            var carriedSnapshots = snapshots
+                .Where(snapshot => snapshot.ClosingDebit != 0m || snapshot.ClosingCredit != 0m)
+                .ToList();
+
+            var existingNextPeriodBalances = await _context.AccountOpeningBalances
+                .Where(balance => balance.BalanceDate == nextPeriodStart)
+                .ToListAsync();
+            var previousGenerated = existingNextPeriodBalances
+                .Where(balance => balance.IsSystemGenerated && balance.SourcePeriodId == period.Id)
+                .ToList();
+
+            var carriedCodes = carriedSnapshots
+                .Select(snapshot => snapshot.AccountCode)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var conflicts = existingNextPeriodBalances
+                .Where(balance => carriedCodes.Contains(balance.AccountCode) &&
+                    !(balance.IsSystemGenerated && balance.SourcePeriodId == period.Id))
+                .Select(balance => balance.AccountCode)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (conflicts.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"На дату {nextPeriodStart:dd.MM.yyyy} уже существуют входящие остатки по счетам: {string.Join(", ", conflicts)}. " +
+                    "Автоперенос закрытия не перезаписывает их автоматически.");
+            }
+
+            var previousGeneratedByAccount = previousGenerated
+                .GroupBy(balance => balance.AccountCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+            var newBalances = new List<AccountOpeningBalance>();
+
+            foreach (var snapshot in carriedSnapshots)
+            {
+                if (previousGeneratedByAccount.TryGetValue(snapshot.AccountCode, out var existingBalance))
+                {
+                    existingBalance.BalanceDate = nextPeriodStart;
+                    existingBalance.Debit = snapshot.ClosingDebit;
+                    existingBalance.Credit = snapshot.ClosingCredit;
+                    existingBalance.SourcePeriodId = period.Id;
+                    existingBalance.IsSystemGenerated = true;
+                    existingBalance.UpdatedAt = updatedAt;
+                    continue;
+                }
+
+                newBalances.Add(new AccountOpeningBalance
+                {
+                    BalanceDate = nextPeriodStart,
+                    AccountCode = snapshot.AccountCode,
+                    Debit = snapshot.ClosingDebit,
+                    Credit = snapshot.ClosingCredit,
+                    SourcePeriodId = period.Id,
+                    IsSystemGenerated = true,
+                    UpdatedAt = updatedAt
+                });
+            }
+
+            var obsoleteBalances = previousGenerated
+                .Where(balance => !carriedCodes.Contains(balance.AccountCode))
+                .ToList();
+            if (obsoleteBalances.Count > 0)
+                _context.AccountOpeningBalances.RemoveRange(obsoleteBalances);
+
+            if (newBalances.Count > 0)
+                await _context.AccountOpeningBalances.AddRangeAsync(newBalances);
+        }
+
+        private async Task RemoveGeneratedOpeningBalancesAsync(Guid sourcePeriodId)
+        {
+            var generatedBalances = await _context.AccountOpeningBalances
+                .Where(balance => balance.IsSystemGenerated && balance.SourcePeriodId == sourcePeriodId)
+                .ToListAsync();
+            if (generatedBalances.Count > 0)
+                _context.AccountOpeningBalances.RemoveRange(generatedBalances);
         }
     }
 }

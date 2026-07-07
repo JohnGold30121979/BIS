@@ -37,8 +37,12 @@ namespace BIS.ERP.Services
             }
         }
 
-        // Получение всех проводок из динамических документов
-        public async Task<List<PostingViewModel>> GetAllPostingsAsync(DateTime? startDate = null, DateTime? endDate = null)
+        // Для бухгалтерских расчетов используем только единый регистр doc_postings.
+        // Импортированные строки можно подмешивать только по явному запросу.
+        public async Task<List<PostingViewModel>> GetAllPostingsAsync(
+            DateTime? startDate = null,
+            DateTime? endDate = null,
+            bool includeImportedDocuments = false)
         {
             var postings = new List<PostingViewModel>();
             var organizationMap = await LoadReferenceMapAsync("Организации");
@@ -107,52 +111,55 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка загрузки из doc_postings: {ex.Message}");
             }
 
-            // 2. Проводки из DynamicDocuments (DBF импорт)
-            try
+            if (includeImportedDocuments)
             {
-                var dynamicDocs = await _context.DynamicDocuments
-                    .Include(d => d.Rows)
-                    .ToListAsync();
-
-                foreach (var doc in dynamicDocs)
+                // 2. Проводки из DynamicDocuments (DBF импорт)
+                try
                 {
-                    if (startDate.HasValue && doc.Date < startDate.Value) continue;
-                    if (endDate.HasValue && doc.Date > endDate.Value) continue;
+                    var dynamicDocs = await _context.DynamicDocuments
+                        .Include(d => d.Rows)
+                        .ToListAsync();
 
-                    foreach (var row in doc.Rows)
+                    foreach (var doc in dynamicDocs)
                     {
-                        var rowData = GetRowData(row);
+                        if (startDate.HasValue && doc.Date < startDate.Value) continue;
+                        if (endDate.HasValue && doc.Date > endDate.Value) continue;
 
-                        decimal amount = 0;
-                        if (rowData.ContainsKey("SUMMA"))
-                            amount = Convert.ToDecimal(rowData["SUMMA"] ?? 0);
-                        else if (rowData.ContainsKey("Сумма"))
-                            amount = Convert.ToDecimal(rowData["Сумма"] ?? 0);
-                        else if (rowData.ContainsKey("AMOUNT"))
-                            amount = Convert.ToDecimal(rowData["AMOUNT"] ?? 0);
-
-                        decimal amountCurrency = 0;
-                        if (rowData.ContainsKey("SUMMA_V"))
-                            amountCurrency = Convert.ToDecimal(rowData["SUMMA_V"] ?? 0);
-                        else if (rowData.ContainsKey("Сумма в валюте"))
-                            amountCurrency = Convert.ToDecimal(rowData["Сумма в валюте"] ?? 0);
-
-                        var debet = rowData.ContainsKey("DEBET") ? rowData["DEBET"]?.ToString() :
-                                   (rowData.ContainsKey("Дебет") ? rowData["Дебет"]?.ToString() : "");
-                        var credit = rowData.ContainsKey("KREDIT") ? rowData["KREDIT"]?.ToString() :
-                                    (rowData.ContainsKey("Кредит") ? rowData["Кредит"]?.ToString() : "");
-
-                        var note = rowData.ContainsKey("TEX") ? rowData["TEX"]?.ToString() :
-                                  (rowData.ContainsKey("Примечание") ? rowData["Примечание"]?.ToString() : "");
-
-                        var organization = rowData.ContainsKey("ORGANIZATION") ? rowData["ORGANIZATION"]?.ToString() :
-                                          (rowData.ContainsKey("Организация") ? rowData["Организация"]?.ToString() : "");
-
-                        var employee = rowData.ContainsKey("EMPLOYEE") ? rowData["EMPLOYEE"]?.ToString() :
-                                      (rowData.ContainsKey("Сотрудник") ? rowData["Сотрудник"]?.ToString() : "");
-
-                        if (!string.IsNullOrEmpty(debet) || !string.IsNullOrEmpty(credit))
+                        foreach (var row in doc.Rows)
                         {
+                            var rowData = GetRowData(row);
+
+                            decimal amount = 0;
+                            if (rowData.ContainsKey("SUMMA"))
+                                amount = Convert.ToDecimal(rowData["SUMMA"] ?? 0);
+                            else if (rowData.ContainsKey("Сумма"))
+                                amount = Convert.ToDecimal(rowData["Сумма"] ?? 0);
+                            else if (rowData.ContainsKey("AMOUNT"))
+                                amount = Convert.ToDecimal(rowData["AMOUNT"] ?? 0);
+
+                            decimal amountCurrency = 0;
+                            if (rowData.ContainsKey("SUMMA_V"))
+                                amountCurrency = Convert.ToDecimal(rowData["SUMMA_V"] ?? 0);
+                            else if (rowData.ContainsKey("Сумма в валюте"))
+                                amountCurrency = Convert.ToDecimal(rowData["Сумма в валюте"] ?? 0);
+
+                            var debet = rowData.ContainsKey("DEBET") ? rowData["DEBET"]?.ToString() :
+                                       (rowData.ContainsKey("Дебет") ? rowData["Дебет"]?.ToString() : "");
+                            var credit = rowData.ContainsKey("KREDIT") ? rowData["KREDIT"]?.ToString() :
+                                        (rowData.ContainsKey("Кредит") ? rowData["Кредит"]?.ToString() : "");
+
+                            var note = rowData.ContainsKey("TEX") ? rowData["TEX"]?.ToString() :
+                                      (rowData.ContainsKey("Примечание") ? rowData["Примечание"]?.ToString() : "");
+
+                            var organization = rowData.ContainsKey("ORGANIZATION") ? rowData["ORGANIZATION"]?.ToString() :
+                                              (rowData.ContainsKey("Организация") ? rowData["Организация"]?.ToString() : "");
+
+                            var employee = rowData.ContainsKey("EMPLOYEE") ? rowData["EMPLOYEE"]?.ToString() :
+                                          (rowData.ContainsKey("Сотрудник") ? rowData["Сотрудник"]?.ToString() : "");
+
+                            if (string.IsNullOrEmpty(debet) && string.IsNullOrEmpty(credit))
+                                continue;
+
                             postings.Add(new PostingViewModel
                             {
                                 Id = Guid.NewGuid(),
@@ -178,10 +185,10 @@ namespace BIS.ERP.Services
                         }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки из DynamicDocuments: {ex.Message}");
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки из DynamicDocuments: {ex.Message}");
+                }
             }
 
             return postings.OrderByDescending(p => p.Date).ThenBy(p => p.DocumentNumber).ToList();
@@ -190,12 +197,13 @@ namespace BIS.ERP.Services
         public async Task<List<PostingViewModel>> GetPostingsByDocumentAsync(
             string documentType,
             string documentNumber,
-            DateTime? documentDate = null)
+            DateTime? documentDate = null,
+            bool includeImportedDocuments = false)
         {
             var normalizedNumber = MetadataService.NormalizeLegacyDocumentNumber(documentNumber);
             var startDate = documentDate?.Date ?? DateTime.Today.AddYears(-10);
             var endDate = documentDate?.Date ?? DateTime.Today.AddYears(1);
-            var postings = await GetAllPostingsAsync(startDate, endDate);
+            var postings = await GetAllPostingsAsync(startDate, endDate, includeImportedDocuments);
             return postings
                 .Where(posting =>
                     string.Equals(posting.DocumentType, documentType, StringComparison.OrdinalIgnoreCase) &&
@@ -313,9 +321,13 @@ namespace BIS.ERP.Services
         }
 
         // Получение оборотов по счету
-        public async Task<DataTable> GetTurnoversByAccountAsync(string accountCode, DateTime startDate, DateTime endDate)
+        public async Task<DataTable> GetTurnoversByAccountAsync(
+            string accountCode,
+            DateTime startDate,
+            DateTime endDate,
+            bool includeImportedDocuments = false)
         {
-            var postings = await GetAllPostingsAsync(startDate, endDate);
+            var postings = await GetAllPostingsAsync(startDate, endDate, includeImportedDocuments);
 
             var filteredPostings = postings.Where(p => p.DebitAccount == accountCode || p.CreditAccount == accountCode).ToList();
 
@@ -363,9 +375,12 @@ namespace BIS.ERP.Services
         }
 
         // Получение сводных оборотов
-        public async Task<DataTable> GetSummaryTurnoversAsync(DateTime startDate, DateTime endDate)
+        public async Task<DataTable> GetSummaryTurnoversAsync(
+            DateTime startDate,
+            DateTime endDate,
+            bool includeImportedDocuments = false)
         {
-            var postings = await GetAllPostingsAsync(startDate, endDate);
+            var postings = await GetAllPostingsAsync(startDate, endDate, includeImportedDocuments);
 
             var summary = postings
                 .GroupBy(p => new { p.DebitAccount, p.CreditAccount })

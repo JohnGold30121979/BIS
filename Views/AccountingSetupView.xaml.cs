@@ -51,7 +51,11 @@ namespace BIS.ERP.Views
                 {
                     Id = item.Id, BalanceDate = item.BalanceDate.Date, AccountCode = item.AccountCode,
                     AccountName = accountNames.GetValueOrDefault(item.AccountCode, item.AccountCode),
-                    Debit = item.Debit, Credit = item.Credit
+                    Debit = item.Debit, Credit = item.Credit,
+                    IsSystemGenerated = item.IsSystemGenerated,
+                    SourceDescription = item.IsSystemGenerated
+                        ? "Автоперенос закрытия периода"
+                        : "Ручной ввод"
                 });
         }
 
@@ -73,11 +77,21 @@ namespace BIS.ERP.Views
         {
             if (OpeningGrid.SelectedItem is not OpeningBalanceEditorRow row)
                 return;
+            if (row.IsSystemGenerated)
+            {
+                MessageBox.Show(
+                    "Системный остаток создается при закрытии периода. Для изменения откройте исходный период и закройте его заново.",
+                    "Начальные остатки",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
             if (row.Id != Guid.Empty)
             {
                 var entity = await _context.AccountOpeningBalances.FindAsync(row.Id);
                 if (entity != null)
                 {
+                    await _periodService.EnsureOpeningBalanceCanBeModifiedAsync(entity.BalanceDate);
                     _context.AccountOpeningBalances.Remove(entity);
                     await _context.SaveChangesAsync();
                 }
@@ -89,7 +103,7 @@ namespace BIS.ERP.Views
         {
             try
             {
-                foreach (var row in _openings)
+                foreach (var row in _openings.Where(item => !item.IsSystemGenerated))
                 {
                     if (string.IsNullOrWhiteSpace(row.AccountCode))
                         throw new InvalidOperationException("Для каждой строки должен быть выбран счет.");
@@ -97,6 +111,9 @@ namespace BIS.ERP.Views
                         throw new InvalidOperationException($"По счету {row.AccountCode} остаток указывается только по одной стороне.");
                     var entity = row.Id == Guid.Empty ? new AccountOpeningBalance() :
                         await _context.AccountOpeningBalances.FindAsync(row.Id) ?? new AccountOpeningBalance();
+                    await _periodService.EnsureOpeningBalanceCanBeModifiedAsync(row.BalanceDate);
+                    if (row.Id != Guid.Empty)
+                        await _periodService.EnsureOpeningBalanceCanBeModifiedAsync(entity.BalanceDate);
                     entity.BalanceDate = DateTime.SpecifyKind(row.BalanceDate.Date, DateTimeKind.Utc);
                     entity.AccountCode = row.AccountCode;
                     entity.Debit = row.Debit;
@@ -209,6 +226,15 @@ namespace BIS.ERP.Views
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "План счетов");
             return metadata == null ? new() : await _metadataService.GetCatalogDataAsync(metadata.Id);
         }
+
+        private void OnOpeningGridBeginningEdit(object sender, DataGridBeginningEditEventArgs e)
+        {
+            if (e.Row.Item is not OpeningBalanceEditorRow { IsSystemGenerated: true })
+                return;
+
+            e.Cancel = true;
+            StatusText.Text = "Автоматически перенесенные остатки редактируются через закрытие и повторное открытие периода.";
+        }
     }
 
     public class OpeningBalanceEditorRow
@@ -217,6 +243,8 @@ namespace BIS.ERP.Views
         public DateTime BalanceDate { get; set; }
         public string AccountCode { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
+        public string SourceDescription { get; set; } = "Ручной ввод";
+        public bool IsSystemGenerated { get; set; }
         public decimal Debit { get; set; }
         public decimal Credit { get; set; }
     }

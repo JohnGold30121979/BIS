@@ -319,6 +319,10 @@ namespace BIS.ERP.Services
             var id = existingId ?? Guid.NewGuid();
             var isNew = !existingId.HasValue;
             var existing = isNew ? null : await GetInvoiceAsync(id);
+            if (!isNew && existing == null)
+                throw new InvalidOperationException("Документ не найден.");
+
+            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate, existing?.DocDate);
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -352,7 +356,7 @@ namespace BIS.ERP.Services
                 else
                 {
                     if (existing != null)
-                        await DeletePostingsAsync(existing.DocNumber);
+                        await DeletePostingsAsync(existing.DocNumber, existing.DocDate);
 
                     await _context.Database.ExecuteSqlRawAsync($@"
                         UPDATE ""{HeaderTableName}""
@@ -440,6 +444,7 @@ namespace BIS.ERP.Services
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
+            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate);
 
             await _context.Database.ExecuteSqlRawAsync($@"
                 UPDATE ""{HeaderTableName}""
@@ -466,6 +471,7 @@ namespace BIS.ERP.Services
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
+            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate);
             if (invoice.IsPosted)
                 throw new InvalidOperationException("Проведённый документ нельзя удалить.");
 
@@ -484,6 +490,7 @@ namespace BIS.ERP.Services
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
+            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate);
             if (invoice.IsPosted)
                 throw new InvalidOperationException("Документ уже проведён.");
             if (invoice.Lines.Count == 0)
@@ -498,7 +505,7 @@ namespace BIS.ERP.Services
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                await DeletePostingsAsync(invoice.DocNumber);
+                await DeletePostingsAsync(invoice.DocNumber, invoice.DocDate);
 
                 foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
                 {
@@ -613,6 +620,15 @@ namespace BIS.ERP.Services
             invoice.TotalAmount = invoice.Lines.Sum(line => line.LineTotal);
         }
 
+        private async Task EnsureInvoiceDateCanBeModifiedAsync(DateTime invoiceDate, DateTime? existingDate = null)
+        {
+            var periodService = new AccountingPeriodService(_context);
+            await periodService.EnsureDateCanBeModifiedAsync(invoiceDate);
+
+            if (existingDate.HasValue && existingDate.Value.Date != invoiceDate.Date)
+                await periodService.EnsureDateCanBeModifiedAsync(existingDate.Value);
+        }
+
         private async Task CreatePostingAsync(InvoiceDocument invoice, string debit, string credit, decimal amount, string description)
         {
             if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit))
@@ -666,13 +682,26 @@ namespace BIS.ERP.Services
                 : DefaultPurchaseLineAccount;
         }
 
-        private async Task DeletePostingsAsync(string docNumber)
+        private async Task DeletePostingsAsync(string docNumber, DateTime? docDate = null)
         {
-            await _context.Database.ExecuteSqlRawAsync(@"
+            var sql = @"
                 DELETE FROM doc_postings
-                WHERE doc_number = @number AND document_type = @type;",
-                new NpgsqlParameter("@number", docNumber),
-                new NpgsqlParameter("@type", DocumentName));
+                WHERE doc_number = @number AND document_type = @type";
+
+            var parameters = new List<NpgsqlParameter>
+            {
+                new("@number", docNumber),
+                new("@type", DocumentName)
+            };
+
+            if (docDate.HasValue)
+            {
+                sql += @" AND DATE(posting_date) = DATE(@date)";
+                parameters.Add(new NpgsqlParameter("@date", docDate.Value.Date));
+            }
+
+            sql += ";";
+            await _context.Database.ExecuteSqlRawAsync(sql, parameters.Cast<object>().ToArray());
         }
 
         private static string BuildLineDescription(InvoiceDocument invoice, InvoiceLineRow line) =>

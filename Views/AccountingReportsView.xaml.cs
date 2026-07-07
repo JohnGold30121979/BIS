@@ -110,17 +110,19 @@ namespace BIS.ERP.Views
 
                 if (_currentPeriod.IsLocked)
                 {
-                    if (MessageBox.Show("Открыть период для изменения документов?", "Учетный период",
+                    if (MessageBox.Show("Открыть период для изменения документов? Автоматически перенесенные входящие остатки следующего периода будут удалены и сформируются заново после повторного закрытия.", "Учетный период",
                             MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                         return;
                     await _periodService.ReopenAsync(_currentPeriod.Id);
+                    StatusText.Text = "Период открыт. Перенесенные остатки следующего периода удалены.";
                 }
                 else
                 {
-                    if (MessageBox.Show("Закрыть период? Документы с датами этого периода нельзя будет изменять.",
+                    if (MessageBox.Show("Закрыть период? Документы с датами этого периода нельзя будет изменять, а конечные остатки будут перенесены на следующий день как входящие.",
                             "Учетный период", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                         return;
                     await _periodService.CloseAsync(_currentPeriod.Id);
+                    StatusText.Text = "Период закрыт. Конечные остатки перенесены в следующий период.";
                 }
                 await UpdatePeriodStateAsync(start, end);
             }
@@ -322,6 +324,7 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
         {
             var entries = await _balanceService.GetPurchaseSalesJournalAsync(start, end);
+            var period = await _periodService.FindAsync(start, end);
             var utcStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
             var utcEnd = DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc);
             var savedEntries = await _context.TaxJournalRecords.AsNoTracking()
@@ -340,7 +343,7 @@ namespace BIS.ERP.Views
             table.Columns.Add("Проведен", typeof(string));
             table.Columns.Add("Примечание", typeof(string));
 
-            if (savedEntries.Count > 0)
+            if (period?.IsLocked == true)
             {
                 foreach (var entry in savedEntries)
                     table.Rows.Add(LocalizationService.DisplayValue(entry.JournalType), entry.Date,
@@ -360,6 +363,9 @@ namespace BIS.ERP.Views
             report.ShowGrandTotal = true;
             var amountField = report.Fields.First(field => field.FieldName == "Всего");
             amountField.AggregateType = "Sum";
+            report.SummaryText = period?.IsLocked == true
+                ? "Показан сохраненный журнал закрытого периода."
+                : "Показаны текущие данные открытого периода.";
             return (table, report);
         }
 
