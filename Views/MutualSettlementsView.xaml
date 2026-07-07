@@ -49,12 +49,17 @@
                   AlternatingRowBackground="#F5F5F5" RowHeaderWidth="0"
                   Margin="0,5,0,0">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Организация" Binding="{Binding organization_name}" Width="200"/>
-                <DataGridTextColumn Header="Счет дебета" Binding="{Binding debit_account}" Width="100"/>
-                <DataGridTextColumn Header="Счет кредита" Binding="{Binding credit_account}" Width="100"/>
-                <DataGridTextColumn Header="Сумма дебет" Binding="{Binding debit_total, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="Сумма кредит" Binding="{Binding credit_total, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="Сальдо" Binding="{Binding balance, StringFormat=N2}" Width="120"/>
+                <DataGridTextColumn Header="Организация" Binding="{Binding organization_name}" Width="180"/>
+                <DataGridTextColumn Header="Вид расчета" Binding="{Binding account_pair_name}" Width="220"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding debit_account}" Width="95"/>
+                <DataGridTextColumn Header="Кредит" Binding="{Binding credit_account}" Width="95"/>
+                <DataGridTextColumn Header="Сальдо нач. Дт" Binding="{Binding opening_debit, StringFormat=N2}" Width="115"/>
+                <DataGridTextColumn Header="Сальдо нач. Кт" Binding="{Binding opening_credit, StringFormat=N2}" Width="115"/>
+                <DataGridTextColumn Header="Оборот Дт" Binding="{Binding debit_total, StringFormat=N2}" Width="105"/>
+                <DataGridTextColumn Header="Оборот Кт" Binding="{Binding credit_total, StringFormat=N2}" Width="105"/>
+                <DataGridTextColumn Header="Сальдо кон. Дт" Binding="{Binding closing_debit, StringFormat=N2}" Width="115"/>
+                <DataGridTextColumn Header="Сальдо кон. Кт" Binding="{Binding closing_credit, StringFormat=N2}" Width="115"/>
+                <DataGridTextColumn Header="Сальдо" Binding="{Binding balance, StringFormat=N2}" Width="105"/>
             </DataGrid.Columns>
         </DataGrid>
     </Grid>

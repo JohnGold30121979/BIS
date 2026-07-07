@@ -13,15 +13,18 @@ namespace BIS.ERP.Views
     {
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
+        private readonly bool _isRegistrationMode;
         private InvoiceService? _invoiceService;
 
         public InvoiceWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
+            _isRegistrationMode = InvoiceDocumentTypes.IsPurchase(documentMetadata.Name);
             InitializeComponent();
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
             TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";
             DescriptionText.Text = documentMetadata.Description;
+            ConfigureModeUi();
             Loaded += OnLoaded;
         }
 
@@ -44,6 +47,29 @@ namespace BIS.ERP.Views
             DeleteButton.IsEnabled = hasSelection && selected?.IsPosted == false;
             AllPostingsButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
+        }
+
+        private void ConfigureModeUi()
+        {
+            if (!_isRegistrationMode)
+                return;
+
+            TitleText.Text = $"{_documentMetadata.Icon} Регистрация счет-фактур по НДС";
+            DescriptionText.Text =
+                "Реестр зарегистрированных счетов-фактур: просмотр документов и присвоение серии/номера налогового бланка.";
+            AddButton.Content = "➕ Добавить счет-фактуру";
+            AddButton.Width = 165;
+            EditButton.Content = "🧾 Номер бланка";
+            EditButton.Width = 135;
+
+            TaxBlankColumn.Visibility = Visibility.Visible;
+            ArmColumn.Visibility = Visibility.Visible;
+            BasisColumn.Visibility = Visibility.Collapsed;
+
+            LineUnitColumn.Visibility = Visibility.Visible;
+            LineQuantityColumn.Visibility = Visibility.Visible;
+            LineAccountColumn.Visibility = Visibility.Collapsed;
+            LineSalesTaxColumn.Visibility = Visibility.Collapsed;
         }
 
         private async Task LoadDataAsync()
@@ -119,6 +145,19 @@ namespace BIS.ERP.Views
         {
             if (_invoiceService == null)
                 return;
+
+            if (_isRegistrationMode)
+            {
+                var registrationDialog = new InvoiceRegistrationDialog(
+                    _documentMetadata,
+                    _invoiceService,
+                    invoiceId,
+                    isReadOnly);
+                registrationDialog.Owner = Window.GetWindow(this);
+                if (registrationDialog.ShowDialog() == true && !isReadOnly)
+                    await LoadDataAsync();
+                return;
+            }
 
             var dialog = new InvoiceEditDialog(_documentMetadata, _metadataService, _invoiceService, invoiceId, isReadOnly);
             dialog.Owner = Window.GetWindow(this);

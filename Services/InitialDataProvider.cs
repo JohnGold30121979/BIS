@@ -8,13 +8,7 @@ namespace BIS.ERP.Services
         // План счетов бухгалтерского учета КР (основные счета)
         public static List<ChartOfAccount> GetChartOfAccounts()
         {
-            var accounts = new List<ChartOfAccount>();
-
-            // Контрольные корреспондирующие счета для автопроверки проводок.
-            accounts.Add(new ChartOfAccount { Code = "4010", Name = "Расчеты с поставщиками", AccountType = "Passive", Description = "Корреспондирующий счет для оплаты поставщикам", Level = 1 });
-            accounts.Add(new ChartOfAccount { Code = "6010", Name = "Доходы от реализации", AccountType = "Passive", Description = "Корреспондирующий счет для поступления оплаты от покупателей", Level = 1 });
-            accounts.Add(new ChartOfAccount { Code = "6810", Name = "Расчеты с персоналом по оплате труда", AccountType = "Passive", Description = "Корреспондирующий счет для выплаты заработной платы", Level = 1 });
-            accounts.Add(new ChartOfAccount { Code = "6850", Name = "Расчеты с подотчетными лицами", AccountType = "Active", Description = "Корреспондирующий счет для выдачи денежных средств под отчет", Level = 1 });
+            var accounts = new List<ChartOfAccount>();        
 
             // ==================== РАЗДЕЛ 1000: ОБОРОТНЫЕ АКТИВЫ ====================
             accounts.Add(new ChartOfAccount { Code = "11100000", Name = "Денежные средства в национальной валюте", AccountType = "Active", Level = 1 });

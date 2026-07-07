@@ -19,6 +19,7 @@ namespace BIS.ERP.Views
     {
         private readonly AppDbContext _context;
         private readonly BalanceService _balanceService;
+        private readonly OrganizationBalanceService _organizationBalanceService;
         private readonly ReportService _reportService;
         private readonly AccountingPeriodService _periodService;
         private readonly PostingService _postingService;
@@ -31,6 +32,7 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _context = context;
             _balanceService = new BalanceService(context);
+            _organizationBalanceService = new OrganizationBalanceService(context);
             _reportService = new ReportService(context);
             _periodService = new AccountingPeriodService(context);
             _postingService = new PostingService(context);
@@ -58,6 +60,7 @@ namespace BIS.ERP.Views
                     "FinancialPosition" => await BuildFinancialPositionAsync(end),
                     "FinancialResults" => await BuildFinancialResultsAsync(start, end),
                     "PurchaseSalesJournal" => await BuildPurchaseSalesJournalAsync(start, end),
+                    "OrganizationBalances" => await BuildOrganizationBalancesAsync(start, end),
                     "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
                     "CashBook" => await BuildCashBookAsync(start, end),
                     _ => await BuildTrialBalanceAsync(start, end)
@@ -357,6 +360,48 @@ namespace BIS.ERP.Views
             report.ShowGrandTotal = true;
             var amountField = report.Fields.First(field => field.FieldName == "Всего");
             amountField.AggregateType = "Sum";
+            return (table, report);
+        }
+
+        private async Task<(DataTable, Report)> BuildOrganizationBalancesAsync(DateTime start, DateTime end)
+        {
+            var calculation = await _organizationBalanceService.CalculateAsync(start, end);
+            var table = new DataTable("Сальдо по организациям");
+            table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Вид расчета", typeof(string));
+            table.Columns.Add("Счет", typeof(string));
+            table.Columns.Add("Счет корр.", typeof(string));
+            table.Columns.Add("Сальдо нач. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо нач. Кт", typeof(decimal));
+            table.Columns.Add("Оборот Дт", typeof(decimal));
+            table.Columns.Add("Оборот Кт", typeof(decimal));
+            table.Columns.Add("Сальдо кон. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо кон. Кт", typeof(decimal));
+            table.Columns.Add("Сальдо", typeof(decimal));
+            table.Columns.Add("АРМ", typeof(string));
+
+            foreach (var row in calculation.Rows)
+            {
+                table.Rows.Add(
+                    row.OrganizationName,
+                    row.IsOrganizationTotal ? "ИТОГО" : row.AccountPairName,
+                    row.AccountCode,
+                    row.CounterAccountCode,
+                    row.OpeningDebit,
+                    row.OpeningCredit,
+                    row.TurnoverDebit,
+                    row.TurnoverCredit,
+                    row.ClosingDebit,
+                    row.ClosingCredit,
+                    row.Balance,
+                    row.ArmCode);
+            }
+
+            var report = CreateReport(table,
+                $"Сальдо по организациям за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+            report.SummaryText = calculation.Warnings.Count == 0
+                ? "Расчет выполнен по активным парам счетов справочника авансовых платежей."
+                : string.Join(Environment.NewLine, calculation.Warnings);
             return (table, report);
         }
 

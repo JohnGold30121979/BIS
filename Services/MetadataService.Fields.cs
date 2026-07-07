@@ -125,6 +125,22 @@ public partial class MetadataService
             };
     }
 
+    private List<MetadataField> GetSupplyKindFields(Guid metadataObjectId)
+    {
+        var fields = GetStandardCatalogFields(metadataObjectId);
+        fields.Add(new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Порядок",
+            DbColumnName = "sort_order",
+            FieldType = "Int",
+            IsRequired = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        });
+        return fields;
+    }
+
     private List<MetadataField> GetChartOfAccountsFields(Guid metadataObjectId)
     {
         var fields = new List<MetadataField>

@@ -2,7 +2,11 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Счет-фактура" Height="720" Width="1050"
+        MinHeight="620" MinWidth="760"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -55,7 +59,9 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="AccountBox" Height="28" IsReadOnly="True"/>
-                    <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="..." Width="32" Height="28" Margin="4,0,0,0" Click="OnSelectAccountClick"/>
+                    <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="..." Width="32" Height="28" Margin="4,0,0,0"
+                            Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Click="OnSelectAccountClick"/>
                 </Grid>
             </StackPanel>
             <StackPanel Grid.Row="2" Grid.Column="1" Margin="10,0,0,8">
@@ -79,10 +85,12 @@
         </Grid>
 
         <DataGrid x:Name="LinesGrid" Grid.Row="2" AutoGenerateColumns="False"
-                  CanUserAddRows="False" SelectionChanged="OnLineSelectionChanged">
+                  CanUserAddRows="False"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  SelectionChanged="OnLineSelectionChanged">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="2.4*"/>
-                <DataGridTemplateColumn Header="Счет стороны А" Width="190">
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="2.4*" MinWidth="220"/>
+                <DataGridTemplateColumn Header="Счет стороны А" Width="230" MinWidth="190">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
@@ -93,12 +101,13 @@
                                 <TextBox Text="{Binding AccountDisplayName}" IsReadOnly="True" Height="24"/>
                                 <Button Grid.Column="1" Content="..." Width="28" Height="24" Margin="4,0,0,0"
                                         Tag="{Binding}" Click="OnSelectLineAccountClick"
+                                        Visibility="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
                                         IsEnabled="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}}"/>
                             </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Без налогов" Binding="{Binding AmountWithoutTax, UpdateSourceTrigger=PropertyChanged, StringFormat=N2}" Width="100"/>
+                <DataGridTextColumn Header="Без налогов" Binding="{Binding AmountWithoutTax, UpdateSourceTrigger=PropertyChanged, StringFormat=N2}" Width="105"/>
                 <DataGridTemplateColumn Header="НДС" Width="130">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>

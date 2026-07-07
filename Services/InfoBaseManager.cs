@@ -86,13 +86,12 @@ public class InfoBaseManager
             settings.Port,
             settings.Username,
             settings.Password,
-            createTestPostings: settings.CreateTestPostingsForNewInfoBases,
             patchVersion: DefaultPatchVersion);
     }
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
     string host, int port, string username, string password, string? databaseName = null,
-    bool createTestPostings = true, string? patchVersion = null)
+    string? patchVersion = null)
     {
         var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
         var normalizedPatchVersion = NormalizePatchVersion(patchVersion);
@@ -135,7 +134,6 @@ public class InfoBaseManager
             await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
             await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
             await new PrintFormService(dbContext).SeedCashOrderFormsAsync();
-            await new TestPostingMetadataSeedService(dbContext).EnsureAsync(createTestPostings);
             await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
 
             _masterContext.InfoBases.Add(infoBase);

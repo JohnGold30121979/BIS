@@ -89,13 +89,6 @@
 
                                 <TextBlock x:Name="TestResultText" Foreground="Green" FontSize="12" 
                                            Visibility="Collapsed" Margin="0,0,0,10" TextAlignment="Center" TextWrapping="Wrap"/>
-
-                                <CheckBox x:Name="CreateTestPostingsCheckBox"
-                                          Content="Создать тестовые проводки при создании базы"
-                                          IsChecked="True"
-                                          Margin="0,0,0,12"
-                                          Foreground="#555"
-                                          FontSize="12"/>
                             </StackPanel>
                         </Expander>
 

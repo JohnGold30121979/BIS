@@ -71,9 +71,6 @@
                         </ComboBox>
                         <TextBlock x:Name="CurrentThemeText" Foreground="{DynamicResource AppSecondaryTextBrush}"
                                    FontSize="11" Margin="0,0,0,12"/>
-                        <CheckBox x:Name="CreateTestPostingsCheckBox"
-                                  Content="Создавать тестовые проводки при создании новой инфобазы"
-                                  Margin="0,0,0,12"/>
                         <TextBlock Text="Язык интерфейса" Margin="0,0,0,5"/>
                         <ComboBox x:Name="LanguageComboBox" Height="36" SelectedValuePath="Tag"
                                   SelectionChanged="OnLanguageChanged">

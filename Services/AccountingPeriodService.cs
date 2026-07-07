@@ -96,6 +96,7 @@ namespace BIS.ERP.Services
                 TurnoverDebit = balance.TurnoverDebit, TurnoverCredit = balance.TurnoverCredit,
                 ClosingDebit = balance.ClosingDebit, ClosingCredit = balance.ClosingCredit
             }));
+            await new OrganizationBalanceService(_context).CalculateAsync(startDate, endDate);
             await SynchronizeTaxJournalAsync(startDate, endDate);
             period.Status = "Collected";
             period.CollectedAt = DateTime.UtcNow;

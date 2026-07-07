@@ -368,7 +368,6 @@ flowchart TD
 | `ServiceLocator` | Доступ к singleton-сервисам. |
 | `SiteService` | Участки. |
 | `SystemConfigurationService` | Настройки системы и реквизиты. |
-| `TestPostingMetadataSeedService` | Тестовые проводки/данные для новых баз. |
 | `ThemeService` | Переключение тем. |
 | `TrayManager` | Системный трей. |
 | `UserAccessService` | Пользователи и права на навигацию. |

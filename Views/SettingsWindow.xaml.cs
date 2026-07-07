@@ -26,7 +26,6 @@ namespace BIS.ERP.Views
             }
 
             LanguageComboBox.SelectedValue = _settings.Language;
-            CreateTestPostingsCheckBox.IsChecked = _settings.CreateTestPostingsForNewInfoBases;
 
             UpdateCurrentThemeText();
             Loaded += async (_, _) =>
@@ -107,7 +106,6 @@ namespace BIS.ERP.Views
                 EmailBox.Text,
                 PhoneBox.Text,
                 AppUpdateUrlBox.Text);
-            _settings.CreateTestPostingsForNewInfoBases = CreateTestPostingsCheckBox.IsChecked == true;
             _settings.Save();
             DialogResult = true;
             Close();

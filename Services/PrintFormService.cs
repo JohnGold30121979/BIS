@@ -677,6 +677,7 @@ namespace BIS.ERP.Services
         {
             var invoiceService = new InvoiceService(_context);
             invoiceService.Configure(metadata);
+            await invoiceService.EnsureSchemaAsync();
             var invoice = await invoiceService.GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Счет-фактура для печати не найден.");
             var (issuer, recipient) = await LoadInvoicePartiesAsync(invoice, metadata.Name);
@@ -886,8 +887,16 @@ namespace BIS.ERP.Services
                 AddExtra($"{side}_BUH", organization.ChiefAccountant);
             }
 
+            var taxBlankNumber = string.IsNullOrWhiteSpace(invoice.TaxBlankNumber)
+                ? invoice.EsfNumber
+                : invoice.TaxBlankNumber;
+
             AddExtra("esf_number", invoice.EsfNumber);
             AddExtra("Номер ЭСФ", invoice.EsfNumber);
+            AddExtra("tax_blank_number", taxBlankNumber);
+            AddExtra("Серия и N бланка", taxBlankNumber);
+            AddExtra("arm_code", invoice.ArmCode);
+            AddExtra("АРМ", invoice.ArmCode);
             AddExtra("counterparty_account", invoice.CounterpartyAccountCode);
             AddExtra("Счет", invoice.CounterpartyAccountCode);
             AddExtra("payment_kind", invoice.PaymentKind);
@@ -898,8 +907,8 @@ namespace BIS.ERP.Services
             AddExtra("sales_tax_total", invoice.SalesTaxTotal);
             AddExtra("total_amount", invoice.TotalAmount);
             AddExtra("is_posted", invoice.IsPosted ? "Да" : "Нет");
-            AddExtra("fact_SER_BL", invoice.EsfNumber);
-            AddExtra("fact.SER_BL", invoice.EsfNumber);
+            AddExtra("fact_SER_BL", taxBlankNumber);
+            AddExtra("fact.SER_BL", taxBlankNumber);
             AddExtra("fact_NOM_BL", invoice.DocNumber);
             AddExtra("fact.NOM_BL", invoice.DocNumber);
             AddExtra("fact_D_SALE", invoice.DocDate);
@@ -936,8 +945,8 @@ namespace BIS.ERP.Services
             var firstLine = invoice.Lines.FirstOrDefault();
             AddExtra("curFACTSW.K_MAT", firstLine?.AccountCode ?? string.Empty);
             AddExtra("curFACTSW.NAME_MAT", firstLine?.Name ?? string.Empty);
-            AddExtra("curFACTSW.ED_IZ", string.Empty);
-            AddExtra("curFACTSW.KOL", firstLine == null ? 0 : 1);
+            AddExtra("curFACTSW.ED_IZ", firstLine?.UnitName ?? string.Empty);
+            AddExtra("curFACTSW.KOL", firstLine?.Quantity ?? 0);
             AddExtra("curFACTSW.CENA", firstLine?.AmountWithoutTax ?? 0);
             AddExtra("curFACTSW.PR_NDC", firstLine?.VatRate ?? 0);
             AddExtra("curFACTSW.PR_OP", firstLine?.SalesTaxRate ?? 0);
@@ -947,6 +956,8 @@ namespace BIS.ERP.Services
                 var number = index + 1;
                 var line = invoice.Lines[index];
                 AddExtra($"line{number}_name", line.Name);
+                AddExtra($"line{number}_unit", line.UnitName);
+                AddExtra($"line{number}_quantity", line.Quantity);
                 AddExtra($"line{number}_account", line.AccountCode);
                 AddExtra($"line{number}_account_name", string.IsNullOrWhiteSpace(line.AccountName) ? line.AccountCode : line.AccountName);
                 AddExtra($"line{number}_amount_without_tax", line.AmountWithoutTax);
@@ -954,6 +965,8 @@ namespace BIS.ERP.Services
                 AddExtra($"line{number}_sales_tax", line.SalesTaxAmount);
                 AddExtra($"line{number}_total", line.LineTotal);
                 AddExtra($"curFACTSW{number}.name", line.Name);
+                AddExtra($"curFACTSW{number}.ed_iz", line.UnitName);
+                AddExtra($"curFACTSW{number}.kol", line.Quantity);
                 AddExtra($"curFACTSW{number}.account", line.AccountCode);
                 AddExtra($"curFACTSW{number}.sum", line.AmountWithoutTax);
                 AddExtra($"curFACTSW{number}.ndc", line.VatAmount);

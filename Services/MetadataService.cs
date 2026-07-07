@@ -554,10 +554,12 @@ namespace BIS.ERP.Services
         {
             try
             {
+                await RemoveTestPostingArtifactsAsync();
                 await EnsureChartOfAccountsCatalogStructureAsync();
                 await EnsureOrganizationsCatalogStructureAsync();
                 await EnsureEmployeesCatalogStructureAsync();
                 await EnsureCashDesksCatalogStructureAsync();
+                await EnsureSupplyKindCatalogStructureAsync();
                 await EnsureAdvancePaymentsCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
                 await EnsurePositionCatalogDataAsync();
@@ -705,6 +707,161 @@ namespace BIS.ERP.Services
             };
         }
 
+        private async Task RemoveTestPostingArtifactsAsync()
+        {
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync(@"
+DO $$
+DECLARE
+    marker text := 'Тестовая проводка при создании инфобазы';
+BEGIN
+    IF to_regclass('public.catalog_cash_desks') IS NOT NULL
+       AND to_regclass('public.doc_cash_receipt') IS NOT NULL
+       AND EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'catalog_cash_desks' AND column_name = 'current_balance')
+       AND NOT EXISTS (
+           SELECT 1
+           FROM (VALUES ('description'), ('cash_desk_id'), ('amount'), ('is_posted')) required(column_name)
+           WHERE NOT EXISTS (
+               SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'doc_cash_receipt'
+                 AND column_name = required.column_name)) THEN
+        UPDATE catalog_cash_desks cd
+        SET current_balance = COALESCE(cd.current_balance, 0) - src.amount
+        FROM (
+            SELECT cash_desk_id::text::uuid AS cash_desk_id, SUM(amount) AS amount
+            FROM doc_cash_receipt
+            WHERE description = marker
+              AND COALESCE(is_posted, false) = true
+              AND cash_desk_id IS NOT NULL
+              AND cash_desk_id::text ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+            GROUP BY cash_desk_id::text
+        ) src
+        WHERE cd.""Id"" = src.cash_desk_id;
+    END IF;
+
+    IF to_regclass('public.catalog_cash_desks') IS NOT NULL
+       AND to_regclass('public.doc_cash_payment') IS NOT NULL
+       AND EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'catalog_cash_desks' AND column_name = 'current_balance')
+       AND NOT EXISTS (
+           SELECT 1
+           FROM (VALUES ('description'), ('cash_desk_id'), ('amount'), ('is_posted')) required(column_name)
+           WHERE NOT EXISTS (
+               SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'doc_cash_payment'
+                 AND column_name = required.column_name)) THEN
+        UPDATE catalog_cash_desks cd
+        SET current_balance = COALESCE(cd.current_balance, 0) + src.amount
+        FROM (
+            SELECT cash_desk_id::text::uuid AS cash_desk_id, SUM(amount) AS amount
+            FROM doc_cash_payment
+            WHERE description = marker
+              AND COALESCE(is_posted, false) = true
+              AND cash_desk_id IS NOT NULL
+              AND cash_desk_id::text ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
+            GROUP BY cash_desk_id::text
+        ) src
+        WHERE cd.""Id"" = src.cash_desk_id;
+    END IF;
+
+    IF to_regclass('public.doc_postings') IS NOT NULL
+       AND to_regclass('public.doc_cash_receipt') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM (VALUES ('doc_number'), ('document_type')) required(column_name)
+           WHERE NOT EXISTS (
+               SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'doc_postings'
+                 AND column_name = required.column_name))
+       AND NOT EXISTS (
+           SELECT 1
+           FROM (VALUES ('doc_number'), ('description')) required(column_name)
+           WHERE NOT EXISTS (
+               SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'doc_cash_receipt'
+                 AND column_name = required.column_name)) THEN
+        DELETE FROM doc_postings p
+        USING doc_cash_receipt d
+        WHERE p.document_type = 'Приходный кассовый ордер'
+          AND p.doc_number = d.doc_number
+          AND d.description = marker;
+    END IF;
+
+    IF to_regclass('public.doc_postings') IS NOT NULL
+       AND to_regclass('public.doc_cash_payment') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM (VALUES ('doc_number'), ('document_type')) required(column_name)
+           WHERE NOT EXISTS (
+               SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'doc_postings'
+                 AND column_name = required.column_name))
+       AND NOT EXISTS (
+           SELECT 1
+           FROM (VALUES ('doc_number'), ('description')) required(column_name)
+           WHERE NOT EXISTS (
+               SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'doc_cash_payment'
+                 AND column_name = required.column_name)) THEN
+        DELETE FROM doc_postings p
+        USING doc_cash_payment d
+        WHERE p.document_type = 'Расходный кассовый ордер'
+          AND p.doc_number = d.doc_number
+          AND d.description = marker;
+    END IF;
+
+    IF to_regclass('public.doc_cash_receipt') IS NOT NULL
+       AND EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'doc_cash_receipt' AND column_name = 'description') THEN
+        DELETE FROM doc_cash_receipt WHERE description = marker;
+    END IF;
+
+    IF to_regclass('public.doc_cash_payment') IS NOT NULL
+       AND EXISTS (
+           SELECT 1 FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = 'doc_cash_payment' AND column_name = 'description') THEN
+        DELETE FROM doc_cash_payment WHERE description = marker;
+    END IF;
+END $$;");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка очистки тестовых проводок: {ex.Message}");
+            }
+
+            try
+            {
+                var catalog = await _context.MetadataObjects
+                    .Include(item => item.Fields)
+                    .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Тестовые сценарии проводок");
+
+                if (catalog == null)
+                    return;
+
+                if (!string.IsNullOrWhiteSpace(catalog.TableName))
+                    await _context.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS {QuoteIdentifier(catalog.TableName)} CASCADE;");
+
+                _context.MetadataFields.RemoveRange(catalog.Fields);
+                _context.MetadataObjects.Remove(catalog);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка удаления тестового справочника проводок: {ex.Message}");
+            }
+        }
+
 
         // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
 
@@ -730,6 +887,8 @@ namespace BIS.ERP.Services
                     await _context.MetadataConfigurations.AddAsync(config);
                     await _context.SaveChangesAsync();
                 }
+
+                await RemoveTestPostingArtifactsAsync();
 
                 // Проверяем существующие справочники
                 var existingCatalogs = await _context.MetadataObjects
@@ -814,6 +973,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Виды поставки"))
                     await CreateSupplyKindCatalog(config);
+                await EnsureSupplyKindCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Виды оплаты"))
                     await CreatePaymentKindCatalog(config);

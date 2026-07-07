@@ -56,38 +56,28 @@ namespace BIS.ERP.Views
                 var startDate = dpStartDate.SelectedDate ?? DateTime.Now.AddMonths(-1);
                 var endDate = dpEndDate.SelectedDate ?? DateTime.Now;
 
-                var rawData = await _metadataService.GetMutualSettlementsAsync(startDate, endDate);
+                var calculation = await _metadataService.CalculateOrganizationBalancesAsync(startDate, endDate);
+                foreach (var warning in calculation.Warnings)
+                    System.Diagnostics.Debug.WriteLine($"Предупреждение расчета взаиморасчетов: {warning}");
 
-                // Группируем по организациям и парам счетов
-                var grouped = rawData
-                    .GroupBy(r => new
+                _allData = calculation.Rows
+                    .Where(row => !row.IsOrganizationTotal)
+                    .Select(row => new MutualSettlementItem
                     {
-                        org = r.GetValueOrDefault("organization_name")?.ToString() ?? "Без организации",
-                        debit = r.GetValueOrDefault("debit_account")?.ToString() ?? "",
-                        credit = r.GetValueOrDefault("credit_account")?.ToString() ?? ""
-                    })
-                    .Select(g =>
-                    {
-                        var debitSum = g.Sum(r =>
-                        {
-                            var amt = r.GetValueOrDefault("amount_kgs");
-                            return Convert.ToDecimal(amt ?? 0);
-                        });
-                        // For simplicity, treat all amounts as debit if debit account matches filter
-                        var creditSum = 0m;
-                        return new MutualSettlementItem
-                        {
-                            organization_name = g.Key.org,
-                            debit_account = g.Key.debit,
-                            credit_account = g.Key.credit,
-                            debit_total = debitSum,
-                            credit_total = creditSum,
-                            balance = debitSum - creditSum
-                        };
+                        organization_id = row.OrganizationId?.ToString() ?? string.Empty,
+                        organization_name = row.OrganizationName,
+                        account_pair_name = row.AccountPairName,
+                        debit_account = row.AccountCode,
+                        credit_account = row.CounterAccountCode,
+                        opening_debit = row.OpeningDebit,
+                        opening_credit = row.OpeningCredit,
+                        debit_total = row.TurnoverDebit,
+                        credit_total = row.TurnoverCredit,
+                        closing_debit = row.ClosingDebit,
+                        closing_credit = row.ClosingCredit,
+                        balance = row.Balance
                     })
                     .ToList();
-
-                _allData = grouped;
                 ApplyFilters();
             }
             catch (Exception ex)
@@ -149,10 +139,21 @@ namespace BIS.ERP.Views
                 .GroupBy(d => d.organization_name)
                 .Select(g => new MutualSettlementItem
                 {
+                    organization_id = g.Select(d => d.organization_id).FirstOrDefault(id => !string.IsNullOrWhiteSpace(id)) ?? string.Empty,
                     organization_name = g.Key,
+                    account_pair_name = "Итого по организации",
+                    opening_debit = g.Sum(d => d.opening_debit),
+                    opening_credit = g.Sum(d => d.opening_credit),
                     debit_total = g.Sum(d => d.debit_total),
                     credit_total = g.Sum(d => d.credit_total),
-                    balance = g.Sum(d => d.balance)
+                    closing_debit = Math.Max(
+                        g.Sum(d => d.opening_debit) - g.Sum(d => d.opening_credit) +
+                        g.Sum(d => d.debit_total) - g.Sum(d => d.credit_total), 0),
+                    closing_credit = Math.Max(
+                        -(g.Sum(d => d.opening_debit) - g.Sum(d => d.opening_credit) +
+                          g.Sum(d => d.debit_total) - g.Sum(d => d.credit_total)), 0),
+                    balance = g.Sum(d => d.balance),
+                    is_total = true
                 })
                 .ToList();
 
@@ -172,10 +173,16 @@ namespace BIS.ERP.Views
             // Find organization ID by name
             var startDate = dpStartDate.SelectedDate ?? DateTime.Now.AddMonths(-1);
             var endDate = dpEndDate.SelectedDate ?? DateTime.Now;
+            if (!Guid.TryParse(selected.organization_id, out var organizationId) || organizationId == Guid.Empty)
+            {
+                MessageBox.Show("Для выбранной строки нет ссылки на организацию.", "Акт сверки",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
 
             // For now, show the data in a message
             var data = await _metadataService.GetReconciliationStatementAsync(
-                Guid.Empty, startDate, endDate);
+                organizationId, startDate, endDate);
 
             var details = string.Join("\n", data.Select(d =>
                 $"{d.GetValueOrDefault("Дата"):yyyy-MM-dd} | {d.GetValueOrDefault("Номер документа")} | {d.GetValueOrDefault("Дебет")} -> {d.GetValueOrDefault("Кредит")} | {d.GetValueOrDefault("Сумма"):N2}"));
@@ -235,11 +242,18 @@ namespace BIS.ERP.Views
 
     public class MutualSettlementItem
     {
+        public string organization_id { get; set; } = string.Empty;
         public string organization_name { get; set; } = string.Empty;
+        public string account_pair_name { get; set; } = string.Empty;
         public string debit_account { get; set; } = string.Empty;
         public string credit_account { get; set; } = string.Empty;
+        public decimal opening_debit { get; set; }
+        public decimal opening_credit { get; set; }
         public decimal debit_total { get; set; }
         public decimal credit_total { get; set; }
+        public decimal closing_debit { get; set; }
+        public decimal closing_credit { get; set; }
         public decimal balance { get; set; }
+        public bool is_total { get; set; }
     }
 }

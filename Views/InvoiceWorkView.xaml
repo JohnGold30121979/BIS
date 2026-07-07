@@ -36,27 +36,33 @@
         </WrapPanel>
 
         <DataGrid x:Name="InvoicesGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
                   SelectionChanged="OnInvoiceSelectionChanged" MouseDoubleClick="OnInvoiceDoubleClick"
                   AlternatingRowBackground="#F5F5F5">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
-                <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" Width="*"/>
-                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding TotalAmount, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="200"/>
+                <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" Width="*" MinWidth="220"/>
+                <DataGridTextColumn Header="Сумма" Binding="{Binding TotalAmount, StringFormat=N2}" Width="120"/>
+                <DataGridTextColumn x:Name="TaxBlankColumn" Header="Серия и N бланка" Binding="{Binding TaxBlankNumber}" Width="170" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="ArmColumn" Header="АРМ" Binding="{Binding ArmCode}" Width="80" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="BasisColumn" Header="Основание" Binding="{Binding Basis}" Width="220"/>
             </DataGrid.Columns>
         </DataGrid>
 
         <TextBlock Grid.Row="3" Text="Строки счета-фактуры" FontWeight="Bold" Margin="0,10,0,5"/>
 
         <DataGrid x:Name="LinesGrid" Grid.Row="4" AutoGenerateColumns="False" IsReadOnly="True"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
                   AlternatingRowBackground="#F8F8F8">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="*"/>
-                <DataGridTextColumn Header="Счет" Binding="{Binding AccountName}" Width="180"/>
-                <DataGridTextColumn Header="Сумма без нал" Binding="{Binding AmountWithoutTax, StringFormat=N2}" Width="110"/>
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="*" MinWidth="240"/>
+                <DataGridTextColumn x:Name="LineUnitColumn" Header="ЕдИз" Binding="{Binding UnitName}" Width="80" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="LineQuantityColumn" Header="Кол-во" Binding="{Binding Quantity, StringFormat=N3}" Width="90" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="LineAccountColumn" Header="Счет" Binding="{Binding AccountName}" Width="220"/>
+                <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, StringFormat=N2}" Width="110"/>
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, StringFormat=N2}" Width="90"/>
-                <DataGridTextColumn Header="Налог с прод" Binding="{Binding SalesTaxAmount, StringFormat=N2}" Width="100"/>
+                <DataGridTextColumn x:Name="LineSalesTaxColumn" Header="Налог с прод" Binding="{Binding SalesTaxAmount, StringFormat=N2}" Width="100"/>
                 <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, StringFormat=N2}" Width="100"/>
             </DataGrid.Columns>
         </DataGrid>

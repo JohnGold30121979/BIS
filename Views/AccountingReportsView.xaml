@@ -25,6 +25,7 @@
                     <ComboBoxItem Tag="FinancialPosition">Баланс предприятия</ComboBoxItem>
                     <ComboBoxItem Tag="FinancialResults">Финансовые результаты</ComboBoxItem>
                     <ComboBoxItem Tag="PurchaseSalesJournal">Журнал закупок и продаж</ComboBoxItem>
+                    <ComboBoxItem Tag="OrganizationBalances">Сальдо по организациям</ComboBoxItem>
                     <ComboBoxItem Tag="PeriodCollection">Сбор информации за период</ComboBoxItem>
                     <ComboBoxItem Tag="CashBook">Кассовая книга</ComboBoxItem>
                 </ComboBox>

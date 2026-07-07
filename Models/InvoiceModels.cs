@@ -11,6 +11,8 @@ namespace BIS.ERP.Models
         public string OrganizationName { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
         public string Basis { get; set; } = string.Empty;
+        public string TaxBlankNumber { get; set; } = string.Empty;
+        public string ArmCode { get; set; } = string.Empty;
         public bool IsPosted { get; set; }
         public string IsPostedDisplay => IsPosted ? "Да" : "Нет";
     }
@@ -20,6 +22,8 @@ namespace BIS.ERP.Models
         public Guid Id { get; set; }
         public int LineNumber { get; set; }
         public string Name { get; set; } = string.Empty;
+        public string UnitName { get; set; } = string.Empty;
+        public decimal Quantity { get; set; } = 1m;
         public string AccountCode { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
         public string VatTaxCode { get; set; } = string.Empty;
@@ -38,6 +42,8 @@ namespace BIS.ERP.Models
         public string DocNumber { get; set; } = string.Empty;
         public DateTime DocDate { get; set; } = DateTime.Today;
         public string EsfNumber { get; set; } = string.Empty;
+        public string TaxBlankNumber { get; set; } = string.Empty;
+        public string ArmCode { get; set; } = string.Empty;
         public Guid? OrganizationId { get; set; }
         public string OrganizationName { get; set; } = string.Empty;
         public string CounterpartyAccountCode { get; set; } = string.Empty;

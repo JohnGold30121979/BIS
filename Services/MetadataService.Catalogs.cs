@@ -930,9 +930,10 @@ namespace BIS.ERP.Services
         {
             try
             {
+                var catalogId = Guid.NewGuid();
                 var catalog = new MetadataObject
                 {
-                    Id = Guid.NewGuid(),
+                    Id = catalogId,
                     Name = "Виды поставки",
                     TableName = "catalog_supply_kinds",
                     ObjectType = "Catalog",
@@ -941,7 +942,7 @@ namespace BIS.ERP.Services
                     Order = 17,
                     IsSystem = true,
                     MetadataConfigId = config.Id,
-                    Fields = GetStandardCatalogFields(Guid.NewGuid())
+                    Fields = GetSupplyKindFields(catalogId)
                 };
 
                 await _context.MetadataObjects.AddAsync(catalog);
@@ -955,6 +956,36 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Виды поставки': {ex.Message}");
             }
+        }
+
+        private async Task EnsureSupplyKindCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Виды поставки");
+
+            if (catalog == null)
+                return;
+
+            var existingColumns = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .Select(field => field.DbColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetSupplyKindFields(catalog.Id))
+            {
+                if (existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+                catalog.Fields.Add(field);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         // Справочник "Виды оплаты"

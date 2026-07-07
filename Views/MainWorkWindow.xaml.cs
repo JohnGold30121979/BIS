@@ -123,7 +123,6 @@ namespace BIS.ERP
                     var printFormService = new PrintFormService(context);
                     await printFormService.SeedCashOrderFormsAsync();
                     await printFormService.SeedInvoiceFormsAsync();
-                    await new TestPostingMetadataSeedService(context).EnsureAsync(createTestPostings: false);
                     await BuildNavigationTree();
                 }
             }

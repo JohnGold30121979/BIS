@@ -511,7 +511,6 @@ internal sealed class CashOrderTestContext
         }
 
         await new MetadataService(context).EnsureCashOrderPostingAccountsAsync();
-        await new TestPostingMetadataSeedService(context).EnsureAsync(createTestPostings: false);
 
         var (accounts, createdAccountIds) = await EnsureAccountIdsAsync(
             context,

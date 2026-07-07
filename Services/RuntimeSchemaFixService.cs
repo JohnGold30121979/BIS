@@ -92,6 +92,7 @@ namespace BIS.ERP.Services
 
                     IF to_regclass('public.catalog_supply_kinds') IS NOT NULL THEN
                         ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS sort_order integer;
                         ALTER TABLE catalog_supply_kinds ALTER COLUMN code TYPE varchar(80);
                     END IF;
 

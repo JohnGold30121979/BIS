@@ -1,0 +1,91 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.InvoiceRegistrationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Регистрация счет-фактуры по НДС"
+        Height="560" Width="920" MinHeight="500" MinWidth="760"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock x:Name="DialogTitle" Text="Регистрация счет-фактуры по НДС"
+                       FontSize="18" FontWeight="Bold" Foreground="#2C3E50"/>
+            <TextBlock Text="Присвоение серии/номера налогового бланка зарегистрированной счет-фактуре."
+                       Foreground="Gray"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,8">
+                <TextBlock Text="Дата"/>
+                <TextBox x:Name="DateBox" Height="28" IsReadOnly="True"/>
+            </StackPanel>
+            <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,10,8">
+                <TextBlock Text="Документ"/>
+                <TextBox x:Name="DocumentNumberBox" Height="28" IsReadOnly="True"/>
+            </StackPanel>
+            <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,8">
+                <TextBlock Text="Сумма"/>
+                <TextBox x:Name="TotalAmountBox" Height="28" IsReadOnly="True"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,10,8">
+                <TextBlock Text="Организация"/>
+                <TextBox x:Name="OrganizationBox" Height="28" IsReadOnly="True"/>
+            </StackPanel>
+            <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">
+                <TextBlock Text="Номер ЭСФ"/>
+                <TextBox x:Name="EsfNumberBox" Height="28" IsReadOnly="True"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,10,0">
+                <TextBlock Text="Серия и N бланка"/>
+                <TextBox x:Name="TaxBlankNumberBox" Height="28"/>
+            </StackPanel>
+            <StackPanel Grid.Row="2" Grid.Column="2">
+                <TextBlock Text="АРМ"/>
+                <TextBox x:Name="ArmCodeBox" Height="28"/>
+            </StackPanel>
+        </Grid>
+
+        <DataGrid x:Name="LinesGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
+                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                  AlternatingRowBackground="#F8F8F8">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="*" MinWidth="260"/>
+                <DataGridTextColumn Header="ЕдИз" Binding="{Binding UnitName}" Width="80"/>
+                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, StringFormat=N3}" Width="90"/>
+                <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, StringFormat=N2}" Width="120"/>
+                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, StringFormat=N2}" Width="100"/>
+                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, StringFormat=N2}" Width="110"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <TextBlock x:Name="ModeHintText" Grid.Row="3"
+                   Text="Режим просмотра: номер бланка и АРМ изменить нельзя."
+                   Foreground="#7F8C8D" FontStyle="Italic" Visibility="Collapsed" Margin="0,8,0,8"/>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="SaveButton" Content="Записать" Width="100" Height="35" Margin="0,0,10,0"
+                    Background="#27AE60" Foreground="White" Click="OnSaveClick"/>
+            <Button x:Name="CancelButton" Content="Отмена" Width="100" Height="35"
+                    Background="#95A5A6" Foreground="White" Click="OnCancelClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

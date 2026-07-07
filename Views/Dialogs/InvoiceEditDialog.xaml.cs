@@ -142,6 +142,8 @@ namespace BIS.ERP.Views.Dialogs
                             Id = line.Id,
                             LineNumber = line.LineNumber,
                             Name = line.Name,
+                            UnitName = line.UnitName,
+                            Quantity = line.Quantity <= 0 ? 1m : line.Quantity,
                             AccountCode = line.AccountCode,
                             AccountDisplayName = GetAccountDisplayName(line.AccountCode),
                             VatTaxCode = ResolveTaxCode(line.VatTaxCode, line.VatRate, VatTaxItems),
@@ -439,6 +441,8 @@ namespace BIS.ERP.Views.Dialogs
             {
                 LineNumber = _lines.Count + 1,
                 Name = previous?.Name ?? string.Empty,
+                UnitName = previous?.UnitName ?? string.Empty,
+                Quantity = previous?.Quantity > 0 ? previous.Quantity : 1m,
                 AccountCode = accountCode,
                 AccountDisplayName = GetAccountDisplayName(accountCode),
                 VatTaxCode = previous?.VatTaxCode
@@ -611,6 +615,8 @@ namespace BIS.ERP.Views.Dialogs
                     Id = line.Id,
                     LineNumber = line.LineNumber,
                     Name = line.Name,
+                    UnitName = line.UnitName,
+                    Quantity = line.Quantity <= 0 ? 1m : line.Quantity,
                     AccountCode = ResolveLineAccountCode(line.AccountCode),
                     VatTaxCode = line.VatTaxCode,
                     AmountWithoutTax = line.AmountWithoutTax,

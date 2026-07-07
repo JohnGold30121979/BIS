@@ -382,5 +382,10 @@ public partial class MetadataService
         return result;
     }
 
+    public async Task<OrganizationBalanceCalculationResult> CalculateOrganizationBalancesAsync(DateTime startDate, DateTime endDate)
+    {
+        return await new OrganizationBalanceService(_context).CalculateAsync(startDate, endDate);
+    }
+
     #endregion
 }
