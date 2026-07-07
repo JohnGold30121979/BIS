@@ -3,6 +3,7 @@ using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -281,21 +282,43 @@ namespace BIS.ERP.Services
                     var isSales = document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("Расход", StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("реализа", StringComparison.OrdinalIgnoreCase);
-                    var amount = GetDecimal(row, "Сумма", "Сумма в сом");
-                    var taxAmount = GetDecimal(row, "Сумма НДС", "vat_amount");
+                    var amount = GetDecimal(row, "Сумма", "Сумма в сом", "amount", "total_amount");
+                    var amountWithoutTax = GetDecimal(row,
+                        "Сумма без налогов",
+                        "Сумма без налога",
+                        "Сумма без НДС",
+                        "amount_without_tax");
+                    var vatAmount = GetDecimal(row, "Сумма НДС", "vat_total", "vat_amount", "ndc", "sumnds");
+                    var salesTaxAmount = GetDecimal(row,
+                        "Налог с продаж",
+                        "Сумма налога с продаж",
+                        "sales_tax_total",
+                        "sales_tax_amount",
+                        "nalog",
+                        "nal",
+                        "sumnal",
+                        "sum_n");
+                    var taxAmount = vatAmount + salesTaxAmount;
+                    if (amountWithoutTax == 0m && (amount != 0m || taxAmount != 0m))
+                        amountWithoutTax = amount - taxAmount;
+                    if (amount == 0m && (amountWithoutTax != 0m || taxAmount != 0m))
+                        amount = amountWithoutTax + taxAmount;
+
                     result.Add(new PurchaseSaleJournalEntry
                     {
                         Section = isPurchase ? "Закупки" : isSales ? "Продажи" : "Продажи",
                         Date = date,
                         DocumentNumber = GetString(row, "Номер", "Номер документа", "doc_number"),
                         DocumentType = document.Name,
-                        Organization = GetString(row, "Организация"),
+                        Organization = GetString(row, "Организация", "organization_name", "name_org"),
                         Amount = amount,
-                        AmountWithoutTax = amount - taxAmount,
+                        AmountWithoutTax = amountWithoutTax,
+                        VatAmount = vatAmount,
+                        SalesTaxAmount = salesTaxAmount,
                         TaxAmount = taxAmount,
-                        TaxType = GetString(row, "Ставка НДС", "vat_rate"),
+                        TaxType = BuildTaxType(row, vatAmount, salesTaxAmount),
                         IsPosted = GetBoolean(row, "Проведён", "Проведен", "is_posted"),
-                        Note = GetString(row, "Примечание", "Описание")
+                        Note = GetString(row, "Примечание", "Описание", "Основание", "basis")
                     });
                 }
             }
@@ -439,8 +462,27 @@ namespace BIS.ERP.Services
         {
             foreach (var name in names)
             {
-                if (row.TryGetValue(name, out var value) && decimal.TryParse(value?.ToString(), out var amount))
+                if (!row.TryGetValue(name, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is decimal amount)
                     return amount;
+                if (value is double doubleValue)
+                    return Convert.ToDecimal(doubleValue);
+                if (value is float floatValue)
+                    return Convert.ToDecimal(floatValue);
+                if (value is int intValue)
+                    return intValue;
+                if (value is long longValue)
+                    return longValue;
+
+                var text = value.ToString();
+                if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out amount) ||
+                    decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out amount) ||
+                    decimal.TryParse(text, NumberStyles.Any, new CultureInfo("ru-RU"), out amount))
+                {
+                    return amount;
+                }
             }
             return 0;
         }
@@ -453,10 +495,70 @@ namespace BIS.ERP.Services
                     continue;
                 if (value is bool boolean)
                     return boolean;
-                if (bool.TryParse(value?.ToString(), out boolean))
+
+                var text = value?.ToString()?.Trim();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+                if (bool.TryParse(text, out boolean))
                     return boolean;
+                if (text.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("да", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("t", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals(".t.", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (text.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("нет", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("no", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("f", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals(".f.", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
             }
             return false;
+        }
+
+        private static string BuildTaxType(
+            Dictionary<string, object> row,
+            decimal vatAmount,
+            decimal salesTaxAmount)
+        {
+            var parts = new List<string>();
+            if (vatAmount != 0m)
+                parts.Add(FormatTaxLabel("НДС", GetString(row, "Ставка НДС", "vat_rate")));
+            if (salesTaxAmount != 0m)
+                parts.Add(FormatTaxLabel("Налог с продаж", GetString(row, "Ставка налога с продаж", "sales_tax_rate")));
+
+            if (parts.Count > 0)
+                return string.Join("; ", parts);
+
+            return GetString(row,
+                "Ставка НДС",
+                "vat_rate",
+                "Ставка налога с продаж",
+                "sales_tax_rate");
+        }
+
+        private static string FormatTaxLabel(string label, string rate)
+        {
+            var normalizedRate = rate.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedRate))
+                return label;
+
+            if (normalizedRate.EndsWith("%", StringComparison.Ordinal))
+                return $"{label} {normalizedRate}";
+
+            if (decimal.TryParse(normalizedRate, NumberStyles.Any, CultureInfo.CurrentCulture, out var parsedRate) ||
+                decimal.TryParse(normalizedRate, NumberStyles.Any, CultureInfo.InvariantCulture, out parsedRate) ||
+                decimal.TryParse(normalizedRate, NumberStyles.Any, new CultureInfo("ru-RU"), out parsedRate))
+            {
+                return $"{label} {parsedRate:0.##}%";
+            }
+
+            return $"{label} {normalizedRate}";
         }
 
         private static BalanceSides SplitBalanceByType(string? accountType, decimal balance)

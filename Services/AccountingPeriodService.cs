@@ -64,9 +64,17 @@ namespace BIS.ERP.Services
                     ""Date"" timestamp with time zone NOT NULL, ""DocumentNumber"" varchar(50) NOT NULL,
                     ""DocumentType"" varchar(100) NOT NULL, ""Organization"" varchar(300) NOT NULL,
                     ""TaxType"" varchar(50) NOT NULL, ""AmountWithoutTax"" numeric(18,2) NOT NULL,
+                    ""VatAmount"" numeric(18,2) NOT NULL DEFAULT 0,
+                    ""SalesTaxAmount"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""TaxAmount"" numeric(18,2) NOT NULL, ""TotalAmount"" numeric(18,2) NOT NULL,
                     ""SourceRecordId"" uuid NULL, ""CreatedAt"" timestamp with time zone NOT NULL);";
+            const string taxJournalAlterSql = @"
+                ALTER TABLE ""TaxJournalRecords""
+                    ADD COLUMN IF NOT EXISTS ""VatAmount"" numeric(18,2) NOT NULL DEFAULT 0;
+                ALTER TABLE ""TaxJournalRecords""
+                    ADD COLUMN IF NOT EXISTS ""SalesTaxAmount"" numeric(18,2) NOT NULL DEFAULT 0;";
             await _context.Database.ExecuteSqlRawAsync(sql);
+            await _context.Database.ExecuteSqlRawAsync(taxJournalAlterSql);
             await SeedFinancialReportLinesAsync();
         }
 
@@ -206,6 +214,8 @@ namespace BIS.ERP.Services
                 Organization = entry.Organization,
                 TaxType = entry.TaxType,
                 AmountWithoutTax = entry.AmountWithoutTax,
+                VatAmount = entry.VatAmount,
+                SalesTaxAmount = entry.SalesTaxAmount,
                 TaxAmount = entry.TaxAmount,
                 TotalAmount = entry.Amount
             }));

@@ -74,6 +74,8 @@ namespace BIS.ERP.Models
         [MaxLength(300)] public string Organization { get; set; } = string.Empty;
         [MaxLength(50)] public string TaxType { get; set; } = string.Empty;
         [Column(TypeName = "numeric(18,2)")] public decimal AmountWithoutTax { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal VatAmount { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal SalesTaxAmount { get; set; }
         [Column(TypeName = "numeric(18,2)")] public decimal TaxAmount { get; set; }
         [Column(TypeName = "numeric(18,2)")] public decimal TotalAmount { get; set; }
         public Guid? SourceRecordId { get; set; }

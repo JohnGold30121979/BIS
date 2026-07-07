@@ -73,6 +73,8 @@
         public string Organization { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public decimal AmountWithoutTax { get; set; }
+        public decimal VatAmount { get; set; }
+        public decimal SalesTaxAmount { get; set; }
         public decimal TaxAmount { get; set; }
         public string TaxType { get; set; } = string.Empty;
         public bool IsPosted { get; set; }

@@ -338,6 +338,8 @@ namespace BIS.ERP.Views
             table.Columns.Add("Организация", typeof(string));
             table.Columns.Add("Ставка налога", typeof(string));
             table.Columns.Add("Сумма без налога", typeof(decimal));
+            table.Columns.Add("НДС", typeof(decimal));
+            table.Columns.Add("Налог с продаж", typeof(decimal));
             table.Columns.Add("Налог", typeof(decimal));
             table.Columns.Add("Всего", typeof(decimal));
             table.Columns.Add("Проведен", typeof(string));
@@ -348,24 +350,29 @@ namespace BIS.ERP.Views
                 foreach (var entry in savedEntries)
                     table.Rows.Add(LocalizationService.DisplayValue(entry.JournalType), entry.Date,
                         entry.DocumentNumber, entry.DocumentType, entry.Organization, entry.TaxType,
-                        entry.AmountWithoutTax, entry.TaxAmount, entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
+                        entry.AmountWithoutTax, entry.VatAmount, entry.SalesTaxAmount, entry.TaxAmount,
+                        entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
             }
             else
             {
                 foreach (var entry in entries)
                     table.Rows.Add(entry.Section, entry.Date, entry.DocumentNumber, entry.DocumentType,
-                        entry.Organization, entry.TaxType, entry.AmountWithoutTax, entry.TaxAmount, entry.Amount,
+                        entry.Organization, entry.TaxType, entry.AmountWithoutTax, entry.VatAmount, entry.SalesTaxAmount,
+                        entry.TaxAmount, entry.Amount,
                         LocalizationService.DisplayValue(entry.IsPosted), entry.Note);
             }
 
             var report = CreateReport(table,
                 $"Журнал закупок и продаж за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
             report.ShowGrandTotal = true;
-            var amountField = report.Fields.First(field => field.FieldName == "Всего");
-            amountField.AggregateType = "Sum";
+            foreach (var fieldName in new[] { "Сумма без налога", "НДС", "Налог с продаж", "Налог", "Всего" })
+            {
+                var field = report.Fields.First(reportField => reportField.FieldName == fieldName);
+                field.AggregateType = "Sum";
+            }
             report.SummaryText = period?.IsLocked == true
-                ? "Показан сохраненный журнал закрытого периода."
-                : "Показаны текущие данные открытого периода.";
+                ? "Показан сохраненный журнал закрытого периода с раздельными суммами НДС и налога с продаж."
+                : "Показаны текущие данные открытого периода с раздельными суммами НДС и налога с продаж.";
             return (table, report);
         }
 

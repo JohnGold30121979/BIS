@@ -812,6 +812,15 @@ namespace BIS.ERP.Services
             OrganizationPrintInfo recipient)
         {
             var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            static decimal GetUnitPrice(InvoiceLineRow? line)
+            {
+                if (line == null)
+                    return 0m;
+                if (line.Quantity == 0m)
+                    return line.AmountWithoutTax;
+                return Math.Round(line.AmountWithoutTax / line.Quantity, 4);
+            }
+
             void AddExtra(string key, object? value)
             {
                 var normalized = NormalizeFieldName(key);
@@ -947,7 +956,7 @@ namespace BIS.ERP.Services
             AddExtra("curFACTSW.NAME_MAT", firstLine?.Name ?? string.Empty);
             AddExtra("curFACTSW.ED_IZ", firstLine?.UnitName ?? string.Empty);
             AddExtra("curFACTSW.KOL", firstLine?.Quantity ?? 0);
-            AddExtra("curFACTSW.CENA", firstLine?.AmountWithoutTax ?? 0);
+            AddExtra("curFACTSW.CENA", GetUnitPrice(firstLine));
             AddExtra("curFACTSW.PR_NDC", firstLine?.VatRate ?? 0);
             AddExtra("curFACTSW.PR_OP", firstLine?.SalesTaxRate ?? 0);
 
@@ -955,9 +964,11 @@ namespace BIS.ERP.Services
             {
                 var number = index + 1;
                 var line = invoice.Lines[index];
+                var unitPrice = GetUnitPrice(line);
                 AddExtra($"line{number}_name", line.Name);
                 AddExtra($"line{number}_unit", line.UnitName);
                 AddExtra($"line{number}_quantity", line.Quantity);
+                AddExtra($"line{number}_unit_price", unitPrice);
                 AddExtra($"line{number}_account", line.AccountCode);
                 AddExtra($"line{number}_account_name", string.IsNullOrWhiteSpace(line.AccountName) ? line.AccountCode : line.AccountName);
                 AddExtra($"line{number}_amount_without_tax", line.AmountWithoutTax);
@@ -965,12 +976,17 @@ namespace BIS.ERP.Services
                 AddExtra($"line{number}_sales_tax", line.SalesTaxAmount);
                 AddExtra($"line{number}_total", line.LineTotal);
                 AddExtra($"curFACTSW{number}.name", line.Name);
+                AddExtra($"curFACTSW{number}.name_mat", line.Name);
                 AddExtra($"curFACTSW{number}.ed_iz", line.UnitName);
                 AddExtra($"curFACTSW{number}.kol", line.Quantity);
                 AddExtra($"curFACTSW{number}.account", line.AccountCode);
+                AddExtra($"curFACTSW{number}.k_mat", line.AccountCode);
+                AddExtra($"curFACTSW{number}.cena", unitPrice);
                 AddExtra($"curFACTSW{number}.sum", line.AmountWithoutTax);
                 AddExtra($"curFACTSW{number}.ndc", line.VatAmount);
                 AddExtra($"curFACTSW{number}.nalog", line.SalesTaxAmount);
+                AddExtra($"curFACTSW{number}.pr_ndc", line.VatRate);
+                AddExtra($"curFACTSW{number}.pr_op", line.SalesTaxRate);
             }
 
             return new CashOrderPrintData
