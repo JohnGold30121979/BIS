@@ -335,7 +335,71 @@ namespace BIS.ERP.Services
             result.PostingCount = postings.Count;
             result.DebitTurnover = postings.Sum(posting => posting.Amount);
             result.CreditTurnover = postings.Sum(posting => posting.Amount);
+            result.Warnings.AddRange(await GetFixedAssetIntegrityWarningsAsync());
             return result;
+        }
+
+        private async Task<List<string>> GetFixedAssetIntegrityWarningsAsync()
+        {
+            var assetCatalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
+            if (assetCatalog == null)
+                return new List<string>();
+
+            var metadataService = new MetadataService(_context);
+            var rows = await metadataService.GetCatalogDataAsync(assetCatalog.Id);
+            var maps = await ReferenceDisplayHelper.LoadMapsAsync(assetCatalog, metadataService);
+            rows = ReferenceDisplayHelper.ResolveRows(rows, maps);
+            var warnings = new List<string>();
+
+            foreach (var row in rows)
+            {
+                var inventoryNumber = GetString(row, "Инвентарный номер", "Код");
+                var name = GetString(row, "Наименование", "name");
+                var assetLabel = string.IsNullOrWhiteSpace(inventoryNumber)
+                    ? name
+                    : $"{inventoryNumber} {name}".Trim();
+
+                var isActive = GetBoolean(row, "Активен", "is_active");
+                var initialCost = GetDecimal(row, "Первоначальная стоимость", "initial_cost");
+                var accumulatedDepreciation = GetDecimal(row, "Накопленная амортизация", "accumulated_depreciation");
+                var carryingAmount = GetDecimal(row, "Остаточная стоимость", "carrying_amount");
+                var expectedCarryingAmount = Math.Max(0m, initialCost - accumulatedDepreciation);
+                var status = GetString(row, "Статус", "status");
+
+                if (isActive)
+                {
+                    if (string.IsNullOrWhiteSpace(GetString(row, "Счет учета", "asset_account")) ||
+                        string.IsNullOrWhiteSpace(GetString(row, "Счет амортизации", "depreciation_account")) ||
+                        string.IsNullOrWhiteSpace(GetString(row, "Затратный счет", "expense_account")))
+                    {
+                        warnings.Add($"ОС {assetLabel}: не заполнены все учетные счета (учета, амортизации, затрат).");
+                    }
+
+                    if (Math.Abs(carryingAmount - expectedCarryingAmount) >= 0.01m)
+                    {
+                        warnings.Add(
+                            $"ОС {assetLabel}: остаточная стоимость {carryingAmount:N2} не равна расчетной {expectedCarryingAmount:N2}.");
+                    }
+                }
+
+                if (status.Contains("Выбыло", StringComparison.OrdinalIgnoreCase) && isActive)
+                    warnings.Add($"ОС {assetLabel}: статус 'Выбыло', но карточка все еще активна.");
+
+                var conservationDate = GetDate(row, "Дата консервации", "conservation_date");
+                if (conservationDate.HasValue &&
+                    !status.Contains("консервац", StringComparison.OrdinalIgnoreCase) &&
+                    !status.Contains("CONSERVATION", StringComparison.OrdinalIgnoreCase))
+                {
+                    warnings.Add($"ОС {assetLabel}: дата консервации заполнена, но статус не переведен на консервацию.");
+                }
+            }
+
+            return warnings
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(25)
+                .ToList();
         }
 
         private static decimal CalculateCurrentFinancialResult(
@@ -412,6 +476,21 @@ namespace BIS.ERP.Services
 
             date = default;
             return false;
+        }
+
+        private static DateTime? GetDate(Dictionary<string, object> row, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!row.TryGetValue(name, out var value) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is DateTime date)
+                    return date;
+                if (DateTime.TryParse(value.ToString(), out date))
+                    return date;
+            }
+
+            return null;
         }
 
         private static string GetString(Dictionary<string, object> row, params string[] names)

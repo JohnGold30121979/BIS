@@ -430,6 +430,8 @@ namespace BIS.ERP.Views
             table.Rows.Add("БУХГАЛТЕРСКИЕ ПРОВОДКИ", collection.PostingCount,
                 collection.PostingCount, 0, collection.DebitTurnover,
                 collection.DebitTurnover, collection.CreditTurnover, collection.Difference);
+            table.Rows.Add("КОНТРОЛЬ КАРТОЧЕК ОС", collection.Warnings.Count,
+                0, collection.Warnings.Count, 0m, 0m, 0m, 0m);
             table.Rows.Add("КОНТРОЛЬ КОНЕЧНОГО САЛЬДО", 0, 0, 0, 0m,
                 closingDebit, closingCredit, closingDebit - closingCredit);
 
@@ -440,6 +442,8 @@ namespace BIS.ERP.Views
             report.SummaryText = isBalanced
                 ? "Контроль пройден: начальное сальдо, обороты и конечное сальдо сбалансированы."
                 : "Контроль не пройден: обнаружено расхождение дебета и кредита.";
+            if (collection.Warnings.Count > 0)
+                report.SummaryText += Environment.NewLine + string.Join(Environment.NewLine, collection.Warnings);
             return (table, report);
         }
 

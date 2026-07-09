@@ -166,7 +166,9 @@ namespace BIS.ERP.Services
 
             await AssignMissingByNameAsync(modules[FixedAssetsCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Оборотная ведомость по ОС", "Ведомость основных средств", "Ведомость ОС по счету",
-                "Ведомость амортизации", "Приход ОС за период", "Расшифровка баланса по ОС");
+                "Ведомость амортизации", "Приход ОС за период", "Расшифровка баланса по ОС",
+                "Контроль состояния карточек ОС", "Журнал начисления амортизации ОС",
+                "Журнал переоценки ОС", "Журнал реализации ОС", "Журнал ликвидации ОС");
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Реестр платежных поручений", "Выписка банка", "Акт сверки по подотчетному лицу");
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),

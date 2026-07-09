@@ -93,6 +93,7 @@
     public class PeriodCollectionResult
     {
         public List<PeriodDocumentSummary> Documents { get; set; } = new();
+        public List<string> Warnings { get; set; } = new();
         public int PostingCount { get; set; }
         public decimal DebitTurnover { get; set; }
         public decimal CreditTurnover { get; set; }

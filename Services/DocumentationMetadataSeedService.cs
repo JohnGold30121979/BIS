@@ -211,7 +211,8 @@ namespace BIS.ERP.Services
                 Field(asset.Id, "Месячная амортизация", "monthly_depreciation", "Decimal", 24),
                 Field(asset.Id, "Налоговая группа", "tax_group", "Reference", 25, false, "Налоговые группы ОС"),
                 Field(asset.Id, "Дата консервации", "conservation_date", "DateTime", 26),
-                Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 27)
+                Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 27),
+                Field(asset.Id, "Дата выбытия", "disposal_date", "DateTime", 28)
             };
             foreach (var field in additions.Where(candidate => asset.Fields.All(existing => existing.DbColumnName != candidate.DbColumnName)))
             {
@@ -276,6 +277,7 @@ namespace BIS.ERP.Services
                 displayPattern: chartPattern, displayFields: chartFields);
             ConfigureField(asset, "conservation_date", type: "DateTime", order: 26);
             ConfigureField(asset, "reopening_date", type: "DateTime", order: 27);
+            ConfigureField(asset, "disposal_date", type: "DateTime", order: 28);
 
             await EnsureFixedAssetAutoCalculationsAsync(asset);
             await _context.SaveChangesAsync();
@@ -325,6 +327,36 @@ namespace BIS.ERP.Services
             await EnsureReportAsync("Расшифровка баланса по ОС", "assets.balance.details", source,
                 "Счет учета", "Инвентарный номер", "Наименование", "Первоначальная стоимость",
                 "Накопленная амортизация", "Остаточная стоимость");
+            await EnsureReportAsync("Контроль состояния карточек ОС", "assets.control", source,
+                "Инвентарный номер", "Наименование", "Статус", "Активен", "Счет учета",
+                "Счет амортизации", "Затратный счет", "Первоначальная стоимость",
+                "Накопленная амортизация", "Остаточная стоимость", "Месячная амортизация",
+                "Дата консервации", "Дата расконсервации", "Дата выбытия");
+
+            var depreciationDocument = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Начисление амортизации");
+            if (depreciationDocument != null)
+                await EnsureReportAsync("Журнал начисления амортизации ОС", "assets.depreciation.journal", depreciationDocument,
+                    "Номер", "Дата", "Основное средство", "Организация", "Сумма", "Сумма амортизации",
+                    "Счет дебета", "Счет кредита", "Основание", "Проведен");
+
+            var revaluationDocument = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Переоценка ОС");
+            if (revaluationDocument != null)
+                await EnsureReportAsync("Журнал переоценки ОС", "assets.revaluation.journal", revaluationDocument,
+                    "Номер", "Дата", "Основное средство", "Организация", "Сумма", "Счет дебета", "Счет кредита", "Примечание", "Проведен");
+
+            var realizationDocument = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Реализация ОС");
+            if (realizationDocument != null)
+                await EnsureReportAsync("Журнал реализации ОС", "assets.sale.journal", realizationDocument,
+                    "Номер", "Дата", "Основное средство", "Организация", "Сумма", "Счет дебета", "Счет кредита", "Дата выбытия", "Проведен");
+
+            var liquidationDocument = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Ликвидация ОС");
+            if (liquidationDocument != null)
+                await EnsureReportAsync("Журнал ликвидации ОС", "assets.liquidation.journal", liquidationDocument,
+                    "Номер", "Дата", "Основное средство", "Организация", "Сумма", "Счет дебета", "Счет кредита", "Дата выбытия", "Проведен");
         }
 
         private async Task EnsureFinanceReportsAsync()
@@ -361,7 +393,7 @@ namespace BIS.ERP.Services
             var report = new Report
             {
                 Name = name, Code = code, Description = $"Настраиваемый отчет: {name}",
-                DataSourceType = "Catalog", DataSourceId = source.Id, ReportType = "Table",
+                DataSourceType = source.ObjectType, DataSourceId = source.Id, ReportType = "Table",
                 Icon = "📊", IsActive = true, SourceFormat = "Native", Order = 100,
                 TitleText = name, PageOrientation = "Landscape"
             };
@@ -452,9 +484,11 @@ namespace BIS.ERP.Services
             switch (documentName)
             {
                 case "Покупка ОС":
+                case "Приход из производства ОС":
                     RequireDocumentPostingFields(fields);
                     fields.Add(Field(Guid.Empty, "Дата приобретения", "acquisition_date", "DateTime", 20));
-                    fields.Add(Field(Guid.Empty, "Поставщик", "supplier_name", "String", 21));
+                    if (documentName == "Покупка ОС")
+                        fields.Add(Field(Guid.Empty, "Поставщик", "supplier_name", "String", 21));
                     fields.Add(Field(Guid.Empty, "Группа ОС", "asset_group_id", "Reference", 22, false, "Группы ОС"));
                     fields.Add(Field(Guid.Empty, "Подгруппа ОС", "asset_subgroup_id", "Reference", 23, false, "Подгруппы ОС"));
                     fields.Add(Field(Guid.Empty, "Вид ОС", "asset_type_id", "Reference", 24, false, "Виды ОС"));
@@ -487,6 +521,11 @@ namespace BIS.ERP.Services
                     break;
                 case "Смена затратного счета":
                     fields.Add(Field(Guid.Empty, "Новый затратный счет", "new_expense_account", "Reference", 20, true, "План счетов"));
+                    break;
+                case "Реализация ОС":
+                case "Ликвидация ОС":
+                case "Частичная реализация ОС":
+                    fields.Add(Field(Guid.Empty, "Дата выбытия", "disposal_date", "DateTime", 20));
                     break;
                 case "Консервация ОС":
                 case "Расконсервация ОС":
