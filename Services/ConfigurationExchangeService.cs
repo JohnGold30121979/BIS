@@ -74,6 +74,7 @@ namespace BIS.ERP.Services
             {
                 await ReplaceMetadataAsync(package.MetadataObjects);
                 await ReplaceReportsAsync(package.Reports);
+                await ReplaceRegulatedReportTemplatesAsync(package.RegulatedReportTemplates);
                 await ReplaceSystemConfigurationAsync(package.SystemConfigurations);
                 await ReplaceModulesAsync(package.Modules, package.ModuleItems);
                 await _context.SaveChangesAsync();
@@ -101,6 +102,7 @@ namespace BIS.ERP.Services
             await new ModuleMetadataService(_context).EnsureSchemaAsync();
             await new PrintFormService(_context).EnsureSchemaAsync();
             await new BisPatchService(_context).EnsureSchemaAsync();
+            await new RegulatedReportTemplateService(_context).EnsureSchemaAsync();
 
             var metadata = await _context.MetadataObjects
                 .AsNoTracking()
@@ -128,6 +130,8 @@ namespace BIS.ERP.Services
                 SystemConfigurations = await _context.SystemConfigurations.AsNoTracking().ToListAsync(),
                 MetadataObjects = metadata,
                 Reports = reports,
+                RegulatedReportTemplates = await _context.RegulatedReportTemplates.AsNoTracking()
+                    .OrderBy(item => item.Code).ThenBy(item => item.Version).ToListAsync(),
                 Modules = await _context.MetadataModules.AsNoTracking().OrderBy(item => item.Order).ToListAsync(),
                 ModuleItems = await _context.MetadataModuleItems.AsNoTracking().OrderBy(item => item.Order).ToListAsync()
             };
@@ -202,6 +206,24 @@ namespace BIS.ERP.Services
             }
 
             await _context.Reports.AddRangeAsync(reports);
+        }
+
+        private async Task ReplaceRegulatedReportTemplatesAsync(List<RegulatedReportTemplate> templates)
+        {
+            await new RegulatedReportTemplateService(_context).EnsureSchemaAsync();
+            _context.RegulatedReportTemplates.RemoveRange(await _context.RegulatedReportTemplates.ToListAsync());
+            await _context.SaveChangesAsync();
+
+            if (templates.Count == 0)
+                return;
+
+            foreach (var template in templates)
+            {
+                if (template.Id == Guid.Empty)
+                    template.Id = Guid.NewGuid();
+            }
+
+            await _context.RegulatedReportTemplates.AddRangeAsync(templates);
         }
 
         private async Task ReplaceSystemConfigurationAsync(List<SystemConfiguration> configurations)

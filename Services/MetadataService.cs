@@ -183,6 +183,7 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(m => m.Id == catalogId);
 
             if (catalog == null) return new List<Dictionary<string, object>>();
+            await RemoveDuplicateMetadataFieldsAsync(catalog);
 
             if (catalog.ObjectType == "Document")
             {
@@ -345,6 +346,8 @@ namespace BIS.ERP.Services
             await _context.Database.OpenConnectionAsync();
             await command.ExecuteNonQueryAsync();
             await _context.Database.CloseConnectionAsync();
+
+            await EnsureSingleCatalogDefaultsAsync(catalog, itemData, (Guid)parameters["@Id"]);
         }
 
         public async Task SaveCatalogAsync(MetadataObject catalog)
@@ -555,11 +558,14 @@ namespace BIS.ERP.Services
             try
             {
                 await RemoveTestPostingArtifactsAsync();
+                await EnsureTaxCatalogStructureAsync();
+                await EnsurePaymentKindCatalogStructureAsync();
                 await EnsureChartOfAccountsCatalogStructureAsync();
                 await EnsureOrganizationsCatalogStructureAsync();
                 await EnsureEmployeesCatalogStructureAsync();
                 await EnsureCashDesksCatalogStructureAsync();
                 await EnsureSupplyKindCatalogStructureAsync();
+                await EnsureDeliveryTypeCatalogStructureAsync();
                 await EnsureAdvancePaymentsCatalogStructureAsync();
                 await EnsureAccountAnalyticsLinksCatalogAsync();
                 await EnsurePositionCatalogDataAsync();
@@ -569,11 +575,16 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации служебных справочников: {ex.Message}");
             }
 
-            return await _context.Set<MetadataObject>()
+            var catalogs = await _context.Set<MetadataObject>()
                 .Where(m => m.ObjectType == "Catalog" && m.Name != "Контрагенты")
                 .Include(m => m.Fields)
                 .OrderBy(m => m.Order)
                 .ToListAsync();
+
+            foreach (var catalog in catalogs)
+                await RemoveDuplicateMetadataFieldsAsync(catalog);
+
+            return catalogs;
         }
 
         public async Task<List<MetadataObject>> GetDocumentsAsync()
@@ -964,6 +975,7 @@ END $$;");
 
                 if (!existingCatalogs.Contains("Налоги"))
                     await CreateTaxCatalog(config);
+                await EnsureTaxCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Подразделения"))
                     await CreateDivisionCatalog(config);
@@ -977,9 +989,11 @@ END $$;");
 
                 if (!existingCatalogs.Contains("Виды оплаты"))
                     await CreatePaymentKindCatalog(config);
+                await EnsurePaymentKindCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Типы поставки"))
                     await CreateDeliveryTypeCatalog(config);
+                await EnsureDeliveryTypeCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Должности"))
                     await CreatePositionsCatalog(config);
@@ -1112,6 +1126,8 @@ END $$;");
             await command.ExecuteNonQueryAsync();
             await _context.Database.CloseConnectionAsync();
 
+            await EnsureSingleCatalogDefaultsAsync(metadata, data, recordId);
+
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
             if (IsPostingsDocument(metadata))
@@ -1163,6 +1179,105 @@ END $$;");
             }
 
             return result;
+        }
+
+        private async Task RemoveDuplicateMetadataFieldsAsync(MetadataObject metadata)
+        {
+            if (metadata.Fields == null || metadata.Fields.Count <= 1)
+                return;
+
+            var duplicatesByColumn = metadata.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(group => group.OrderBy(field => field.Order).Skip(1));
+
+            var duplicatesByName = metadata.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.Name))
+                .GroupBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(group => group.OrderBy(field => field.Order).Skip(1));
+
+            var duplicates = duplicatesByColumn
+                .Concat(duplicatesByName)
+                .GroupBy(field => field.Id)
+                .Select(group => group.First())
+                .ToList();
+
+            if (duplicates.Count == 0)
+                return;
+
+            _context.MetadataFields.RemoveRange(duplicates);
+            foreach (var duplicate in duplicates)
+                metadata.Fields.Remove(duplicate);
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureSingleCatalogDefaultsAsync(
+            MetadataObject metadata,
+            IReadOnlyDictionary<string, object> data,
+            Guid currentRecordId)
+        {
+            if (!string.Equals(metadata.ObjectType, "Catalog", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            foreach (var field in GetCatalogDefaultFields(metadata))
+            {
+                var value = GetFieldValue(data, field);
+                if (!IsTrueValue(value))
+                    continue;
+
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{metadata.TableName}""
+                    SET ""{field.DbColumnName}"" = false, ""UpdatedAt"" = NOW()
+                    WHERE COALESCE(""{field.DbColumnName}"", false) = true
+                      AND ""Id"" <> '{currentRecordId}';");
+            }
+        }
+
+        private static IEnumerable<MetadataField> GetCatalogDefaultFields(MetadataObject metadata)
+        {
+            if (metadata.Name.Equals("Налоги", StringComparison.OrdinalIgnoreCase))
+            {
+                return metadata.Fields.Where(field =>
+                    field.DbColumnName.Equals("is_default_vat", StringComparison.OrdinalIgnoreCase) ||
+                    field.DbColumnName.Equals("is_default_sales_tax", StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (metadata.Name.Equals("Виды оплаты", StringComparison.OrdinalIgnoreCase) ||
+                metadata.Name.Equals("Виды поставки", StringComparison.OrdinalIgnoreCase) ||
+                metadata.Name.Equals("Типы поставки", StringComparison.OrdinalIgnoreCase))
+            {
+                return metadata.Fields.Where(field =>
+                    field.DbColumnName.Equals("is_default", StringComparison.OrdinalIgnoreCase));
+            }
+
+            return Array.Empty<MetadataField>();
+        }
+
+        private static object? GetFieldValue(IReadOnlyDictionary<string, object> data, MetadataField field)
+        {
+            if (data.TryGetValue(field.Name, out var byName))
+                return byName;
+
+            return !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                   data.TryGetValue(field.DbColumnName, out var byColumn)
+                ? byColumn
+                : null;
+        }
+
+        private static bool IsTrueValue(object? value)
+        {
+            return value switch
+            {
+                bool boolean => boolean,
+                string text => text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                               text.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                               text.Equals("да", StringComparison.OrdinalIgnoreCase),
+                int number => number != 0,
+                long number => number != 0,
+                short number => number != 0,
+                _ => false
+            };
         }
 
         private async Task EnsureDocumentDateCanBeModifiedAsync(

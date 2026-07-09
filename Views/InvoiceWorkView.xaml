@@ -31,6 +31,10 @@
                     Background="#16A085" Foreground="White" IsEnabled="False" Click="OnAllPostingsClick"/>
             <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
                     Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
+            <Button x:Name="ExportEsfButton" Content="📤 Выгрузка ЭСФ" Width="135" Height="35" Margin="0,0,10,5"
+                    Background="#8E44AD" Foreground="White" Click="OnExportEsfClick"/>
+            <Button x:Name="ImportEsfButton" Content="📥 Загрузка ответа" Width="145" Height="35" Margin="0,0,10,5"
+                    Background="#7F8C8D" Foreground="White" Click="OnImportEsfClick"/>
             <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="100" Height="35" Margin="0,0,0,5"
                     Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
         </WrapPanel>
@@ -44,6 +48,8 @@
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
                 <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" Width="*" MinWidth="220"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding TotalAmount, StringFormat=N2}" Width="120"/>
+                <DataGridTextColumn x:Name="EsfNumberColumn" Header="Номер ЭСФ" Binding="{Binding EsfNumber}" Width="155"/>
+                <DataGridTextColumn x:Name="EsfStatusColumn" Header="Статус ЭСФ" Binding="{Binding TaxStatusDisplay}" Width="120"/>
                 <DataGridTextColumn x:Name="TaxBlankColumn" Header="Серия и N бланка" Binding="{Binding TaxBlankNumber}" Width="170" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="ArmColumn" Header="АРМ" Binding="{Binding ArmCode}" Width="80" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="BasisColumn" Header="Основание" Binding="{Binding Basis}" Width="220"/>

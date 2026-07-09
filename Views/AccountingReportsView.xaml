@@ -37,6 +37,8 @@
                         Background="#27AE60" Foreground="White" Click="OnGenerateClick"/>
                 <Button x:Name="ExportPdfButton" Content="Экспорт PDF" Width="110" Height="34"
                         Background="#34495E" Foreground="White" IsEnabled="False" Click="OnExportPdfClick"/>
+                <Button Content="Экспорт НДС XLS" Width="130" Height="34" Margin="6,0,0,0"
+                        Background="#1F618D" Foreground="White" Click="OnExportVatClick"/>
             </WrapPanel>
             <WrapPanel Margin="0,10,0,0">
                 <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="0,0,6,0"/>

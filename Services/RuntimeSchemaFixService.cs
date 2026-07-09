@@ -81,23 +81,34 @@ namespace BIS.ERP.Services
                     IF to_regclass('public.catalog_taxes') IS NOT NULL THEN
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS sort_order integer;
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS esf_vat_code varchar(20);
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS esf_sales_tax_code varchar(20);
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_default_vat boolean NOT NULL DEFAULT false;
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_default_sales_tax boolean NOT NULL DEFAULT false;
                         ALTER TABLE catalog_taxes ALTER COLUMN code TYPE varchar(80);
                     END IF;
 
                     IF to_regclass('public.catalog_payment_kinds') IS NOT NULL THEN
                         ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
                         ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS rate decimal(18, 2);
+                        ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS esf_code varchar(20);
+                        ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
                         ALTER TABLE catalog_payment_kinds ALTER COLUMN code TYPE varchar(80);
                     END IF;
 
                     IF to_regclass('public.catalog_supply_kinds') IS NOT NULL THEN
                         ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
                         ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS sort_order integer;
+                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS esf_code varchar(20);
+                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
                         ALTER TABLE catalog_supply_kinds ALTER COLUMN code TYPE varchar(80);
                     END IF;
 
                     IF to_regclass('public.catalog_delivery_types') IS NOT NULL THEN
                         ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS sort_order integer;
+                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS esf_code varchar(20);
+                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
                         ALTER TABLE catalog_delivery_types ALTER COLUMN code TYPE varchar(80);
                     END IF;
 

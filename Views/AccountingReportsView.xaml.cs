@@ -508,5 +508,70 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private async void OnExportVatClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var (start, end) = GetPeriod();
+                if (start.Year != end.Year || start.Month != end.Month)
+                {
+                    if (MessageBox.Show(
+                            "Для налогового отчета по НДС обычно выбирается один календарный месяц. Продолжить выгрузку для выбранного диапазона?",
+                            "Экспорт НДС",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    {
+                        return;
+                    }
+                }
+
+                var templateService = new RegulatedReportTemplateService(_context);
+                var activeTemplate = await templateService.GetActiveTemplateAsync(VatTaxReportExportService.OfficialTemplateCode);
+                var templateExtension = activeTemplate?.FileExtension;
+                if (string.IsNullOrWhiteSpace(templateExtension))
+                    templateExtension = Path.GetExtension(activeTemplate?.OriginalFileName);
+
+                var defaultExtension = string.Equals(templateExtension, ".xls", StringComparison.OrdinalIgnoreCase)
+                    ? "xls"
+                    : "xlsx";
+                var saveDialog = new SaveFileDialog
+                {
+                    Title = "Сохранить налоговый отчет по НДС",
+                    Filter = "Excel файлы (*.xlsx)|*.xlsx|Excel 97-2003 (*.xls)|*.xls",
+                    DefaultExt = defaultExtension,
+                    FileName = $"STI062_NDS_{start:yyyyMM}.{defaultExtension}"
+                };
+                if (saveDialog.ShowDialog() != true)
+                    return;
+
+                IsEnabled = false;
+                StatusText.Text = activeTemplate == null
+                    ? "Формирование внутреннего XLSX-отчета по НДС..."
+                    : $"Заполнение шаблона {activeTemplate.Code} из БД...";
+
+                var exportService = new VatTaxReportExportService(_context);
+                var exportResult = await exportService.ExportMonthlyVatReportAsync(start, end, saveDialog.FileName);
+
+                StatusText.Text = "Отчет по НДС выгружен";
+                MessageBox.Show(
+                    exportResult.UsedOfficialTemplate
+                        ? $"Шаблон {exportResult.TemplateCode} взят из БД, заполнен и сохранен."
+                        : "Активный шаблон STI-062_7 в БД не найден. Сформирован внутренний Excel-отчет по НДС.",
+                    "Экспорт НДС",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка экспорта НДС";
+                MessageBox.Show($"Ошибка экспорта НДС: {ex.Message}", "Экспорт НДС",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
+        }
     }
 }

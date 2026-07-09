@@ -26,6 +26,7 @@ namespace BIS.ERP.Views.Dialogs
         private string _selectedHeaderAccountCode = string.Empty;
         private bool _isRecalculating;
         private bool _isPosted;
+        private bool _synchronizingHeaderTaxSelection;
         private bool _isInvoiceEditingEnabled = true;
         private const string DefaultSalesCounterpartyAccount = "14100000";
         private const string DefaultPurchaseCounterpartyAccount = "31100000";
@@ -120,8 +121,8 @@ namespace BIS.ERP.Views.Dialogs
                     SetHeaderAccount(invoice.CounterpartyAccountCode);
                     BasisBox.Text = invoice.Basis;
                     SelectStoredComboValue(PaymentKindCombo, invoice.PaymentKind);
-                    SelectStoredComboValue(DeliveryKindCombo, invoice.DeliveryKind);
-                    SelectStoredComboValue(SupplyKindCombo, invoice.SupplyKind);
+                    SelectStoredComboValue(DeliveryKindCombo, NormalizeLegacyDeliveryKind(invoice.DeliveryKind));
+                    SelectStoredComboValue(SupplyKindCombo, NormalizeLegacySupplyKind(invoice.SupplyKind));
 
                     if (invoice.OrganizationId.HasValue)
                     {
@@ -156,6 +157,7 @@ namespace BIS.ERP.Views.Dialogs
                         });
                     }
 
+                    SyncHeaderTaxControls();
                     AllPostingsButton.IsEnabled = true;
                 }
                 else
@@ -163,9 +165,11 @@ namespace BIS.ERP.Views.Dialogs
                     DatePicker.SelectedDate = DateTime.Today;
                     NumberBox.Text = await _invoiceService.GenerateDocumentNumberAsync();
                     SetHeaderAccount(GetDefaultHeaderAccountCode());
-                    SelectComboValue(PaymentKindCombo, "TRANSFER");
-                    SelectComboValue(DeliveryKindCombo, "TAXABLE");
-                    SelectComboValue(SupplyKindCombo, "TAXABLE");
+                    SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TRANSFER");
+                    SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "GOODS");
+                    SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "NDS12");
+                    SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+                    SelectDefaultReference(SupplyKindCombo, SupplyKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TAXABLE");
                 }
 
                 RecalculateTotals();
@@ -192,6 +196,8 @@ namespace BIS.ERP.Views.Dialogs
             OrganizationCombo.IsEnabled = false;
             PaymentKindCombo.IsEnabled = false;
             DeliveryKindCombo.IsEnabled = false;
+            HeaderVatTaxCombo.IsEnabled = false;
+            HeaderSalesTaxCombo.IsEnabled = false;
             SupplyKindCombo.IsEnabled = false;
             HeaderAccountButton.IsEnabled = false;
             LinesGrid.IsReadOnly = true;
@@ -239,10 +245,18 @@ namespace BIS.ERP.Views.Dialogs
                 .Where(IsActiveRow)
                 .Select(row => new ReferenceOption(
                     GetRowValue(row, "Код", "code"),
-                    BuildReferenceDisplayName(GetRowValue(row, "Наименование", "name"), GetDecimal(row, "Ставка", "rate")),
-                    GetDecimal(row, "Ставка", "rate")))
+                    BuildReferenceDisplayName(
+                        catalogName,
+                        GetRowValue(row, "Наименование", "name"),
+                        GetDecimal(row, "Ставка", "rate")),
+                    GetDecimal(row, "Ставка", "rate"),
+                    GetInt(row, "Порядок", "sort_order"),
+                    GetBool(row, "По умолчанию", "is_default"),
+                    GetBool(row, "По умолчанию для НДС", "is_default_vat"),
+                    GetBool(row, "По умолчанию для налога с продаж", "is_default_sales_tax")))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Value))
-                .OrderBy(item => item.DisplayName)
+                .OrderBy(item => item.SortOrder ?? int.MaxValue)
+                .ThenBy(item => item.DisplayName)
                 .ToList();
         }
 
@@ -299,6 +313,13 @@ namespace BIS.ERP.Views.Dialogs
                 or nameof(EditableInvoiceLine.SalesTaxCode))
             {
                 RecalculateTotals();
+            }
+
+            if (LinesGrid.SelectedItem == line &&
+                e.PropertyName is nameof(EditableInvoiceLine.VatTaxCode)
+                    or nameof(EditableInvoiceLine.SalesTaxCode))
+            {
+                SyncHeaderTaxControls(line);
             }
         }
 
@@ -365,6 +386,34 @@ namespace BIS.ERP.Views.Dialogs
                 comboBox.SelectedIndex = 0;
         }
 
+        private static void SelectDefaultReference(
+            ComboBox comboBox,
+            IEnumerable<ReferenceOption> options,
+            Func<ReferenceOption, bool> isDefaultSelector,
+            string fallbackValue)
+        {
+            var selected = GetDefaultReferenceOption(options, isDefaultSelector, fallbackValue);
+            if (selected != null)
+            {
+                comboBox.SelectedValue = selected.Value;
+                if (comboBox.SelectedIndex >= 0)
+                    return;
+            }
+
+            SelectComboValue(comboBox, fallbackValue);
+        }
+
+        private static ReferenceOption? GetDefaultReferenceOption(
+            IEnumerable<ReferenceOption> options,
+            Func<ReferenceOption, bool> isDefaultSelector,
+            string fallbackValue)
+        {
+            var optionList = options.ToList();
+            return optionList.FirstOrDefault(isDefaultSelector)
+                   ?? optionList.FirstOrDefault(item => item.Value.Equals(fallbackValue, StringComparison.OrdinalIgnoreCase))
+                   ?? optionList.FirstOrDefault();
+        }
+
         private static void SelectStoredComboValue(ComboBox comboBox, string storedValue)
         {
             if (string.IsNullOrWhiteSpace(storedValue))
@@ -385,6 +434,73 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             comboBox.SelectedValue = storedValue;
+        }
+
+        private void SyncHeaderTaxControls(EditableInvoiceLine? line = null)
+        {
+            var selectedLine = line ?? LinesGrid.SelectedItem as EditableInvoiceLine ?? _lines.FirstOrDefault();
+            _synchronizingHeaderTaxSelection = true;
+            try
+            {
+                if (selectedLine != null)
+                {
+                    if (string.IsNullOrWhiteSpace(selectedLine.VatTaxCode))
+                        SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "NDS12");
+                    else
+                        SelectStoredComboValue(HeaderVatTaxCombo, selectedLine.VatTaxCode);
+
+                    if (string.IsNullOrWhiteSpace(selectedLine.SalesTaxCode))
+                        SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+                    else
+                        SelectStoredComboValue(HeaderSalesTaxCombo, selectedLine.SalesTaxCode);
+
+                    return;
+                }
+
+                SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "NDS12");
+                SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+            }
+            finally
+            {
+                _synchronizingHeaderTaxSelection = false;
+            }
+        }
+
+        private static ReferenceOption? GetSelectedReferenceOption(ComboBox comboBox)
+        {
+            if (comboBox.SelectedItem is ReferenceOption selected)
+                return selected;
+
+            var selectedValue = comboBox.SelectedValue?.ToString();
+            return string.IsNullOrWhiteSpace(selectedValue)
+                ? null
+                : comboBox.Items
+                    .OfType<ReferenceOption>()
+                    .FirstOrDefault(item => item.Value.Equals(selectedValue, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string NormalizeLegacyDeliveryKind(string storedValue)
+        {
+            return storedValue?.Trim().ToUpperInvariant() switch
+            {
+                "GOODS" or "SERVICE" or "OTHER" => storedValue.Trim().ToUpperInvariant(),
+                "OPT" or "ROZN" or "IMP" or "EXPORT" or
+                "REMNANTS_2009" or "ZERO_SUPPLY" or "EXEMPT_SUPPLY" or
+                "TAXABLE_SUPPLY" or "NON_TAXABLE_SUPPLY" or
+                "STANDARD" or "EXPRESS" or "SAMOVIVOZ" or "TAXABLE" => "GOODS",
+                _ => storedValue
+            };
+        }
+
+        private static string NormalizeLegacySupplyKind(string storedValue)
+        {
+            return storedValue?.Trim().ToUpperInvariant() switch
+            {
+                "TAXABLE" or "EXEMPT" or "IMPORT" or "EXPORT" => storedValue.Trim().ToUpperInvariant(),
+                "IMP" => "IMPORT",
+                "WITHOUT_TAX" or "NON_TAXABLE_SUPPLY" or "EXEMPT_SUPPLY" => "EXEMPT",
+                _ => string.IsNullOrWhiteSpace(storedValue) ? string.Empty : "TAXABLE"
+            };
         }
 
         private void OnSelectAccountClick(object sender, RoutedEventArgs e)
@@ -437,6 +553,10 @@ namespace BIS.ERP.Views.Dialogs
 
             var previous = _lines.LastOrDefault();
             var accountCode = ResolveLineAccountCode(previous?.AccountCode);
+            var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, "NDS12");
+            var defaultSalesTax = GetDefaultReferenceOption(SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+            var selectedHeaderVat = GetSelectedReferenceOption(HeaderVatTaxCombo);
+            var selectedHeaderSalesTax = GetSelectedReferenceOption(HeaderSalesTaxCombo);
             var line = new EditableInvoiceLine
             {
                 LineNumber = _lines.Count + 1,
@@ -445,21 +565,21 @@ namespace BIS.ERP.Views.Dialogs
                 Quantity = previous?.Quantity > 0 ? previous.Quantity : 1m,
                 AccountCode = accountCode,
                 AccountDisplayName = GetAccountDisplayName(accountCode),
-                VatTaxCode = previous?.VatTaxCode
-                             ?? VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Value
-                             ?? VatTaxItems.FirstOrDefault()?.Value
+                VatTaxCode = selectedHeaderVat?.Value
+                             ?? previous?.VatTaxCode
+                             ?? defaultVat?.Value
                              ?? string.Empty,
-                VatRate = previous?.VatRate
-                          ?? VatTaxItems.FirstOrDefault(item => item.Value.Equals("NDS12", StringComparison.OrdinalIgnoreCase))?.Rate
-                          ?? VatTaxItems.FirstOrDefault()?.Rate
+                VatRate = selectedHeaderVat?.Rate
+                          ?? previous?.VatRate
+                          ?? defaultVat?.Rate
                           ?? 0,
-                SalesTaxCode = previous?.SalesTaxCode
-                               ?? SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Value
-                               ?? SalesTaxItems.FirstOrDefault()?.Value
+                SalesTaxCode = selectedHeaderSalesTax?.Value
+                               ?? previous?.SalesTaxCode
+                               ?? defaultSalesTax?.Value
                                ?? string.Empty,
-                SalesTaxRate = previous?.SalesTaxRate
-                               ?? SalesTaxItems.FirstOrDefault(item => item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase))?.Rate
-                               ?? SalesTaxItems.FirstOrDefault()?.Rate
+                SalesTaxRate = selectedHeaderSalesTax?.Rate
+                               ?? previous?.SalesTaxRate
+                               ?? defaultSalesTax?.Rate
                                ?? 0
             };
             AddLine(line);
@@ -488,6 +608,41 @@ namespace BIS.ERP.Views.Dialogs
             var hasSelection = LinesGrid.SelectedItem != null;
             DeleteLineButton.IsEnabled = hasSelection && !_isReadOnlyMode;
             LinePostingsButton.IsEnabled = hasSelection && _editId.HasValue && _isPosted;
+            SyncHeaderTaxControls(LinesGrid.SelectedItem as EditableInvoiceLine);
+        }
+
+        private void OnHeaderVatTaxChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_synchronizingHeaderTaxSelection || _isReadOnlyMode)
+                return;
+
+            if (LinesGrid.SelectedItem is not EditableInvoiceLine selectedLine)
+                return;
+
+            var selectedTax = GetSelectedReferenceOption(HeaderVatTaxCombo);
+            if (selectedTax == null)
+                return;
+
+            selectedLine.VatTaxCode = selectedTax.Value;
+            selectedLine.VatRate = selectedTax.Rate;
+            RecalculateTotals();
+        }
+
+        private void OnHeaderSalesTaxChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_synchronizingHeaderTaxSelection || _isReadOnlyMode)
+                return;
+
+            if (LinesGrid.SelectedItem is not EditableInvoiceLine selectedLine)
+                return;
+
+            var selectedTax = GetSelectedReferenceOption(HeaderSalesTaxCombo);
+            if (selectedTax == null)
+                return;
+
+            selectedLine.SalesTaxCode = selectedTax.Value;
+            selectedLine.SalesTaxRate = selectedTax.Rate;
+            RecalculateTotals();
         }
 
         private async void OnLinePostingsClick(object sender, RoutedEventArgs e)
@@ -660,6 +815,19 @@ namespace BIS.ERP.Views.Dialogs
             return decimal.TryParse(GetRowValue(row, keys), out var value) ? value : 0;
         }
 
+        private static int? GetInt(Dictionary<string, object> row, params string[] keys)
+        {
+            return int.TryParse(GetRowValue(row, keys), out var value) ? value : null;
+        }
+
+        private static bool GetBool(Dictionary<string, object> row, params string[] keys)
+        {
+            var value = GetRowValue(row, keys);
+            return value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("да", StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool IsActiveRow(Dictionary<string, object> row)
         {
             var value = GetRowValue(row, "Активен", "is_active");
@@ -689,11 +857,15 @@ namespace BIS.ERP.Views.Dialogs
             }), System.Windows.Threading.DispatcherPriority.Background);
         }
 
-        private static string BuildReferenceDisplayName(string name, decimal rate)
+        private static string BuildReferenceDisplayName(string catalogName, string name, decimal rate)
         {
             if (string.IsNullOrWhiteSpace(name))
-                return rate > 0 ? $"{rate:N2}%" : string.Empty;
-            if (rate > 0 && !name.Contains('%'))
+                return !string.Equals(catalogName, "Налоги", StringComparison.OrdinalIgnoreCase) && rate == 0
+                    ? string.Empty
+                    : $"{rate:N2}%";
+
+            var shouldShowRate = string.Equals(catalogName, "Налоги", StringComparison.OrdinalIgnoreCase) || rate != 0;
+            if (shouldShowRate && !name.Contains('%'))
                 return $"{name} ({rate:N2}%)";
             return name;
         }
@@ -748,7 +920,14 @@ namespace BIS.ERP.Views.Dialogs
                    left.Trim().Equals(right.Trim(), StringComparison.OrdinalIgnoreCase);
         }
 
-        public sealed record ReferenceOption(string Value, string DisplayName, decimal Rate = 0);
+        public sealed record ReferenceOption(
+            string Value,
+            string DisplayName,
+            decimal Rate = 0,
+            int? SortOrder = null,
+            bool IsDefault = false,
+            bool IsDefaultVat = false,
+            bool IsDefaultSalesTax = false);
 
         private sealed class OrganizationItem
         {

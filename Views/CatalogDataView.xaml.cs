@@ -70,10 +70,11 @@ namespace BIS.ERP.Views
 
                 _dataTable = new DataTable();
                 _dataTable.TableName = _catalog.Name;
+                var visibleFields = GetUniqueCatalogFields();
 
                 // Добавляем колонки
                 _dataTable.Columns.Add("Id", typeof(Guid));
-                foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                foreach (var field in visibleFields)
                 {
                     var columnType = GetColumnType(field.FieldType);
                     _dataTable.Columns.Add(field.Name, columnType);
@@ -90,7 +91,7 @@ namespace BIS.ERP.Views
                     var dataRow = _dataTable.NewRow();
                     dataRow["Id"] = row.ContainsKey("Id") ? row["Id"] : Guid.NewGuid();
 
-                    foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                    foreach (var field in visibleFields)
                     {
                         var rawValue = row.ContainsKey(field.Name) ? row[field.Name] : DBNull.Value;
 
@@ -117,7 +118,7 @@ namespace BIS.ERP.Views
                 // Настраиваем DataGrid
                 DataGrid.Columns.Clear();
 
-                foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                foreach (var field in visibleFields)
                 {
                     DataGrid.Columns.Add(CreateDataGridColumn(field));
                 }
@@ -162,7 +163,7 @@ namespace BIS.ERP.Views
         {
             _referenceCache.Clear();
 
-            foreach (var field in _catalog.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
+            foreach (var field in GetUniqueCatalogFields().Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
             {
                 if (!_catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
                     continue;
@@ -183,6 +184,28 @@ namespace BIS.ERP.Views
 
                 _referenceCache[field.Name] = dict;
             }
+        }
+
+        private List<MetadataField> GetUniqueCatalogFields()
+        {
+            var result = new List<MetadataField>();
+            var usedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+            {
+                var hasDuplicateColumn = !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                                         !usedColumns.Add(field.DbColumnName);
+                var hasDuplicateName = !string.IsNullOrWhiteSpace(field.Name) &&
+                                       !usedNames.Add(field.Name);
+
+                if (hasDuplicateColumn || hasDuplicateName)
+                    continue;
+
+                result.Add(field);
+            }
+
+            return result;
         }
 
         private static IEnumerable<string> GetReferenceLookupKeys(Dictionary<string, object> row)
@@ -363,6 +386,11 @@ namespace BIS.ERP.Views
                 "Связь с объектами строительства" => 85,
                 "Код налога" => 80,
                 "Валюта счета" => 125,
+                "Признак счета Fox (prsch)" => 85,
+                "Признак НДС Fox (pr_sch)" => 85,
+                "Признак ОС Fox (pr_sc7)" => 85,
+                "Связь с организациями Fox (sv_o)" => 85,
+                "Код формы отчета Fox (kodf_rb)" => 95,
                 _ => field.FieldType == "Bool" ? 65 : 110
             };
 
@@ -429,6 +457,11 @@ namespace BIS.ERP.Views
                 "Связь с объектами строительства" => "Объекты",
                 "Код налога" => "Код нал.",
                 "Валюта счета" => "Валюта сч.",
+                "Признак счета Fox (prsch)" => "Fox тип",
+                "Признак НДС Fox (pr_sch)" => "Fox НДС",
+                "Признак ОС Fox (pr_sc7)" => "Fox ОС",
+                "Связь с организациями Fox (sv_o)" => "Fox орг.",
+                "Код формы отчета Fox (kodf_rb)" => "Fox код",
                 "Дата создания" => "Создан",
                 "Дата изменения" => "Изменен",
                 _ => fieldName

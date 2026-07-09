@@ -49,6 +49,10 @@ namespace BIS.ERP.Services
                     ""esf_number"" varchar(100),
                     ""tax_blank_number"" varchar(100),
                     ""arm_code"" varchar(50),
+                    ""exchange_code"" varchar(100),
+                    ""tax_status"" varchar(100),
+                    ""exported_at"" timestamp,
+                    ""tax_status_date"" timestamp,
                     ""organization_id"" uuid,
                     ""counterparty_account"" varchar(50),
                     ""payment_kind"" varchar(100),
@@ -89,6 +93,10 @@ namespace BIS.ERP.Services
                     ""esf_number"" varchar(100),
                     ""tax_blank_number"" varchar(100),
                     ""arm_code"" varchar(50),
+                    ""exchange_code"" varchar(100),
+                    ""tax_status"" varchar(100),
+                    ""exported_at"" timestamp,
+                    ""tax_status_date"" timestamp,
                     ""organization_id"" uuid,
                     ""counterparty_account"" varchar(50),
                     ""payment_kind"" varchar(100),
@@ -130,12 +138,22 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""arm_code"" varchar(50);
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""arm_code"" varchar(50);
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
                 ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
                 ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
+                CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_exchange_code"" ON ""doc_sales_invoice"" (""exchange_code"");
+                CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_exchange_code"" ON ""doc_purchase_invoice"" (""exchange_code"");
             ");
         }
 
@@ -143,8 +161,8 @@ namespace BIS.ERP.Services
         {
             var organizationMap = await LoadOrganizationMapAsync();
             var sql = $@"
-                SELECT ""Id"", ""doc_number"", ""doc_date"", ""organization_id"", ""amount"", ""basis"", ""is_posted"",
-                       ""tax_blank_number"", ""arm_code""
+                SELECT ""Id"", ""doc_number"", ""doc_date"", ""organization_id"", ""amount"", ""esf_number"", ""basis"", ""is_posted"",
+                       ""tax_blank_number"", ""arm_code"", ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date""
                 FROM ""{HeaderTableName}""
                 ORDER BY ""doc_date"" DESC, ""doc_number"" DESC";
 
@@ -165,10 +183,15 @@ namespace BIS.ERP.Services
                         ? name
                         : string.Empty,
                     TotalAmount = reader.GetDecimal(4),
-                    Basis = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
-                    IsPosted = reader.GetBoolean(6),
-                    TaxBlankNumber = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                    ArmCode = reader.IsDBNull(8) ? string.Empty : reader.GetString(8)
+                    EsfNumber = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                    Basis = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                    IsPosted = reader.GetBoolean(7),
+                    TaxBlankNumber = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                    ArmCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
+                    ExchangeCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                    TaxStatus = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                    ExportedAt = reader.IsDBNull(12) ? null : reader.GetDateTime(12),
+                    TaxStatusDate = reader.IsDBNull(13) ? null : reader.GetDateTime(13)
                 });
             }
             await _context.Database.CloseConnectionAsync();
@@ -222,7 +245,8 @@ namespace BIS.ERP.Services
         {
             var organizationMap = await LoadOrganizationMapAsync();
             var sql = $@"
-                SELECT ""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""arm_code"", ""organization_id"",
+                SELECT ""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""arm_code"",
+                       ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date"", ""organization_id"",
                        ""counterparty_account"", ""payment_kind"", ""delivery_kind"", ""supply_kind"", ""basis"",
                        ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted""
                 FROM ""{HeaderTableName}""
@@ -239,7 +263,7 @@ namespace BIS.ERP.Services
                 return null;
             }
 
-            var organizationId = reader.IsDBNull(6) ? (Guid?)null : reader.GetGuid(6);
+            var organizationId = reader.IsDBNull(10) ? (Guid?)null : reader.GetGuid(10);
             var invoice = new InvoiceDocument
             {
                 Id = reader.GetGuid(0),
@@ -248,20 +272,24 @@ namespace BIS.ERP.Services
                 EsfNumber = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
                 TaxBlankNumber = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
                 ArmCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                ExchangeCode = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                TaxStatus = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+                ExportedAt = reader.IsDBNull(8) ? null : reader.GetDateTime(8),
+                TaxStatusDate = reader.IsDBNull(9) ? null : reader.GetDateTime(9),
                 OrganizationId = organizationId,
                 OrganizationName = organizationId.HasValue && organizationMap.TryGetValue(organizationId.Value, out var name)
                     ? name
                     : string.Empty,
-                CounterpartyAccountCode = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                PaymentKind = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
-                DeliveryKind = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
-                SupplyKind = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
-                Basis = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
-                AmountWithoutTax = reader.GetDecimal(12),
-                VatTotal = reader.GetDecimal(13),
-                SalesTaxTotal = reader.GetDecimal(14),
-                TotalAmount = reader.GetDecimal(15),
-                IsPosted = reader.GetBoolean(16)
+                CounterpartyAccountCode = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                PaymentKind = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+                DeliveryKind = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
+                SupplyKind = reader.IsDBNull(14) ? string.Empty : reader.GetString(14),
+                Basis = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
+                AmountWithoutTax = reader.GetDecimal(16),
+                VatTotal = reader.GetDecimal(17),
+                SalesTaxTotal = reader.GetDecimal(18),
+                TotalAmount = reader.GetDecimal(19),
+                IsPosted = reader.GetBoolean(20)
             };
             await reader.CloseAsync();
             await _context.Database.CloseConnectionAsync();
@@ -313,6 +341,138 @@ namespace BIS.ERP.Services
             }
         }
 
+        public async Task<Guid?> FindInvoiceIdByExchangeCodeAsync(string exchangeCode)
+        {
+            if (string.IsNullOrWhiteSpace(exchangeCode))
+                return null;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE ""exchange_code"" = @exchangeCode
+                ORDER BY ""UpdatedAt"" DESC
+                LIMIT 1";
+
+            await using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.Add(new NpgsqlParameter("@exchangeCode", exchangeCode.Trim()));
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                var value = await command.ExecuteScalarAsync();
+                return value is Guid id ? id : null;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        public async Task<Guid?> FindInvoiceIdByTaxBlankNumberAsync(string taxBlankNumber, DateTime? documentDate = null)
+        {
+            var normalizedNumber = taxBlankNumber?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedNumber))
+                return null;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE ""tax_blank_number"" = @number";
+
+            if (documentDate.HasValue)
+                sql += @" AND DATE(""doc_date"") = DATE(@date)";
+
+            sql += @" ORDER BY ""UpdatedAt"" DESC LIMIT 1";
+
+            await using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.Add(new NpgsqlParameter("@number", normalizedNumber));
+            if (documentDate.HasValue)
+                command.Parameters.Add(new NpgsqlParameter("@date", documentDate.Value.Date));
+
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                var value = await command.ExecuteScalarAsync();
+                return value is Guid id ? id : null;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        public async Task<Guid?> FindInvoiceIdByEsfNumberAsync(string esfNumber)
+        {
+            var normalizedNumber = esfNumber?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedNumber))
+                return null;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE ""esf_number"" = @number
+                ORDER BY ""UpdatedAt"" DESC
+                LIMIT 1";
+
+            await using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.Add(new NpgsqlParameter("@number", normalizedNumber));
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                var value = await command.ExecuteScalarAsync();
+                return value is Guid id ? id : null;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        public async Task UpdateEsfExchangeInfoAsync(
+            Guid invoiceId,
+            string? esfNumber,
+            string? exchangeCode,
+            string? taxStatus,
+            DateTime? exportedAt,
+            DateTime? taxStatusDate)
+        {
+            var invoice = await GetInvoiceAsync(invoiceId)
+                ?? throw new InvalidOperationException("Документ не найден.");
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{HeaderTableName}""
+                SET ""esf_number"" = @esfNumber,
+                    ""exchange_code"" = @exchangeCode,
+                    ""tax_status"" = @taxStatus,
+                    ""exported_at"" = @exportedAt,
+                    ""tax_status_date"" = @taxStatusDate,
+                    ""UpdatedAt"" = NOW()
+                WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", invoiceId),
+                new NpgsqlParameter("@esfNumber", DbValueOrNull(esfNumber)),
+                new NpgsqlParameter("@exchangeCode", DbValueOrNull(exchangeCode)),
+                new NpgsqlParameter("@taxStatus", DbValueOrNull(taxStatus)),
+                new NpgsqlParameter("@exportedAt", (object?)exportedAt ?? DBNull.Value),
+                new NpgsqlParameter("@taxStatusDate", (object?)taxStatusDate ?? DBNull.Value));
+
+            await new EventLogService(_context).LogAsync(
+                "UpdateEsfExchange",
+                "Document",
+                DocumentName,
+                invoiceId,
+                new
+                {
+                    Number = invoice.DocNumber,
+                    EsfNumber = esfNumber?.Trim() ?? string.Empty,
+                    ExchangeCode = exchangeCode?.Trim() ?? string.Empty,
+                    TaxStatus = taxStatus?.Trim() ?? string.Empty,
+                    ExportedAt = exportedAt,
+                    TaxStatusDate = taxStatusDate
+                });
+        }
+
         public async Task<Guid> SaveInvoiceAsync(InvoiceDocument invoice, Guid? existingId = null)
         {
             RecalculateTotals(invoice);
@@ -327,10 +487,11 @@ namespace BIS.ERP.Services
                 {
                     await _context.Database.ExecuteSqlRawAsync($@"
                         INSERT INTO ""{HeaderTableName}""
-                        (""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""arm_code"", ""organization_id"", ""counterparty_account"",
+                        (""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""arm_code"",
+                         ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date"", ""organization_id"", ""counterparty_account"",
                          ""payment_kind"", ""delivery_kind"", ""supply_kind"", ""basis"",
                          ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted"", ""CreatedAt"", ""UpdatedAt"")
-                        VALUES (@id, @number, @date, @esf, @taxBlank, @arm, @org, @account, @payment, @delivery, @supply, @basis,
+                        VALUES (@id, @number, @date, @esf, @taxBlank, @arm, @exchangeCode, @taxStatus, @exportedAt, @taxStatusDate, @org, @account, @payment, @delivery, @supply, @basis,
                                 @amountWithoutTax, @vatTotal, @salesTaxTotal, @amount, false, NOW(), NOW())",
                         new NpgsqlParameter("@id", id),
                         new NpgsqlParameter("@number", invoice.DocNumber),
@@ -338,6 +499,10 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@esf", (object?)invoice.EsfNumber ?? DBNull.Value),
                         new NpgsqlParameter("@taxBlank", (object?)invoice.TaxBlankNumber ?? DBNull.Value),
                         new NpgsqlParameter("@arm", (object?)invoice.ArmCode ?? DBNull.Value),
+                        new NpgsqlParameter("@exchangeCode", (object?)invoice.ExchangeCode ?? DBNull.Value),
+                        new NpgsqlParameter("@taxStatus", (object?)invoice.TaxStatus ?? DBNull.Value),
+                        new NpgsqlParameter("@exportedAt", (object?)invoice.ExportedAt ?? DBNull.Value),
+                        new NpgsqlParameter("@taxStatusDate", (object?)invoice.TaxStatusDate ?? DBNull.Value),
                         new NpgsqlParameter("@org", (object?)invoice.OrganizationId ?? DBNull.Value),
                         new NpgsqlParameter("@account", (object?)invoice.CounterpartyAccountCode ?? DBNull.Value),
                         new NpgsqlParameter("@payment", (object?)invoice.PaymentKind ?? DBNull.Value),
@@ -358,6 +523,8 @@ namespace BIS.ERP.Services
                         UPDATE ""{HeaderTableName}""
                         SET ""doc_number"" = @number, ""doc_date"" = @date, ""esf_number"" = @esf,
                             ""tax_blank_number"" = @taxBlank, ""arm_code"" = @arm,
+                            ""exchange_code"" = @exchangeCode, ""tax_status"" = @taxStatus,
+                            ""exported_at"" = @exportedAt, ""tax_status_date"" = @taxStatusDate,
                             ""organization_id"" = @org, ""counterparty_account"" = @account,
                             ""payment_kind"" = @payment, ""delivery_kind"" = @delivery, ""supply_kind"" = @supply,
                             ""basis"" = @basis, ""amount_without_tax"" = @amountWithoutTax,
@@ -370,6 +537,10 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@esf", (object?)invoice.EsfNumber ?? DBNull.Value),
                         new NpgsqlParameter("@taxBlank", (object?)invoice.TaxBlankNumber ?? DBNull.Value),
                         new NpgsqlParameter("@arm", (object?)invoice.ArmCode ?? DBNull.Value),
+                        new NpgsqlParameter("@exchangeCode", (object?)invoice.ExchangeCode ?? DBNull.Value),
+                        new NpgsqlParameter("@taxStatus", (object?)invoice.TaxStatus ?? DBNull.Value),
+                        new NpgsqlParameter("@exportedAt", (object?)invoice.ExportedAt ?? DBNull.Value),
+                        new NpgsqlParameter("@taxStatusDate", (object?)invoice.TaxStatusDate ?? DBNull.Value),
                         new NpgsqlParameter("@org", (object?)invoice.OrganizationId ?? DBNull.Value),
                         new NpgsqlParameter("@account", (object?)invoice.CounterpartyAccountCode ?? DBNull.Value),
                         new NpgsqlParameter("@payment", (object?)invoice.PaymentKind ?? DBNull.Value),
@@ -718,6 +889,12 @@ namespace BIS.ERP.Services
             if (string.IsNullOrWhiteSpace(code))
                 return string.Empty;
             return map.TryGetValue(code, out var display) ? display : code;
+        }
+
+        private static object DbValueOrNull(string? value)
+        {
+            var normalized = value?.Trim();
+            return string.IsNullOrWhiteSpace(normalized) ? DBNull.Value : normalized;
         }
     }
 }

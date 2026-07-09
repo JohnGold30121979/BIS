@@ -6,12 +6,13 @@ namespace BIS.ERP.Models
     public class ConfigurationPackage
     {
         public string Format { get; set; } = "BIS.Configuration";
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public DateTime ExportedAt { get; set; } = DateTime.UtcNow;
         public string Application { get; set; } = "BIS ERP";
         public List<SystemConfiguration> SystemConfigurations { get; set; } = new();
         public List<MetadataObject> MetadataObjects { get; set; } = new();
         public List<Report> Reports { get; set; } = new();
+        public List<RegulatedReportTemplate> RegulatedReportTemplates { get; set; } = new();
         public List<MetadataModule> Modules { get; set; } = new();
         public List<MetadataModuleItem> ModuleItems { get; set; } = new();
         public List<ConfigurationTableData> TableData { get; set; } = new();

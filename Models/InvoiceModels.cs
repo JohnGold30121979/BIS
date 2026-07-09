@@ -10,11 +10,18 @@ namespace BIS.ERP.Models
         public DateTime DocDate { get; set; }
         public string OrganizationName { get; set; } = string.Empty;
         public decimal TotalAmount { get; set; }
+        public string EsfNumber { get; set; } = string.Empty;
         public string Basis { get; set; } = string.Empty;
         public string TaxBlankNumber { get; set; } = string.Empty;
         public string ArmCode { get; set; } = string.Empty;
+        public string ExchangeCode { get; set; } = string.Empty;
+        public string TaxStatus { get; set; } = string.Empty;
+        public DateTime? ExportedAt { get; set; }
+        public DateTime? TaxStatusDate { get; set; }
         public bool IsPosted { get; set; }
         public string IsPostedDisplay => IsPosted ? "Да" : "Нет";
+        public bool IsEsfExported => ExportedAt.HasValue || !string.IsNullOrWhiteSpace(ExchangeCode);
+        public string TaxStatusDisplay => string.IsNullOrWhiteSpace(TaxStatus) ? "Не выгружен" : TaxStatus;
     }
 
     public class InvoiceLineRow
@@ -44,6 +51,10 @@ namespace BIS.ERP.Models
         public string EsfNumber { get; set; } = string.Empty;
         public string TaxBlankNumber { get; set; } = string.Empty;
         public string ArmCode { get; set; } = string.Empty;
+        public string ExchangeCode { get; set; } = string.Empty;
+        public string TaxStatus { get; set; } = string.Empty;
+        public DateTime? ExportedAt { get; set; }
+        public DateTime? TaxStatusDate { get; set; }
         public Guid? OrganizationId { get; set; }
         public string OrganizationName { get; set; } = string.Empty;
         public string CounterpartyAccountCode { get; set; } = string.Empty;

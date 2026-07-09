@@ -785,7 +785,7 @@ namespace BIS.ERP.Services
                     Name = "Налоги",
                     TableName = "catalog_taxes",
                     ObjectType = "Catalog",
-                    Description = "Справочник налогов (НДС, налог с продаж и т.д.)",
+                    Description = "Справочник налогов с кодами ЭСФ для НДС и налога с продаж.",
                     Icon = "💰",
                     Order = 14,
                     IsSystem = true,
@@ -805,6 +805,9 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Налоги': {ex.Message}");
             }
         }
+
+        private async Task EnsureTaxCatalogStructureAsync() =>
+            await EnsureCatalogStructureAsync("Налоги", GetTaxFields);
 
         // Справочник "Подразделения"
         private async Task CreateDivisionCatalog(MetadataConfiguration config)
@@ -937,7 +940,7 @@ namespace BIS.ERP.Services
                     Name = "Виды поставки",
                     TableName = "catalog_supply_kinds",
                     ObjectType = "Catalog",
-                    Description = "Справочник видов поставки (опт, розница, импорт)",
+                    Description = "Классификатор вида поставки ЭСФ для поля invoiceDeliveryTypeCode.",
                     Icon = "📦",
                     Order = 17,
                     IsSystem = true,
@@ -999,7 +1002,7 @@ namespace BIS.ERP.Services
                     Name = "Виды оплаты",
                     TableName = "catalog_payment_kinds",
                     ObjectType = "Catalog",
-                    Description = "Справочник видов оплаты (наличные, карта, безнал)",
+                    Description = "Справочник видов оплаты с кодами ЭСФ для paymentTypeCode.",
                     Icon = "💳",
                     Order = 18,
                     IsSystem = true,
@@ -1020,23 +1023,27 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task EnsurePaymentKindCatalogStructureAsync() =>
+            await EnsureCatalogStructureAsync("Виды оплаты", GetPaymentKindFields);
+
         // Справочник "Типы поставки"
         private async Task CreateDeliveryTypeCatalog(MetadataConfiguration config)
         {
             try
             {
+                var catalogId = Guid.NewGuid();
                 var catalog = new MetadataObject
                 {
-                    Id = Guid.NewGuid(),
+                    Id = catalogId,
                     Name = "Типы поставки",
                     TableName = "catalog_delivery_types",
                     ObjectType = "Catalog",
-                    Description = "Справочник типов поставки (срочная, стандартная)",
+                    Description = "Классификатор налогового типа поставки ЭСФ для поля vatDeliveryTypeCode.",
                     Icon = "🚚",
                     Order = 19,
                     IsSystem = true,
                     MetadataConfigId = config.Id,
-                    Fields = GetStandardCatalogFields(Guid.NewGuid())
+                    Fields = GetDeliveryTypeFields(catalogId)
                 };
 
                 await _context.MetadataObjects.AddAsync(catalog);
@@ -1049,6 +1056,89 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Типы поставки': {ex.Message}");
+            }
+        }
+
+        private async Task EnsureDeliveryTypeCatalogStructureAsync() =>
+            await EnsureCatalogStructureAsync("Типы поставки", GetDeliveryTypeFields);
+
+        private async Task EnsureCatalogStructureAsync(
+            string catalogName,
+            Func<Guid, List<MetadataField>> getFields)
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == catalogName);
+
+            if (catalog == null)
+                return;
+
+            await RemoveDuplicateMetadataFieldsAsync(catalog);
+
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .ToDictionary(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in getFields(catalog.Id))
+            {
+                if (existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    existing.Name = desired.Name;
+                    existing.FieldType = desired.FieldType;
+                    existing.ReferenceCatalog = desired.ReferenceCatalog;
+                    existing.DisplayPattern = desired.DisplayPattern;
+                    existing.DisplayFields = desired.DisplayFields;
+                    existing.Order = desired.Order;
+                    existing.IsRequired = desired.IsRequired;
+                    existing.IsUnique = desired.IsUnique;
+                    existing.Length = desired.Length;
+                    existing.Precision = desired.Precision;
+                    existing.Scale = desired.Scale;
+                    continue;
+                }
+
+                desired.Id = Guid.NewGuid();
+                desired.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(desired);
+                await AddColumnToTableAsync(catalog.TableName, desired);
+                catalog.Fields.Add(desired);
+                existingByColumn[desired.DbColumnName] = desired;
+            }
+
+            await _context.SaveChangesAsync();
+            await BackfillFoxChartOfAccountsCompatibilityFieldsAsync(catalog);
+        }
+
+        private async Task BackfillFoxChartOfAccountsCompatibilityFieldsAsync(MetadataObject catalog)
+        {
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{catalog.TableName}""
+                    SET
+                        ""prsch"" = COALESCE(
+                            ""prsch"",
+                            CASE
+                                WHEN ""account_type"" = 'Active' THEN 1
+                                WHEN ""account_type"" = 'Passive' THEN 2
+                                WHEN ""account_type"" = 'ActivePassive' THEN 3
+                                ELSE NULL
+                            END),
+                        ""sv_o"" = COALESCE(""sv_o"", ""link_organizations"", false),
+                        ""pr_sch"" = COALESCE(""pr_sch"", 0),
+                        ""pr_sc7"" = COALESCE(""pr_sc7"", 0),
+                        ""kodf_rb"" = COALESCE(""kodf_rb"", 0)
+                    WHERE
+                        ""prsch"" IS NULL OR
+                        ""sv_o"" IS NULL OR
+                        ""pr_sch"" IS NULL OR
+                        ""pr_sc7"" IS NULL OR
+                        ""kodf_rb"" IS NULL;");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка заполнения Fox-полей плана счетов: {ex.Message}");
             }
         }
 

@@ -27,9 +27,9 @@ namespace BIS.ERP.Services
 
                 while (await reader.ReadAsync())
                 {
-                    var id = reader.GetGuid(0);        // Id
-                    var code = reader.GetString(1);     // code
-                    var name = reader.GetString(2);     // name
+                    var id = reader.GetGuid(0);
+                    var code = reader.GetString(1);
+                    var name = reader.GetString(2);
 
                     currencies[code] = id;
                     System.Diagnostics.Debug.WriteLine($"Загружена валюта: {code} - {name} - {id}");
@@ -159,7 +159,7 @@ namespace BIS.ERP.Services
                 {
                     var sql = $@"
                         INSERT INTO ""{catalog.TableName}"" 
-                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
+                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""prsch"", ""pr_sch"", ""pr_sc7"", ""sv_o"", ""kodf_rb"", ""CreatedAt"", ""UpdatedAt"") 
                         VALUES (
                             '{Guid.NewGuid()}',
                             '{account.Code}',
@@ -168,6 +168,11 @@ namespace BIS.ERP.Services
                             '{account.Description?.Replace("'", "''") ?? ""}',
                             {account.Level},
                             true,
+                            {GetFoxAccountSign(account.AccountType)},
+                            0,
+                            0,
+                            false,
+                            0,
                             NOW(),
                             NOW()
                         )";
@@ -180,6 +185,14 @@ namespace BIS.ERP.Services
             }
             System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
         }
+
+        private static int GetFoxAccountSign(string accountType) => accountType switch
+        {
+            "Active" => 1,
+            "Passive" => 2,
+            "ActivePassive" => 3,
+            _ => 0
+        };
 
         public async Task EnsureCashOrderPostingAccountsAsync()
         {
@@ -627,31 +640,34 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             var taxes = new[]
             {
-        new { code = "NDS20", name = "НДС 20%", rate = 20m, is_active = true, sort_order = 1 },
-        new { code = "NDS12", name = "НДС 12%", rate = 12m, is_active = true, sort_order = 2 },
-        new { code = "NDS0", name = "НДС 0%", rate = 0m, is_active = true, sort_order = 3 },
-        new { code = "SALES_TAX", name = "Налог с продаж", rate = 2m, is_active = true, sort_order = 4 },
-        new { code = "WITHOUT_TAX", name = "Без налога", rate = 0m, is_active = true, sort_order = 5 }
+        new { code = "NDS12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
+        new { code = "NDS0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
+        new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_TRADE", name = "Налог с продаж: торговая деятельность", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 6, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_EXEMPT", name = "Налог с продаж: необлагаемая деятельность", rate = 0m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 7, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_RETAIL_2009", name = "Налог с продаж: розничная продажа до 2009", rate = 4m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 8, is_default_vat = false, is_default_sales_tax = false }
         };
 
             foreach (var tax in taxes)
             {
                 try
                 {
-                    var sql = $@"
-                INSERT INTO ""{tableName}"" (""code"", ""name"", ""rate"", ""is_active"", ""sort_order"", ""CreatedAt"")
-                SELECT 
-                    '{tax.code}', 
-                    '{tax.name}', 
-                    {tax.rate.ToString(CultureInfo.InvariantCulture)}, 
-                    {tax.is_active}, 
-                    {tax.sort_order}, 
-                    CURRENT_TIMESTAMP
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{tax.code}'
-                )";
-
-                    await _context.Database.ExecuteSqlRawAsync(sql);
+                    await UpsertCatalogSeedRowAsync(tableName, tax.code, new Dictionary<string, object?>
+                    {
+                        ["code"] = tax.code,
+                        ["name"] = tax.name,
+                        ["rate"] = tax.rate,
+                        ["esf_vat_code"] = tax.esf_vat_code,
+                        ["esf_sales_tax_code"] = tax.esf_sales_tax_code,
+                        ["is_active"] = tax.is_active,
+                        ["sort_order"] = tax.sort_order,
+                        ["is_default_vat"] = tax.is_default_vat,
+                        ["is_default_sales_tax"] = tax.is_default_sales_tax,
+                        ["CreatedAt"] = DateTime.UtcNow,
+                        ["UpdatedAt"] = DateTime.UtcNow
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -666,28 +682,27 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             var items = new[]
             {
-            new { code = "OPT", name = "Оптовая", is_active = true },
-            new { code = "ROZN", name = "Розничная", is_active = true },
-            new { code = "IMP", name = "Импорт", is_active = true },
-            new { code = "EXPORT", name = "Экспорт", is_active = true }
+            new { code = "GOODS", name = "Поставка товаров", description = "Используется для стандартной товарной поставки ЭСФ.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
+            new { code = "SERVICE", name = "Работы / услуги", description = "Наблюдалось в FoxPro-выгрузках как код 101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
+            new { code = "OTHER", name = "Прочая поставка", description = "Наблюдалось в FoxPro-выгрузках как код 299.", esf_code = "299", is_active = true, sort_order = 3, is_default = false }
             };
 
             foreach (var item in items)
             {
                 try
                 {
-                    var sql = $@"
-                INSERT INTO ""{tableName}"" (""code"", ""name"", ""is_active"", ""CreatedAt"")
-                SELECT 
-                    '{item.code}', 
-                    '{item.name}', 
-                    {item.is_active}, 
-                    CURRENT_TIMESTAMP
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{item.code}'
-                )";
-
-                    await _context.Database.ExecuteSqlRawAsync(sql);
+                    await UpsertCatalogSeedRowAsync(tableName, item.code, new Dictionary<string, object?>
+                    {
+                        ["code"] = item.code,
+                        ["name"] = item.name,
+                        ["description"] = item.description,
+                        ["esf_code"] = item.esf_code,
+                        ["is_active"] = item.is_active,
+                        ["sort_order"] = item.sort_order,
+                        ["is_default"] = item.is_default,
+                        ["CreatedAt"] = DateTime.UtcNow,
+                        ["UpdatedAt"] = DateTime.UtcNow
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -702,29 +717,27 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             var items = new[]
             {
-            new { code = "CASH", name = "Наличные", rate = 0m, is_active = true },
-            new { code = "CARD", name = "Банковская карта", rate = 1.5m, is_active = true },
-            new { code = "TRANSFER", name = "Безналичный перевод", rate = 0m, is_active = true },
-            new { code = "CHEQUE", name = "Чек", rate = 0m, is_active = true }
+            new { code = "CASH", name = "Наличные", rate = 0m, esf_code = "10", is_active = true, is_default = false },
+            new { code = "CARD", name = "Банковская карта", rate = 0m, esf_code = "11", is_active = true, is_default = false },
+            new { code = "TRANSFER", name = "Безналичный перевод", rate = 0m, esf_code = "20", is_active = true, is_default = true },
+            new { code = "CHEQUE", name = "Чек", rate = 0m, esf_code = "30", is_active = true, is_default = false }
             };
 
             foreach (var item in items)
             {
                 try
                 {
-                    var sql = $@"
-                INSERT INTO ""{tableName}"" (""code"", ""name"", ""rate"", ""is_active"", ""CreatedAt"")
-                SELECT 
-                    '{item.code}', 
-                    '{item.name}', 
-                    {item.rate.ToString(CultureInfo.InvariantCulture)}, 
-                    {item.is_active}, 
-                    CURRENT_TIMESTAMP
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{item.code}'
-                )";
-
-                    await _context.Database.ExecuteSqlRawAsync(sql);
+                    await UpsertCatalogSeedRowAsync(tableName, item.code, new Dictionary<string, object?>
+                    {
+                        ["code"] = item.code,
+                        ["name"] = item.name,
+                        ["rate"] = item.rate,
+                        ["esf_code"] = item.esf_code,
+                        ["is_active"] = item.is_active,
+                        ["is_default"] = item.is_default,
+                        ["CreatedAt"] = DateTime.UtcNow,
+                        ["UpdatedAt"] = DateTime.UtcNow
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -739,27 +752,28 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             var items = new[]
             {
-            new { code = "STANDARD", name = "Стандартная", is_active = true },
-            new { code = "EXPRESS", name = "Срочная", is_active = true },
-            new { code = "SAMOVIVOZ", name = "Самовывоз", is_active = true }
+            new { code = "TAXABLE", name = "Облагаемая поставка", description = "FoxPro/XML: vatDeliveryTypeCode=100.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
+            new { code = "EXEMPT", name = "Необлагаемая / без НДС", description = "FoxPro/XML: vatDeliveryTypeCode=101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
+            new { code = "IMPORT", name = "Импорт", description = "Резерв под vatDeliveryTypeCode=200.", esf_code = "200", is_active = true, sort_order = 3, is_default = false },
+            new { code = "EXPORT", name = "Экспорт", description = "Резерв под vatDeliveryTypeCode=300.", esf_code = "300", is_active = true, sort_order = 4, is_default = false }
             };
 
             foreach (var item in items)
             {
                 try
                 {
-                    var sql = $@"
-                INSERT INTO ""{tableName}"" (""code"", ""name"", ""is_active"", ""CreatedAt"")
-                SELECT 
-                    '{item.code}', 
-                    '{item.name}', 
-                    {item.is_active}, 
-                    CURRENT_TIMESTAMP
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM ""{tableName}"" WHERE ""code"" = '{item.code}'
-                )";
-
-                    await _context.Database.ExecuteSqlRawAsync(sql);
+                    await UpsertCatalogSeedRowAsync(tableName, item.code, new Dictionary<string, object?>
+                    {
+                        ["code"] = item.code,
+                        ["name"] = item.name,
+                        ["description"] = item.description,
+                        ["esf_code"] = item.esf_code,
+                        ["is_active"] = item.is_active,
+                        ["sort_order"] = item.sort_order,
+                        ["is_default"] = item.is_default,
+                        ["CreatedAt"] = DateTime.UtcNow,
+                        ["UpdatedAt"] = DateTime.UtcNow
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -802,6 +816,62 @@ namespace BIS.ERP.Services
         private static string EscapeSql(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");
+        }
+
+        private async Task UpsertCatalogSeedRowAsync(
+            string tableName,
+            string code,
+            IReadOnlyDictionary<string, object?> values)
+        {
+            var codeLiteral = ToSqlLiteral(code);
+            var updateAssignments = values
+                .Where(item => !item.Key.Equals("code", StringComparison.OrdinalIgnoreCase) &&
+                               !item.Key.Equals("CreatedAt", StringComparison.OrdinalIgnoreCase) &&
+                               !item.Key.Equals("is_default", StringComparison.OrdinalIgnoreCase) &&
+                               !item.Key.Equals("is_default_vat", StringComparison.OrdinalIgnoreCase) &&
+                               !item.Key.Equals("is_default_sales_tax", StringComparison.OrdinalIgnoreCase))
+                .Select(item => $@"""{item.Key}"" = {ToSqlLiteral(item.Value)}")
+                .ToList();
+
+            if (updateAssignments.Count > 0)
+            {
+                var updated = await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{tableName}""
+                    SET {string.Join(", ", updateAssignments)}
+                    WHERE ""code"" = {codeLiteral};");
+
+                if (updated > 0)
+                    return;
+            }
+
+            var columnSql = string.Join(", ", values.Keys.Select(item => $@"""{item}"""));
+            var valueSql = string.Join(", ", values.Values.Select(ToSqlLiteral));
+            await _context.Database.ExecuteSqlRawAsync($@"
+                INSERT INTO ""{tableName}"" ({columnSql})
+                SELECT {valueSql}
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM ""{tableName}""
+                    WHERE ""code"" = {codeLiteral}
+                );");
+        }
+
+        private static string ToSqlLiteral(object? value)
+        {
+            return value switch
+            {
+                null => "NULL",
+                DBNull _ => "NULL",
+                bool boolean => boolean ? "true" : "false",
+                decimal number => number.ToString(CultureInfo.InvariantCulture),
+                double number => number.ToString(CultureInfo.InvariantCulture),
+                float number => number.ToString(CultureInfo.InvariantCulture),
+                int number => number.ToString(CultureInfo.InvariantCulture),
+                long number => number.ToString(CultureInfo.InvariantCulture),
+                Guid guid => $"'{guid}'",
+                DateTime dateTime => $"'{dateTime:yyyy-MM-dd HH:mm:ss}'",
+                _ => $"'{EscapeSql(value.ToString() ?? string.Empty)}'"
+            };
         }
 
         private async Task AddSiteDataToTable(MetadataObject catalog)

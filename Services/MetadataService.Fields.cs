@@ -125,9 +125,26 @@ public partial class MetadataService
             };
     }
 
-    private List<MetadataField> GetSupplyKindFields(Guid metadataObjectId)
+    private List<MetadataField> GetSupplyKindFields(Guid metadataObjectId) =>
+        GetEsfClassifierFields(metadataObjectId);
+
+    private List<MetadataField> GetDeliveryTypeFields(Guid metadataObjectId) =>
+        GetEsfClassifierFields(metadataObjectId);
+
+    private List<MetadataField> GetEsfClassifierFields(Guid metadataObjectId)
     {
         var fields = GetStandardCatalogFields(metadataObjectId);
+        fields.Add(new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код ЭСФ",
+            DbColumnName = "esf_code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        });
         fields.Add(new MetadataField
         {
             Id = Guid.NewGuid(),
@@ -135,7 +152,17 @@ public partial class MetadataService
             DbColumnName = "sort_order",
             FieldType = "Int",
             IsRequired = false,
-            Order = 5,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        });
+        fields.Add(new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "По умолчанию",
+            DbColumnName = "is_default",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 7,
             MetadataObjectId = metadataObjectId
         });
         return fields;
@@ -183,7 +210,12 @@ public partial class MetadataService
                 DisplayFields = "Код,Наименование",
                 Order = 18,
                 MetadataObjectId = metadataObjectId
-            }
+            },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Признак счета Fox (prsch)", DbColumnName = "prsch", FieldType = "Int", Order = 19, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Признак НДС Fox (pr_sch)", DbColumnName = "pr_sch", FieldType = "Int", Order = 20, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Признак ОС Fox (pr_sc7)", DbColumnName = "pr_sc7", FieldType = "Int", Order = 21, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с организациями Fox (sv_o)", DbColumnName = "sv_o", FieldType = "Bool", Order = 22, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Код формы отчета Fox (kodf_rb)", DbColumnName = "kodf_rb", FieldType = "Int", Order = 23, MetadataObjectId = metadataObjectId }
         };
     }
 
@@ -2524,11 +2556,33 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
+            Name = "Код ЭСФ НДС",
+            DbColumnName = "esf_vat_code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код ЭСФ НСП",
+            DbColumnName = "esf_sales_tax_code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
             Name = "Активен",
             DbColumnName = "is_active",
             FieldType = "Bool",
             IsRequired = true,
-            Order = 4,
+            Order = 6,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -2538,7 +2592,27 @@ public partial class MetadataService
             DbColumnName = "sort_order",
             FieldType = "Int",
             IsRequired = false,
-            Order = 5,
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "По умолчанию для НДС",
+            DbColumnName = "is_default_vat",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 8,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "По умолчанию для налога с продаж",
+            DbColumnName = "is_default_sales_tax",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         }
     };
@@ -2639,11 +2713,32 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
+            Name = "Код ЭСФ",
+            DbColumnName = "esf_code",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
             Name = "Активен",
             DbColumnName = "is_active",
             FieldType = "Bool",
             IsRequired = true,
-            Order = 4,
+            Order = 5,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "По умолчанию",
+            DbColumnName = "is_default",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 6,
             MetadataObjectId = metadataObjectId
         }
     };

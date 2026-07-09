@@ -55,6 +55,7 @@ public class AppDbContext : DbContext
     public DbSet<TaxJournalRecord> TaxJournalRecords { get; set; }
     public DbSet<LocalizationEntry> LocalizationEntries { get; set; }
     public DbSet<SystemConfiguration> SystemConfigurations { get; set; }
+    public DbSet<RegulatedReportTemplate> RegulatedReportTemplates { get; set; }
     public DbSet<UserAccessPermission> UserAccessPermissions { get; set; }
     public DbSet<MetadataModule> MetadataModules { get; set; }
     public DbSet<MetadataModuleItem> MetadataModuleItems { get; set; }
@@ -185,6 +186,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<FinancialReportLine>().HasIndex(line => new { line.ReportCode, line.LineCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLineAccount>().HasIndex(link => new { link.LineId, link.AccountCode }).IsUnique();
         modelBuilder.Entity<LocalizationEntry>().HasIndex(entry => new { entry.Culture, entry.Key }).IsUnique();
+        modelBuilder.Entity<RegulatedReportTemplate>().HasIndex(template => new { template.Code, template.Version }).IsUnique();
+        modelBuilder.Entity<RegulatedReportTemplate>().HasIndex(template => new { template.Code, template.IsActive });
     }
 
 
