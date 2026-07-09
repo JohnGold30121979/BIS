@@ -475,6 +475,23 @@ namespace BIS.ERP.Services
                     fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 25, true, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Налоговая группа", "tax_group", "Reference", 26, false, "Налоговые группы ОС"));
                     break;
+                case "Начисление амортизации":
+                    fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20));
+                    fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 21, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 22, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Дата окончания", "end_date", "DateTime", 23));
+                    break;
+                case "Списание амортизации":
+                    fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20, true));
+                    fields.Add(Field(Guid.Empty, "Дата окончания", "end_date", "DateTime", 21));
+                    break;
+                case "Смена затратного счета":
+                    fields.Add(Field(Guid.Empty, "Новый затратный счет", "new_expense_account", "Reference", 20, true, "План счетов"));
+                    break;
+                case "Консервация ОС":
+                case "Расконсервация ОС":
+                    fields.Add(Field(Guid.Empty, "Дата окончания", "end_date", "DateTime", 20));
+                    break;
                 default:
                     fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20));
                     fields.Add(Field(Guid.Empty, "Новый затратный счет", "new_expense_account", "Reference", 21, false, "План счетов"));

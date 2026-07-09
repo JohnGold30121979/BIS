@@ -86,6 +86,7 @@ namespace BIS.ERP.Services
                 await _context.AccountingPeriods.AddAsync(period);
             await _context.SaveChangesAsync();
 
+            await EnsureFixedAssetPeriodClosingAsync(startDate, endDate);
             var balances = await new BalanceService(_context).GetTurnoverBalanceAsync(startDate, endDate);
             var previous = await _context.AccountTurnoverSnapshots.Where(item => item.PeriodId == period.Id).ToListAsync();
             _context.AccountTurnoverSnapshots.RemoveRange(previous);
@@ -194,6 +195,259 @@ namespace BIS.ERP.Services
                     await _context.FinancialReportLines.AddAsync(line);
             }
             await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureFixedAssetPeriodClosingAsync(DateTime startDate, DateTime endDate)
+        {
+            var monthEnds = GetCoveredMonthEnds(startDate, endDate);
+            if (monthEnds.Count == 0)
+                return;
+
+            var metadataService = new MetadataService(_context);
+            var assetCatalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
+            var depreciationDocument = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Начисление амортизации");
+
+            if (assetCatalog == null || depreciationDocument == null)
+                return;
+
+            var assets = await metadataService.GetCatalogDataAsync(assetCatalog.Id);
+            var existingDocuments = await metadataService.GetCatalogDataAsync(depreciationDocument.Id);
+            var existingByNumber = existingDocuments
+                .Select(row => new
+                {
+                    Id = GetGuid(row, "Id"),
+                    Number = MetadataService.NormalizeLegacyDocumentNumber(GetString(row, "Номер", "doc_number")),
+                    IsPosted = GetBoolean(row, "Проведен", "Проведён", "is_posted")
+                })
+                .Where(item => item.Id != Guid.Empty && !string.IsNullOrWhiteSpace(item.Number))
+                .GroupBy(item => item.Number, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var asset in assets)
+            {
+                var assetId = GetGuid(asset, "Id");
+                if (assetId == Guid.Empty || !GetBoolean(asset, "Активен", "is_active"))
+                    continue;
+
+                var monthlyDepreciation = GetDecimal(asset, "Месячная амортизация", "monthly_depreciation");
+                if (monthlyDepreciation <= 0)
+                    continue;
+
+                var initialCost = GetDecimal(asset, "Первоначальная стоимость", "initial_cost");
+                var accumulatedDepreciation = GetDecimal(asset, "Накопленная амортизация", "accumulated_depreciation");
+                var carryingAmount = GetDecimal(asset, "Остаточная стоимость", "carrying_amount");
+                if ((initialCost > 0 && accumulatedDepreciation >= initialCost) ||
+                    (initialCost <= 0 && carryingAmount <= 0))
+                {
+                    continue;
+                }
+
+                var commissioningDate = GetDate(asset, "Дата ввода в эксплуатацию", "commissioning_date");
+                var acquisitionDate = GetDate(asset, "Дата приобретения", "acquisition_date");
+                var depreciationStart = GetDepreciationStartDate(commissioningDate ?? acquisitionDate);
+                if (!depreciationStart.HasValue)
+                    continue;
+
+                var conservationDate = GetDate(asset, "Дата консервации", "conservation_date");
+                var reopeningDate = GetDate(asset, "Дата расконсервации", "reopening_date");
+
+                foreach (var monthEnd in monthEnds)
+                {
+                    if (monthEnd.Date < depreciationStart.Value.Date)
+                        continue;
+
+                    if (conservationDate.HasValue &&
+                        conservationDate.Value.Date <= monthEnd.Date &&
+                        (!reopeningDate.HasValue || reopeningDate.Value.Date > monthEnd.Date))
+                    {
+                        continue;
+                    }
+
+                    var documentNumber = BuildFixedAssetDepreciationDocumentNumber(asset, monthEnd);
+                    if (existingByNumber.TryGetValue(documentNumber, out var existingDocument))
+                    {
+                        if (!existingDocument.IsPosted)
+                            await metadataService.PostDocumentAsync(depreciationDocument.Id, existingDocument.Id);
+                        continue;
+                    }
+
+                    var documentData = new Dictionary<string, object>
+                    {
+                        ["Номер"] = documentNumber,
+                        ["Дата"] = monthEnd,
+                        ["Основное средство"] = assetId,
+                        ["Сумма"] = monthlyDepreciation,
+                        ["Сумма амортизации"] = monthlyDepreciation,
+                        ["Счет дебета"] = GetFirstNonEmptyValue(asset, "Затратный счет", "expense_account"),
+                        ["Счет кредита"] = GetFirstNonEmptyValue(asset, "Счет амортизации", "depreciation_account"),
+                        ["Затратный счет"] = GetFirstNonEmptyValue(asset, "Затратный счет", "expense_account"),
+                        ["Счет амортизации"] = GetFirstNonEmptyValue(asset, "Счет амортизации", "depreciation_account"),
+                        ["Организация"] = GetFirstNonEmptyValue(asset, "Организация", "organization_id"),
+                        ["МОЛ"] = GetFirstNonEmptyValue(asset, "МОЛ", "responsible_person_id"),
+                        ["Участок"] = GetFirstNonEmptyValue(asset, "Участок", "site_id"),
+                        ["Основание"] = $"Закрытие месяца {monthEnd:MM.yyyy}",
+                        ["Примечание"] = $"Автоматическое начисление амортизации ОС за {monthEnd:MM.yyyy}"
+                    };
+
+                    var recordId = await metadataService.CreateDynamicRecordAsync(depreciationDocument.Id, documentData);
+                    await metadataService.PostDocumentAsync(depreciationDocument.Id, recordId);
+                    existingByNumber[documentNumber] = new
+                    {
+                        Id = recordId,
+                        Number = documentNumber,
+                        IsPosted = true
+                    };
+                }
+            }
+        }
+
+        private static List<DateTime> GetCoveredMonthEnds(DateTime startDate, DateTime endDate)
+        {
+            var start = startDate.Date;
+            var end = endDate.Date;
+            if (start.Day != 1)
+                return new List<DateTime>();
+
+            var expectedEndDay = DateTime.DaysInMonth(end.Year, end.Month);
+            if (end.Day != expectedEndDay)
+                return new List<DateTime>();
+
+            var result = new List<DateTime>();
+            var monthStart = new DateTime(start.Year, start.Month, 1);
+            while (monthStart <= end)
+            {
+                var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+                if (monthEnd >= start && monthEnd <= end)
+                    result.Add(monthEnd);
+                monthStart = monthStart.AddMonths(1);
+            }
+
+            return result;
+        }
+
+        private static DateTime? GetDepreciationStartDate(DateTime? lifecycleDate)
+        {
+            if (!lifecycleDate.HasValue)
+                return null;
+
+            var monthStart = new DateTime(lifecycleDate.Value.Year, lifecycleDate.Value.Month, 1);
+            return monthStart.AddMonths(1);
+        }
+
+        private static string BuildFixedAssetDepreciationDocumentNumber(Dictionary<string, object> asset, DateTime monthEnd)
+        {
+            var source = GetString(asset, "Инвентарный номер", "Код", "Наименование");
+            if (string.IsNullOrWhiteSpace(source))
+                source = GetGuid(asset, "Id").ToString("N")[..8];
+
+            var normalized = new string(source
+                .Where(ch => char.IsLetterOrDigit(ch))
+                .Take(12)
+                .ToArray());
+            if (string.IsNullOrWhiteSpace(normalized))
+                normalized = GetGuid(asset, "Id").ToString("N")[..8];
+
+            return $"DEP-{monthEnd:yyyyMM}-{normalized.ToUpperInvariant()}";
+        }
+
+        private static Guid GetGuid(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var raw) && raw != null && raw != DBNull.Value &&
+                    Guid.TryParse(raw.ToString(), out var value))
+                {
+                    return value;
+                }
+            }
+
+            return Guid.Empty;
+        }
+
+        private static string GetString(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var raw) && raw != null && raw != DBNull.Value)
+                    return raw.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static object? GetFirstNonEmptyValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var raw) &&
+                    raw != null &&
+                    raw != DBNull.Value &&
+                    !string.IsNullOrWhiteSpace(raw.ToString()))
+                {
+                    return raw;
+                }
+            }
+
+            return null;
+        }
+
+        private static decimal GetDecimal(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var raw) || raw == null || raw == DBNull.Value)
+                    continue;
+
+                if (raw is decimal value)
+                    return value;
+
+                if (decimal.TryParse(raw.ToString(), out value))
+                    return value;
+            }
+
+            return 0m;
+        }
+
+        private static DateTime? GetDate(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var raw) || raw == null || raw == DBNull.Value)
+                    continue;
+
+                if (raw is DateTime value)
+                    return value;
+
+                if (DateTime.TryParse(raw.ToString(), out value))
+                    return value;
+            }
+
+            return null;
+        }
+
+        private static bool GetBoolean(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var raw) || raw == null || raw == DBNull.Value)
+                    continue;
+
+                if (raw is bool value)
+                    return value;
+
+                if (bool.TryParse(raw.ToString(), out value))
+                    return value;
+
+                var text = raw.ToString();
+                if (string.Equals(text, "Да", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (string.Equals(text, "Нет", StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            return false;
         }
     }
 }
