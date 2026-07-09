@@ -1461,14 +1461,30 @@ END $$;");
 
         private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
         {
-            var initialCost = Convert.ToDecimal(data.GetValueOrDefault("InitialCost", 0));
-            var usefulLife = Convert.ToInt32(data.GetValueOrDefault("UsefulLife", 0));
-            var depreciationRate = Convert.ToDecimal(data.GetValueOrDefault("DepreciationRate", 0));
+            var initialCost = GetDecimalValue(data, "initial_cost", "InitialCost", "Первоначальная стоимость");
+            var usefulLife = GetIntValue(data, "useful_life_months", "UsefulLife", "useful_life", "Срок полезного использования, мес.");
+            var depreciationRate = GetDecimalValue(data, "depreciation_rate", "DepreciationRate", "Норма амортизации, %");
 
             if (usefulLife > 0)
                 return initialCost / usefulLife;
-            else if (depreciationRate > 0)
+            if (depreciationRate > 0)
                 return initialCost * depreciationRate / 100;
+
+            return 0;
+        }
+
+        private static int GetIntValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (data.TryGetValue(key, out var value) &&
+                    value != null &&
+                    value != DBNull.Value &&
+                    int.TryParse(value.ToString(), out var result))
+                {
+                    return result;
+                }
+            }
 
             return 0;
         }

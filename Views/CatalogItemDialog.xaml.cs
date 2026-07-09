@@ -147,6 +147,8 @@ namespace BIS.ERP.Views
                     item.Id = Guid.Parse(row["Id"].ToString());
 
                 item.DisplayName = GetDisplayValue(row, field, refCatalog.Name);
+                foreach (var key in GetReferenceLookupKeys(row, item.DisplayName))
+                    item.LookupKeys.Add(key);
                 items.Add(item);
             }
 
@@ -158,7 +160,7 @@ namespace BIS.ERP.Views
             {
                 var selectedItem = items.FirstOrDefault(i =>
                     string.Equals(i.Id.ToString(), existingValue, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(i.DisplayName, existingValue, StringComparison.OrdinalIgnoreCase));
+                    i.LookupKeys.Contains(NormalizeReferenceLookupKey(existingValue)));
                 if (selectedItem != null)
                     comboBox.SelectedItem = selectedItem;
             }
@@ -178,6 +180,37 @@ namespace BIS.ERP.Views
             // =======================================
 
             return comboBox;
+        }
+
+        private static IEnumerable<string> GetReferenceLookupKeys(
+            Dictionary<string, object> row,
+            string displayName)
+        {
+            foreach (var keyName in new[] { "Id", "Код", "code", "Code", "Счет", "account_code" })
+            {
+                if (!row.TryGetValue(keyName, out var value))
+                    continue;
+
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
+
+            var displayKey = NormalizeReferenceLookupKey(displayName);
+            if (!string.IsNullOrWhiteSpace(displayKey))
+                yield return displayKey;
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? normalized[..separatorIndex].Trim()
+                : normalized;
         }
 
         /// <summary>
@@ -552,5 +585,6 @@ namespace BIS.ERP.Views
     {
         public Guid Id { get; set; }
         public string DisplayName { get; set; } = string.Empty;
+        public HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

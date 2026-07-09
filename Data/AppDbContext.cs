@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users { get; set; }
     public DbSet<Transaction> Transactions { get; set; }
     public DbSet<Material> Materials { get; set; }
+    // Legacy compatibility table. The active fixed-assets module is metadata-driven via catalog_assets.
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<MetadataObject> MetadataObjects { get; set; }
     public DbSet<MetadataField> MetadataFields { get; set; }

@@ -467,7 +467,8 @@ public partial class MetadataService
         var fields = new List<MetadataField>();
 
         void Add(string name, string column, string type, int order, bool required = false,
-            string? referenceCatalog = null, int length = 0, int scale = 2)
+            string? referenceCatalog = null, int length = 0, int scale = 2,
+            bool unique = false, string? displayPattern = null, string? displayFields = null)
         {
             fields.Add(new MetadataField
             {
@@ -480,15 +481,24 @@ public partial class MetadataService
                 Length = length,
                 Precision = 18,
                 Scale = scale,
+                IsUnique = unique,
                 ReferenceCatalog = referenceCatalog,
+                DisplayPattern = displayPattern,
+                DisplayFields = displayFields,
                 MetadataObjectId = metadataObjectId
             });
         }
 
-        Add("Код", "code", "String", 1, true, length: 50);
-        Add("Инвентарный номер", "inventory_number", "String", 2, true, length: 50);
+        const string accountPattern = "{Код} - {Наименование}";
+        const string accountFields = "Код,Наименование";
+        const string catalogPattern = "{Код} - {Наименование}";
+        const string catalogFields = "Код,Наименование";
+
+        Add("Код", "code", "String", 1, true, length: 50, unique: true);
+        Add("Инвентарный номер", "inventory_number", "String", 2, true, length: 50, unique: true);
         Add("Наименование", "name", "String", 3, true, length: 300);
-        Add("Группа ОС", "asset_group", "String", 4, length: 100);
+        Add("Группа ОС", "asset_group", "Reference", 4, referenceCatalog: "Группы ОС",
+            displayPattern: catalogPattern, displayFields: catalogFields);
         Add("Дата приобретения", "acquisition_date", "DateTime", 5);
         Add("Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 6);
         Add("Первоначальная стоимость", "initial_cost", "Decimal", 7);
@@ -496,14 +506,17 @@ public partial class MetadataService
         Add("Остаточная стоимость", "carrying_amount", "Decimal", 9);
         Add("Срок полезного использования, мес.", "useful_life_months", "Int", 10);
         Add("Метод амортизации", "depreciation_method", "String", 11, length: 50);
-        Add("Счет учета", "asset_account", "String", 12, length: 50);
-        Add("Счет амортизации", "depreciation_account", "String", 13, length: 50);
-        Add("Организация", "organization_id", "Reference", 14, referenceCatalog: "Организации");
-        Add("МОЛ", "responsible_person_id", "Reference", 15, referenceCatalog: "МОЛ");
-        Add("Участок", "site_id", "Reference", 16, referenceCatalog: "Участки");
-        Add("Статус", "status", "String", 17, length: 50);
-        Add("Активен", "is_active", "Bool", 18, true);
-        Add("Описание", "description", "String", 19, length: 500);
+        Add("Норма амортизации, %", "depreciation_rate", "Decimal", 12);
+        Add("Счет учета", "asset_account", "Reference", 13, referenceCatalog: "План счетов",
+            displayPattern: accountPattern, displayFields: accountFields);
+        Add("Счет амортизации", "depreciation_account", "Reference", 14, referenceCatalog: "План счетов",
+            displayPattern: accountPattern, displayFields: accountFields);
+        Add("Организация", "organization_id", "Reference", 15, referenceCatalog: "Организации");
+        Add("МОЛ", "responsible_person_id", "Reference", 16, referenceCatalog: "МОЛ");
+        Add("Участок", "site_id", "Reference", 17, referenceCatalog: "Участки");
+        Add("Статус", "status", "String", 18, length: 50);
+        Add("Активен", "is_active", "Bool", 19, true);
+        Add("Описание", "description", "String", 20, length: 500);
         return fields;
     }
 

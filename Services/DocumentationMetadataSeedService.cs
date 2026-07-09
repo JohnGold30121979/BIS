@@ -19,6 +19,7 @@ namespace BIS.ERP.Services
         {
             await EnsureFixedAssetCatalogsAsync();
             await ExtendFixedAssetCardAsync();
+            await EnsureFixedAssetCanonicalModelAsync();
             await EnsureDocumentsAsync();
             await EnsureFixedAssetReportsAsync();
             await EnsureFinanceReportsAsync();
@@ -71,13 +72,13 @@ namespace BIS.ERP.Services
 
             var additions = new[]
             {
-                Field(asset.Id, "Подгруппа ОС", "asset_subgroup_id", "Reference", 20, false, "Подгруппы ОС"),
-                Field(asset.Id, "Вид ОС", "asset_type_id", "Reference", 21, false, "Виды ОС"),
-                Field(asset.Id, "Затратный счет", "expense_account", "String", 22),
-                Field(asset.Id, "Месячная амортизация", "monthly_depreciation", "Decimal", 23),
-                Field(asset.Id, "Налоговая группа", "tax_group", "String", 24),
-                Field(asset.Id, "Дата консервации", "conservation_date", "DateTime", 25),
-                Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 26)
+                Field(asset.Id, "Подгруппа ОС", "asset_subgroup_id", "Reference", 21, false, "Подгруппы ОС"),
+                Field(asset.Id, "Вид ОС", "asset_type_id", "Reference", 22, false, "Виды ОС"),
+                Field(asset.Id, "Затратный счет", "expense_account", "String", 23),
+                Field(asset.Id, "Месячная амортизация", "monthly_depreciation", "Decimal", 24),
+                Field(asset.Id, "Налоговая группа", "tax_group", "String", 25),
+                Field(asset.Id, "Дата консервации", "conservation_date", "DateTime", 26),
+                Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 27)
             };
             foreach (var field in additions.Where(candidate => asset.Fields.All(existing => existing.DbColumnName != candidate.DbColumnName)))
             {
@@ -89,6 +90,57 @@ namespace BIS.ERP.Services
                 await _context.Database.ExecuteSqlRawAsync(
                     $"ALTER TABLE \"{asset.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {sqlType};");
             }
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureFixedAssetCanonicalModelAsync()
+        {
+            var asset = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
+            if (asset == null)
+                return;
+
+            const string chartPattern = "{Код} - {Наименование}";
+            const string chartFields = "Код,Наименование";
+
+            await EnsureMetadataFieldAsync(asset,
+                Field(asset.Id, "Норма амортизации, %", "depreciation_rate", "Decimal", 12));
+
+            ConfigureField(asset, "code", type: "String", order: 1, required: true, unique: true, length: 50);
+            ConfigureField(asset, "inventory_number", type: "String", order: 2, required: true, unique: true, length: 50);
+            ConfigureField(asset, "name", type: "String", order: 3, required: true, length: 300);
+            ConfigureField(asset, "asset_group", type: "Reference", order: 4, reference: "Группы ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "acquisition_date", type: "DateTime", order: 5);
+            ConfigureField(asset, "commissioning_date", type: "DateTime", order: 6);
+            ConfigureField(asset, "initial_cost", type: "Decimal", order: 7);
+            ConfigureField(asset, "accumulated_depreciation", type: "Decimal", order: 8);
+            ConfigureField(asset, "carrying_amount", type: "Decimal", order: 9);
+            ConfigureField(asset, "useful_life_months", type: "Int", order: 10);
+            ConfigureField(asset, "depreciation_method", type: "String", order: 11, length: 50);
+            ConfigureField(asset, "depreciation_rate", type: "Decimal", order: 12);
+            ConfigureField(asset, "asset_account", type: "Reference", order: 13, reference: "План счетов",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "depreciation_account", type: "Reference", order: 14, reference: "План счетов",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "organization_id", type: "Reference", order: 15, reference: "Организации");
+            ConfigureField(asset, "responsible_person_id", type: "Reference", order: 16, reference: "МОЛ");
+            ConfigureField(asset, "site_id", type: "Reference", order: 17, reference: "Участки");
+            ConfigureField(asset, "status", type: "String", order: 18, length: 50);
+            ConfigureField(asset, "is_active", type: "Bool", order: 19, required: true);
+            ConfigureField(asset, "description", type: "String", order: 20, length: 500);
+            ConfigureField(asset, "asset_subgroup_id", type: "Reference", order: 21, reference: "Подгруппы ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "asset_type_id", type: "Reference", order: 22, reference: "Виды ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "expense_account", type: "Reference", order: 23, reference: "План счетов",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "monthly_depreciation", type: "Decimal", order: 24);
+            ConfigureField(asset, "tax_group", type: "String", order: 25, length: 100);
+            ConfigureField(asset, "conservation_date", type: "DateTime", order: 26);
+            ConfigureField(asset, "reopening_date", type: "DateTime", order: 27);
+
             await _context.SaveChangesAsync();
         }
 
@@ -316,6 +368,57 @@ namespace BIS.ERP.Services
             Name = name, DbColumnName = column, FieldType = type, Order = order,
             IsRequired = required, ReferenceCatalog = reference, MetadataObjectId = metadataObjectId,
             Length = type == "String" ? 500 : 0, Precision = 18, Scale = 2
+        };
+
+        private async Task EnsureMetadataFieldAsync(MetadataObject metadata, MetadataField field)
+        {
+            if (metadata.Fields.Any(existing =>
+                string.Equals(existing.DbColumnName, field.DbColumnName, StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            field.MetadataObjectId = metadata.Id;
+            metadata.Fields.Add(field);
+            await _context.MetadataFields.AddAsync(field);
+            await _context.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"{metadata.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {GetSqlType(field)};");
+        }
+
+        private static void ConfigureField(
+            MetadataObject metadata,
+            string columnName,
+            string type,
+            int order,
+            bool required = false,
+            bool unique = false,
+            int? length = null,
+            string? reference = null,
+            string? displayPattern = null,
+            string? displayFields = null)
+        {
+            var field = metadata.Fields.FirstOrDefault(existing =>
+                string.Equals(existing.DbColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+            if (field == null)
+                return;
+
+            field.FieldType = type;
+            field.Order = order;
+            field.IsRequired = required;
+            field.IsUnique = unique;
+            field.ReferenceCatalog = reference;
+            field.DisplayPattern = displayPattern;
+            field.DisplayFields = displayFields;
+
+            if (length.HasValue)
+                field.Length = length.Value;
+        }
+
+        private static string GetSqlType(MetadataField field) => field.FieldType switch
+        {
+            "Decimal" => "numeric(18,2)",
+            "Int" => "integer",
+            "DateTime" => "timestamp",
+            "Bool" => "boolean",
+            _ => "varchar(200)"
         };
 
         private static void Reorder(IList<MetadataField> fields)

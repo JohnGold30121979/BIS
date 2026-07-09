@@ -425,15 +425,17 @@ namespace BIS.ERP.Services
 
         public static object GetAccountValueForField(MetadataField field, AccountReferenceItem account)
         {
-            if (field.Name.Equals("Дебет", StringComparison.OrdinalIgnoreCase) ||
-                field.Name.Equals("Кредит", StringComparison.OrdinalIgnoreCase) ||
-                field.DbColumnName.Equals("debit_account", StringComparison.OrdinalIgnoreCase) ||
-                field.DbColumnName.Equals("credit_account", StringComparison.OrdinalIgnoreCase))
-            {
+            if (field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true)
                 return account.Code;
-            }
-            if (field.Name.Equals("Дебет", StringComparison.OrdinalIgnoreCase) ||
-                field.Name.Equals("Кредит", StringComparison.OrdinalIgnoreCase))
+
+            var normalizedName = NormalizeFieldName(field.Name);
+            var normalizedColumn = NormalizeFieldName(field.DbColumnName);
+            if (normalizedName is "дебет" or "кредит" or "счет дебета" or "счет кредита" or
+                "корр счет" or "коррсчет" or "счет кассы" or "счет учета" or
+                "счет амортизации" or "затратный счет" or "новый затратный счет" ||
+                normalizedColumn is "debit account" or "credit account" or "corr account" or
+                "correspondent account" or "cash account" or "asset account" or
+                "depreciation account" or "expense account" or "new expense account")
             {
                 return account.Code;
             }
