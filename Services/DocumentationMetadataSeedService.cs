@@ -18,6 +18,8 @@ namespace BIS.ERP.Services
         public async Task EnsureAsync()
         {
             await EnsureFixedAssetCatalogsAsync();
+            await EnsureFixedAssetSupportCatalogsAsync();
+            await SeedFixedAssetSupportCatalogDataAsync();
             await ExtendFixedAssetCardAsync();
             await EnsureFixedAssetCanonicalModelAsync();
             await EnsureDocumentsAsync();
@@ -59,8 +61,139 @@ namespace BIS.ERP.Services
                     ("Код", "code", "String", true, null),
                     ("Наименование", "name", "String", true, null),
                     ("Подгруппа ОС", "asset_subgroup_id", "Reference", false, "Подгруппы ОС"),
-                    ("Налоговая группа", "tax_group", "String", false, null),
+                    ("Налоговая группа", "tax_group", "Reference", false, "Налоговые группы ОС"),
                     ("Активен", "is_active", "Bool", true, null)));
+        }
+
+        private async Task EnsureFixedAssetSupportCatalogsAsync()
+        {
+            await EnsureObjectAsync("Методы амортизации ОС", "catalog_asset_depreciation_methods", "Catalog",
+                "Настройки методов начисления амортизации основных средств", "📐", CatalogFields(
+                    ("Код", "code", "String", true, null),
+                    ("Наименование", "name", "String", true, null),
+                    ("Тип расчета", "calculation_type", "String", true, null),
+                    ("По умолчанию", "is_default", "Bool", false, null),
+                    ("Активен", "is_active", "Bool", true, null),
+                    ("Описание", "description", "String", false, null)));
+
+            await EnsureObjectAsync("Статусы ОС", "catalog_asset_statuses", "Catalog",
+                "Жизненный цикл основных средств", "🚦", CatalogFields(
+                    ("Код", "code", "String", true, null),
+                    ("Наименование", "name", "String", true, null),
+                    ("Этап", "lifecycle_stage", "Int", false, null),
+                    ("По умолчанию", "is_default", "Bool", false, null),
+                    ("Активен", "is_active", "Bool", true, null),
+                    ("Описание", "description", "String", false, null)));
+
+            await EnsureObjectAsync("Налоговые группы ОС", "catalog_asset_tax_groups", "Catalog",
+                "Налоговые признаки основных средств", "🏷", CatalogFields(
+                    ("Код", "code", "String", true, null),
+                    ("Наименование", "name", "String", true, null),
+                    ("Активен", "is_active", "Bool", true, null),
+                    ("Описание", "description", "String", false, null)));
+
+            await EnsureObjectAsync("Параметры контура ОС", "catalog_asset_module_settings", "Catalog",
+                "Fox-совместимые параметры и переключатели контура ОС", "⚙", CatalogFields(
+                    ("Код", "code", "String", true, null),
+                    ("Наименование", "name", "String", true, null),
+                    ("Строковое значение", "string_value", "String", false, null),
+                    ("Счет", "account_value", "Reference", false, "План счетов"),
+                    ("Булево значение", "bool_value", "Bool", false, null),
+                    ("Источник Fox", "fox_source", "String", false, null),
+                    ("Описание", "description", "String", false, null),
+                    ("Активен", "is_active", "Bool", true, null)));
+        }
+
+        private async Task SeedFixedAssetSupportCatalogDataAsync()
+        {
+            await EnsureCatalogRowsAsync("Методы амортизации ОС", new[]
+            {
+                Row(
+                    ("Код", "LINEAR"),
+                    ("Наименование", "Линейный"),
+                    ("Тип расчета", "Depreciation"),
+                    ("По умолчанию", true),
+                    ("Активен", true),
+                    ("Описание", "Месячная сумма определяется по стоимости и сроку полезного использования.")),
+                Row(
+                    ("Код", "RATE"),
+                    ("Наименование", "По норме амортизации"),
+                    ("Тип расчета", "Depreciation"),
+                    ("По умолчанию", false),
+                    ("Активен", true),
+                    ("Описание", "Месячная сумма определяется по процентной норме амортизации."))
+            });
+
+            await EnsureCatalogRowsAsync("Статусы ОС", new[]
+            {
+                Row(
+                    ("Код", "RECEIVED"),
+                    ("Наименование", "Поступило"),
+                    ("Этап", 10),
+                    ("По умолчанию", false),
+                    ("Активен", true),
+                    ("Описание", "ОС поступило, но еще не введено в эксплуатацию.")),
+                Row(
+                    ("Код", "ACTIVE"),
+                    ("Наименование", "В эксплуатации"),
+                    ("Этап", 20),
+                    ("По умолчанию", true),
+                    ("Активен", true),
+                    ("Описание", "Основное средство введено в эксплуатацию.")),
+                Row(
+                    ("Код", "CONSERVATION"),
+                    ("Наименование", "На консервации"),
+                    ("Этап", 30),
+                    ("По умолчанию", false),
+                    ("Активен", true),
+                    ("Описание", "Основное средство временно не используется.")),
+                Row(
+                    ("Код", "DISPOSED"),
+                    ("Наименование", "Выбыло"),
+                    ("Этап", 40),
+                    ("По умолчанию", false),
+                    ("Активен", true),
+                    ("Описание", "Основное средство реализовано, ликвидировано или списано."))
+            });
+
+            await EnsureCatalogRowsAsync("Налоговые группы ОС", new[]
+            {
+                Row(
+                    ("Код", "GENERAL"),
+                    ("Наименование", "Общая группа"),
+                    ("Активен", true),
+                    ("Описание", "Базовая налоговая группа для учета ОС.")),
+                Row(
+                    ("Код", "EXEMPT"),
+                    ("Наименование", "Необлагаемая группа"),
+                    ("Активен", true),
+                    ("Описание", "Используется для ОС с льготным или необлагаемым режимом."))
+            });
+
+            await EnsureCatalogRowsAsync("Параметры контура ОС", new[]
+            {
+                Row(
+                    ("Код", "FORM_PR"),
+                    ("Наименование", "Форма печатного отчета"),
+                    ("Строковое значение", "prd1n"),
+                    ("Булево значение", false),
+                    ("Источник Fox", "f_osn.FORM_PR"),
+                    ("Описание", "Fox-параметр выбора печатной формы отчетности по ОС."),
+                    ("Активен", true)),
+                Row(
+                    ("Код", "PRIZ_RASHET"),
+                    ("Наименование", "Признак расчета"),
+                    ("Булево значение", false),
+                    ("Источник Fox", "f_osn.PRIZ_RASHET"),
+                    ("Описание", "Fox-переключатель режима расчета в контуре ОС."),
+                    ("Активен", true)),
+                Row(
+                    ("Код", "SCH_NALP"),
+                    ("Наименование", "Счет налогового платежа"),
+                    ("Источник Fox", "sp_nal.SCH_NALP / F_OSN3"),
+                    ("Описание", "Fox-параметр счета налогового платежа, используемый связанными отчетами."),
+                    ("Активен", true))
+            });
         }
 
         private async Task ExtendFixedAssetCardAsync()
@@ -76,7 +209,7 @@ namespace BIS.ERP.Services
                 Field(asset.Id, "Вид ОС", "asset_type_id", "Reference", 22, false, "Виды ОС"),
                 Field(asset.Id, "Затратный счет", "expense_account", "String", 23),
                 Field(asset.Id, "Месячная амортизация", "monthly_depreciation", "Decimal", 24),
-                Field(asset.Id, "Налоговая группа", "tax_group", "String", 25),
+                Field(asset.Id, "Налоговая группа", "tax_group", "Reference", 25, false, "Налоговые группы ОС"),
                 Field(asset.Id, "Дата консервации", "conservation_date", "DateTime", 26),
                 Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 27)
             };
@@ -118,7 +251,8 @@ namespace BIS.ERP.Services
             ConfigureField(asset, "accumulated_depreciation", type: "Decimal", order: 8);
             ConfigureField(asset, "carrying_amount", type: "Decimal", order: 9);
             ConfigureField(asset, "useful_life_months", type: "Int", order: 10);
-            ConfigureField(asset, "depreciation_method", type: "String", order: 11, length: 50);
+            ConfigureField(asset, "depreciation_method", type: "Reference", order: 11, reference: "Методы амортизации ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
             ConfigureField(asset, "depreciation_rate", type: "Decimal", order: 12);
             ConfigureField(asset, "asset_account", type: "Reference", order: 13, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
@@ -127,7 +261,8 @@ namespace BIS.ERP.Services
             ConfigureField(asset, "organization_id", type: "Reference", order: 15, reference: "Организации");
             ConfigureField(asset, "responsible_person_id", type: "Reference", order: 16, reference: "МОЛ");
             ConfigureField(asset, "site_id", type: "Reference", order: 17, reference: "Участки");
-            ConfigureField(asset, "status", type: "String", order: 18, length: 50);
+            ConfigureField(asset, "status", type: "Reference", order: 18, reference: "Статусы ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
             ConfigureField(asset, "is_active", type: "Bool", order: 19, required: true);
             ConfigureField(asset, "description", type: "String", order: 20, length: 500);
             ConfigureField(asset, "asset_subgroup_id", type: "Reference", order: 21, reference: "Подгруппы ОС",
@@ -137,10 +272,12 @@ namespace BIS.ERP.Services
             ConfigureField(asset, "expense_account", type: "Reference", order: 23, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
             ConfigureField(asset, "monthly_depreciation", type: "Decimal", order: 24);
-            ConfigureField(asset, "tax_group", type: "String", order: 25, length: 100);
+            ConfigureField(asset, "tax_group", type: "Reference", order: 25, reference: "Налоговые группы ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
             ConfigureField(asset, "conservation_date", type: "DateTime", order: 26);
             ConfigureField(asset, "reopening_date", type: "DateTime", order: 27);
 
+            await EnsureFixedAssetAutoCalculationsAsync(asset);
             await _context.SaveChangesAsync();
         }
 
@@ -148,7 +285,7 @@ namespace BIS.ERP.Services
         {
             foreach (var name in ModuleMetadataService.FixedAssetDocumentNames)
                 await EnsureObjectAsync(name, $"doc_asset_{Slug(name)}", "Document",
-                    $"Документ модуля основных средств: {name}", "🏗", FixedAssetDocumentFields());
+                    $"Документ модуля основных средств: {name}", "🏗", FixedAssetDocumentFields(name));
 
             foreach (var name in new[] { "Платежная ведомость", "Доверенность", "Авансовый отчет", "Расчет курсовой разницы" })
                 await EnsureObjectAsync(name, $"doc_fin_{Slug(name)}", "Document",
@@ -256,9 +393,9 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(item => item.ObjectType == objectType && item.Name == name);
             if (existing != null)
             {
+                await EnsureObjectFieldsAsync(existing, fields);
                 if (objectType == "Document")
                     await EnsureGenericPostingRuleAsync(existing);
-                await _metadataService.CreateDynamicTableAsync(existing);
                 return;
             }
 
@@ -307,15 +444,55 @@ namespace BIS.ERP.Services
         private static List<MetadataField> CatalogFields(params (string Name, string Column, string Type, bool Required, string? Reference)[] fields) =>
             fields.Select((item, index) => Field(Guid.Empty, item.Name, item.Column, item.Type, index + 1, item.Required, item.Reference)).ToList();
 
-        private static List<MetadataField> FixedAssetDocumentFields()
+        private static List<MetadataField> FixedAssetDocumentFields(string documentName)
         {
             var fields = StandardDocumentFields();
             fields.Insert(2, Field(Guid.Empty, "Основное средство", "asset_id", "Reference", 3, true, "Основные средства"));
-            fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20));
-            fields.Add(Field(Guid.Empty, "Новый затратный счет", "new_expense_account", "String", 21));
-            fields.Add(Field(Guid.Empty, "Дата окончания", "end_date", "DateTime", 22));
+
+            switch (documentName)
+            {
+                case "Покупка ОС":
+                    RequireDocumentPostingFields(fields);
+                    fields.Add(Field(Guid.Empty, "Дата приобретения", "acquisition_date", "DateTime", 20));
+                    fields.Add(Field(Guid.Empty, "Поставщик", "supplier_name", "String", 21));
+                    fields.Add(Field(Guid.Empty, "Группа ОС", "asset_group_id", "Reference", 22, false, "Группы ОС"));
+                    fields.Add(Field(Guid.Empty, "Подгруппа ОС", "asset_subgroup_id", "Reference", 23, false, "Подгруппы ОС"));
+                    fields.Add(Field(Guid.Empty, "Вид ОС", "asset_type_id", "Reference", 24, false, "Виды ОС"));
+                    fields.Add(Field(Guid.Empty, "Метод амортизации", "depreciation_method", "Reference", 25, false, "Методы амортизации ОС"));
+                    fields.Add(Field(Guid.Empty, "Срок полезного использования, мес.", "useful_life_months", "Int", 26));
+                    fields.Add(Field(Guid.Empty, "Норма амортизации, %", "depreciation_rate", "Decimal", 27));
+                    fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 28, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 29, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Налоговая группа", "tax_group", "Reference", 30, false, "Налоговые группы ОС"));
+                    break;
+                case "Ввод ОС в эксплуатацию":
+                    RequireDocumentPostingFields(fields);
+                    fields.Add(Field(Guid.Empty, "Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 20));
+                    fields.Add(Field(Guid.Empty, "Метод амортизации", "depreciation_method", "Reference", 21, false, "Методы амортизации ОС"));
+                    fields.Add(Field(Guid.Empty, "Срок полезного использования, мес.", "useful_life_months", "Int", 22));
+                    fields.Add(Field(Guid.Empty, "Норма амортизации, %", "depreciation_rate", "Decimal", 23));
+                    fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 24, true, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 25, true, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Налоговая группа", "tax_group", "Reference", 26, false, "Налоговые группы ОС"));
+                    break;
+                default:
+                    fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20));
+                    fields.Add(Field(Guid.Empty, "Новый затратный счет", "new_expense_account", "Reference", 21, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Дата окончания", "end_date", "DateTime", 22));
+                    break;
+            }
+
             Reorder(fields);
             return fields;
+        }
+
+        private static void RequireDocumentPostingFields(List<MetadataField> fields)
+        {
+            foreach (var field in fields.Where(field =>
+                         field.DbColumnName is "amount" or "debit_account" or "credit_account"))
+            {
+                field.IsRequired = true;
+            }
         }
 
         private static List<MetadataField> FinanceDocumentFields(string name)
@@ -383,6 +560,30 @@ namespace BIS.ERP.Services
                 $"ALTER TABLE \"{metadata.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {GetSqlType(field)};");
         }
 
+        private async Task EnsureObjectFieldsAsync(
+            MetadataObject metadata,
+            IReadOnlyCollection<MetadataField> fields)
+        {
+            foreach (var sourceField in fields.OrderBy(field => field.Order))
+            {
+                var existingField = metadata.Fields.FirstOrDefault(field =>
+                    string.Equals(field.DbColumnName, sourceField.DbColumnName, StringComparison.OrdinalIgnoreCase));
+                if (existingField == null)
+                {
+                    var newField = CloneField(metadata.Id, sourceField);
+                    metadata.Fields.Add(newField);
+                    await _context.MetadataFields.AddAsync(newField);
+                    await _context.Database.ExecuteSqlRawAsync(
+                        $"ALTER TABLE \"{metadata.TableName}\" ADD COLUMN IF NOT EXISTS \"{newField.DbColumnName}\" {GetSqlType(newField)};");
+                    continue;
+                }
+
+                ApplyFieldTemplate(existingField, sourceField);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         private static void ConfigureField(
             MetadataObject metadata,
             string columnName,
@@ -410,6 +611,93 @@ namespace BIS.ERP.Services
 
             if (length.HasValue)
                 field.Length = length.Value;
+        }
+
+        private async Task EnsureFixedAssetAutoCalculationsAsync(MetadataObject asset)
+        {
+            if (await _context.MetadataCalculations.AnyAsync(item =>
+                    item.MetadataObjectId == asset.Id &&
+                    item.TargetField == "monthly_depreciation"))
+            {
+                return;
+            }
+
+            await _context.MetadataCalculations.AddAsync(new MetadataCalculation
+            {
+                MetadataObjectId = asset.Id,
+                Name = "Авторасчет месячной амортизации",
+                TargetField = "monthly_depreciation",
+                CalculationType = "Depreciation",
+                IsAuto = true,
+                ExecutionOrder = 1
+            });
+        }
+
+        private async Task EnsureCatalogRowsAsync(string catalogName, IEnumerable<Dictionary<string, object>> rows)
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == catalogName);
+            if (catalog == null)
+                return;
+
+            var existingRows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            var existingCodes = existingRows
+                .Select(row => row.GetValueOrDefault("Код")?.ToString() ?? row.GetValueOrDefault("code")?.ToString())
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in rows)
+            {
+                var code = row.GetValueOrDefault("Код")?.ToString();
+                if (string.IsNullOrWhiteSpace(code) || existingCodes.Contains(code))
+                    continue;
+
+                await _metadataService.AddCatalogItemAsync(catalog.Id, row);
+                existingCodes.Add(code);
+            }
+        }
+
+        private static Dictionary<string, object> Row(params (string Key, object Value)[] values)
+        {
+            var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in values)
+                row[key] = value;
+            return row;
+        }
+
+        private static MetadataField CloneField(Guid metadataObjectId, MetadataField source) => new()
+        {
+            MetadataObjectId = metadataObjectId,
+            Name = source.Name,
+            DbColumnName = source.DbColumnName,
+            FieldType = source.FieldType,
+            Length = source.Length,
+            Precision = source.Precision,
+            Scale = source.Scale,
+            IsRequired = source.IsRequired,
+            IsUnique = source.IsUnique,
+            Order = source.Order,
+            ReferenceCatalog = source.ReferenceCatalog,
+            Formula = source.Formula,
+            DisplayPattern = source.DisplayPattern,
+            DisplayFields = source.DisplayFields
+        };
+
+        private static void ApplyFieldTemplate(MetadataField target, MetadataField source)
+        {
+            target.Name = source.Name;
+            target.FieldType = source.FieldType;
+            target.Length = source.Length;
+            target.Precision = source.Precision;
+            target.Scale = source.Scale;
+            target.IsRequired = source.IsRequired;
+            target.IsUnique = source.IsUnique;
+            target.Order = source.Order;
+            target.ReferenceCatalog = source.ReferenceCatalog;
+            target.Formula = source.Formula;
+            target.DisplayPattern = source.DisplayPattern;
+            target.DisplayFields = source.DisplayFields;
         }
 
         private static string GetSqlType(MetadataField field) => field.FieldType switch

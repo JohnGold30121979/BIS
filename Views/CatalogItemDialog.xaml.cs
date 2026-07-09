@@ -186,7 +186,11 @@ namespace BIS.ERP.Views
             Dictionary<string, object> row,
             string displayName)
         {
-            foreach (var keyName in new[] { "Id", "Код", "code", "Code", "Счет", "account_code" })
+            foreach (var keyName in new[]
+                     {
+                         "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Наименование", "name", "ФИО", "full_name"
+                     })
             {
                 if (!row.TryGetValue(keyName, out var value))
                     continue;
@@ -195,6 +199,9 @@ namespace BIS.ERP.Views
                 if (!string.IsNullOrWhiteSpace(normalized))
                     yield return normalized;
             }
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+                yield return displayName.Trim();
 
             var displayKey = NormalizeReferenceLookupKey(displayName);
             if (!string.IsNullOrWhiteSpace(displayKey))

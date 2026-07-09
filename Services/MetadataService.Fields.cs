@@ -505,7 +505,8 @@ public partial class MetadataService
         Add("Накопленная амортизация", "accumulated_depreciation", "Decimal", 8);
         Add("Остаточная стоимость", "carrying_amount", "Decimal", 9);
         Add("Срок полезного использования, мес.", "useful_life_months", "Int", 10);
-        Add("Метод амортизации", "depreciation_method", "String", 11, length: 50);
+        Add("Метод амортизации", "depreciation_method", "Reference", 11, referenceCatalog: "Методы амортизации ОС",
+            displayPattern: catalogPattern, displayFields: catalogFields);
         Add("Норма амортизации, %", "depreciation_rate", "Decimal", 12);
         Add("Счет учета", "asset_account", "Reference", 13, referenceCatalog: "План счетов",
             displayPattern: accountPattern, displayFields: accountFields);
@@ -514,7 +515,8 @@ public partial class MetadataService
         Add("Организация", "organization_id", "Reference", 15, referenceCatalog: "Организации");
         Add("МОЛ", "responsible_person_id", "Reference", 16, referenceCatalog: "МОЛ");
         Add("Участок", "site_id", "Reference", 17, referenceCatalog: "Участки");
-        Add("Статус", "status", "String", 18, length: 50);
+        Add("Статус", "status", "Reference", 18, referenceCatalog: "Статусы ОС",
+            displayPattern: catalogPattern, displayFields: catalogFields);
         Add("Активен", "is_active", "Bool", 19, true);
         Add("Описание", "description", "String", 20, length: 500);
         return fields;

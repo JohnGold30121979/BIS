@@ -2027,6 +2027,14 @@ END $$;");
                 {
                     await ProcessPaymentOrderAsync(document, recordData, recordId, amount);
                 }
+                else if (document.Name == "Покупка ОС")
+                {
+                    await ProcessFixedAssetPurchaseDocumentAsync(document, recordData, recordId, amount);
+                }
+                else if (document.Name == "Ввод ОС в эксплуатацию")
+                {
+                    await ProcessFixedAssetCommissioningDocumentAsync(document, recordData, recordId, amount);
+                }
                 else if (document.PostingRules.Any())
                 {
                     await ProcessDocumentByPostingRulesAsync(document, recordData, recordId, amount);
@@ -2110,7 +2118,8 @@ END $$;");
             MetadataObject document,
             Dictionary<string, object> recordData,
             Guid recordId,
-            decimal documentAmount)
+            decimal documentAmount,
+            bool updatePostedStatus = true)
         {
             var postingDate = recordData.GetValueOrDefault("doc_date") is DateTime documentDate
                 ? documentDate
@@ -2164,7 +2173,116 @@ END $$;");
                     new NpgsqlParameter("@description", description));
             }
 
+            if (updatePostedStatus)
+                await UpdateDocumentPostedStatus(document.TableName, recordId);
+        }
+
+        private async Task ProcessFixedAssetPurchaseDocumentAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            Guid recordId,
+            decimal amount)
+        {
+            await ProcessDocumentByPostingRulesAsync(document, recordData, recordId, amount, updatePostedStatus: false);
+            await SyncFixedAssetLifecycleFromDocumentAsync(
+                recordData,
+                amount,
+                statusCode: "RECEIVED",
+                lifecycleDateColumn: "acquisition_date",
+                fallbackDateColumn: "doc_date");
             await UpdateDocumentPostedStatus(document.TableName, recordId);
+        }
+
+        private async Task ProcessFixedAssetCommissioningDocumentAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            Guid recordId,
+            decimal amount)
+        {
+            await ProcessDocumentByPostingRulesAsync(document, recordData, recordId, amount, updatePostedStatus: false);
+            await SyncFixedAssetLifecycleFromDocumentAsync(
+                recordData,
+                amount,
+                statusCode: "ACTIVE",
+                lifecycleDateColumn: "commissioning_date",
+                fallbackDateColumn: "doc_date");
+            await UpdateDocumentPostedStatus(document.TableName, recordId);
+        }
+
+        private async Task SyncFixedAssetLifecycleFromDocumentAsync(
+            Dictionary<string, object> recordData,
+            decimal amount,
+            string statusCode,
+            string lifecycleDateColumn,
+            string fallbackDateColumn)
+        {
+            if (!TryGetGuid(recordData, out var assetId, "asset_id", "Основное средство"))
+                throw new InvalidOperationException("Для документа ОС необходимо выбрать основное средство.");
+
+            var assetMetadata = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства")
+                ?? throw new InvalidOperationException("Справочник 'Основные средства' не найден.");
+
+            var assetRecord = await GetRecordDataAsync(assetMetadata.TableName, assetId);
+            if (assetRecord.Count == 0)
+                throw new InvalidOperationException("Выбранное основное средство не найдено в карточке ОС.");
+
+            var initialCost = GetDecimalValue(recordData, "amount", "Сумма");
+            if (initialCost <= 0)
+                initialCost = amount;
+            if (initialCost <= 0)
+                initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
+
+            var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
+            if (initialCost > 0)
+            {
+                await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "initial_cost", initialCost);
+                await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "carrying_amount",
+                    Math.Max(0m, initialCost - accumulatedDepreciation));
+            }
+
+            var lifecycleDate = GetDateValue(recordData, lifecycleDateColumn, fallbackDateColumn, "Дата", "doc_date");
+            if (lifecycleDate.HasValue)
+                await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, lifecycleDateColumn, lifecycleDate.Value);
+
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "organization_id", "organization_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "responsible_person_id", "responsible_person_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "site_id", "site_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "asset_group", "asset_group_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "asset_subgroup_id", "asset_subgroup_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "asset_type_id", "asset_type_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_method", "depreciation_method");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "useful_life_months", "useful_life_months");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_rate", "depreciation_rate");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "asset_account", "debit_account");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_account", "depreciation_account");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "expense_account", "expense_account");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "tax_group", "tax_group");
+
+            var statusValue = await GetReferenceCodeOrIdValueAsync("Статусы ОС", statusCode);
+            if (!string.IsNullOrWhiteSpace(statusValue))
+                await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "status", statusValue);
+
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "is_active", true);
+            await ExecuteAutoCalculationsAsync(assetMetadata.Id, assetId);
+        }
+
+        private async Task UpdateAssetFieldFromDocumentAsync(
+            MetadataObject assetMetadata,
+            Guid assetId,
+            Dictionary<string, object> recordData,
+            string assetColumn,
+            string documentColumn)
+        {
+            if (!recordData.TryGetValue(documentColumn, out var value) || value == null || value == DBNull.Value)
+                return;
+
+            var stringValue = value.ToString();
+            if (string.IsNullOrWhiteSpace(stringValue))
+                return;
+
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, assetColumn, value);
         }
 
         private async Task ProcessCashOrderAsync(MetadataObject document, Dictionary<string, object> recordData, Guid recordId, decimal amount)
@@ -2676,6 +2794,70 @@ END $$;");
             }
 
             return true;
+        }
+
+        private static DateTime? GetDateValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var raw) || raw == null || raw == DBNull.Value)
+                    continue;
+
+                if (raw is DateTime dateTime)
+                    return dateTime;
+
+                if (DateTime.TryParse(raw.ToString(), out var parsedDate))
+                    return parsedDate;
+            }
+
+            return null;
+        }
+
+        private async Task<string> GetReferenceCodeOrIdValueAsync(string catalogName, string code)
+        {
+            if (string.IsNullOrWhiteSpace(code))
+                return string.Empty;
+
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == catalogName);
+            if (catalog == null)
+                return code;
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = $@"
+                SELECT ""Id""
+                FROM ""{catalog.TableName}""
+                WHERE UPPER(COALESCE(""code"", '')) = UPPER(@code)
+                ORDER BY ""CreatedAt""
+                LIMIT 1;";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@code";
+            parameter.Value = code;
+            command.Parameters.Add(parameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                var result = await command.ExecuteScalarAsync();
+                if (result is Guid id)
+                    return id.ToString();
+                if (Guid.TryParse(result?.ToString(), out id))
+                    return id.ToString();
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            return code;
         }
 
         private static bool TryGetGuid(Dictionary<string, object> data, out Guid value, params string[] keys)
