@@ -3714,6 +3714,10 @@ END $$;");
             }
 
             var normalizedNumber = documentNumber.Trim();
+            if (normalizedNumber.Any(char.IsLetter))
+            {
+                return normalizedNumber;
+            }
 
             var digitsOnly = new string(normalizedNumber.Where(char.IsDigit).ToArray());
             return string.IsNullOrEmpty(digitsOnly) ? normalizedNumber : digitsOnly;

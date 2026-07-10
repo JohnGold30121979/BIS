@@ -120,6 +120,8 @@ namespace BIS.ERP.Views.Dialogs
                     NumberBox.Text = invoice.DocNumber;
                     DatePicker.SelectedDate = invoice.DocDate;
                     EsfNumberBox.Text = invoice.EsfNumber;
+                    TaxBlankNumberBox.Text = invoice.TaxBlankNumber;
+                    ModuleCodeBox.Text = invoice.ModuleCode;
                     SetHeaderAccount(invoice.CounterpartyAccountCode);
                     BasisBox.Text = invoice.Basis;
                     SelectStoredComboValue(PaymentKindCombo, invoice.PaymentKind);
@@ -194,6 +196,8 @@ namespace BIS.ERP.Views.Dialogs
             NumberBox.IsReadOnly = true;
             DatePicker.IsEnabled = false;
             EsfNumberBox.IsReadOnly = true;
+            TaxBlankNumberBox.IsReadOnly = true;
+            ModuleCodeBox.IsReadOnly = true;
             BasisBox.IsReadOnly = true;
             OrganizationCombo.IsEnabled = false;
             PaymentKindCombo.IsEnabled = false;
@@ -759,6 +763,8 @@ namespace BIS.ERP.Views.Dialogs
                 DocNumber = MetadataService.NormalizeLegacyDocumentNumber(NumberBox.Text),
                 DocDate = DatePicker.SelectedDate ?? DateTime.Today,
                 EsfNumber = EsfNumberBox.Text.Trim(),
+                TaxBlankNumber = TaxBlankNumberBox.Text.Trim(),
+                ModuleCode = ModuleCodeBox.Text.Trim(),
                 OrganizationId = organizationId,
                 CounterpartyAccountCode = string.IsNullOrWhiteSpace(_selectedHeaderAccountCode)
                     ? AccountBox.Text.Trim()

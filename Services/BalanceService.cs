@@ -255,16 +255,27 @@ namespace BIS.ERP.Services
             DateTime startDate,
             DateTime endDate)
         {
+            await new RuntimeSchemaFixService(_context).EnsureAsync();
             var metadataService = new MetadataService(_context);
             var documents = await metadataService.GetDocumentsAsync();
             var result = new List<PurchaseSaleJournalEntry>();
 
+            var salesInvoiceDocument = documents.FirstOrDefault(document =>
+                document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase));
+            if (salesInvoiceDocument != null)
+                await AppendInvoiceJournalEntriesAsync(result, salesInvoiceDocument, startDate, endDate, "Продажи");
+
+            var purchaseInvoiceDocument = documents.FirstOrDefault(document =>
+                document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase));
+            if (purchaseInvoiceDocument != null)
+                await AppendInvoiceJournalEntriesAsync(result, purchaseInvoiceDocument, startDate, endDate, "Закупки");
+
             foreach (var document in documents.Where(document =>
                          document.Name.Equals("Приход товаров", StringComparison.OrdinalIgnoreCase) ||
                          document.Name.Equals("Расход товаров", StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase)))
+                         (document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase) &&
+                          !document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) &&
+                          !document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase))))
             {
                 var rows = await metadataService.GetCatalogDataAsync(document.Id);
                 var maps = await ReferenceDisplayHelper.LoadMapsAsync(document, metadataService);
@@ -281,7 +292,8 @@ namespace BIS.ERP.Services
                                   document.Name.Contains("Расход", StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("реализа", StringComparison.OrdinalIgnoreCase);
                     var amount = GetDecimal(row, "Сумма", "Сумма в сом");
-                    var taxAmount = GetDecimal(row, "Сумма НДС", "vat_amount");
+                    var vatAmount = GetDecimal(row, "Сумма НДС", "vat_amount");
+                    var salesTaxAmount = GetDecimal(row, "Сумма налога с продаж", "sales_tax_amount");
                     result.Add(new PurchaseSaleJournalEntry
                     {
                         Section = isPurchase ? "Закупки" : isSales ? "Продажи" : "Продажи",
@@ -290,8 +302,10 @@ namespace BIS.ERP.Services
                         DocumentType = document.Name,
                         Organization = GetString(row, "Организация"),
                         Amount = amount,
-                        AmountWithoutTax = amount - taxAmount,
-                        TaxAmount = taxAmount,
+                        AmountWithoutTax = amount - vatAmount - salesTaxAmount,
+                        TaxAmount = vatAmount,
+                        VatAmount = vatAmount,
+                        SalesTaxAmount = salesTaxAmount,
                         TaxType = GetString(row, "Ставка НДС", "vat_rate"),
                         IsPosted = GetBoolean(row, "Проведён", "Проведен", "is_posted"),
                         Note = GetString(row, "Примечание", "Описание")
@@ -300,6 +314,77 @@ namespace BIS.ERP.Services
             }
 
             return result.OrderBy(entry => entry.Date).ThenBy(entry => entry.DocumentNumber).ToList();
+        }
+
+        private async Task AppendInvoiceJournalEntriesAsync(
+            ICollection<PurchaseSaleJournalEntry> result,
+            MetadataObject document,
+            DateTime startDate,
+            DateTime endDate,
+            string section)
+        {
+            var invoiceService = new InvoiceService(_context);
+            invoiceService.Configure(document);
+            await invoiceService.EnsureSchemaAsync();
+
+            var invoices = await invoiceService.GetInvoicesAsync();
+            foreach (var invoiceRow in invoices.Where(item =>
+                         item.DocDate.Date >= startDate.Date &&
+                         item.DocDate.Date <= endDate.Date))
+            {
+                var invoice = await invoiceService.GetInvoiceAsync(invoiceRow.Id);
+                if (invoice == null)
+                    continue;
+
+                if (invoice.Lines.Count == 0)
+                {
+                    result.Add(new PurchaseSaleJournalEntry
+                    {
+                        Section = section,
+                        Date = invoice.DocDate,
+                        DocumentNumber = invoice.DocNumber,
+                        DocumentType = document.Name,
+                        Organization = invoice.OrganizationName,
+                        ModuleCode = invoice.ModuleCode,
+                        TaxBlankNumber = invoice.TaxBlankNumber,
+                        EsfNumber = invoice.EsfNumber,
+                        Amount = invoice.TotalAmount,
+                        AmountWithoutTax = invoice.AmountWithoutTax,
+                        TaxAmount = invoice.VatTotal,
+                        VatAmount = invoice.VatTotal,
+                        SalesTaxAmount = invoice.SalesTaxTotal,
+                        TaxType = ResolveInvoiceTaxType(invoice),
+                        IsPosted = invoice.IsPosted,
+                        Note = invoice.Basis
+                    });
+                    continue;
+                }
+
+                foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
+                {
+                    result.Add(new PurchaseSaleJournalEntry
+                    {
+                        Section = section,
+                        Date = invoice.DocDate,
+                        DocumentNumber = invoice.DocNumber,
+                        DocumentType = document.Name,
+                        Organization = invoice.OrganizationName,
+                        ModuleCode = invoice.ModuleCode,
+                        TaxBlankNumber = invoice.TaxBlankNumber,
+                        EsfNumber = invoice.EsfNumber,
+                        Amount = line.LineTotal,
+                        AmountWithoutTax = line.AmountWithoutTax,
+                        TaxAmount = line.VatAmount,
+                        VatAmount = line.VatAmount,
+                        SalesTaxAmount = line.SalesTaxAmount,
+                        TaxType = ResolveLineTaxType(line),
+                        VatTaxCode = line.VatTaxCode,
+                        SalesTaxCode = line.SalesTaxCode,
+                        IsPosted = invoice.IsPosted,
+                        Note = BuildInvoiceJournalNote(invoice, line)
+                    });
+                }
+            }
         }
 
         public async Task<PeriodCollectionResult> CollectPeriodInformationAsync(
@@ -497,6 +582,35 @@ namespace BIS.ERP.Services
         {
             return names.Select(name => row.GetValueOrDefault(name)?.ToString())
                 .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+        }
+
+        private static string ResolveInvoiceTaxType(InvoiceDocument invoice)
+        {
+            var firstLine = invoice.Lines.FirstOrDefault();
+            return firstLine == null ? string.Empty : ResolveLineTaxType(firstLine);
+        }
+
+        private static string ResolveLineTaxType(InvoiceLineRow line)
+        {
+            if (line.VatRate > 0)
+                return $"{line.VatRate:0.##}%";
+            if (!string.IsNullOrWhiteSpace(line.VatTaxCode))
+                return line.VatTaxCode;
+            if (line.SalesTaxRate > 0)
+                return $"НП {line.SalesTaxRate:0.##}%";
+            if (!string.IsNullOrWhiteSpace(line.SalesTaxCode))
+                return line.SalesTaxCode;
+            return string.Empty;
+        }
+
+        private static string BuildInvoiceJournalNote(InvoiceDocument invoice, InvoiceLineRow line)
+        {
+            if (string.IsNullOrWhiteSpace(invoice.Basis))
+                return line.Name;
+
+            return string.IsNullOrWhiteSpace(line.Name)
+                ? invoice.Basis
+                : $"{invoice.Basis}; {line.Name}";
         }
 
         private static decimal GetDecimal(Dictionary<string, object> row, params string[] names)

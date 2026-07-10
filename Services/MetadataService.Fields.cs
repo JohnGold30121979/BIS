@@ -2625,6 +2625,39 @@ public partial class MetadataService
             IsRequired = false,
             Order = 9,
             MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Счет НДС к оплате",
+            DbColumnName = "vat_payable_account",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 10,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Счет НДС к возмещению",
+            DbColumnName = "vat_recoverable_account",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 11,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Счет налога с продаж",
+            DbColumnName = "sales_tax_account",
+            FieldType = "String",
+            Length = 50,
+            IsRequired = false,
+            Order = 12,
+            MetadataObjectId = metadataObjectId
         }
     };
     }

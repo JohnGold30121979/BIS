@@ -419,8 +419,12 @@ namespace BIS.ERP.Views
             table.Columns.Add("Номер", typeof(string));
             table.Columns.Add("Документ", typeof(string));
             table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Модуль", typeof(string));
+            table.Columns.Add("Бланк", typeof(string));
             table.Columns.Add("Ставка налога", typeof(string));
             table.Columns.Add("Сумма без налога", typeof(decimal));
+            table.Columns.Add("НДС", typeof(decimal));
+            table.Columns.Add("Налог с продаж", typeof(decimal));
             table.Columns.Add("Налог", typeof(decimal));
             table.Columns.Add("Всего", typeof(decimal));
             table.Columns.Add("Проведен", typeof(string));
@@ -430,14 +434,15 @@ namespace BIS.ERP.Views
             {
                 foreach (var entry in savedEntries)
                     table.Rows.Add(LocalizationService.DisplayValue(entry.JournalType), entry.Date,
-                        entry.DocumentNumber, entry.DocumentType, entry.Organization, entry.TaxType,
-                        entry.AmountWithoutTax, entry.TaxAmount, entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
+                        entry.DocumentNumber, entry.DocumentType, entry.Organization, string.Empty, string.Empty, entry.TaxType,
+                        entry.AmountWithoutTax, 0m, 0m, entry.TaxAmount, entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
             }
             else
             {
                 foreach (var entry in entries)
                     table.Rows.Add(entry.Section, entry.Date, entry.DocumentNumber, entry.DocumentType,
-                        entry.Organization, entry.TaxType, entry.AmountWithoutTax, entry.TaxAmount, entry.Amount,
+                        entry.Organization, entry.ModuleCode, entry.TaxBlankNumber, entry.TaxType, entry.AmountWithoutTax,
+                        entry.VatAmount, entry.SalesTaxAmount, entry.VatAmount + entry.SalesTaxAmount, entry.Amount,
                         LocalizationService.DisplayValue(entry.IsPosted), entry.Note);
             }
 

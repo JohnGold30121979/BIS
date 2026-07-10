@@ -642,14 +642,14 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             var taxes = new[]
             {
-        new { code = "НДС12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
-        new { code = "НДС0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
-        new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_TRADE", name = "Налог с продаж: торговая деятельность", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 6, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_EXEMPT", name = "Налог с продаж: необлагаемая деятельность", rate = 0m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 7, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_RETAIL_2009", name = "Налог с продаж: розничная продажа до 2009", rate = 4m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 8, is_default_vat = false, is_default_sales_tax = false }
+        new { code = "НДС12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
+        new { code = "НДС0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "34900000", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
+        new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_TRADE", name = "Налог с продаж: торговая деятельность", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 6, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_EXEMPT", name = "Налог с продаж: необлагаемая деятельность", rate = 0m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 7, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_RETAIL_2009", name = "Налог с продаж: розничная продажа до 2009", rate = 4m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 8, is_default_vat = false, is_default_sales_tax = false }
         };
 
             foreach (var tax in taxes)
@@ -663,6 +663,9 @@ namespace BIS.ERP.Services
                         ["rate"] = tax.rate,
                         ["esf_vat_code"] = tax.esf_vat_code,
                         ["esf_sales_tax_code"] = tax.esf_sales_tax_code,
+                        ["vat_payable_account"] = tax.vat_payable_account,
+                        ["vat_recoverable_account"] = tax.vat_recoverable_account,
+                        ["sales_tax_account"] = tax.sales_tax_account,
                         ["is_active"] = tax.is_active,
                         ["sort_order"] = tax.sort_order,
                         ["is_default_vat"] = tax.is_default_vat,

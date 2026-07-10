@@ -15,9 +15,9 @@ namespace BIS.ERP.Services
         private const string DefaultPurchaseLineAccount = "16100000";
         private const string DefaultSalesAccount = "14100000";
         private const string DefaultSalesRevenueAccount = "61100000";
-        private const string VatPayableAccount = "34300000";
-        private const string VatRecoverableAccount = "24000000";
-        private const string SalesTaxAccount = "34900000";
+        private const string DefaultVatPayableAccount = "34300000";
+        private const string DefaultVatRecoverableAccount = "15400000";
+        private const string DefaultSalesTaxAccount = "34900000";
 
         private readonly AppDbContext _context;
         private readonly MetadataService _metadataService;
@@ -689,6 +689,7 @@ namespace BIS.ERP.Services
             var counterpartyAccount = string.IsNullOrWhiteSpace(invoice.CounterpartyAccountCode)
                 ? InvoiceDocumentTypes.IsSales(DocumentName) ? DefaultSalesAccount : DefaultPurchaseAccount
                 : invoice.CounterpartyAccountCode.Trim();
+            var taxPostingEntries = await LoadTaxPostingEntriesAsync();
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -702,6 +703,7 @@ namespace BIS.ERP.Services
                         : line.AccountCode.Trim();
                     lineAccount = NormalizeLineAccountForPosting(counterpartyAccount, lineAccount);
                     var lineDescription = BuildLineDescription(invoice, line);
+                    var taxPosting = ResolveTaxPostingEntry(line, taxPostingEntries);
 
                     if (line.AmountWithoutTax > 0)
                     {
@@ -714,15 +716,15 @@ namespace BIS.ERP.Services
                     if (line.VatAmount > 0)
                     {
                         if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, VatPayableAccount, line.VatAmount, $"НДС: {lineDescription}");
+                            await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.VatPayableAccount, line.VatAmount, $"НДС: {lineDescription}");
                         else
-                            await CreatePostingAsync(invoice, VatRecoverableAccount, counterpartyAccount, line.VatAmount, $"НДС: {lineDescription}");
+                            await CreatePostingAsync(invoice, taxPosting.VatRecoverableAccount, counterpartyAccount, line.VatAmount, $"НДС: {lineDescription}");
                     }
 
                     if (line.SalesTaxAmount > 0)
                     {
                         if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, SalesTaxAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
+                            await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.SalesTaxAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
                         else
                             await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
                     }
@@ -908,6 +910,59 @@ namespace BIS.ERP.Services
             return result;
         }
 
+        private async Task<Dictionary<string, TaxPostingCatalogEntry>> LoadTaxPostingEntriesAsync()
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Налоги");
+            if (catalog == null)
+                return new Dictionary<string, TaxPostingCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            var result = new Dictionary<string, TaxPostingCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+            {
+                if (!IsActiveRow(row))
+                    continue;
+
+                var code = GetRowValue(row, "Код", "code");
+                if (string.IsNullOrWhiteSpace(code))
+                    continue;
+
+                result[code] = new TaxPostingCatalogEntry(
+                    code,
+                    GetRowValue(row, "Счет НДС к оплате", "vat_payable_account"),
+                    GetRowValue(row, "Счет НДС к возмещению", "vat_recoverable_account"),
+                    GetRowValue(row, "Счет налога с продаж", "sales_tax_account"));
+            }
+
+            return result;
+        }
+
+        private static TaxPostingCatalogEntry ResolveTaxPostingEntry(
+            InvoiceLineRow line,
+            IReadOnlyDictionary<string, TaxPostingCatalogEntry> entries)
+        {
+            TaxPostingCatalogEntry? vatEntry = null;
+            if (!string.IsNullOrWhiteSpace(line.VatTaxCode) &&
+                entries.TryGetValue(line.VatTaxCode.Trim(), out var loadedVatEntry))
+            {
+                vatEntry = loadedVatEntry;
+            }
+
+            TaxPostingCatalogEntry? salesTaxEntry = null;
+            if (!string.IsNullOrWhiteSpace(line.SalesTaxCode) &&
+                entries.TryGetValue(line.SalesTaxCode.Trim(), out var loadedSalesTaxEntry))
+            {
+                salesTaxEntry = loadedSalesTaxEntry;
+            }
+
+            return new TaxPostingCatalogEntry(
+                vatEntry?.Code ?? salesTaxEntry?.Code ?? string.Empty,
+                NormalizeAccountOrDefault(vatEntry?.VatPayableAccount, DefaultVatPayableAccount),
+                NormalizeAccountOrDefault(vatEntry?.VatRecoverableAccount, DefaultVatRecoverableAccount),
+                NormalizeAccountOrDefault(salesTaxEntry?.SalesTaxAccount, DefaultSalesTaxAccount));
+        }
+
         private static string ResolveAccount(string? code, IReadOnlyDictionary<string, string> map)
         {
             if (string.IsNullOrWhiteSpace(code))
@@ -915,10 +970,44 @@ namespace BIS.ERP.Services
             return map.TryGetValue(code, out var display) ? display : code;
         }
 
+        private static string GetRowValue(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var pair = row.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                var value = pair.Value?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsActiveRow(Dictionary<string, object> row)
+        {
+            var value = GetRowValue(row, "Активен", "is_active");
+            return string.IsNullOrWhiteSpace(value) ||
+                   value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                   value.Equals("да", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizeAccountOrDefault(string? value, string fallback)
+        {
+            var normalized = value?.Trim();
+            return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
+        }
+
         private static object DbValueOrNull(string? value)
         {
             var normalized = value?.Trim();
             return string.IsNullOrWhiteSpace(normalized) ? DBNull.Value : normalized;
         }
+
+        private sealed record TaxPostingCatalogEntry(
+            string Code,
+            string VatPayableAccount,
+            string VatRecoverableAccount,
+            string SalesTaxAccount);
     }
 }

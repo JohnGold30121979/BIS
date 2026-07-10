@@ -363,7 +363,7 @@ namespace BIS.ERP.Services
                 Organization = entry.Organization,
                 TaxType = entry.TaxType,
                 AmountWithoutTax = entry.AmountWithoutTax,
-                TaxAmount = entry.TaxAmount,
+                TaxAmount = entry.VatAmount + entry.SalesTaxAmount,
                 TotalAmount = entry.Amount
             }));
         }

@@ -63,11 +63,11 @@ namespace BIS.ERP.Views
 
             TitleText.Text = $"{_documentMetadata.Icon} Регистрация счет-фактур по НДС";
             DescriptionText.Text =
-                "Реестр зарегистрированных счетов-фактур: просмотр документов и присвоение серии/номера налогового бланка.";
+                "Реестр зарегистрированных счетов-фактур: полный просмотр и редактирование документа, включая номер бланка и модуль.";
             AddButton.Content = "➕ Добавить счет-фактуру";
             AddButton.Width = 165;
-            EditButton.Content = "🧾 Номер бланка";
-            EditButton.Width = 135;
+            EditButton.Content = "✏ Изменить";
+            EditButton.Width = 120;
 
             TaxBlankColumn.Visibility = Visibility.Visible;
             ModuleColumn.Visibility = Visibility.Visible;
@@ -156,19 +156,6 @@ namespace BIS.ERP.Views
         {
             if (_invoiceService == null)
                 return;
-
-            if (_isRegistrationMode)
-            {
-                var registrationDialog = new InvoiceRegistrationDialog(
-                    _documentMetadata,
-                    _invoiceService,
-                    invoiceId,
-                    isReadOnly);
-                registrationDialog.Owner = Window.GetWindow(this);
-                if (registrationDialog.ShowDialog() == true && !isReadOnly)
-                    await LoadDataAsync();
-                return;
-            }
 
             var dialog = new InvoiceEditDialog(_documentMetadata, _metadataService, _invoiceService, invoiceId, isReadOnly);
             dialog.Owner = Window.GetWindow(this);
