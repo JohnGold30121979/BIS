@@ -280,6 +280,17 @@ namespace BIS.ERP.Services
                 throw new InvalidOperationException($"Период, содержащий дату {date:dd.MM.yyyy}, закрыт. Изменение документов запрещено.");
         }
 
+        public async Task EnsureOpeningBalanceCanBeModifiedAsync(DateTime balanceDate)
+        {
+            await EnsureSchemaAsync();
+            var utcDate = DateTime.SpecifyKind(balanceDate.Date, DateTimeKind.Utc);
+            var locked = await _context.AccountingPeriods.AsNoTracking().AnyAsync(period =>
+                period.IsLocked && utcDate >= period.StartDate && utcDate <= period.EndDate);
+            if (locked)
+                throw new InvalidOperationException(
+                    $"Период, содержащий дату входящего остатка {balanceDate:dd.MM.yyyy}, закрыт. Изменение остатков запрещено.");
+        }
+
         private async Task EnsurePeriodModuleStatesAsync(Guid periodId)
         {
             var modules = await _context.MetadataModules

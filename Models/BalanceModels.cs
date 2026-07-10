@@ -78,9 +78,7 @@
         public decimal AmountWithoutTax { get; set; }
         public decimal VatAmount { get; set; }
         public decimal SalesTaxAmount { get; set; }
-        public decimal TaxAmount { get; set; }
-        public decimal VatAmount { get; set; }
-        public decimal SalesTaxAmount { get; set; }
+        public decimal TaxAmount { get; set; }     
         public string TaxType { get; set; } = string.Empty;
         public string VatTaxCode { get; set; } = string.Empty;
         public string SalesTaxCode { get; set; } = string.Empty;
