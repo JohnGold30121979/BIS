@@ -83,7 +83,7 @@ namespace BIS.ERP.Services
                     Name = "Списочный состав / табельный номер",
                     AccountFlagField = "Связь со списочным составом",
                     ReferenceCatalog = "Сотрудники (Списочный состав)",
-                    DocumentFields = "Сотрудник;Табельный номер;Таб. номер;Таб N;Таб. N",
+                    DocumentFields = "Сотрудник;Табельный номер;Таб. номер;Таб №;Таб. №",
                     Description = "Показывает справочник сотрудников для счетов с аналитикой по табельным номерам"
                 },
                 new AccountAnalyticsLinkDefinition
@@ -103,6 +103,15 @@ namespace BIS.ERP.Services
                     ReferenceCatalog = "Справочник материалов",
                     DocumentFields = "Материал;Материалы;Номенклатура",
                     Description = "Показывает справочник материалов для материальных счетов"
+                },
+                new AccountAnalyticsLinkDefinition
+                {
+                    Code = "sites",
+                    Name = "Участки",
+                    AccountFlagField = "Связь с участками",
+                    ReferenceCatalog = "Участки",
+                    DocumentFields = "Участок;Участки",
+                    Description = "Показывает участок, если счет ведется в разрезе участков"
                 },
                 new AccountAnalyticsLinkDefinition
                 {
@@ -130,6 +139,7 @@ namespace BIS.ERP.Services
         public Guid Id { get; set; }
         public string Code { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
+        public string ClosingModule { get; set; } = string.Empty;
     }
 
     public sealed class AccountAnalyticsSettings
@@ -192,7 +202,10 @@ namespace BIS.ERP.Services
                 {
                     Id = id,
                     Code = code,
-                    DisplayName = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}"
+                    DisplayName = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}",
+                    ClosingModule = row.GetValueOrDefault("Закрывает модуль")?.ToString() ??
+                                    row.GetValueOrDefault("closing_module_code")?.ToString() ??
+                                    string.Empty
                 };
 
                 var settings = new AccountAnalyticsSettings();
@@ -251,6 +264,18 @@ namespace BIS.ERP.Services
             var code = NormalizeAccountCode(value.ToString());
             return Accounts.FirstOrDefault(account =>
                 string.Equals(account.Code, code, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public IReadOnlyList<AccountReferenceItem> GetAccountsForModule(string? moduleCodeOrName)
+        {
+            if (string.IsNullOrWhiteSpace(moduleCodeOrName))
+                return Accounts;
+
+            return Accounts
+                .Where(account => ChartOfAccountsSelectionMetadata.IsAccountAllowedForModule(
+                    account.ClosingModule,
+                    moduleCodeOrName))
+                .ToList();
         }
 
         public AccountAnalyticsSettings? GetSettingsFromValue(object? value)

@@ -21,6 +21,7 @@ namespace BIS.ERP.Views.Dialogs
         private readonly MetadataService _metadataService;
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private Dictionary<string, object>? _existingData;
+        private string? _assignedModuleName;
 
         public Dictionary<string, object> ItemData { get; private set; } = new();
 
@@ -41,6 +42,7 @@ namespace BIS.ERP.Views.Dialogs
             var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
             _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
             _existingData = await LoadExistingDataAsync();
+            _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_metadata.Id, _metadata.ObjectType);
 
             FieldsPanel.Children.Clear();
             _fieldControls.Clear();
@@ -111,7 +113,8 @@ namespace BIS.ERP.Views.Dialogs
                     _accountAnalytics,
                     currentValue,
                     this,
-                    UpdateAccountControlledFieldsVisibility);
+                    UpdateAccountControlledFieldsVisibility,
+                    _assignedModuleName);
             }
 
             if (!string.IsNullOrEmpty(field.ReferenceCatalog))

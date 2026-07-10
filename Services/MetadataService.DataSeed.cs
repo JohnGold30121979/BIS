@@ -159,20 +159,30 @@ namespace BIS.ERP.Services
                 {
                     var sql = $@"
                         INSERT INTO ""{catalog.TableName}"" 
-                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""prsch"", ""pr_sch"", ""pr_sc7"", ""sv_o"", ""kodf_rb"", ""CreatedAt"", ""UpdatedAt"") 
+                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"",
+                         ""closing_module_code"", ""analytic_group"", ""print_mode"", ""balance_mode"",
+                         ""link_organizations"", ""link_employees"", ""link_currencies"", ""link_personal_accounts"",
+                         ""link_materials"", ""link_sites"", ""tax_code"",
+                         ""CreatedAt"", ""UpdatedAt"") 
                         VALUES (
                             '{Guid.NewGuid()}',
-                            '{account.Code}',
-                            '{account.Name.Replace("'", "''")}',
-                            '{account.AccountType}',
-                            '{account.Description?.Replace("'", "''") ?? ""}',
+                            '{EscapeSql(account.Code)}',
+                            '{EscapeSql(account.Name)}',
+                            '{EscapeSql(account.AccountType)}',
+                            '{EscapeSql(account.Description)}',
                             {account.Level},
                             true,
-                            {GetFoxAccountSign(account.AccountType)},
-                            0,
-                            0,
-                            false,
-                            0,
+                            {ToSqlLiteral(account.ClosingSubsystemCode == 0 ? null : account.ClosingSubsystemCode.ToString(CultureInfo.InvariantCulture))},
+                            {ToSqlLiteral(account.AnalyticsGroupCode == 0 ? null : account.AnalyticsGroupCode.ToString(CultureInfo.InvariantCulture))},
+                            {ToSqlLiteral(account.PrintModeCode == 0 ? null : account.PrintModeCode.ToString(CultureInfo.InvariantCulture))},
+                            {ToSqlLiteral(account.BalanceModeCode == 0 ? null : account.BalanceModeCode.ToString(CultureInfo.InvariantCulture))},
+                            {account.UseOrganizations.ToString().ToLower()},
+                            {account.UseEmployees.ToString().ToLower()},
+                            {account.UseCurrencies.ToString().ToLower()},
+                            {account.UsePersonalAccounts.ToString().ToLower()},
+                            {account.UseMaterials.ToString().ToLower()},
+                            {account.UseSites.ToString().ToLower()},
+                            {ToSqlLiteral(account.TaxCode == 0 ? null : account.TaxCode.ToString(CultureInfo.InvariantCulture))},
                             NOW(),
                             NOW()
                         )";
@@ -185,14 +195,6 @@ namespace BIS.ERP.Services
             }
             System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
         }
-
-        private static int GetFoxAccountSign(string accountType) => accountType switch
-        {
-            "Active" => 1,
-            "Passive" => 2,
-            "ActivePassive" => 3,
-            _ => 0
-        };
 
         public async Task EnsureCashOrderPostingAccountsAsync()
         {
@@ -640,8 +642,8 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             var taxes = new[]
             {
-        new { code = "NDS12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
-        new { code = "NDS0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "НДС12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
+        new { code = "НДС0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
         new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
         new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
         new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
@@ -825,7 +827,8 @@ namespace BIS.ERP.Services
         {
             var codeLiteral = ToSqlLiteral(code);
             var updateAssignments = values
-                .Where(item => !item.Key.Equals("code", StringComparison.OrdinalIgnoreCase) &&
+                .Where(item => !item.Key.Equals("Id", StringComparison.OrdinalIgnoreCase) &&
+                               !item.Key.Equals("code", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("CreatedAt", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("is_default", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("is_default_vat", StringComparison.OrdinalIgnoreCase) &&

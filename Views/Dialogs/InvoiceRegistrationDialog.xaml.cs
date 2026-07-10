@@ -51,7 +51,7 @@ namespace BIS.ERP.Views.Dialogs
                 EsfNumberBox.Text = _invoice.EsfNumber;
                 TotalAmountBox.Text = _invoice.TotalAmount.ToString("N2");
                 TaxBlankNumberBox.Text = _invoice.TaxBlankNumber;
-                ArmCodeBox.Text = _invoice.ArmCode;
+                ModuleCodeBox.Text = _invoice.ModuleCode;
                 LinesGrid.ItemsSource = _invoice.Lines;
 
                 if (_isReadOnly)
@@ -70,7 +70,7 @@ namespace BIS.ERP.Views.Dialogs
         private void DisableEditing()
         {
             TaxBlankNumberBox.IsReadOnly = true;
-            ArmCodeBox.IsReadOnly = true;
+            ModuleCodeBox.IsReadOnly = true;
             SaveButton.Content = "Закрыть";
             CancelButton.Visibility = Visibility.Collapsed;
             ModeHintText.Visibility = Visibility.Visible;
@@ -89,7 +89,7 @@ namespace BIS.ERP.Views.Dialogs
                 await _invoiceService.UpdateRegistrationInfoAsync(
                     _invoiceId,
                     TaxBlankNumberBox.Text,
-                    ArmCodeBox.Text);
+                    ModuleCodeBox.Text);
                 DialogResult = true;
                 Close();
             }

@@ -122,8 +122,8 @@ namespace BIS.ERP.Services
                     taxes.TableName,
                     new[]
                     {
-                        new CatalogSeedRow("NDS12", "НДС 12%", Rate: 12m, EsfVatCode: "10", SortOrder: 1, IsDefaultVat: true),
-                        new CatalogSeedRow("NDS0", "НДС 0%", Rate: 0m, EsfVatCode: "10", SortOrder: 2),
+                        new CatalogSeedRow("НДС12", "НДС 12%", Rate: 12m, EsfVatCode: "10", SortOrder: 1, IsDefaultVat: true),
+                        new CatalogSeedRow("НДС0", "НДС 0%", Rate: 0m, EsfVatCode: "10", SortOrder: 2),
                         new CatalogSeedRow("WITHOUT_TAX", "Без НДС / освобождено", Rate: 0m, EsfVatCode: "90", EsfSalesTaxCode: "50", SortOrder: 3, IsDefaultSalesTax: true),
                         new CatalogSeedRow("SALES_TAX", "Налог с продаж (базовый режим)", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 4),
                         new CatalogSeedRow("SALES_SERVICE", "Налог с продаж: услуги (неторг. деятельность)", Rate: 2.5m, EsfSalesTaxCode: "70", SortOrder: 5),
@@ -133,7 +133,7 @@ namespace BIS.ERP.Services
                     },
                     defaultCodesByColumn: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
-                        ["is_default_vat"] = "NDS12",
+                        ["is_default_vat"] = "НДС12",
                         ["is_default_sales_tax"] = "WITHOUT_TAX"
                     });
             }

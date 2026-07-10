@@ -239,11 +239,15 @@ namespace BIS.ERP.Views
             {
                 this.Cursor = Cursors.Wait;
 
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var chartCatalog = allCatalogs.FirstOrDefault(c => c.Name.StartsWith("План счетов"));
-                if (chartCatalog == null) return;
+                var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                    _document.Id,
+                    _document.ObjectType);
+                if (accountsData.Count == 0)
+                {
+                    MessageBox.Show("Для этого модуля нет доступных счетов в плане счетов.", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
 
-                var accountsData = await _metadataService.GetCatalogDataAsync(chartCatalog.Id);
                 var dialog = new AccountSelectionDialog(accountsData);
                 dialog.Owner = this;
 

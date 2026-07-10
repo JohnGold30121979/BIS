@@ -188,7 +188,7 @@ public partial class MetadataService
     {
         return new List<MetadataField>
         {
-            new MetadataField { Id = Guid.NewGuid(), Name = "Закрывает АРМ", DbColumnName = "closing_arm", FieldType = "String", Length = 50, Order = 7, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Закрывает модуль", DbColumnName = "closing_module_code", FieldType = "String", Length = 50, Order = 7, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Группа аналитических статей", DbColumnName = "analytic_group", FieldType = "String", Length = 100, Order = 8, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Признак печати", DbColumnName = "print_mode", FieldType = "String", Length = 50, Order = 9, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Сохранять остатки", DbColumnName = "balance_mode", FieldType = "String", Length = 50, Order = 10, MetadataObjectId = metadataObjectId },
@@ -198,7 +198,8 @@ public partial class MetadataService
             new MetadataField { Id = Guid.NewGuid(), Name = "Связь с лицевыми счетами", DbColumnName = "link_personal_accounts", FieldType = "Bool", Order = 14, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Связь с материалами", DbColumnName = "link_materials", FieldType = "Bool", Order = 15, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Связь с объектами строительства", DbColumnName = "link_construction_objects", FieldType = "Bool", Order = 16, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Код налога", DbColumnName = "tax_code", FieldType = "String", Length = 30, Order = 17, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с участками", DbColumnName = "link_sites", FieldType = "Bool", Order = 17, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Код налога", DbColumnName = "tax_code", FieldType = "String", Length = 30, Order = 18, MetadataObjectId = metadataObjectId },
             new MetadataField
             {
                 Id = Guid.NewGuid(),
@@ -208,14 +209,9 @@ public partial class MetadataService
                 ReferenceCatalog = "Справочник валют",
                 DisplayPattern = "{Код} - {Наименование}",
                 DisplayFields = "Код,Наименование",
-                Order = 18,
+                Order = 19,
                 MetadataObjectId = metadataObjectId
-            },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Признак счета Fox (prsch)", DbColumnName = "prsch", FieldType = "Int", Order = 19, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Признак НДС Fox (pr_sch)", DbColumnName = "pr_sch", FieldType = "Int", Order = 20, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Признак ОС Fox (pr_sc7)", DbColumnName = "pr_sc7", FieldType = "Int", Order = 21, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Связь с организациями Fox (sv_o)", DbColumnName = "sv_o", FieldType = "Bool", Order = 22, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Код формы отчета Fox (kodf_rb)", DbColumnName = "kodf_rb", FieldType = "Int", Order = 23, MetadataObjectId = metadataObjectId }
+            }
         };
     }
 

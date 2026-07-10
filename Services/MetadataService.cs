@@ -587,6 +587,70 @@ namespace BIS.ERP.Services
             return catalogs;
         }
 
+        public async Task<List<MetadataModule>> GetModulesAsync(bool includeInactive = false)
+        {
+            var query = _context.MetadataModules.AsNoTracking();
+            if (!includeInactive)
+                query = query.Where(module => module.IsActive);
+
+            return await query
+                .OrderBy(module => module.Order)
+                .ThenBy(module => module.Name)
+                .ToListAsync();
+        }
+
+        public async Task<string?> GetAssignedModuleNameAsync(Guid metadataObjectId, string objectType)
+        {
+            if (metadataObjectId == Guid.Empty || string.IsNullOrWhiteSpace(objectType))
+                return null;
+
+            try
+            {
+                var moduleService = new ModuleMetadataService(_context);
+                await moduleService.EnsureSchemaAsync();
+
+                return await (from item in _context.MetadataModuleItems.AsNoTracking()
+                              join module in _context.MetadataModules.AsNoTracking()
+                                  on item.ModuleId equals module.Id
+                              where item.ObjectId == metadataObjectId &&
+                                    item.ObjectType == objectType
+                              orderby item.Order, module.Order, module.Name
+                              select module.Name)
+                    .FirstOrDefaultAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка определения модуля для объекта {metadataObjectId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        public async Task<List<Dictionary<string, object>>> GetChartOfAccountsSelectionDataAsync(
+            string? moduleCodeOrName = null)
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    item.Name == "План счетов");
+
+            if (catalog == null)
+                return new List<Dictionary<string, object>>();
+
+            var rows = await GetCatalogDataAsync(catalog.Id);
+            return ChartOfAccountsSelectionMetadata
+                .FilterAccountRowsByModule(rows, moduleCodeOrName)
+                .ToList();
+        }
+
+        public async Task<List<Dictionary<string, object>>> GetChartOfAccountsSelectionDataForObjectAsync(
+            Guid metadataObjectId,
+            string objectType)
+        {
+            var assignedModuleName = await GetAssignedModuleNameAsync(metadataObjectId, objectType);
+            return await GetChartOfAccountsSelectionDataAsync(assignedModuleName);
+        }
+
         public async Task<List<MetadataObject>> GetDocumentsAsync()
         {
             var documents = await LoadDocumentMetadataAsync();

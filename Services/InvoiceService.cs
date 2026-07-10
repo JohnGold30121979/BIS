@@ -48,7 +48,7 @@ namespace BIS.ERP.Services
                     ""doc_date"" timestamp NOT NULL,
                     ""esf_number"" varchar(100),
                     ""tax_blank_number"" varchar(100),
-                    ""arm_code"" varchar(50),
+                    ""module_code"" varchar(50),
                     ""exchange_code"" varchar(100),
                     ""tax_status"" varchar(100),
                     ""exported_at"" timestamp,
@@ -92,7 +92,7 @@ namespace BIS.ERP.Services
                     ""doc_date"" timestamp NOT NULL,
                     ""esf_number"" varchar(100),
                     ""tax_blank_number"" varchar(100),
-                    ""arm_code"" varchar(50),
+                    ""module_code"" varchar(50),
                     ""exchange_code"" varchar(100),
                     ""tax_status"" varchar(100),
                     ""exported_at"" timestamp,
@@ -137,13 +137,13 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""arm_code"" varchar(50);
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""arm_code"" varchar(50);
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
@@ -152,6 +152,30 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'doc_sales_invoice'
+                          AND column_name = 'arm_code') THEN
+                        UPDATE ""doc_sales_invoice""
+                        SET ""module_code"" = COALESCE(NULLIF(""module_code"", ''), ""arm_code"")
+                        WHERE COALESCE(NULLIF(""arm_code"", ''), '') <> '';
+                    END IF;
+
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'doc_purchase_invoice'
+                          AND column_name = 'arm_code') THEN
+                        UPDATE ""doc_purchase_invoice""
+                        SET ""module_code"" = COALESCE(NULLIF(""module_code"", ''), ""arm_code"")
+                        WHERE COALESCE(NULLIF(""arm_code"", ''), '') <> '';
+                    END IF;
+                END $$;
                 CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_exchange_code"" ON ""doc_sales_invoice"" (""exchange_code"");
                 CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_exchange_code"" ON ""doc_purchase_invoice"" (""exchange_code"");
             ");
@@ -162,7 +186,7 @@ namespace BIS.ERP.Services
             var organizationMap = await LoadOrganizationMapAsync();
             var sql = $@"
                 SELECT ""Id"", ""doc_number"", ""doc_date"", ""organization_id"", ""amount"", ""esf_number"", ""basis"", ""is_posted"",
-                       ""tax_blank_number"", ""arm_code"", ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date""
+                       ""tax_blank_number"", ""module_code"", ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date""
                 FROM ""{HeaderTableName}""
                 ORDER BY ""doc_date"" DESC, ""doc_number"" DESC";
 
@@ -187,7 +211,7 @@ namespace BIS.ERP.Services
                     Basis = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
                     IsPosted = reader.GetBoolean(7),
                     TaxBlankNumber = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
-                    ArmCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
+                    ModuleCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
                     ExchangeCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
                     TaxStatus = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
                     ExportedAt = reader.IsDBNull(12) ? null : reader.GetDateTime(12),
@@ -245,7 +269,7 @@ namespace BIS.ERP.Services
         {
             var organizationMap = await LoadOrganizationMapAsync();
             var sql = $@"
-                SELECT ""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""arm_code"",
+                SELECT ""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""module_code"",
                        ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date"", ""organization_id"",
                        ""counterparty_account"", ""payment_kind"", ""delivery_kind"", ""supply_kind"", ""basis"",
                        ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted""
@@ -271,7 +295,7 @@ namespace BIS.ERP.Services
                 DocDate = reader.GetDateTime(2),
                 EsfNumber = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
                 TaxBlankNumber = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
-                ArmCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                ModuleCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
                 ExchangeCode = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
                 TaxStatus = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
                 ExportedAt = reader.IsDBNull(8) ? null : reader.GetDateTime(8),
@@ -487,18 +511,18 @@ namespace BIS.ERP.Services
                 {
                     await _context.Database.ExecuteSqlRawAsync($@"
                         INSERT INTO ""{HeaderTableName}""
-                        (""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""arm_code"",
+                        (""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""module_code"",
                          ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date"", ""organization_id"", ""counterparty_account"",
                          ""payment_kind"", ""delivery_kind"", ""supply_kind"", ""basis"",
                          ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted"", ""CreatedAt"", ""UpdatedAt"")
-                        VALUES (@id, @number, @date, @esf, @taxBlank, @arm, @exchangeCode, @taxStatus, @exportedAt, @taxStatusDate, @org, @account, @payment, @delivery, @supply, @basis,
+                        VALUES (@id, @number, @date, @esf, @taxBlank, @moduleCode, @exchangeCode, @taxStatus, @exportedAt, @taxStatusDate, @org, @account, @payment, @delivery, @supply, @basis,
                                 @amountWithoutTax, @vatTotal, @salesTaxTotal, @amount, false, NOW(), NOW())",
                         new NpgsqlParameter("@id", id),
                         new NpgsqlParameter("@number", invoice.DocNumber),
                         new NpgsqlParameter("@date", invoice.DocDate),
                         new NpgsqlParameter("@esf", (object?)invoice.EsfNumber ?? DBNull.Value),
                         new NpgsqlParameter("@taxBlank", (object?)invoice.TaxBlankNumber ?? DBNull.Value),
-                        new NpgsqlParameter("@arm", (object?)invoice.ArmCode ?? DBNull.Value),
+                        new NpgsqlParameter("@moduleCode", (object?)invoice.ModuleCode ?? DBNull.Value),
                         new NpgsqlParameter("@exchangeCode", (object?)invoice.ExchangeCode ?? DBNull.Value),
                         new NpgsqlParameter("@taxStatus", (object?)invoice.TaxStatus ?? DBNull.Value),
                         new NpgsqlParameter("@exportedAt", (object?)invoice.ExportedAt ?? DBNull.Value),
@@ -522,7 +546,7 @@ namespace BIS.ERP.Services
                     await _context.Database.ExecuteSqlRawAsync($@"
                         UPDATE ""{HeaderTableName}""
                         SET ""doc_number"" = @number, ""doc_date"" = @date, ""esf_number"" = @esf,
-                            ""tax_blank_number"" = @taxBlank, ""arm_code"" = @arm,
+                            ""tax_blank_number"" = @taxBlank, ""module_code"" = @moduleCode,
                             ""exchange_code"" = @exchangeCode, ""tax_status"" = @taxStatus,
                             ""exported_at"" = @exportedAt, ""tax_status_date"" = @taxStatusDate,
                             ""organization_id"" = @org, ""counterparty_account"" = @account,
@@ -536,7 +560,7 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@date", invoice.DocDate),
                         new NpgsqlParameter("@esf", (object?)invoice.EsfNumber ?? DBNull.Value),
                         new NpgsqlParameter("@taxBlank", (object?)invoice.TaxBlankNumber ?? DBNull.Value),
-                        new NpgsqlParameter("@arm", (object?)invoice.ArmCode ?? DBNull.Value),
+                        new NpgsqlParameter("@moduleCode", (object?)invoice.ModuleCode ?? DBNull.Value),
                         new NpgsqlParameter("@exchangeCode", (object?)invoice.ExchangeCode ?? DBNull.Value),
                         new NpgsqlParameter("@taxStatus", (object?)invoice.TaxStatus ?? DBNull.Value),
                         new NpgsqlParameter("@exportedAt", (object?)invoice.ExportedAt ?? DBNull.Value),
@@ -607,18 +631,18 @@ namespace BIS.ERP.Services
             return id;
         }
 
-        public async Task UpdateRegistrationInfoAsync(Guid invoiceId, string taxBlankNumber, string armCode)
+        public async Task UpdateRegistrationInfoAsync(Guid invoiceId, string taxBlankNumber, string moduleCode)
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
 
             await _context.Database.ExecuteSqlRawAsync($@"
                 UPDATE ""{HeaderTableName}""
-                SET ""tax_blank_number"" = @taxBlank, ""arm_code"" = @arm, ""UpdatedAt"" = NOW()
+                SET ""tax_blank_number"" = @taxBlank, ""module_code"" = @moduleCode, ""UpdatedAt"" = NOW()
                 WHERE ""Id"" = @id;",
                 new NpgsqlParameter("@id", invoiceId),
                 new NpgsqlParameter("@taxBlank", (object?)taxBlankNumber?.Trim() ?? DBNull.Value),
-                new NpgsqlParameter("@arm", (object?)armCode?.Trim() ?? DBNull.Value));
+                new NpgsqlParameter("@moduleCode", (object?)moduleCode?.Trim() ?? DBNull.Value));
 
             await new EventLogService(_context).LogAsync(
                 "UpdateRegistration",
@@ -629,7 +653,7 @@ namespace BIS.ERP.Services
                 {
                     Number = invoice.DocNumber,
                     TaxBlankNumber = taxBlankNumber?.Trim() ?? string.Empty,
-                    Arm = armCode?.Trim() ?? string.Empty
+                    Module = moduleCode?.Trim() ?? string.Empty
                 });
         }
 

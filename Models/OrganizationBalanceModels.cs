@@ -22,7 +22,7 @@ namespace BIS.ERP.Models
         public string CounterAccountCode { get; set; } = string.Empty;
         public string CounterAccountName { get; set; } = string.Empty;
         public string AccountPairName { get; set; } = string.Empty;
-        public string ArmCode { get; set; } = string.Empty;
+        public string ModuleCode { get; set; } = string.Empty;
         public bool UsesCurrency { get; set; }
         public bool IsOrganizationTotal { get; set; }
         public decimal OpeningDebit { get; set; }

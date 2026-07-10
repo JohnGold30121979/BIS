@@ -376,7 +376,7 @@ namespace BIS.ERP.Services
             const double tableTop = 610;
             const double rowHeight = 105;
             var widths = new[] { 80d, 620d, 240d, 250d, 210d, 210d, 250d };
-            var headers = new[] { "N", "Наименование", "Счет", "Без налогов", "НДС", "Налог", "Итого" };
+            var headers = new[] { "№", "Наименование", "Счет", "Без налогов", "НДС", "Налог", "Итого" };
             Add("Box", "", "", tableLeft, tableTop, widths.Sum(), rowHeight * 10);
             var x = tableLeft;
             for (var column = 0; column < widths.Length; column++)
@@ -894,9 +894,9 @@ namespace BIS.ERP.Services
             AddExtra("esf_number", invoice.EsfNumber);
             AddExtra("Номер ЭСФ", invoice.EsfNumber);
             AddExtra("tax_blank_number", taxBlankNumber);
-            AddExtra("Серия и N бланка", taxBlankNumber);
-            AddExtra("arm_code", invoice.ArmCode);
-            AddExtra("АРМ", invoice.ArmCode);
+            AddExtra("Серия и № бланка", taxBlankNumber);
+            AddExtra("module_code", invoice.ModuleCode);
+            AddExtra("Модуль", invoice.ModuleCode);
             AddExtra("counterparty_account", invoice.CounterpartyAccountCode);
             AddExtra("Счет", invoice.CounterpartyAccountCode);
             AddExtra("payment_kind", invoice.PaymentKind);

@@ -26,6 +26,7 @@ namespace BIS.ERP.Views
         private DataTable? _currentData;
         private Report? _currentReport;
         private AccountingPeriod? _currentPeriod;
+        private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
 
         public AccountingReportsView(AppDbContext context)
         {
@@ -137,6 +138,91 @@ namespace BIS.ERP.Views
                 ? "Период не собран"
                 : $"Статус: {LocalizationService.DisplayValue(_currentPeriod.Status)}";
             PeriodStateButton.Content = _currentPeriod?.IsLocked == true ? "Открыть период" : "Закрыть период";
+            await LoadPeriodModuleStatesAsync();
+        }
+
+        private async Task LoadPeriodModuleStatesAsync()
+        {
+            _currentModuleStates.Clear();
+            PeriodModuleCombo.ItemsSource = null;
+
+            if (_currentPeriod == null)
+            {
+                PeriodModuleCombo.IsEnabled = false;
+                CloseModuleButton.IsEnabled = false;
+                ReopenModuleButton.IsEnabled = false;
+                PeriodModuleStatusText.Text = "Модули периода недоступны";
+                return;
+            }
+
+            _currentModuleStates = await _periodService.GetModuleStatusesAsync(_currentPeriod.Id);
+            PeriodModuleCombo.ItemsSource = _currentModuleStates;
+            PeriodModuleCombo.IsEnabled = _currentModuleStates.Count > 0 && _currentPeriod.IsLocked == false;
+            PeriodModuleCombo.SelectedItem = _currentModuleStates.FirstOrDefault(item => !item.IsClosed) ??
+                                             _currentModuleStates.FirstOrDefault();
+            UpdateSelectedModuleState();
+        }
+
+        private void OnPeriodModuleSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateSelectedModuleState();
+        }
+
+        private void UpdateSelectedModuleState()
+        {
+            if (_currentPeriod == null || PeriodModuleCombo.SelectedItem is not AccountingPeriodModuleStatus module)
+            {
+                CloseModuleButton.IsEnabled = false;
+                ReopenModuleButton.IsEnabled = false;
+                PeriodModuleStatusText.Text = "Модули периода недоступны";
+                return;
+            }
+
+            CloseModuleButton.IsEnabled = !_currentPeriod.IsLocked && !module.IsClosed && module.ParticipatesInPeriodClose;
+            ReopenModuleButton.IsEnabled = !_currentPeriod.IsLocked && module.IsClosed;
+
+            if (!module.ParticipatesInPeriodClose)
+            {
+                PeriodModuleStatusText.Text = $"{module.ModuleName}: не участвует в закрытии периода";
+                return;
+            }
+
+            var dependencyText = module.RequirePreviousModulesClosed
+                ? "закрывается по очереди"
+                : "может закрываться отдельно";
+            PeriodModuleStatusText.Text = $"{module.ModuleName}: {module.StateCaption}, {dependencyText}";
+        }
+
+        private async void OnCloseModuleClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentPeriod == null || PeriodModuleCombo.SelectedItem is not AccountingPeriodModuleStatus module)
+                    return;
+
+                await _periodService.CloseModuleAsync(_currentPeriod.Id, module.ModuleId);
+                await UpdatePeriodStateAsync(_currentPeriod.StartDate, _currentPeriod.EndDate);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Закрытие модуля", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private async void OnReopenModuleClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentPeriod == null || PeriodModuleCombo.SelectedItem is not AccountingPeriodModuleStatus module)
+                    return;
+
+                await _periodService.ReopenModuleAsync(_currentPeriod.Id, module.ModuleId);
+                await UpdatePeriodStateAsync(_currentPeriod.StartDate, _currentPeriod.EndDate);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Открытие модуля", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         private (DateTime Start, DateTime End) GetPeriod()
@@ -378,7 +464,7 @@ namespace BIS.ERP.Views
             table.Columns.Add("Сальдо кон. Дт", typeof(decimal));
             table.Columns.Add("Сальдо кон. Кт", typeof(decimal));
             table.Columns.Add("Сальдо", typeof(decimal));
-            table.Columns.Add("АРМ", typeof(string));
+            table.Columns.Add("Модуль", typeof(string));
 
             foreach (var row in calculation.Rows)
             {
@@ -394,7 +480,7 @@ namespace BIS.ERP.Views
                     row.ClosingDebit,
                     row.ClosingCredit,
                     row.Balance,
-                    row.ArmCode);
+                    row.ModuleCode);
             }
 
             var report = CreateReport(table,
@@ -544,7 +630,7 @@ namespace BIS.ERP.Views
                     Title = "Сохранить налоговый отчет по НДС",
                     Filter = "Excel файлы (*.xlsx)|*.xlsx|Excel 97-2003 (*.xls)|*.xls",
                     DefaultExt = defaultExtension,
-                    FileName = $"STI062_NDS_{start:yyyyMM}.{defaultExtension}"
+                    FileName = $"STI062_НДС_{start:yyyyMM}.{defaultExtension}"
                 };
                 if (saveDialog.ShowDialog() != true)
                     return;

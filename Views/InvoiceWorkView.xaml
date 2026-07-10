@@ -50,8 +50,8 @@
                 <DataGridTextColumn Header="Сумма" Binding="{Binding TotalAmount, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn x:Name="EsfNumberColumn" Header="Номер ЭСФ" Binding="{Binding EsfNumber}" Width="155"/>
                 <DataGridTextColumn x:Name="EsfStatusColumn" Header="Статус ЭСФ" Binding="{Binding TaxStatusDisplay}" Width="120"/>
-                <DataGridTextColumn x:Name="TaxBlankColumn" Header="Серия и N бланка" Binding="{Binding TaxBlankNumber}" Width="170" Visibility="Collapsed"/>
-                <DataGridTextColumn x:Name="ArmColumn" Header="АРМ" Binding="{Binding ArmCode}" Width="80" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="TaxBlankColumn" Header="Серия и № бланка" Binding="{Binding TaxBlankNumber}" Width="170" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="ModuleColumn" Header="Модуль" Binding="{Binding ModuleCode}" Width="95" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="BasisColumn" Header="Основание" Binding="{Binding Basis}" Width="220"/>
             </DataGrid.Columns>
         </DataGrid>

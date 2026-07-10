@@ -70,7 +70,7 @@ namespace BIS.ERP.Views
             EditButton.Width = 135;
 
             TaxBlankColumn.Visibility = Visibility.Visible;
-            ArmColumn.Visibility = Visibility.Visible;
+            ModuleColumn.Visibility = Visibility.Visible;
             BasisColumn.Visibility = Visibility.Collapsed;
             EsfNumberColumn.Visibility = Visibility.Collapsed;
             EsfStatusColumn.Visibility = Visibility.Collapsed;

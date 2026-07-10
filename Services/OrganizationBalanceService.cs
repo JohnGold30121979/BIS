@@ -35,7 +35,7 @@ namespace BIS.ERP.Services
                     ""CounterAccountCode"" varchar(50) NOT NULL,
                     ""CounterAccountName"" varchar(300) NOT NULL,
                     ""AccountPairName"" varchar(300) NOT NULL,
-                    ""ArmCode"" varchar(80) NOT NULL,
+                    ""ModuleCode"" varchar(80) NOT NULL,
                     ""UsesCurrency"" boolean NOT NULL DEFAULT false,
                     ""IsOrganizationTotal"" boolean NOT NULL DEFAULT false,
                     ""OpeningDebit"" numeric(18,2) NOT NULL DEFAULT 0,
@@ -55,7 +55,21 @@ namespace BIS.ERP.Services
                 CREATE INDEX IF NOT EXISTS ""IX_OrganizationBalanceSnapshots_Period""
                     ON ""OrganizationBalanceSnapshots"" (""PeriodStart"", ""PeriodEnd"");
                 CREATE INDEX IF NOT EXISTS ""IX_OrganizationBalanceSnapshots_Organization""
-                    ON ""OrganizationBalanceSnapshots"" (""OrganizationId"", ""OrganizationName"");");
+                    ON ""OrganizationBalanceSnapshots"" (""OrganizationId"", ""OrganizationName"");
+                ALTER TABLE ""OrganizationBalanceSnapshots"" ADD COLUMN IF NOT EXISTS ""ModuleCode"" varchar(80) NOT NULL DEFAULT '';
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'OrganizationBalanceSnapshots'
+                          AND column_name = 'ArmCode') THEN
+                        UPDATE ""OrganizationBalanceSnapshots""
+                        SET ""ModuleCode"" = COALESCE(NULLIF(""ModuleCode"", ''), ""ArmCode"")
+                        WHERE COALESCE(NULLIF(""ArmCode"", ''), '') <> '';
+                    END IF;
+                END $$;");
         }
 
         public async Task<OrganizationBalanceCalculationResult> CalculateAsync(DateTime startDate, DateTime endDate)
@@ -186,7 +200,7 @@ namespace BIS.ERP.Services
                     Name = GetString(row, "name", "Вид расчета"),
                     DebitAccount = debit,
                     CreditAccount = credit,
-                    ArmCode = GetString(row, "arm_code", "Остаток брать из АРМ"),
+                    ModuleCode = GetString(row, "module_code", "arm_code"),
                     UseOrganizations = GetBool(row, true, "use_organizations", "Орг"),
                     UseCurrency = GetBool(row, false, "use_currency", "Валюта")
                 });
@@ -461,7 +475,7 @@ namespace BIS.ERP.Services
                 INSERT INTO ""OrganizationBalanceSnapshots""
                 (""Id"", ""PeriodStart"", ""PeriodEnd"", ""OrganizationId"", ""OrganizationName"",
                  ""AccountCode"", ""AccountName"", ""CounterAccountCode"", ""CounterAccountName"",
-                 ""AccountPairName"", ""ArmCode"", ""UsesCurrency"", ""IsOrganizationTotal"",
+                 ""AccountPairName"", ""ModuleCode"", ""UsesCurrency"", ""IsOrganizationTotal"",
                  ""OpeningDebit"", ""OpeningCredit"", ""TurnoverDebit"", ""TurnoverCredit"",
                  ""ClosingDebit"", ""ClosingCredit"", ""OpeningDebitCurrency"", ""OpeningCreditCurrency"",
                  ""TurnoverDebitCurrency"", ""TurnoverCreditCurrency"", ""ClosingDebitCurrency"",
@@ -469,7 +483,7 @@ namespace BIS.ERP.Services
                 VALUES
                 (@id, @start, @end, @organizationId, @organizationName,
                  @accountCode, @accountName, @counterAccountCode, @counterAccountName,
-                 @accountPairName, @armCode, @usesCurrency, @isOrganizationTotal,
+                 @accountPairName, @moduleCode, @usesCurrency, @isOrganizationTotal,
                  @openingDebit, @openingCredit, @turnoverDebit, @turnoverCredit,
                  @closingDebit, @closingCredit, @openingDebitCurrency, @openingCreditCurrency,
                  @turnoverDebitCurrency, @turnoverCreditCurrency, @closingDebitCurrency,
@@ -488,7 +502,7 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@counterAccountCode", row.CounterAccountCode),
                     new NpgsqlParameter("@counterAccountName", row.CounterAccountName),
                     new NpgsqlParameter("@accountPairName", row.AccountPairName),
-                    new NpgsqlParameter("@armCode", row.ArmCode),
+                    new NpgsqlParameter("@moduleCode", row.ModuleCode),
                     new NpgsqlParameter("@usesCurrency", row.UsesCurrency),
                     new NpgsqlParameter("@isOrganizationTotal", row.IsOrganizationTotal),
                     new NpgsqlParameter("@openingDebit", row.OpeningDebit),
@@ -595,7 +609,7 @@ namespace BIS.ERP.Services
             public string Name { get; init; } = string.Empty;
             public string DebitAccount { get; init; } = string.Empty;
             public string CreditAccount { get; init; } = string.Empty;
-            public string ArmCode { get; init; } = string.Empty;
+            public string ModuleCode { get; init; } = string.Empty;
             public bool UseOrganizations { get; init; }
             public bool UseCurrency { get; init; }
         }
@@ -659,7 +673,7 @@ namespace BIS.ERP.Services
                         ? counterAccount.Name
                         : Pair.CreditAccount,
                     AccountPairName = string.IsNullOrWhiteSpace(Pair.Name) ? Pair.Code : Pair.Name,
-                    ArmCode = Pair.ArmCode,
+                    ModuleCode = Pair.ModuleCode,
                     UsesCurrency = Pair.UseCurrency,
                     OpeningDebit = OpeningDebit,
                     OpeningCredit = OpeningCredit,

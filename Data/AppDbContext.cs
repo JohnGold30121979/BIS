@@ -49,6 +49,7 @@ public class AppDbContext : DbContext
     public DbSet<Organization> Organizations { get; set; }   
     public DbSet<Posting> Postings { get; set; }  
     public DbSet<AccountingPeriod> AccountingPeriods { get; set; }
+    public DbSet<AccountingPeriodModuleState> AccountingPeriodModuleStates { get; set; }
     public DbSet<AccountOpeningBalance> AccountOpeningBalances { get; set; }
     public DbSet<AccountTurnoverSnapshot> AccountTurnoverSnapshots { get; set; }
     public DbSet<FinancialReportLine> FinancialReportLines { get; set; }
@@ -182,6 +183,7 @@ public class AppDbContext : DbContext
         });
 
         modelBuilder.Entity<AccountingPeriod>().HasIndex(period => new { period.StartDate, period.EndDate }).IsUnique();
+        modelBuilder.Entity<AccountingPeriodModuleState>().HasIndex(state => new { state.PeriodId, state.ModuleId }).IsUnique();
         modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => new { balance.BalanceDate, balance.AccountCode }).IsUnique();
         modelBuilder.Entity<AccountTurnoverSnapshot>().HasIndex(snapshot => new { snapshot.PeriodId, snapshot.AccountCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLine>().HasIndex(line => new { line.ReportCode, line.LineCode }).IsUnique();

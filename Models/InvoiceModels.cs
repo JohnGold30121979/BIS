@@ -13,7 +13,7 @@ namespace BIS.ERP.Models
         public string EsfNumber { get; set; } = string.Empty;
         public string Basis { get; set; } = string.Empty;
         public string TaxBlankNumber { get; set; } = string.Empty;
-        public string ArmCode { get; set; } = string.Empty;
+        public string ModuleCode { get; set; } = string.Empty;
         public string ExchangeCode { get; set; } = string.Empty;
         public string TaxStatus { get; set; } = string.Empty;
         public DateTime? ExportedAt { get; set; }
@@ -50,7 +50,7 @@ namespace BIS.ERP.Models
         public DateTime DocDate { get; set; } = DateTime.Today;
         public string EsfNumber { get; set; } = string.Empty;
         public string TaxBlankNumber { get; set; } = string.Empty;
-        public string ArmCode { get; set; } = string.Empty;
+        public string ModuleCode { get; set; } = string.Empty;
         public string ExchangeCode { get; set; } = string.Empty;
         public string TaxStatus { get; set; } = string.Empty;
         public DateTime? ExportedAt { get; set; }

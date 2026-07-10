@@ -28,6 +28,12 @@ namespace BIS.ERP.Services
                     ""CreatedAt"" timestamp with time zone NOT NULL, ""UpdatedAt"" timestamp with time zone NOT NULL);
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountingPeriods_StartDate_EndDate""
                     ON ""AccountingPeriods"" (""StartDate"", ""EndDate"");
+                CREATE TABLE IF NOT EXISTS ""AccountingPeriodModuleStates"" (
+                    ""Id"" uuid PRIMARY KEY, ""PeriodId"" uuid NOT NULL, ""ModuleId"" uuid NOT NULL,
+                    ""IsClosed"" boolean NOT NULL DEFAULT false, ""ClosedAt"" timestamp with time zone NULL,
+                    ""CreatedAt"" timestamp with time zone NOT NULL, ""UpdatedAt"" timestamp with time zone NOT NULL);
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountingPeriodModuleStates_Period_Module""
+                    ON ""AccountingPeriodModuleStates"" (""PeriodId"", ""ModuleId"");
                 CREATE TABLE IF NOT EXISTS ""AccountOpeningBalances"" (
                     ""Id"" uuid PRIMARY KEY, ""BalanceDate"" timestamp with time zone NOT NULL,
                     ""AccountCode"" varchar(50) NOT NULL, ""Debit"" numeric(18,2) NOT NULL,
@@ -99,6 +105,7 @@ namespace BIS.ERP.Services
             }));
             await new OrganizationBalanceService(_context).CalculateAsync(startDate, endDate);
             await SynchronizeTaxJournalAsync(startDate, endDate);
+            await ResetPeriodModuleStatesAsync(period.Id);
             period.Status = "Collected";
             period.CollectedAt = DateTime.UtcNow;
             period.UpdatedAt = DateTime.UtcNow;
@@ -112,6 +119,7 @@ namespace BIS.ERP.Services
                 ?? throw new InvalidOperationException("Учетный период не найден");
             if (period.Status != "Collected")
                 throw new InvalidOperationException("Перед закрытием выполните сбор информации за период");
+            await EnsureAllModulesClosedAsync(periodId);
             var snapshots = await _context.AccountTurnoverSnapshots.AsNoTracking()
                 .Where(snapshot => snapshot.PeriodId == periodId).ToListAsync();
             var openingDifference = snapshots.Sum(item => item.OpeningDebit - item.OpeningCredit);
@@ -136,6 +144,7 @@ namespace BIS.ERP.Services
             period.ClosedAt = null;
             period.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+            await ResetPeriodModuleStatesAsync(periodId);
         }
 
         public async Task<AccountingPeriod?> FindAsync(DateTime startDate, DateTime endDate)
@@ -147,6 +156,120 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(item => item.StartDate == start && item.EndDate == end);
         }
 
+        public async Task<List<AccountingPeriodModuleStatus>> GetModuleStatusesAsync(Guid periodId)
+        {
+            await EnsureSchemaAsync();
+            await EnsurePeriodModuleStatesAsync(periodId);
+
+            var modules = await _context.MetadataModules.AsNoTracking()
+                .Where(module => module.IsActive)
+                .OrderBy(module => module.CloseOrder)
+                .ThenBy(module => module.Order)
+                .ThenBy(module => module.Name)
+                .ToListAsync();
+
+            var states = await _context.AccountingPeriodModuleStates.AsNoTracking()
+                .Where(state => state.PeriodId == periodId)
+                .ToDictionaryAsync(state => state.ModuleId);
+
+            return modules.Select(module =>
+            {
+                states.TryGetValue(module.Id, out var state);
+                return new AccountingPeriodModuleStatus
+                {
+                    PeriodId = periodId,
+                    ModuleId = module.Id,
+                    ModuleCode = module.Code,
+                    ModuleName = module.Name,
+                    CloseOrder = module.CloseOrder,
+                    ParticipatesInPeriodClose = module.ParticipatesInPeriodClose,
+                    RequirePreviousModulesClosed = module.RequirePreviousModulesClosed,
+                    IsClosed = state?.IsClosed == true,
+                    ClosedAt = state?.ClosedAt
+                };
+            }).ToList();
+        }
+
+        public async Task CloseModuleAsync(Guid periodId, Guid moduleId)
+        {
+            await EnsureSchemaAsync();
+            var period = await _context.AccountingPeriods.FindAsync(periodId)
+                ?? throw new InvalidOperationException("Учетный период не найден.");
+            if (period.IsLocked)
+                throw new InvalidOperationException("Период уже закрыт итоговым балансом. Сначала откройте период.");
+            if (period.Status != "Collected")
+                throw new InvalidOperationException("Сначала выполните сбор информации за период.");
+
+            await EnsurePeriodModuleStatesAsync(periodId);
+
+            var module = await _context.MetadataModules.FindAsync(moduleId)
+                ?? throw new InvalidOperationException("Модуль не найден.");
+            if (!module.IsActive)
+                throw new InvalidOperationException("Модуль отключен и не может участвовать в закрытии периода.");
+            if (!module.ParticipatesInPeriodClose)
+                throw new InvalidOperationException("Для модуля отключено участие в закрытии периода.");
+
+            if (module.RequirePreviousModulesClosed)
+            {
+                var previousModules = await _context.MetadataModules.AsNoTracking()
+                    .Where(item =>
+                        item.IsActive &&
+                        item.ParticipatesInPeriodClose &&
+                        item.CloseOrder < module.CloseOrder)
+                    .OrderBy(item => item.CloseOrder)
+                    .ThenBy(item => item.Name)
+                    .ToListAsync();
+
+                if (previousModules.Count > 0)
+                {
+                    var previousIds = previousModules.Select(item => item.Id).ToHashSet();
+                    var previousStates = await _context.AccountingPeriodModuleStates.AsNoTracking()
+                        .Where(item => item.PeriodId == periodId && previousIds.Contains(item.ModuleId))
+                        .ToListAsync();
+
+                    var openPrevious = previousModules
+                        .Where(previous => previousStates.All(state => state.ModuleId != previous.Id || !state.IsClosed))
+                        .Select(previous => previous.Name)
+                        .ToList();
+
+                    if (openPrevious.Count > 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"Модуль «{module.Name}» можно закрыть только после модулей: {string.Join(", ", openPrevious)}.");
+                    }
+                }
+            }
+
+            var state = await _context.AccountingPeriodModuleStates
+                .FirstOrDefaultAsync(item => item.PeriodId == periodId && item.ModuleId == moduleId)
+                ?? throw new InvalidOperationException("Не найдено состояние модуля для выбранного периода.");
+
+            state.IsClosed = true;
+            state.ClosedAt = DateTime.UtcNow;
+            state.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task ReopenModuleAsync(Guid periodId, Guid moduleId)
+        {
+            await EnsureSchemaAsync();
+            var period = await _context.AccountingPeriods.FindAsync(periodId)
+                ?? throw new InvalidOperationException("Учетный период не найден.");
+            if (period.IsLocked)
+                throw new InvalidOperationException("Сначала откройте итогово закрытый период.");
+
+            await EnsurePeriodModuleStatesAsync(periodId);
+
+            var state = await _context.AccountingPeriodModuleStates
+                .FirstOrDefaultAsync(item => item.PeriodId == periodId && item.ModuleId == moduleId)
+                ?? throw new InvalidOperationException("Не найдено состояние модуля для выбранного периода.");
+
+            state.IsClosed = false;
+            state.ClosedAt = null;
+            state.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
+
         public async Task EnsureDateCanBeModifiedAsync(DateTime date)
         {
             await EnsureSchemaAsync();
@@ -155,6 +278,72 @@ namespace BIS.ERP.Services
                 period.IsLocked && utcDate >= period.StartDate && utcDate <= period.EndDate);
             if (locked)
                 throw new InvalidOperationException($"Период, содержащий дату {date:dd.MM.yyyy}, закрыт. Изменение документов запрещено.");
+        }
+
+        private async Task EnsurePeriodModuleStatesAsync(Guid periodId)
+        {
+            var modules = await _context.MetadataModules
+                .Where(module => module.IsActive && module.ParticipatesInPeriodClose)
+                .OrderBy(module => module.CloseOrder)
+                .ThenBy(module => module.Name)
+                .ToListAsync();
+
+            var states = await _context.AccountingPeriodModuleStates
+                .Where(state => state.PeriodId == periodId)
+                .ToListAsync();
+
+            var moduleIds = modules.Select(module => module.Id).ToHashSet();
+            var orphaned = states.Where(state => !moduleIds.Contains(state.ModuleId)).ToList();
+            if (orphaned.Count > 0)
+                _context.AccountingPeriodModuleStates.RemoveRange(orphaned);
+
+            foreach (var module in modules)
+            {
+                if (states.Any(state => state.ModuleId == module.Id))
+                    continue;
+
+                await _context.AccountingPeriodModuleStates.AddAsync(new AccountingPeriodModuleState
+                {
+                    PeriodId = periodId,
+                    ModuleId = module.Id,
+                    IsClosed = false
+                });
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task ResetPeriodModuleStatesAsync(Guid periodId)
+        {
+            await EnsurePeriodModuleStatesAsync(periodId);
+            var states = await _context.AccountingPeriodModuleStates
+                .Where(state => state.PeriodId == periodId)
+                .ToListAsync();
+
+            foreach (var state in states)
+            {
+                state.IsClosed = false;
+                state.ClosedAt = null;
+                state.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureAllModulesClosedAsync(Guid periodId)
+        {
+            await EnsurePeriodModuleStatesAsync(periodId);
+            var status = await GetModuleStatusesAsync(periodId);
+            var openModules = status
+                .Where(item => item.ParticipatesInPeriodClose && !item.IsClosed)
+                .Select(item => item.ModuleName)
+                .ToList();
+
+            if (openModules.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Нельзя закрыть период итоговым балансом. Сначала закройте модули: {string.Join(", ", openModules)}.");
+            }
         }
 
         private async Task SynchronizeTaxJournalAsync(DateTime startDate, DateTime endDate)

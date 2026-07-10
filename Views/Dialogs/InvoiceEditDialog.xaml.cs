@@ -95,7 +95,9 @@ namespace BIS.ERP.Views.Dialogs
                 var accountsCatalog = catalogs.FirstOrDefault(item => item.Name.StartsWith("План счетов"));
                 if (accountsCatalog != null)
                 {
-                    _accounts = await _metadataService.GetCatalogDataAsync(accountsCatalog.Id);
+                    _accounts = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                        _document.Id,
+                        _document.ObjectType);
                     FillAccountItems(_accounts);
                 }
 
@@ -167,7 +169,7 @@ namespace BIS.ERP.Views.Dialogs
                     SetHeaderAccount(GetDefaultHeaderAccountCode());
                     SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TRANSFER");
                     SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "GOODS");
-                    SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "NDS12");
+                    SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
                     SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
                     SelectDefaultReference(SupplyKindCombo, SupplyKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TAXABLE");
                 }
@@ -269,7 +271,7 @@ namespace BIS.ERP.Views.Dialogs
 
             var taxes = await LoadReferenceOptionsAsync(catalogs, "Налоги");
             foreach (var tax in taxes.Where(item =>
-                         item.Value.StartsWith("NDS", StringComparison.OrdinalIgnoreCase) ||
+                         item.Value.StartsWith("НДС", StringComparison.OrdinalIgnoreCase) ||
                          item.DisplayName.Contains("НДС", StringComparison.OrdinalIgnoreCase) ||
                          item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase)))
             {
@@ -445,7 +447,7 @@ namespace BIS.ERP.Views.Dialogs
                 if (selectedLine != null)
                 {
                     if (string.IsNullOrWhiteSpace(selectedLine.VatTaxCode))
-                        SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "NDS12");
+                        SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
                     else
                         SelectStoredComboValue(HeaderVatTaxCombo, selectedLine.VatTaxCode);
 
@@ -457,7 +459,7 @@ namespace BIS.ERP.Views.Dialogs
                     return;
                 }
 
-                SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "NDS12");
+                SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
                 SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
             }
             finally
@@ -553,7 +555,7 @@ namespace BIS.ERP.Views.Dialogs
 
             var previous = _lines.LastOrDefault();
             var accountCode = ResolveLineAccountCode(previous?.AccountCode);
-            var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, "NDS12");
+            var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, "НДС12");
             var defaultSalesTax = GetDefaultReferenceOption(SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
             var selectedHeaderVat = GetSelectedReferenceOption(HeaderVatTaxCombo);
             var selectedHeaderSalesTax = GetSelectedReferenceOption(HeaderSalesTaxCombo);

@@ -46,7 +46,10 @@ namespace BIS.ERP.Views.Configurator
             IconBox.Text = module.Icon;
             DescriptionBox.Text = module.Description;
             OrderBox.Text = module.Order.ToString();
+            CloseOrderBox.Text = module.CloseOrder.ToString();
             IsActiveCheck.IsChecked = module.IsActive;
+            ParticipatesInPeriodCloseCheck.IsChecked = module.ParticipatesInPeriodClose;
+            RequirePreviousModulesClosedCheck.IsChecked = module.RequirePreviousModulesClosed;
             CodeBox.IsReadOnly = module.IsSystem;
             DeleteButton.IsEnabled = !module.IsSystem;
             await LoadObjectsAsync(module.Id);
@@ -71,14 +74,24 @@ namespace BIS.ERP.Views.Configurator
 
         private void OnAddClick(object sender, RoutedEventArgs e)
         {
-            _currentModule = new MetadataModule { Order = 100, IsActive = true, Icon = "📁" };
+            _currentModule = new MetadataModule
+            {
+                Order = 100,
+                CloseOrder = 100,
+                IsActive = true,
+                ParticipatesInPeriodClose = true,
+                Icon = "📁"
+            };
             ModulesList.SelectedItem = null;
             NameBox.Text = "Новый модуль";
             CodeBox.Text = string.Empty;
             IconBox.Text = "📁";
             DescriptionBox.Text = string.Empty;
             OrderBox.Text = "100";
+            CloseOrderBox.Text = "100";
             IsActiveCheck.IsChecked = true;
+            ParticipatesInPeriodCloseCheck.IsChecked = true;
+            RequirePreviousModulesClosedCheck.IsChecked = false;
             CodeBox.IsReadOnly = false;
             DeleteButton.IsEnabled = false;
             foreach (var row in _documents.Concat(_reports)) row.IsSelected = false;
@@ -95,7 +108,10 @@ namespace BIS.ERP.Views.Configurator
                 _currentModule.Icon = IconBox.Text;
                 _currentModule.Description = DescriptionBox.Text;
                 _currentModule.Order = int.TryParse(OrderBox.Text, out var order) ? order : 100;
+                _currentModule.CloseOrder = int.TryParse(CloseOrderBox.Text, out var closeOrder) ? closeOrder : _currentModule.Order;
                 _currentModule.IsActive = IsActiveCheck.IsChecked == true;
+                _currentModule.ParticipatesInPeriodClose = ParticipatesInPeriodCloseCheck.IsChecked == true;
+                _currentModule.RequirePreviousModulesClosed = RequirePreviousModulesClosedCheck.IsChecked == true;
                 var saved = await _moduleService.SaveModuleAsync(_currentModule);
                 await _moduleService.SaveAssignmentsAsync(saved.Id,
                     _documents.Where(row => row.IsSelected).Select(row => row.Id),

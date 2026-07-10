@@ -21,6 +21,7 @@ namespace BIS.ERP.Views
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
         private string _generatedNumber = string.Empty;
+        private string? _assignedModuleName;
 
         // Конструктор для добавления
         public PostingEditDialog(MetadataObject document, MetadataService metadataService)
@@ -94,6 +95,7 @@ namespace BIS.ERP.Views
             public Dictionary<string, List<ReferenceItem>> ReferenceData { get; set; } = new();
             public AccountAnalyticsRegistry AccountAnalytics { get; set; } = new();
             public string DocumentNumber { get; set; } = string.Empty;
+            public string? AssignedModuleName { get; set; }
         }
 
         private async Task<PostingDialogData> LoadAllDataAsync(Guid? editId)
@@ -114,6 +116,7 @@ namespace BIS.ERP.Views
             var allCatalogs = await _metadataService.GetCatalogsAsync();
             var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
             result.AccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+            result.AssignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_document.Id, _document.ObjectType);
 
             // Загружаем данные для Reference полей
             foreach (var field in _document.Fields.Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog)))
@@ -185,6 +188,7 @@ namespace BIS.ERP.Views
             _fieldControls.Clear();
             _fieldPanels.Clear();
             _accountAnalytics = dialogData.AccountAnalytics;
+            _assignedModuleName = dialogData.AssignedModuleName;
 
             foreach (var field in _document.Fields.OrderBy(GetPostingFieldDisplayOrder).ThenBy(f => f.Order))
             {
@@ -344,7 +348,8 @@ namespace BIS.ERP.Views
                 _accountAnalytics,
                 currentValue,
                 this,
-                UpdateAnalyticControlsVisibility);
+                UpdateAnalyticControlsVisibility,
+                _assignedModuleName);
         }
 
         private void UpdateAnalyticControlsVisibility()
