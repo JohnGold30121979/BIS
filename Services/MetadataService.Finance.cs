@@ -16,7 +16,7 @@ public partial class MetadataService
             new MetadataField { Id = Guid.NewGuid(), Name = "Орг", DbColumnName = "use_organizations", FieldType = "Bool", IsRequired = true, Order = 3, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Таб №", DbColumnName = "use_personnel", FieldType = "Bool", IsRequired = true, Order = 4, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Валюта", DbColumnName = "use_currency", FieldType = "Bool", IsRequired = true, Order = 5, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Остаток брать из АРМ", DbColumnName = "arm_code", FieldType = "String", Length = 50, IsRequired = false, Order = 6, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Остаток брать из модуля", DbColumnName = "module_code", FieldType = "String", Length = 50, IsRequired = false, Order = 6, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Дебет", DbColumnName = "debit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 7, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Кредит", DbColumnName = "credit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 8, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во взаиморасчетах", DbColumnName = "use_settlements", FieldType = "Bool", IsRequired = true, Order = 9, MetadataObjectId = metadataObjectId },
@@ -88,6 +88,8 @@ public partial class MetadataService
         if (catalog == null)
             return;
 
+        await MigrateAdvancePaymentsModuleFieldAsync(catalog);
+
         foreach (var field in catalog.Fields)
             NormalizeAdvancePaymentField(field);
 
@@ -144,9 +146,11 @@ public partial class MetadataService
             field.IsRequired = true;
             field.Order = 5;
         }
-        else if (field.DbColumnName?.Equals("arm_code", StringComparison.OrdinalIgnoreCase) == true)
+        else if (field.DbColumnName?.Equals("module_code", StringComparison.OrdinalIgnoreCase) == true ||
+                 field.DbColumnName?.Equals("arm_code", StringComparison.OrdinalIgnoreCase) == true)
         {
-            field.Name = "Остаток брать из АРМ";
+            field.Name = "Остаток брать из модуля";
+            field.DbColumnName = "module_code";
             field.FieldType = "String";
             field.Length = Math.Max(field.Length, 50);
             field.Order = 6;
@@ -218,7 +222,7 @@ public partial class MetadataService
                     ""use_organizations"" = COALESCE(""use_organizations"", true),
                     ""use_personnel"" = COALESCE(""use_personnel"", false),
                     ""use_currency"" = COALESCE(""use_currency"", false),
-                    ""arm_code"" = COALESCE(NULLIF(""arm_code"", ''), 'ФИНАНСЫ'),
+                    ""module_code"" = COALESCE(NULLIF(""module_code"", ''), 'ФИНАНСЫ'),
                     ""use_settlements"" = COALESCE(""use_settlements"", true),
                     ""generate_postings"" = COALESCE(""generate_postings"", true),
                     ""use_internal_settlements"" = COALESCE(""use_internal_settlements"", false),
@@ -283,23 +287,53 @@ public partial class MetadataService
     {
         var items = new[]
         {
-            new { code = "AP01", name = "Расчеты с заказчиками (сом)", debit = "14100000", credit = "32200000", arm = "ФИНАНСЫ", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
-            new { code = "AP02", name = "Расчеты по налогу на прибыль", debit = "15300000", credit = "34100000", arm = "ФИНАНСЫ", organizations = false, personnel = false, currency = false, settlements = false, postings = true, internalSettlements = false },
-            new { code = "AP03", name = "Расчеты с сотрудниками", debit = "15200000", credit = "35200000", arm = "ФИНАНСЫ", organizations = false, personnel = true, currency = false, settlements = false, postings = true, internalSettlements = false }
+            new { code = "AP01", name = "Расчеты с заказчиками (сом)", debit = "14100000", credit = "32200000", module = "ФИНАНСЫ", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
+            new { code = "AP02", name = "Расчеты по налогу на прибыль", debit = "15300000", credit = "34100000", module = "ФИНАНСЫ", organizations = false, personnel = false, currency = false, settlements = false, postings = true, internalSettlements = false },
+            new { code = "AP03", name = "Расчеты с сотрудниками", debit = "15200000", credit = "35200000", module = "ФИНАНСЫ", organizations = false, personnel = true, currency = false, settlements = false, postings = true, internalSettlements = false }
         };
         foreach (var item in items)
         {
             await _context.Database.ExecuteSqlRawAsync($@"
                 INSERT INTO ""{catalog.TableName}""
                     (""Id"",""code"",""name"",""use_organizations"",""use_personnel"",""use_currency"",
-                     ""arm_code"",""debit_account"",""credit_account"",""use_settlements"",
+                     ""module_code"",""debit_account"",""credit_account"",""use_settlements"",
                      ""generate_postings"",""use_internal_settlements"",""is_active"",""CreatedAt"",""UpdatedAt"")
                 VALUES
                     ('{Guid.NewGuid()}','{item.code}','{item.name.Replace("'","''")}',
                      {item.organizations.ToString().ToLower()},{item.personnel.ToString().ToLower()},{item.currency.ToString().ToLower()},
-                     '{item.arm}','{item.debit}','{item.credit}',{item.settlements.ToString().ToLower()},
+                     '{item.module}','{item.debit}','{item.credit}',{item.settlements.ToString().ToLower()},
                      {item.postings.ToString().ToLower()},{item.internalSettlements.ToString().ToLower()},true,NOW(),NOW())");
         }
+    }
+
+    private async Task MigrateAdvancePaymentsModuleFieldAsync(MetadataObject catalog)
+    {
+        var legacyField = catalog.Fields.FirstOrDefault(field =>
+            field.DbColumnName?.Equals("arm_code", StringComparison.OrdinalIgnoreCase) == true);
+        if (legacyField != null)
+        {
+            legacyField.DbColumnName = "module_code";
+            legacyField.Name = "Остаток брать из модуля";
+            legacyField.FieldType = "String";
+            legacyField.Length = Math.Max(legacyField.Length, 50);
+            legacyField.Order = 6;
+        }
+
+        await _context.Database.ExecuteSqlRawAsync($@"
+            ALTER TABLE ""{catalog.TableName}"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = '{catalog.TableName}'
+                      AND column_name = 'arm_code') THEN
+                    UPDATE ""{catalog.TableName}""
+                    SET ""module_code"" = COALESCE(NULLIF(""module_code"", ''), ""arm_code"")
+                    WHERE COALESCE(NULLIF(""arm_code"", ''), '') <> '';
+                END IF;
+            END $$;");
     }
 
     #endregion

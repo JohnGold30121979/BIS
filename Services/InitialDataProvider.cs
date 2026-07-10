@@ -8,6 +8,11 @@ namespace BIS.ERP.Services
         // План счетов бухгалтерского учета КР (основные счета)
         public static List<ChartOfAccount> GetChartOfAccounts()
         {
+            return GetFallbackChartOfAccounts();
+        }
+
+        public static List<ChartOfAccount> GetFallbackChartOfAccounts()
+        {
             var accounts = new List<ChartOfAccount>();        
 
             // ==================== РАЗДЕЛ 1000: ОБОРОТНЫЕ АКТИВЫ ====================

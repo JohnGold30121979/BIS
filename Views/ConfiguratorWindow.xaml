@@ -203,6 +203,9 @@
                                 <Button x:Name="ImportFrxButton" Content="📁 Импорт FRX"
                                         Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnImportFrxClick"/>
+                                <Button x:Name="RegulatedTemplatesButton" Content="🧾 Шаблоны отчетов"
+                                        Background="#7D3C98" Foreground="White" Height="35" Margin="0,5,0,0"
+                                        Click="OnRegulatedTemplatesClick"/>
                                 <Button x:Name="ExportConfigurationButton" Content="⬆ Выгрузить конфигурацию"
                                         Background="#16A085" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnExportConfigurationClick"/>

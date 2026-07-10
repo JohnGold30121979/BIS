@@ -55,12 +55,12 @@
             </StackPanel>
 
             <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,10,0">
-                <TextBlock Text="Серия и N бланка"/>
+                <TextBlock Text="Серия и № бланка"/>
                 <TextBox x:Name="TaxBlankNumberBox" Height="28"/>
             </StackPanel>
             <StackPanel Grid.Row="2" Grid.Column="2">
-                <TextBlock Text="АРМ"/>
-                <TextBox x:Name="ArmCodeBox" Height="28"/>
+                <TextBlock Text="Модуль"/>
+                <TextBox x:Name="ModuleCodeBox" Height="28"/>
             </StackPanel>
         </Grid>
 
@@ -78,7 +78,7 @@
         </DataGrid>
 
         <TextBlock x:Name="ModeHintText" Grid.Row="3"
-                   Text="Режим просмотра: номер бланка и АРМ изменить нельзя."
+                   Text="Режим просмотра: номер бланка и модуль изменить нельзя."
                    Foreground="#7F8C8D" FontStyle="Italic" Visibility="Collapsed" Margin="0,8,0,8"/>
 
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">

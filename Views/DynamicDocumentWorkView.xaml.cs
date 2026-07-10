@@ -78,19 +78,22 @@ namespace BIS.ERP.Views
                 _dataTable.Columns.Add("Дата изменения", typeof(DateTime));
 
                 // Загружаем справочники для подстановки имен
-                var referenceCatalogs = new Dictionary<string, Dictionary<Guid, string>>();
+                var referenceCatalogs = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
                 foreach (var field in _documentMetadata.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
                 {
                     var catalog = allCatalogs.FirstOrDefault(c => c.Name == field.ReferenceCatalog);
                     if (catalog != null)
                     {
                         var catalogData = await _metadataService.GetCatalogDataAsync(catalog.Id);
-                        var dict = new Dictionary<Guid, string>();
+                        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var item in catalogData)
                         {
-                            var id = item.ContainsKey("Id") ? Guid.Parse(item["Id"].ToString()) : Guid.Empty;
-                            if (id != Guid.Empty)
-                                dict[id] = ReferenceDisplayHelper.BuildDisplayValue(item, field);
+                            var displayValue = ReferenceDisplayHelper.BuildDisplayValue(item, field);
+                            foreach (var key in GetReferenceLookupKeys(item, displayValue))
+                            {
+                                if (!dict.ContainsKey(key))
+                                    dict[key] = displayValue;
+                            }
                         }
                         referenceCatalogs[field.Name] = dict;
                     }
@@ -109,10 +112,13 @@ namespace BIS.ERP.Views
                         // Если поле ссылается на справочник - подставляем Name вместо GUID
                         if (referenceCatalogs.TryGetValue(field.Name, out var dict) && rawValue != DBNull.Value)
                         {
-                            if (Guid.TryParse(rawValue?.ToString(), out var guid))
-                                dataRow[field.Name] = dict.ContainsKey(guid) ? dict[guid] : rawValue.ToString();
-                            else
-                                dataRow[field.Name] = string.Empty;
+                            var rawText = rawValue?.ToString() ?? string.Empty;
+                            var normalized = NormalizeReferenceLookupKey(rawText);
+                            dataRow[field.Name] = dict.TryGetValue(rawText.Trim(), out var displayValue)
+                                ? displayValue
+                                : dict.TryGetValue(normalized, out displayValue)
+                                    ? displayValue
+                                    : rawText;
                         }
                         else
                         {
@@ -185,6 +191,44 @@ namespace BIS.ERP.Views
                 "Bool" => typeof(bool),
                 _ => typeof(string)
             };
+        }
+
+        private static IEnumerable<string> GetReferenceLookupKeys(
+            Dictionary<string, object> row,
+            string displayName)
+        {
+            foreach (var keyName in new[]
+                     {
+                         "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Наименование", "name", "ФИО", "full_name"
+                     })
+            {
+                if (!row.TryGetValue(keyName, out var value))
+                    continue;
+
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+                yield return displayName.Trim();
+
+            var displayKey = NormalizeReferenceLookupKey(displayName);
+            if (!string.IsNullOrWhiteSpace(displayKey))
+                yield return displayKey;
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? normalized[..separatorIndex].Trim()
+                : normalized;
         }
 
         private async void OnAddClick(object sender, RoutedEventArgs e)

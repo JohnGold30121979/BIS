@@ -36,6 +36,10 @@
                     <Button x:Name="ExportButton" Content="📎 Экспорт" 
                             Width="90" Height="35" Margin="0,0,10,0"
                             Background="#9B59B6" Foreground="White" Click="OnExportClick"/>
+                    <Button x:Name="ImportChartDbfButton" Content="📥 Загрузить DBF"
+                            Width="130" Height="35" Margin="0,0,10,0"
+                            Background="#16A085" Foreground="White" Click="OnImportChartDbfClick"
+                            Visibility="Collapsed"/>
                     <Button x:Name="AddButton" Content="➕ Добавить" 
                             Width="100" Height="35" Margin="0,0,10,0"
                             Background="#27AE60" Foreground="White" Click="OnAddClick"/>
@@ -82,11 +86,19 @@
                   BorderBrush="#E0E0E0"
                   BorderThickness="0"
                   RowHeight="35"
+                  ColumnHeaderHeight="52"
                   FontSize="13"
                   SelectionChanged="DataGrid_SelectionChanged">
             <DataGrid.Resources>
                 <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3498DB" Opacity="0.3"/>
             </DataGrid.Resources>
+            <DataGrid.ColumnHeaderStyle>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="VerticalContentAlignment" Value="Center"/>
+                    <Setter Property="Padding" Value="4,6"/>
+                </Style>
+            </DataGrid.ColumnHeaderStyle>
         </DataGrid>
 
         <!-- Статус бар -->

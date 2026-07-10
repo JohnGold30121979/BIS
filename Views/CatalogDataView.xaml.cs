@@ -24,6 +24,9 @@ namespace BIS.ERP.Views
         private static readonly IValueConverter AccountTypeConverter = new AccountTypeDisplayConverter();
         private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
         private static readonly IValueConverter LinkFlagConverter = new BooleanPlusDisplayConverter();
+        private static readonly IValueConverter ClosingModuleConverter = new ClosingModuleDisplayConverter();
+        private static readonly IValueConverter PrintModeConverter = new ChartOfAccountsModeDisplayConverter("Признак печати");
+        private static readonly IValueConverter BalanceModeConverter = new ChartOfAccountsModeDisplayConverter("Сохранять остатки");
 
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
@@ -35,6 +38,7 @@ namespace BIS.ERP.Views
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
             SearchPanel.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
+            ImportChartDbfButton.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private bool IsChartOfAccountsCatalog =>
@@ -70,10 +74,11 @@ namespace BIS.ERP.Views
 
                 _dataTable = new DataTable();
                 _dataTable.TableName = _catalog.Name;
+                var visibleFields = GetUniqueCatalogFields();
 
                 // Добавляем колонки
                 _dataTable.Columns.Add("Id", typeof(Guid));
-                foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                foreach (var field in visibleFields)
                 {
                     var columnType = GetColumnType(field.FieldType);
                     _dataTable.Columns.Add(field.Name, columnType);
@@ -90,7 +95,7 @@ namespace BIS.ERP.Views
                     var dataRow = _dataTable.NewRow();
                     dataRow["Id"] = row.ContainsKey("Id") ? row["Id"] : Guid.NewGuid();
 
-                    foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                    foreach (var field in visibleFields)
                     {
                         var rawValue = row.ContainsKey(field.Name) ? row[field.Name] : DBNull.Value;
 
@@ -117,7 +122,7 @@ namespace BIS.ERP.Views
                 // Настраиваем DataGrid
                 DataGrid.Columns.Clear();
 
-                foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                foreach (var field in visibleFields)
                 {
                     DataGrid.Columns.Add(CreateDataGridColumn(field));
                 }
@@ -162,7 +167,7 @@ namespace BIS.ERP.Views
         {
             _referenceCache.Clear();
 
-            foreach (var field in _catalog.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
+            foreach (var field in GetUniqueCatalogFields().Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
             {
                 if (!_catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
                     continue;
@@ -183,6 +188,86 @@ namespace BIS.ERP.Views
 
                 _referenceCache[field.Name] = dict;
             }
+        }
+
+        private List<MetadataField> GetUniqueCatalogFields()
+        {
+            var allowedColumns = GetAllowedCatalogColumns();
+            var result = new List<MetadataField>();
+            var usedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+            {
+                if (allowedColumns != null &&
+                    (string.IsNullOrWhiteSpace(field.DbColumnName) || !allowedColumns.Contains(field.DbColumnName)))
+                {
+                    continue;
+                }
+
+                var hasDuplicateColumn = !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                                         !usedColumns.Add(field.DbColumnName);
+                var hasDuplicateName = !string.IsNullOrWhiteSpace(field.Name) &&
+                                       !usedNames.Add(field.Name);
+
+                if (hasDuplicateColumn || hasDuplicateName)
+                    continue;
+
+                result.Add(field);
+            }
+
+            return result;
+        }
+
+        private HashSet<string>? GetAllowedCatalogColumns()
+        {
+            if (IsChartOfAccountsCatalog)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "code",
+                    "name",
+                    "account_type",
+                    "description",
+                    "level",
+                    "is_active",
+                    "closing_module_code",
+                    "analytic_group",
+                    "print_mode",
+                    "balance_mode",
+                    "link_organizations",
+                    "link_employees",
+                    "link_currencies",
+                    "link_personal_accounts",
+                    "link_materials",
+                    "link_construction_objects",
+                    "link_sites",
+                    "tax_code",
+                    "account_currency_id"
+                };
+            }
+
+            if (IsAdvancePaymentsCatalog)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "code",
+                    "name",
+                    "use_organizations",
+                    "use_personnel",
+                    "use_currency",
+                    "module_code",
+                    "debit_account",
+                    "credit_account",
+                    "use_settlements",
+                    "generate_postings",
+                    "use_internal_settlements",
+                    "is_active",
+                    "description"
+                };
+            }
+
+            return null;
         }
 
         private static IEnumerable<string> GetReferenceLookupKeys(Dictionary<string, object> row)
@@ -312,7 +397,10 @@ namespace BIS.ERP.Views
                     : GetChartOfAccountsColumnHeader(fieldName),
                 ToolTip = fieldName,
                 TextAlignment = TextAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 14,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                Margin = new Thickness(2, 2, 2, 2)
             };
         }
 
@@ -326,7 +414,7 @@ namespace BIS.ERP.Views
                     "Орг" => 55,
                     "Таб №" => 60,
                     "Валюта" => 70,
-                    "Остаток брать из АРМ" => 80,
+                    "Остаток брать из модуля" => 90,
                     "Дебет" => 130,
                     "Кредит" => 130,
                     "Участвует во взаиморасчетах" => 85,
@@ -345,25 +433,26 @@ namespace BIS.ERP.Views
 
             var width = field.Name switch
             {
-                "Код" => 90,
-                "Наименование" => 230,
-                "Тип счета" => 120,
-                "Описание" => 190,
-                "Уровень" => 65,
-                "Активен" => 70,
-                "Закрывает АРМ" => 95,
-                "Группа аналитических статей" => 125,
-                "Признак печати" => 105,
-                "Сохранять остатки" => 110,
-                "Связь с организациями" => 65,
-                "Связь со списочным составом" => 65,
-                "Связь с валютами" => 65,
-                "Связь с лицевыми счетами" => 75,
-                "Связь с материалами" => 75,
-                "Связь с объектами строительства" => 85,
-                "Код налога" => 80,
-                "Валюта счета" => 125,
-                _ => field.FieldType == "Bool" ? 65 : 110
+                "Код" => 78,
+                "Наименование" => 185,
+                "Тип счета" => 96,
+                "Описание" => 150,
+                "Уровень" => 48,
+                "Активен" => 58,
+                "Закрывает модуль" => 78,
+                "Группа аналитических статей" => 92,
+                "Признак печати" => 72,
+                "Сохранять остатки" => 82,
+                "Связь с организациями" => 48,
+                "Связь со списочным составом" => 48,
+                "Связь с валютами" => 48,
+                "Связь с лицевыми счетами" => 56,
+                "Связь с материалами" => 56,
+                "Связь с объектами строительства" => 62,
+                "Связь с участками" => 52,
+                "Код налога" => 58,
+                "Валюта счета" => 92,
+                _ => field.FieldType == "Bool" ? 48 : 96
             };
 
             return new DataGridLength(width, DataGridLengthUnitType.Pixel);
@@ -379,12 +468,19 @@ namespace BIS.ERP.Views
 
             return field.Name switch
             {
-                "Код" => 70,
-                "Наименование" => 140,
-                "Описание" => 120,
-                "Уровень" => 50,
-                "Активен" => 55,
-                _ => field.FieldType == "Bool" ? 45 : 60
+                "Код" => 62,
+                "Наименование" => 135,
+                "Тип счета" => 80,
+                "Описание" => 105,
+                "Уровень" => 40,
+                "Активен" => 50,
+                "Закрывает модуль" => 68,
+                "Группа аналитических статей" => 80,
+                "Признак печати" => 62,
+                "Сохранять остатки" => 68,
+                "Код налога" => 52,
+                "Валюта счета" => 78,
+                _ => field.FieldType == "Bool" ? 40 : 56
             };
         }
 
@@ -417,20 +513,22 @@ namespace BIS.ERP.Views
         {
             return fieldName switch
             {
-                "Закрывает АРМ" => "Закр. АРМ",
-                "Группа аналитических статей" => "Группа аналит.",
-                "Признак печати" => "Печать",
-                "Сохранять остатки" => "Сохр. остатки",
-                "Связь с организациями" => "Орг.",
-                "Связь со списочным составом" => "Таб. N",
-                "Связь с валютами" => "Валюта",
-                "Связь с лицевыми счетами" => "Лиц. счета",
-                "Связь с материалами" => "Материалы",
-                "Связь с объектами строительства" => "Объекты",
-                "Код налога" => "Код нал.",
-                "Валюта счета" => "Валюта сч.",
-                "Дата создания" => "Создан",
-                "Дата изменения" => "Изменен",
+                "Тип счета" => "Тип\nсчета",
+                "Закрывает модуль" => "Закрывает\nмодуль",
+                "Группа аналитических статей" => "Группа\nаналитики",
+                "Признак печати" => "Признак\nпечати",
+                "Сохранять остатки" => "Сохр.\nостатки",
+                "Связь с организациями" => "Связь\nс орг.",
+                "Связь со списочным составом" => "Таб.\n№",
+                "Связь с валютами" => "Связь\nс вал.",
+                "Связь с лицевыми счетами" => "Лиц.\nсчета",
+                "Связь с материалами" => "Матер.\nучет",
+                "Связь с объектами строительства" => "Объекты\nстр-ва",
+                "Связь с участками" => "Участки",
+                "Код налога" => "Код\nналога",
+                "Валюта счета" => "Валюта\nсчета",
+                "Дата создания" => "Дата\nсоздания",
+                "Дата изменения" => "Дата\nизменения",
                 _ => fieldName
             };
         }
@@ -439,7 +537,7 @@ namespace BIS.ERP.Views
         {
             return fieldName switch
             {
-                "Остаток брать из АРМ" => "АРМ",
+                "Остаток брать из модуля" => "Модуль",
                 "Участвует во взаиморасчетах" => "Разн. расч.",
                 "Формировать проводки авансовых платежей" => "Анал. плат.",
                 "Участвует во внутренних взаиморасчетах" => "Внут. расч.",
@@ -456,6 +554,18 @@ namespace BIS.ERP.Views
             if (IsChartOfAccountsCatalog && field.Name == "Тип счета")
             {
                 binding.Converter = AccountTypeConverter;
+            }
+            else if (IsChartOfAccountsCatalog && field.Name == "Закрывает модуль")
+            {
+                binding.Converter = ClosingModuleConverter;
+            }
+            else if (IsChartOfAccountsCatalog && field.Name == "Признак печати")
+            {
+                binding.Converter = PrintModeConverter;
+            }
+            else if (IsChartOfAccountsCatalog && field.Name == "Сохранять остатки")
+            {
+                binding.Converter = BalanceModeConverter;
             }
             else if (IsAdvancePaymentsCatalog && field.FieldType == "Bool" && field.Name != "Активен")
             {
@@ -681,6 +791,50 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnImportChartDbfClick(object sender, RoutedEventArgs e)
+        {
+            if (!IsChartOfAccountsCatalog)
+                return;
+
+            var openDialog = new OpenFileDialog
+            {
+                Title = "Выберите DBF файл плана счетов",
+                Filter = "Файл плана счетов (BUXSCH.DBF)|BUXSCH.DBF|DBF файлы (*.dbf)|*.dbf|Все файлы (*.*)|*.*",
+                FileName = "BUXSCH.DBF"
+            };
+
+            if (openDialog.ShowDialog() != true)
+                return;
+
+            try
+            {
+                ProgressText.Text = "⏳ Импорт DBF...";
+                StatusText.Text = "Загрузка плана счетов из Fox DBF...";
+
+                var result = await _metadataService.ImportChartOfAccountsFromDbfAsync(openDialog.FileName);
+                await LoadData();
+
+                MessageBox.Show(
+                    BuildChartOfAccountsImportMessage(result),
+                    "Импорт плана счетов",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Ошибка загрузки плана счетов: {ex.Message}",
+                    "Ошибка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProgressText.Text = string.Empty;
+                StatusText.Text = "✅ Готово";
+            }
+        }
+
         private void ExportToExcel(string filePath)
         {
             using var workbook = new XLWorkbook();
@@ -699,6 +853,26 @@ namespace BIS.ERP.Views
             worksheet.Columns().AdjustToContents();
 
             workbook.SaveAs(filePath);
+        }
+
+        private static string BuildChartOfAccountsImportMessage(ChartOfAccountsDbfImportResult result)
+        {
+            var mappedFields = string.Join(Environment.NewLine,
+                result.FieldMappings.Select(item => $"• {item.SourceField} -> {item.TargetField}"));
+
+            var ignoredFields = result.IgnoredSourceFields.Count == 0
+                ? "нет"
+                : string.Join(", ", result.IgnoredSourceFields);
+
+            return
+                $"Файл: {result.SourcePath}{Environment.NewLine}{Environment.NewLine}" +
+                $"Обработано записей: {result.SourceRecordCount}{Environment.NewLine}" +
+                $"Уникальных счетов: {result.LoadedAccountsCount}{Environment.NewLine}" +
+                $"Добавлено: {result.InsertedCount}{Environment.NewLine}" +
+                $"Обновлено: {result.UpdatedCount}{Environment.NewLine}" +
+                $"Повторов кодов в источнике: {result.DuplicateSourceCodesCount}{Environment.NewLine}{Environment.NewLine}" +
+                $"Разобранные поля DBF:{Environment.NewLine}{mappedFields}{Environment.NewLine}{Environment.NewLine}" +
+                $"Поля Fox без прямой загрузки в текущий набор реквизитов:{Environment.NewLine}{ignoredFields}";
         }
 
         private sealed class AccountTypeDisplayConverter : IValueConverter
@@ -737,6 +911,39 @@ namespace BIS.ERP.Views
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
                 return LocalizationService.DisplayValue(value);
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        private sealed class ClosingModuleDisplayConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return ChartOfAccountsSelectionMetadata.NormalizeModuleDisplayName(value?.ToString());
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        private sealed class ChartOfAccountsModeDisplayConverter : IValueConverter
+        {
+            private readonly string _fieldName;
+
+            public ChartOfAccountsModeDisplayConverter(string fieldName)
+            {
+                _fieldName = fieldName;
+            }
+
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return ChartOfAccountsSelectionMetadata.GetModeDisplay(_fieldName, value?.ToString());
             }
 
             public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users { get; set; }
     public DbSet<Transaction> Transactions { get; set; }
     public DbSet<Material> Materials { get; set; }
+    // Legacy compatibility table. The active fixed-assets module is metadata-driven via catalog_assets.
     public DbSet<FixedAsset> FixedAssets { get; set; }
     public DbSet<MetadataObject> MetadataObjects { get; set; }
     public DbSet<MetadataField> MetadataFields { get; set; }
@@ -48,6 +49,7 @@ public class AppDbContext : DbContext
     public DbSet<Organization> Organizations { get; set; }   
     public DbSet<Posting> Postings { get; set; }  
     public DbSet<AccountingPeriod> AccountingPeriods { get; set; }
+    public DbSet<AccountingPeriodModuleState> AccountingPeriodModuleStates { get; set; }
     public DbSet<AccountOpeningBalance> AccountOpeningBalances { get; set; }
     public DbSet<AccountTurnoverSnapshot> AccountTurnoverSnapshots { get; set; }
     public DbSet<FinancialReportLine> FinancialReportLines { get; set; }
@@ -55,6 +57,7 @@ public class AppDbContext : DbContext
     public DbSet<TaxJournalRecord> TaxJournalRecords { get; set; }
     public DbSet<LocalizationEntry> LocalizationEntries { get; set; }
     public DbSet<SystemConfiguration> SystemConfigurations { get; set; }
+    public DbSet<RegulatedReportTemplate> RegulatedReportTemplates { get; set; }
     public DbSet<UserAccessPermission> UserAccessPermissions { get; set; }
     public DbSet<MetadataModule> MetadataModules { get; set; }
     public DbSet<MetadataModuleItem> MetadataModuleItems { get; set; }
@@ -180,12 +183,15 @@ public class AppDbContext : DbContext
         });
 
         modelBuilder.Entity<AccountingPeriod>().HasIndex(period => new { period.StartDate, period.EndDate }).IsUnique();
+        modelBuilder.Entity<AccountingPeriodModuleState>().HasIndex(state => new { state.PeriodId, state.ModuleId }).IsUnique();
         modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => new { balance.BalanceDate, balance.AccountCode }).IsUnique();
         modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => balance.SourcePeriodId);
         modelBuilder.Entity<AccountTurnoverSnapshot>().HasIndex(snapshot => new { snapshot.PeriodId, snapshot.AccountCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLine>().HasIndex(line => new { line.ReportCode, line.LineCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLineAccount>().HasIndex(link => new { link.LineId, link.AccountCode }).IsUnique();
         modelBuilder.Entity<LocalizationEntry>().HasIndex(entry => new { entry.Culture, entry.Key }).IsUnique();
+        modelBuilder.Entity<RegulatedReportTemplate>().HasIndex(template => new { template.Code, template.Version }).IsUnique();
+        modelBuilder.Entity<RegulatedReportTemplate>().HasIndex(template => new { template.Code, template.IsActive });
     }
 
 

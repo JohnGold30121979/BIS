@@ -21,6 +21,7 @@ namespace BIS.ERP.Views.Dialogs
         private readonly MetadataService _metadataService;
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private Dictionary<string, object>? _existingData;
+        private string? _assignedModuleName;
 
         public Dictionary<string, object> ItemData { get; private set; } = new();
 
@@ -41,6 +42,7 @@ namespace BIS.ERP.Views.Dialogs
             var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
             _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
             _existingData = await LoadExistingDataAsync();
+            _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_metadata.Id, _metadata.ObjectType);
 
             FieldsPanel.Children.Clear();
             _fieldControls.Clear();
@@ -111,7 +113,8 @@ namespace BIS.ERP.Views.Dialogs
                     _accountAnalytics,
                     currentValue,
                     this,
-                    UpdateAccountControlledFieldsVisibility);
+                    UpdateAccountControlledFieldsVisibility,
+                    _assignedModuleName);
             }
 
             if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -170,16 +173,77 @@ namespace BIS.ERP.Views.Dialogs
                 })
                 .ToList();
 
+            foreach (var item in items)
+            {
+                var row = refData.FirstOrDefault(candidate =>
+                    candidate.ContainsKey("Id") &&
+                    Guid.TryParse(candidate["Id"]?.ToString(), out var candidateId) &&
+                    candidateId == item.Id);
+                if (row == null)
+                    continue;
+
+                foreach (var key in GetReferenceLookupKeys(row, item.DisplayName))
+                    item.LookupKeys.Add(key);
+            }
+
             comboBox.ItemsSource = items;
 
-            if (currentValue != null && Guid.TryParse(currentValue.ToString(), out var currentGuid))
+            var currentText = currentValue?.ToString();
+            if (currentValue != null && Guid.TryParse(currentText, out var currentGuid))
             {
                 var selected = items.FirstOrDefault(item => item.Id == currentGuid);
                 if (selected != null)
                     comboBox.SelectedItem = selected;
             }
+            else if (!string.IsNullOrWhiteSpace(currentText))
+            {
+                var normalizedCurrent = NormalizeReferenceLookupKey(currentText);
+                var selected = items.FirstOrDefault(item =>
+                    item.LookupKeys.Contains(currentText.Trim()) ||
+                    item.LookupKeys.Contains(normalizedCurrent));
+                if (selected != null)
+                    comboBox.SelectedItem = selected;
+            }
 
             return comboBox;
+        }
+
+        private static IEnumerable<string> GetReferenceLookupKeys(
+            Dictionary<string, object> row,
+            string displayName)
+        {
+            foreach (var keyName in new[]
+                     {
+                         "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Наименование", "name", "ФИО", "full_name"
+                     })
+            {
+                if (!row.TryGetValue(keyName, out var value))
+                    continue;
+
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+                yield return displayName.Trim();
+
+            var displayKey = NormalizeReferenceLookupKey(displayName);
+            if (!string.IsNullOrWhiteSpace(displayKey))
+                yield return displayKey;
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? normalized[..separatorIndex].Trim()
+                : normalized;
         }
 
         private Control CreateRegularControl(MetadataField field, string safeName, object? currentValue)

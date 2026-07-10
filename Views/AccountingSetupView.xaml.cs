@@ -222,9 +222,7 @@ namespace BIS.ERP.Views
 
         private async Task<System.Collections.Generic.List<System.Collections.Generic.Dictionary<string, object>>> LoadAccountsAsync()
         {
-            var metadata = await _context.MetadataObjects.AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "План счетов");
-            return metadata == null ? new() : await _metadataService.GetCatalogDataAsync(metadata.Id);
+            return await _metadataService.GetChartOfAccountsSelectionDataAsync();
         }
 
         private void OnOpeningGridBeginningEdit(object sender, DataGridBeginningEditEventArgs e)

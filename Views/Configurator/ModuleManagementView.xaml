@@ -23,7 +23,13 @@
         <Border Grid.Column="2" Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="1" CornerRadius="7" Padding="16">
             <Grid>
-                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="150"/>
@@ -56,7 +62,28 @@
                               VerticalAlignment="Center" Margin="15,15,0,0" IsChecked="True"/>
                 </Grid>
 
-                <TabControl Grid.Row="2">
+                <Grid Grid.Row="2" Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="200"/>
+                        <ColumnDefinition Width="18"/>
+                        <ColumnDefinition Width="220"/>
+                        <ColumnDefinition Width="18"/>
+                        <ColumnDefinition Width="260"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Порядок закрытия" Margin="0,0,0,5"/>
+                        <TextBox x:Name="CloseOrderBox" Height="35" Padding="8,4"/>
+                    </StackPanel>
+                    <CheckBox x:Name="ParticipatesInPeriodCloseCheck" Grid.Column="3"
+                              Content="Участвует в закрытии периода"
+                              VerticalAlignment="Center" Margin="0,18,0,0" IsChecked="True"/>
+                    <CheckBox x:Name="RequirePreviousModulesClosedCheck" Grid.Column="5"
+                              Content="Закрывать только после предыдущих модулей"
+                              VerticalAlignment="Center" Margin="0,18,0,0"/>
+                </Grid>
+
+                <TabControl Grid.Row="3">
                     <TabItem Header="Документы">
                         <DataGrid x:Name="DocumentsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
                                   ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -87,7 +114,7 @@
                     </TabItem>
                 </TabControl>
 
-                <Grid Grid.Row="3" Margin="0,14,0,0">
+                <Grid Grid.Row="4" Margin="0,14,0,0">
                     <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
                     <Button Content="Сохранить модуль" Width="150" Height="38" HorizontalAlignment="Right"
                             Click="OnSaveClick" Background="{DynamicResource AppAccentBrush}" Foreground="White"/>

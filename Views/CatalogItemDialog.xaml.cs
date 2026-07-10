@@ -17,6 +17,7 @@ namespace BIS.ERP.Views
         private readonly MetadataService _metadataService;
         private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
         private AccountAnalyticsRegistry? _accountAnalytics;
+        private string? _assignedModuleName;
 
         public Dictionary<string, object> ItemData => _itemData;
 
@@ -29,7 +30,9 @@ namespace BIS.ERP.Views
             _controls = new Dictionary<string, Control>();
             _referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
 
-            DialogTitle.Text = $"Добавление в справочник: {catalog.Name}";
+            DialogTitle.Text = existingData == null
+                ? $"Добавление в справочник: {catalog.Name}"
+                : $"Редактирование справочника: {catalog.Name}";
 
             Loaded += async (s, e) => await BuildFieldsAsync(existingData);
         }
@@ -43,8 +46,9 @@ namespace BIS.ERP.Views
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_catalog.Id, _catalog.ObjectType);
 
-                foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                foreach (var field in GetEditableFields())
                 {
                     System.Diagnostics.Debug.WriteLine($"Processing field: {field.Name}, Type: {field.FieldType}");
 
@@ -54,7 +58,8 @@ namespace BIS.ERP.Views
 
                     Control inputControl;
 
-                    if (TryCreateChartOfAccountsChoiceControl(field, existingData, out var choiceControl))
+                    var choiceControl = await CreateChartOfAccountsChoiceControlAsync(field, existingData);
+                    if (choiceControl != null)
                     {
                         inputControl = choiceControl;
                     }
@@ -63,7 +68,8 @@ namespace BIS.ERP.Views
                         inputControl = AccountPickerControlFactory.Create(
                             _accountAnalytics!,
                             GetExistingValue(field, existingData),
-                            this);
+                            this,
+                            moduleCodeOrName: _assignedModuleName);
                     }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
                     else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -147,6 +153,8 @@ namespace BIS.ERP.Views
                     item.Id = Guid.Parse(row["Id"].ToString());
 
                 item.DisplayName = GetDisplayValue(row, field, refCatalog.Name);
+                foreach (var key in GetReferenceLookupKeys(row, item.DisplayName))
+                    item.LookupKeys.Add(key);
                 items.Add(item);
             }
 
@@ -158,7 +166,7 @@ namespace BIS.ERP.Views
             {
                 var selectedItem = items.FirstOrDefault(i =>
                     string.Equals(i.Id.ToString(), existingValue, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(i.DisplayName, existingValue, StringComparison.OrdinalIgnoreCase));
+                    i.LookupKeys.Contains(NormalizeReferenceLookupKey(existingValue)));
                 if (selectedItem != null)
                     comboBox.SelectedItem = selectedItem;
             }
@@ -178,6 +186,44 @@ namespace BIS.ERP.Views
             // =======================================
 
             return comboBox;
+        }
+
+        private static IEnumerable<string> GetReferenceLookupKeys(
+            Dictionary<string, object> row,
+            string displayName)
+        {
+            foreach (var keyName in new[]
+                     {
+                         "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Наименование", "name", "ФИО", "full_name"
+                     })
+            {
+                if (!row.TryGetValue(keyName, out var value))
+                    continue;
+
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
+
+            if (!string.IsNullOrWhiteSpace(displayName))
+                yield return displayName.Trim();
+
+            var displayKey = NormalizeReferenceLookupKey(displayName);
+            if (!string.IsNullOrWhiteSpace(displayKey))
+                yield return displayKey;
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? normalized[..separatorIndex].Trim()
+                : normalized;
         }
 
         /// <summary>
@@ -301,31 +347,29 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Создание обычного контрола (не Reference)
         /// </summary>
-        private bool TryCreateChartOfAccountsChoiceControl(
+        private async Task<Control?> CreateChartOfAccountsChoiceControlAsync(
             MetadataField field,
-            Dictionary<string, object> existingData,
-            out Control control)
+            Dictionary<string, object> existingData)
         {
-            control = null;
-
             if (_catalog.Name != "План счетов")
-                return false;
+                return null;
 
-            var options = field.Name switch
+            IReadOnlyList<object>? options = field.Name switch
             {
                 "Тип счета" => new object[]
                 {
-                    new ChoiceItem("Active", LocalizationService.DisplayValue("Active")),
-                    new ChoiceItem("Passive", LocalizationService.DisplayValue("Passive")),
-                    new ChoiceItem("ActivePassive", LocalizationService.DisplayValue("ActivePassive"))
+                    new ChoiceItem("Active", LocalizationService.DisplayValue("Active"), "Активный"),
+                    new ChoiceItem("Passive", LocalizationService.DisplayValue("Passive"), "Пассивный"),
+                    new ChoiceItem("ActivePassive", LocalizationService.DisplayValue("ActivePassive"), "Активно-пассивный")
                 },
-                "Признак печати" => new object[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
-                "Сохранять остатки" => new object[] { "", "по статьям", "по организациям", "по таб.номерам", "по лиц.счетам", "по материалам", "по субсчетам" },
+                "Закрывает модуль" => await GetClosingModuleOptionsAsync(),
+                "Признак печати" => BuildModeChoiceItems(ChartOfAccountsSelectionMetadata.PrintModeOptions),
+                "Сохранять остатки" => BuildModeChoiceItems(ChartOfAccountsSelectionMetadata.BalanceModeOptions),
                 _ => null
             };
 
-            if (options == null)
-                return false;
+            if (options == null || options.Count == 0)
+                return null;
 
             var comboBox = new ComboBox
             {
@@ -334,24 +378,79 @@ namespace BIS.ERP.Views
                 ItemsSource = options
             };
 
-            var existingValue = existingData != null && existingData.ContainsKey(field.Name)
-                ? NormalizeChartOfAccountsChoice(field.Name, existingData[field.Name]?.ToString())
-                : string.Empty;
+            var existingValue = NormalizeChartOfAccountsChoice(
+                field.Name,
+                GetExistingValue(field, existingData)?.ToString());
 
-            comboBox.SelectedItem = field.Name == "Тип счета"
-                ? options.OfType<ChoiceItem>().FirstOrDefault(option => option.Code == NormalizeAccountTypeCode(existingData?.GetValueOrDefault(field.Name)?.ToString()))
-                : options.FirstOrDefault(option => option?.ToString() == existingValue);
+            comboBox.SelectedItem = options
+                .OfType<ChoiceItem>()
+                .FirstOrDefault(option => option.Matches(existingValue));
+            comboBox.SelectedItem ??= options.FirstOrDefault(option =>
+                string.Equals(option?.ToString(), existingValue, StringComparison.OrdinalIgnoreCase));
+            comboBox.SelectedItem ??= field.Name == "Тип счета"
+                ? options.OfType<ChoiceItem>().FirstOrDefault(option => option.Code == "Active")
+                : options.FirstOrDefault();
+
             comboBox.SelectedItem ??= options.FirstOrDefault();
-            control = comboBox;
-            return true;
+            return comboBox;
         }
 
-        private static string NormalizeChartOfAccountsChoice(string fieldName, string value)
+        private async Task<IReadOnlyList<object>> GetClosingModuleOptionsAsync()
         {
+            var modules = await _metadataService.GetModulesAsync();
+            var options = new List<object>();
+            var usedValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var module in modules)
+            {
+                if (string.IsNullOrWhiteSpace(module.Name) || !usedValues.Add(module.Name))
+                    continue;
+
+                options.Add(new ChoiceItem(module.Name, module.Name, module.Code));
+            }
+
+            foreach (var option in GetFoxClosingModuleChoices())
+            {
+                if (usedValues.Add(option.Code))
+                    options.Add(option);
+            }
+
+            return options;
+        }
+
+        private static IEnumerable<ChoiceItem> GetFoxClosingModuleChoices()
+        {
+            yield return new ChoiceItem("Финансы", "Финансы", "3", "Finance");
+            yield return new ChoiceItem("Сбыт", "Сбыт", "4", "Продажи", "Реализация", "Регистратура");
+            yield return new ChoiceItem("Учет материальных ценностей", "Учет материальных ценностей", "6", "Inventory", "УМЦ", "ТМЦ", "Материалы");
+            yield return new ChoiceItem("Основные средства", "Основные средства", "7", "FixedAssets", "ОС");
+            yield return new ChoiceItem("Вспомогательное производство", "Вспомогательное производство", "8");
+            yield return new ChoiceItem("Сырье", "Сырье", "12");
+            yield return new ChoiceItem("Меню", "Меню", "66");
+        }
+
+        private static string NormalizeChartOfAccountsChoice(string fieldName, string? value)
+        {
+            value ??= string.Empty;
+
+            if (fieldName == "Закрывает модуль")
+                return NormalizeClosingModuleChoice(value);
+
+            if (fieldName is "Признак печати" or "Сохранять остатки")
+                return ChartOfAccountsSelectionMetadata.NormalizeModeValue(fieldName, value);
+
             if (fieldName != "Тип счета")
-                return value ?? string.Empty;
+                return value;
 
             return LocalizationService.DisplayValue(value);
+        }
+
+        private static IReadOnlyList<object> BuildModeChoiceItems(
+            IEnumerable<ChartOfAccountsChoiceDefinition> options)
+        {
+            return options
+                .Select(option => (object)new ChoiceItem(option.Code, option.Display, option.Aliases))
+                .ToList();
         }
 
         private static string NormalizeAccountTypeCode(string? value) => value switch
@@ -468,7 +567,7 @@ namespace BIS.ERP.Views
         {
             try
             {
-                foreach (var field in _catalog.Fields.OrderBy(f => f.Order))
+                foreach (var field in GetEditableFields())
                 {
                     if (!_controls.ContainsKey(field.Name)) continue;
 
@@ -505,8 +604,30 @@ namespace BIS.ERP.Views
             }
         }
 
-        private sealed record ChoiceItem(string Code, string Display)
+        private static string NormalizeClosingModuleChoice(string? value) => value?.Trim() switch
         {
+            "3" or "Finance" => "Финансы",
+            "4" => "Сбыт",
+            "6" or "Inventory" => "Учет материальных ценностей",
+            "7" or "FixedAssets" => "Основные средства",
+            "8" => "Вспомогательное производство",
+            "12" => "Сырье",
+            "66" => "Меню",
+            _ => value?.Trim() ?? string.Empty
+        };
+
+        private sealed record ChoiceItem(string Code, string Display, params string[] LookupKeys)
+        {
+            public bool Matches(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                    return false;
+
+                return Code.Equals(value, StringComparison.OrdinalIgnoreCase) ||
+                       Display.Equals(value, StringComparison.OrdinalIgnoreCase) ||
+                       LookupKeys.Any(key => key.Equals(value, StringComparison.OrdinalIgnoreCase));
+            }
+
             public override string ToString() => Display;
         }
 
@@ -546,11 +667,96 @@ namespace BIS.ERP.Views
             DialogResult = false;
             Close();
         }
+
+        private List<MetadataField> GetEditableFields()
+        {
+            var allowedColumns = GetAllowedCatalogColumns();
+            var usedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<MetadataField>();
+
+            foreach (var field in _catalog.Fields.OrderBy(field => field.Order))
+            {
+                if (allowedColumns != null &&
+                    (string.IsNullOrWhiteSpace(field.DbColumnName) || !allowedColumns.Contains(field.DbColumnName)))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                    !usedColumns.Add(field.DbColumnName))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(field.Name) &&
+                    !usedNames.Add(field.Name))
+                {
+                    continue;
+                }
+
+                result.Add(field);
+            }
+
+            return result;
+        }
+
+        private HashSet<string>? GetAllowedCatalogColumns()
+        {
+            if (_catalog.Name == "План счетов")
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "code",
+                    "name",
+                    "account_type",
+                    "description",
+                    "level",
+                    "is_active",
+                    "closing_module_code",
+                    "analytic_group",
+                    "print_mode",
+                    "balance_mode",
+                    "link_organizations",
+                    "link_employees",
+                    "link_currencies",
+                    "link_personal_accounts",
+                    "link_materials",
+                    "link_construction_objects",
+                    "link_sites",
+                    "tax_code",
+                    "account_currency_id"
+                };
+            }
+
+            if (_catalog.Name == "Авансовые платежи")
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "code",
+                    "name",
+                    "use_organizations",
+                    "use_personnel",
+                    "use_currency",
+                    "module_code",
+                    "debit_account",
+                    "credit_account",
+                    "use_settlements",
+                    "generate_postings",
+                    "use_internal_settlements",
+                    "is_active",
+                    "description"
+                };
+            }
+
+            return null;
+        }
     }
 
     public class ReferenceItem
     {
         public Guid Id { get; set; }
         public string DisplayName { get; set; } = string.Empty;
+        public HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

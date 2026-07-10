@@ -17,6 +17,35 @@ namespace BIS.ERP.Models
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 
+    public class AccountingPeriodModuleState
+    {
+        [Key] public Guid Id { get; set; } = Guid.NewGuid();
+        public Guid PeriodId { get; set; }
+        public Guid ModuleId { get; set; }
+        public bool IsClosed { get; set; }
+        public DateTime? ClosedAt { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public class AccountingPeriodModuleStatus
+    {
+        public Guid PeriodId { get; set; }
+        public Guid ModuleId { get; set; }
+        public string ModuleCode { get; set; } = string.Empty;
+        public string ModuleName { get; set; } = string.Empty;
+        public int CloseOrder { get; set; }
+        public bool ParticipatesInPeriodClose { get; set; }
+        public bool RequirePreviousModulesClosed { get; set; }
+        public bool IsClosed { get; set; }
+        public DateTime? ClosedAt { get; set; }
+
+        public string DisplayName => $"{CloseOrder:000} - {ModuleName}";
+        public string StateCaption => IsClosed
+            ? $"закрыт {ClosedAt:dd.MM.yyyy HH:mm}"
+            : "открыт";
+    }
+
     public class AccountOpeningBalance
     {
         [Key] public Guid Id { get; set; } = Guid.NewGuid();

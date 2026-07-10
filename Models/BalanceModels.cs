@@ -71,12 +71,19 @@
         public string DocumentNumber { get; set; } = string.Empty;
         public string DocumentType { get; set; } = string.Empty;
         public string Organization { get; set; } = string.Empty;
+        public string ModuleCode { get; set; } = string.Empty;
+        public string TaxBlankNumber { get; set; } = string.Empty;
+        public string EsfNumber { get; set; } = string.Empty;
         public decimal Amount { get; set; }
         public decimal AmountWithoutTax { get; set; }
         public decimal VatAmount { get; set; }
         public decimal SalesTaxAmount { get; set; }
         public decimal TaxAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public decimal SalesTaxAmount { get; set; }
         public string TaxType { get; set; } = string.Empty;
+        public string VatTaxCode { get; set; } = string.Empty;
+        public string SalesTaxCode { get; set; } = string.Empty;
         public bool IsPosted { get; set; }
         public string Note { get; set; } = string.Empty;
     }
@@ -93,6 +100,7 @@
     public class PeriodCollectionResult
     {
         public List<PeriodDocumentSummary> Documents { get; set; } = new();
+        public List<string> Warnings { get; set; } = new();
         public int PostingCount { get; set; }
         public decimal DebitTurnover { get; set; }
         public decimal CreditTurnover { get; set; }

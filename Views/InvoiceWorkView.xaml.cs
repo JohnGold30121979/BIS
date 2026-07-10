@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
+using Microsoft.Win32;
 
 namespace BIS.ERP.Views
 {
@@ -14,11 +15,14 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
         private readonly bool _isRegistrationMode;
+        private readonly bool _isSalesMode;
         private InvoiceService? _invoiceService;
+        private InvoiceEsfExchangeService? _invoiceEsfExchangeService;
 
         public InvoiceWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
             _isRegistrationMode = InvoiceDocumentTypes.IsPurchase(documentMetadata.Name);
+            _isSalesMode = InvoiceDocumentTypes.IsSales(documentMetadata.Name);
             InitializeComponent();
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
@@ -34,6 +38,7 @@ namespace BIS.ERP.Views
             _invoiceService = new InvoiceService(context);
             _invoiceService.Configure(_documentMetadata);
             await _invoiceService.EnsureSchemaAsync();
+            _invoiceEsfExchangeService = new InvoiceEsfExchangeService(context, _invoiceService);
             await LoadDataAsync();
         }
 
@@ -47,6 +52,8 @@ namespace BIS.ERP.Views
             DeleteButton.IsEnabled = hasSelection && selected?.IsPosted == false;
             AllPostingsButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
+            ExportEsfButton.IsEnabled = _isSalesMode;
+            ImportEsfButton.IsEnabled = _isSalesMode;
         }
 
         private void ConfigureModeUi()
@@ -56,15 +63,19 @@ namespace BIS.ERP.Views
 
             TitleText.Text = $"{_documentMetadata.Icon} Регистрация счет-фактур по НДС";
             DescriptionText.Text =
-                "Реестр зарегистрированных счетов-фактур: просмотр документов и присвоение серии/номера налогового бланка.";
+                "Реестр зарегистрированных счетов-фактур: полный просмотр и редактирование документа, включая номер бланка и модуль.";
             AddButton.Content = "➕ Добавить счет-фактуру";
             AddButton.Width = 165;
-            EditButton.Content = "🧾 Номер бланка";
-            EditButton.Width = 135;
+            EditButton.Content = "✏ Изменить";
+            EditButton.Width = 120;
 
             TaxBlankColumn.Visibility = Visibility.Visible;
-            ArmColumn.Visibility = Visibility.Visible;
+            ModuleColumn.Visibility = Visibility.Visible;
             BasisColumn.Visibility = Visibility.Collapsed;
+            EsfNumberColumn.Visibility = Visibility.Collapsed;
+            EsfStatusColumn.Visibility = Visibility.Collapsed;
+            ExportEsfButton.Visibility = Visibility.Collapsed;
+            ImportEsfButton.Visibility = Visibility.Collapsed;
 
             LineUnitColumn.Visibility = Visibility.Visible;
             LineQuantityColumn.Visibility = Visibility.Visible;
@@ -145,19 +156,6 @@ namespace BIS.ERP.Views
         {
             if (_invoiceService == null)
                 return;
-
-            if (_isRegistrationMode)
-            {
-                var registrationDialog = new InvoiceRegistrationDialog(
-                    _documentMetadata,
-                    _invoiceService,
-                    invoiceId,
-                    isReadOnly);
-                registrationDialog.Owner = Window.GetWindow(this);
-                if (registrationDialog.ShowDialog() == true && !isReadOnly)
-                    await LoadDataAsync();
-                return;
-            }
 
             var dialog = new InvoiceEditDialog(_documentMetadata, _metadataService, _invoiceService, invoiceId, isReadOnly);
             dialog.Owner = Window.GetWindow(this);
@@ -256,5 +254,110 @@ namespace BIS.ERP.Views
         }
 
         private async void OnRefreshClick(object sender, RoutedEventArgs e) => await LoadDataAsync();
+
+        private async void OnExportEsfClick(object sender, RoutedEventArgs e)
+        {
+            if (!_isSalesMode || _invoiceEsfExchangeService == null)
+                return;
+
+            var modeDialog = new InvoiceEsfExportDialog(SelectedInvoice)
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (modeDialog.ShowDialog() != true)
+                return;
+
+            var defaultFileName = modeDialog.Mode == InvoiceEsfExportMode.SelectedInvoice && SelectedInvoice != null
+                ? $"esf_{SelectedInvoice.DocNumber}_{SelectedInvoice.DocDate:yyyyMMdd}.xml"
+                : $"esf_{modeDialog.StartDate:yyyyMMdd}_{modeDialog.EndDate:yyyyMMdd}.xml";
+
+            var saveDialog = new SaveFileDialog
+            {
+                Filter = "XML файлы (*.xml)|*.xml",
+                FileName = defaultFileName,
+                AddExtension = true,
+                DefaultExt = ".xml"
+            };
+
+            if (saveDialog.ShowDialog() != true)
+                return;
+
+            try
+            {
+                StatusText.Text = "Формирование XML ЭСФ...";
+                InvoiceEsfExportResult result;
+                if (modeDialog.Mode == InvoiceEsfExportMode.SelectedInvoice)
+                {
+                    var selected = SelectedInvoice;
+                    if (selected == null)
+                        throw new InvalidOperationException("Не выбрана счет-фактура для выгрузки.");
+
+                    result = await _invoiceEsfExchangeService.ExportSelectedInvoicesAsync(
+                        new[] { selected.Id },
+                        saveDialog.FileName);
+                }
+                else
+                {
+                    result = await _invoiceEsfExchangeService.ExportPeriodAsync(
+                        modeDialog.StartDate,
+                        modeDialog.EndDate,
+                        modeDialog.OnlyNotExported,
+                        saveDialog.FileName);
+                }
+
+                await LoadDataAsync();
+                StatusText.Text = $"XML выгружен: {result.ExportedCount}";
+                MessageBox.Show(
+                    $"XML выгружен успешно.\nДокументов: {result.ExportedCount}\nФайл: {result.OutputPath}",
+                    "Выгрузка ЭСФ",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка выгрузки ЭСФ";
+                MessageBox.Show(ex.Message, "Выгрузка ЭСФ", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void OnImportEsfClick(object sender, RoutedEventArgs e)
+        {
+            if (!_isSalesMode || _invoiceEsfExchangeService == null)
+                return;
+
+            var openDialog = new OpenFileDialog
+            {
+                Filter = "XML файлы (*.xml)|*.xml|Все файлы (*.*)|*.*",
+                Multiselect = false
+            };
+
+            if (openDialog.ShowDialog() != true)
+                return;
+
+            try
+            {
+                StatusText.Text = "Загрузка ответа налоговой...";
+                var result = await _invoiceEsfExchangeService.ImportResponseAsync(openDialog.FileName);
+                await LoadDataAsync();
+
+                StatusText.Text = $"Обновлено ЭСФ: {result.UpdatedCount}";
+                var unmatchedText = result.UnmatchedReceipts.Count == 0
+                    ? "\nВсе записи сопоставлены автоматически."
+                    : "\nНе сопоставлено: " + result.UnmatchedReceipts.Count + "\n" +
+                      string.Join(Environment.NewLine, result.UnmatchedReceipts.Take(10));
+
+                MessageBox.Show(
+                    $"Файл обработан.\nВсего записей: {result.TotalReceipts}\nОбновлено документов: {result.UpdatedCount}{unmatchedText}",
+                    "Загрузка ответа",
+                    MessageBoxButton.OK,
+                    result.UnmatchedReceipts.Count == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка загрузки ответа";
+                MessageBox.Show(ex.Message, "Загрузка ответа", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
     }
 }

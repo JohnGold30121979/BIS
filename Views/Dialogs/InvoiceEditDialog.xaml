@@ -31,6 +31,8 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,8">
@@ -70,16 +72,38 @@
             </StackPanel>
 
             <StackPanel Grid.Row="3" Grid.Column="0" Margin="0,0,10,8">
+                <TextBlock Text="Серия и № бланка"/>
+                <TextBox x:Name="TaxBlankNumberBox" Height="28"/>
+            </StackPanel>
+            <StackPanel Grid.Row="3" Grid.Column="1" Margin="10,0,0,8">
+                <TextBlock Text="Модуль"/>
+                <TextBox x:Name="ModuleCodeBox" Height="28"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="4" Grid.Column="0" Margin="0,0,10,8">
                 <TextBlock Text="Вид оплаты"/>
                 <ComboBox x:Name="PaymentKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
             </StackPanel>
-            <StackPanel Grid.Row="3" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Вид поставки"/>
+            <StackPanel Grid.Row="4" Grid.Column="1" Margin="10,0,0,8">
+                <TextBlock Text="Вид поставки ЭСФ"/>
                 <ComboBox x:Name="DeliveryKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
             </StackPanel>
 
-            <StackPanel Grid.Row="4" Grid.Column="0" Margin="0,0,10,0">
-                <TextBlock Text="Тип поставки"/>
+            <StackPanel Grid.Row="5" Grid.Column="0" Margin="0,0,10,8">
+                <TextBlock Text="НДС"/>
+                <ComboBox x:Name="HeaderVatTaxCombo" Height="28"
+                          ItemsSource="{Binding VatTaxItems}" DisplayMemberPath="DisplayName" SelectedValuePath="Value"
+                          SelectionChanged="OnHeaderVatTaxChanged"/>
+            </StackPanel>
+            <StackPanel Grid.Row="5" Grid.Column="1" Margin="10,0,0,8">
+                <TextBlock Text="Налог с продаж"/>
+                <ComboBox x:Name="HeaderSalesTaxCombo" Height="28"
+                          ItemsSource="{Binding SalesTaxItems}" DisplayMemberPath="DisplayName" SelectedValuePath="Value"
+                          SelectionChanged="OnHeaderSalesTaxChanged"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="6" Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock Text="Тип поставки ЭСФ"/>
                 <ComboBox x:Name="SupplyKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
             </StackPanel>
         </Grid>

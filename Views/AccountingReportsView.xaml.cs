@@ -26,6 +26,7 @@ namespace BIS.ERP.Views
         private DataTable? _currentData;
         private Report? _currentReport;
         private AccountingPeriod? _currentPeriod;
+        private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
 
         public AccountingReportsView(AppDbContext context)
         {
@@ -110,19 +111,17 @@ namespace BIS.ERP.Views
 
                 if (_currentPeriod.IsLocked)
                 {
-                    if (MessageBox.Show("Открыть период для изменения документов? Автоматически перенесенные входящие остатки следующего периода будут удалены и сформируются заново после повторного закрытия.", "Учетный период",
+                    if (MessageBox.Show("Открыть период для изменения документов?", "Учетный период",
                             MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                         return;
                     await _periodService.ReopenAsync(_currentPeriod.Id);
-                    StatusText.Text = "Период открыт. Перенесенные остатки следующего периода удалены.";
                 }
                 else
                 {
-                    if (MessageBox.Show("Закрыть период? Документы с датами этого периода нельзя будет изменять, а конечные остатки будут перенесены на следующий день как входящие.",
+                    if (MessageBox.Show("Закрыть период? Документы с датами этого периода нельзя будет изменять.",
                             "Учетный период", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                         return;
                     await _periodService.CloseAsync(_currentPeriod.Id);
-                    StatusText.Text = "Период закрыт. Конечные остатки перенесены в следующий период.";
                 }
                 await UpdatePeriodStateAsync(start, end);
             }
@@ -139,6 +138,91 @@ namespace BIS.ERP.Views
                 ? "Период не собран"
                 : $"Статус: {LocalizationService.DisplayValue(_currentPeriod.Status)}";
             PeriodStateButton.Content = _currentPeriod?.IsLocked == true ? "Открыть период" : "Закрыть период";
+            await LoadPeriodModuleStatesAsync();
+        }
+
+        private async Task LoadPeriodModuleStatesAsync()
+        {
+            _currentModuleStates.Clear();
+            PeriodModuleCombo.ItemsSource = null;
+
+            if (_currentPeriod == null)
+            {
+                PeriodModuleCombo.IsEnabled = false;
+                CloseModuleButton.IsEnabled = false;
+                ReopenModuleButton.IsEnabled = false;
+                PeriodModuleStatusText.Text = "Модули периода недоступны";
+                return;
+            }
+
+            _currentModuleStates = await _periodService.GetModuleStatusesAsync(_currentPeriod.Id);
+            PeriodModuleCombo.ItemsSource = _currentModuleStates;
+            PeriodModuleCombo.IsEnabled = _currentModuleStates.Count > 0 && _currentPeriod.IsLocked == false;
+            PeriodModuleCombo.SelectedItem = _currentModuleStates.FirstOrDefault(item => !item.IsClosed) ??
+                                             _currentModuleStates.FirstOrDefault();
+            UpdateSelectedModuleState();
+        }
+
+        private void OnPeriodModuleSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateSelectedModuleState();
+        }
+
+        private void UpdateSelectedModuleState()
+        {
+            if (_currentPeriod == null || PeriodModuleCombo.SelectedItem is not AccountingPeriodModuleStatus module)
+            {
+                CloseModuleButton.IsEnabled = false;
+                ReopenModuleButton.IsEnabled = false;
+                PeriodModuleStatusText.Text = "Модули периода недоступны";
+                return;
+            }
+
+            CloseModuleButton.IsEnabled = !_currentPeriod.IsLocked && !module.IsClosed && module.ParticipatesInPeriodClose;
+            ReopenModuleButton.IsEnabled = !_currentPeriod.IsLocked && module.IsClosed;
+
+            if (!module.ParticipatesInPeriodClose)
+            {
+                PeriodModuleStatusText.Text = $"{module.ModuleName}: не участвует в закрытии периода";
+                return;
+            }
+
+            var dependencyText = module.RequirePreviousModulesClosed
+                ? "закрывается по очереди"
+                : "может закрываться отдельно";
+            PeriodModuleStatusText.Text = $"{module.ModuleName}: {module.StateCaption}, {dependencyText}";
+        }
+
+        private async void OnCloseModuleClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentPeriod == null || PeriodModuleCombo.SelectedItem is not AccountingPeriodModuleStatus module)
+                    return;
+
+                await _periodService.CloseModuleAsync(_currentPeriod.Id, module.ModuleId);
+                await UpdatePeriodStateAsync(_currentPeriod.StartDate, _currentPeriod.EndDate);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Закрытие модуля", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private async void OnReopenModuleClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentPeriod == null || PeriodModuleCombo.SelectedItem is not AccountingPeriodModuleStatus module)
+                    return;
+
+                await _periodService.ReopenModuleAsync(_currentPeriod.Id, module.ModuleId);
+                await UpdatePeriodStateAsync(_currentPeriod.StartDate, _currentPeriod.EndDate);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Открытие модуля", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         private (DateTime Start, DateTime End) GetPeriod()
@@ -324,7 +408,6 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
         {
             var entries = await _balanceService.GetPurchaseSalesJournalAsync(start, end);
-            var period = await _periodService.FindAsync(start, end);
             var utcStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
             var utcEnd = DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc);
             var savedEntries = await _context.TaxJournalRecords.AsNoTracking()
@@ -336,6 +419,8 @@ namespace BIS.ERP.Views
             table.Columns.Add("Номер", typeof(string));
             table.Columns.Add("Документ", typeof(string));
             table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Модуль", typeof(string));
+            table.Columns.Add("Бланк", typeof(string));
             table.Columns.Add("Ставка налога", typeof(string));
             table.Columns.Add("Сумма без налога", typeof(decimal));
             table.Columns.Add("НДС", typeof(decimal));
@@ -345,34 +430,27 @@ namespace BIS.ERP.Views
             table.Columns.Add("Проведен", typeof(string));
             table.Columns.Add("Примечание", typeof(string));
 
-            if (period?.IsLocked == true)
+            if (savedEntries.Count > 0)
             {
                 foreach (var entry in savedEntries)
                     table.Rows.Add(LocalizationService.DisplayValue(entry.JournalType), entry.Date,
-                        entry.DocumentNumber, entry.DocumentType, entry.Organization, entry.TaxType,
-                        entry.AmountWithoutTax, entry.VatAmount, entry.SalesTaxAmount, entry.TaxAmount,
-                        entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
+                        entry.DocumentNumber, entry.DocumentType, entry.Organization, string.Empty, string.Empty, entry.TaxType,
+                        entry.AmountWithoutTax, 0m, 0m, entry.TaxAmount, entry.TotalAmount, LocalizationService.DisplayValue(true), string.Empty);
             }
             else
             {
                 foreach (var entry in entries)
                     table.Rows.Add(entry.Section, entry.Date, entry.DocumentNumber, entry.DocumentType,
-                        entry.Organization, entry.TaxType, entry.AmountWithoutTax, entry.VatAmount, entry.SalesTaxAmount,
-                        entry.TaxAmount, entry.Amount,
+                        entry.Organization, entry.ModuleCode, entry.TaxBlankNumber, entry.TaxType, entry.AmountWithoutTax,
+                        entry.VatAmount, entry.SalesTaxAmount, entry.VatAmount + entry.SalesTaxAmount, entry.Amount,
                         LocalizationService.DisplayValue(entry.IsPosted), entry.Note);
             }
 
             var report = CreateReport(table,
                 $"Журнал закупок и продаж за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
             report.ShowGrandTotal = true;
-            foreach (var fieldName in new[] { "Сумма без налога", "НДС", "Налог с продаж", "Налог", "Всего" })
-            {
-                var field = report.Fields.First(reportField => reportField.FieldName == fieldName);
-                field.AggregateType = "Sum";
-            }
-            report.SummaryText = period?.IsLocked == true
-                ? "Показан сохраненный журнал закрытого периода с раздельными суммами НДС и налога с продаж."
-                : "Показаны текущие данные открытого периода с раздельными суммами НДС и налога с продаж.";
+            var amountField = report.Fields.First(field => field.FieldName == "Всего");
+            amountField.AggregateType = "Sum";
             return (table, report);
         }
 
@@ -391,7 +469,7 @@ namespace BIS.ERP.Views
             table.Columns.Add("Сальдо кон. Дт", typeof(decimal));
             table.Columns.Add("Сальдо кон. Кт", typeof(decimal));
             table.Columns.Add("Сальдо", typeof(decimal));
-            table.Columns.Add("АРМ", typeof(string));
+            table.Columns.Add("Модуль", typeof(string));
 
             foreach (var row in calculation.Rows)
             {
@@ -407,7 +485,7 @@ namespace BIS.ERP.Views
                     row.ClosingDebit,
                     row.ClosingCredit,
                     row.Balance,
-                    row.ArmCode);
+                    row.ModuleCode);
             }
 
             var report = CreateReport(table,
@@ -443,6 +521,8 @@ namespace BIS.ERP.Views
             table.Rows.Add("БУХГАЛТЕРСКИЕ ПРОВОДКИ", collection.PostingCount,
                 collection.PostingCount, 0, collection.DebitTurnover,
                 collection.DebitTurnover, collection.CreditTurnover, collection.Difference);
+            table.Rows.Add("КОНТРОЛЬ КАРТОЧЕК ОС", collection.Warnings.Count,
+                0, collection.Warnings.Count, 0m, 0m, 0m, 0m);
             table.Rows.Add("КОНТРОЛЬ КОНЕЧНОГО САЛЬДО", 0, 0, 0, 0m,
                 closingDebit, closingCredit, closingDebit - closingCredit);
 
@@ -453,6 +533,8 @@ namespace BIS.ERP.Views
             report.SummaryText = isBalanced
                 ? "Контроль пройден: начальное сальдо, обороты и конечное сальдо сбалансированы."
                 : "Контроль не пройден: обнаружено расхождение дебета и кредита.";
+            if (collection.Warnings.Count > 0)
+                report.SummaryText += Environment.NewLine + string.Join(Environment.NewLine, collection.Warnings);
             return (table, report);
         }
 
@@ -519,6 +601,71 @@ namespace BIS.ERP.Views
             {
                 MessageBox.Show($"Ошибка экспорта PDF: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void OnExportVatClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var (start, end) = GetPeriod();
+                if (start.Year != end.Year || start.Month != end.Month)
+                {
+                    if (MessageBox.Show(
+                            "Для налогового отчета по НДС обычно выбирается один календарный месяц. Продолжить выгрузку для выбранного диапазона?",
+                            "Экспорт НДС",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question) != MessageBoxResult.Yes)
+                    {
+                        return;
+                    }
+                }
+
+                var templateService = new RegulatedReportTemplateService(_context);
+                var activeTemplate = await templateService.GetActiveTemplateAsync(VatTaxReportExportService.OfficialTemplateCode);
+                var templateExtension = activeTemplate?.FileExtension;
+                if (string.IsNullOrWhiteSpace(templateExtension))
+                    templateExtension = Path.GetExtension(activeTemplate?.OriginalFileName);
+
+                var defaultExtension = string.Equals(templateExtension, ".xls", StringComparison.OrdinalIgnoreCase)
+                    ? "xls"
+                    : "xlsx";
+                var saveDialog = new SaveFileDialog
+                {
+                    Title = "Сохранить налоговый отчет по НДС",
+                    Filter = "Excel файлы (*.xlsx)|*.xlsx|Excel 97-2003 (*.xls)|*.xls",
+                    DefaultExt = defaultExtension,
+                    FileName = $"STI062_НДС_{start:yyyyMM}.{defaultExtension}"
+                };
+                if (saveDialog.ShowDialog() != true)
+                    return;
+
+                IsEnabled = false;
+                StatusText.Text = activeTemplate == null
+                    ? "Формирование внутреннего XLSX-отчета по НДС..."
+                    : $"Заполнение шаблона {activeTemplate.Code} из БД...";
+
+                var exportService = new VatTaxReportExportService(_context);
+                var exportResult = await exportService.ExportMonthlyVatReportAsync(start, end, saveDialog.FileName);
+
+                StatusText.Text = "Отчет по НДС выгружен";
+                MessageBox.Show(
+                    exportResult.UsedOfficialTemplate
+                        ? $"Шаблон {exportResult.TemplateCode} взят из БД, заполнен и сохранен."
+                        : "Активный шаблон STI-062_7 в БД не найден. Сформирован внутренний Excel-отчет по НДС.",
+                    "Экспорт НДС",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка экспорта НДС";
+                MessageBox.Show($"Ошибка экспорта НДС: {ex.Message}", "Экспорт НДС",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
             }
         }
     }

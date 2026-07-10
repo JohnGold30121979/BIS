@@ -4,6 +4,8 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace BIS.ERP.Models;
 
+// Legacy compatibility entity from the early static schema.
+// New fixed-asset business logic should use the metadata-driven catalog "Основные средства".
 public class FixedAsset
 {
     [Key]

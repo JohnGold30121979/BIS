@@ -27,10 +27,16 @@ namespace BIS.ERP.Services
                     ""Description"" varchar(600) NOT NULL DEFAULT '',
                     ""Icon"" varchar(20) NOT NULL DEFAULT '',
                     ""Order"" integer NOT NULL DEFAULT 0,
+                    ""CloseOrder"" integer NOT NULL DEFAULT 100,
                     ""IsActive"" boolean NOT NULL DEFAULT true,
+                    ""ParticipatesInPeriodClose"" boolean NOT NULL DEFAULT true,
+                    ""RequirePreviousModulesClosed"" boolean NOT NULL DEFAULT false,
                     ""IsSystem"" boolean NOT NULL DEFAULT false
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_MetadataModules_Code"" ON ""MetadataModules"" (""Code"");
+                ALTER TABLE ""MetadataModules"" ADD COLUMN IF NOT EXISTS ""CloseOrder"" integer NOT NULL DEFAULT 100;
+                ALTER TABLE ""MetadataModules"" ADD COLUMN IF NOT EXISTS ""ParticipatesInPeriodClose"" boolean NOT NULL DEFAULT true;
+                ALTER TABLE ""MetadataModules"" ADD COLUMN IF NOT EXISTS ""RequirePreviousModulesClosed"" boolean NOT NULL DEFAULT false;
                 CREATE TABLE IF NOT EXISTS ""MetadataModuleItems"" (
                     ""Id"" uuid PRIMARY KEY,
                     ""ModuleId"" uuid NOT NULL,
@@ -47,9 +53,9 @@ namespace BIS.ERP.Services
         public async Task EnsureDefaultModulesAsync()
         {
             await EnsureSchemaAsync();
-            await EnsureModuleAsync(FinanceCode, "Финансы", "Кассовые, банковские операции и финансовая отчетность", "💰", 10);
-            await EnsureModuleAsync(FixedAssetsCode, "Основные средства", "Учет движения, состояния и амортизации основных средств", "🏗", 20);
-            await EnsureModuleAsync(InventoryCode, "Учет материальных ценностей", "Поступление, движение, списание и остатки ТМЦ", "📦", 30);
+            await EnsureModuleAsync(FinanceCode, "Финансы", "Кассовые, банковские операции и финансовая отчетность", "💰", 10, 900, true, true);
+            await EnsureModuleAsync(FixedAssetsCode, "Основные средства", "Учет движения, состояния и амортизации основных средств", "🏗", 20, 200);
+            await EnsureModuleAsync(InventoryCode, "Учет материальных ценностей", "Поступление, движение, списание и остатки ТМЦ", "📦", 30, 300);
             await SynchronizeDefaultAssignmentsAsync();
         }
 
@@ -74,6 +80,10 @@ namespace BIS.ERP.Services
             await EnsureSchemaAsync();
             module.Code = NormalizeCode(module.Code, module.Name);
             module.Name = string.IsNullOrWhiteSpace(module.Name) ? "Новый модуль" : module.Name.Trim();
+            module.Order = module.Order <= 0 ? 100 : module.Order;
+            module.CloseOrder = module.CloseOrder <= 0 ? module.Order : module.CloseOrder;
+            module.Icon = string.IsNullOrWhiteSpace(module.Icon) ? "📁" : module.Icon.Trim();
+            module.Description = module.Description?.Trim() ?? string.Empty;
             if (module.Id == Guid.Empty)
                 module.Id = Guid.NewGuid();
 
@@ -84,10 +94,13 @@ namespace BIS.ERP.Services
             {
                 existing.Code = module.Code;
                 existing.Name = module.Name;
-                existing.Description = module.Description?.Trim() ?? string.Empty;
-                existing.Icon = string.IsNullOrWhiteSpace(module.Icon) ? "📁" : module.Icon.Trim();
+                existing.Description = module.Description;
+                existing.Icon = module.Icon;
                 existing.Order = module.Order;
+                existing.CloseOrder = module.CloseOrder;
                 existing.IsActive = module.IsActive;
+                existing.ParticipatesInPeriodClose = module.ParticipatesInPeriodClose;
+                existing.RequirePreviousModulesClosed = module.RequirePreviousModulesClosed;
             }
             await _context.SaveChangesAsync();
             return existing ?? module;
@@ -133,14 +146,43 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
-        private async Task EnsureModuleAsync(string code, string name, string description, string icon, int order)
+        private async Task EnsureModuleAsync(
+            string code,
+            string name,
+            string description,
+            string icon,
+            int order,
+            int closeOrder,
+            bool requirePreviousModulesClosed = false,
+            bool participatesInPeriodClose = true)
         {
-            if (await _context.MetadataModules.AnyAsync(module => module.Code == code))
+            var existing = await _context.MetadataModules.FirstOrDefaultAsync(module => module.Code == code);
+            if (existing != null)
+            {
+                existing.Name = name;
+                existing.Description = description;
+                existing.Icon = icon;
+                existing.Order = order;
+                existing.CloseOrder = closeOrder;
+                existing.ParticipatesInPeriodClose = participatesInPeriodClose;
+                existing.RequirePreviousModulesClosed = requirePreviousModulesClosed;
+                existing.IsSystem = true;
+                await _context.SaveChangesAsync();
                 return;
+            }
+
             await _context.MetadataModules.AddAsync(new MetadataModule
             {
-                Code = code, Name = name, Description = description, Icon = icon,
-                Order = order, IsActive = true, IsSystem = true
+                Code = code,
+                Name = name,
+                Description = description,
+                Icon = icon,
+                Order = order,
+                CloseOrder = closeOrder,
+                IsActive = true,
+                ParticipatesInPeriodClose = participatesInPeriodClose,
+                RequirePreviousModulesClosed = requirePreviousModulesClosed,
+                IsSystem = true
             });
             await _context.SaveChangesAsync();
         }
@@ -166,7 +208,9 @@ namespace BIS.ERP.Services
 
             await AssignMissingByNameAsync(modules[FixedAssetsCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Оборотная ведомость по ОС", "Ведомость основных средств", "Ведомость ОС по счету",
-                "Ведомость амортизации", "Приход ОС за период", "Расшифровка баланса по ОС");
+                "Ведомость амортизации", "Приход ОС за период", "Расшифровка баланса по ОС",
+                "Контроль состояния карточек ОС", "Журнал начисления амортизации ОС",
+                "Журнал переоценки ОС", "Журнал реализации ОС", "Журнал ликвидации ОС");
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Реестр платежных поручений", "Выписка банка", "Акт сверки по подотчетному лицу");
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),

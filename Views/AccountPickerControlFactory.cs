@@ -15,7 +15,8 @@ namespace BIS.ERP.Views
             AccountAnalyticsRegistry accountAnalytics,
             object? currentValue,
             Window owner,
-            Action? selectionChanged = null)
+            Action? selectionChanged = null,
+            string? moduleCodeOrName = null)
         {
             var selectedAccount = accountAnalytics.FindAccount(currentValue);
             var textBox = new TextBox
@@ -51,7 +52,8 @@ namespace BIS.ERP.Views
 
             button.Click += (_, _) =>
             {
-                var dialog = new AccountSelectionDialog(BuildAccountRows(accountAnalytics.Accounts))
+                var dialog = new AccountSelectionDialog(
+                    BuildAccountRows(accountAnalytics.GetAccountsForModule(moduleCodeOrName)))
                 {
                     Owner = owner
                 };

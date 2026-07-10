@@ -27,6 +27,7 @@ namespace BIS.ERP.Views
         private List<MetadataObject> _catalogs;
         private List<MetadataObject> _documents;
         private List<Report> _reports;
+        private RegulatedReportTemplateService? _regulatedTemplateService;
         private bool _isLoading = false;
         private AppDbContext _context;
         private bool _closeForModeSwitch;
@@ -77,6 +78,8 @@ namespace BIS.ERP.Views
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
+                _regulatedTemplateService = new RegulatedReportTemplateService(_context);
+                await _regulatedTemplateService.EnsureSchemaAsync();
                 await new DocumentationMetadataSeedService(_context).EnsureAsync();
                 await new InvoiceMetadataSeedService(_context).EnsureAsync();
                 await printFormService.SeedCashOrderFormsAsync();
@@ -214,6 +217,16 @@ namespace BIS.ERP.Views
             rootItem.Items.Add(modulesItem);
             rootItem.Items.Add(documentsItem);
             rootItem.Items.Add(reportsItem);
+            var regulatedTemplatesItem = new TreeViewItem
+            {
+                Header = "🧾 Шаблоны регламентированных отчетов"
+            };
+            regulatedTemplatesItem.Selected += async (s, e) =>
+            {
+                e.Handled = true;
+                await ShowRegulatedTemplatesEditorAsync();
+            };
+            rootItem.Items.Add(regulatedTemplatesItem);
             var translationsItem = new TreeViewItem
             {
                 Header = "🌐 Переводы интерфейса"
@@ -269,6 +282,9 @@ namespace BIS.ERP.Views
         }
 
         private void OnModulesClick(object sender, RoutedEventArgs e) => ShowModulesEditor();
+
+        private async void OnRegulatedTemplatesClick(object sender, RoutedEventArgs e) =>
+            await ShowRegulatedTemplatesEditorAsync();
 
         private async void ShowTranslationsEditor()
         {
@@ -338,6 +354,306 @@ namespace BIS.ERP.Views
             PropertiesPanel.Children.Clear();
             PropertiesPanel.Children.Add(toolbar);
             PropertiesPanel.Children.Add(grid);
+        }
+
+        private async Task ShowRegulatedTemplatesEditorAsync()
+        {
+            SetPropertiesScrollEnabled(true);
+            if (_context == null)
+                return;
+
+            _regulatedTemplateService ??= new RegulatedReportTemplateService(_context);
+            await _regulatedTemplateService.EnsureSchemaAsync();
+
+            EditorTitle.Text = "🧾 Шаблоны регламентированных отчетов";
+            EditorDescription.Text = "Хранение Excel-шаблонов в БД с автоматическим использованием в прикладных отчетах";
+
+            var templates = new ObservableCollection<RegulatedReportTemplate>(
+                await _regulatedTemplateService.GetTemplatesAsync());
+
+            var note = new Border
+            {
+                Background = (Brush)new BrushConverter().ConvertFrom("#F4ECF7"),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, 0, 12),
+                Child = new TextBlock
+                {
+                    Text = "Для экспорта НДС система автоматически берет активный шаблон с кодом STI-062_7. " +
+                           "Шаблон хранится в БД, а временный файл создается только на время выгрузки и затем удаляется.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = (Brush)new BrushConverter().ConvertFrom("#4A235A")
+                }
+            };
+
+            var grid = new DataGrid
+            {
+                ItemsSource = templates,
+                AutoGenerateColumns = false,
+                CanUserAddRows = false,
+                IsReadOnly = true,
+                MinHeight = 460,
+                Margin = new Thickness(0, 8, 0, 0),
+                SelectionMode = DataGridSelectionMode.Single
+            };
+            grid.Columns.Add(new DataGridTextColumn { Header = "Код", Binding = new Binding(nameof(RegulatedReportTemplate.Code)), Width = 130 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Название", Binding = new Binding(nameof(RegulatedReportTemplate.Name)), Width = 220 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Версия", Binding = new Binding(nameof(RegulatedReportTemplate.Version)), Width = 90 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Файл", Binding = new Binding(nameof(RegulatedReportTemplate.OriginalFileName)), Width = 170 });
+            grid.Columns.Add(new DataGridCheckBoxColumn { Header = "Активен", Binding = new Binding(nameof(RegulatedReportTemplate.IsActive)), Width = 75 });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Размер", Binding = new Binding(nameof(RegulatedReportTemplate.TemplateSizeDisplay)), Width = 90 });
+            grid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "Обновлен",
+                Binding = new Binding(nameof(RegulatedReportTemplate.UpdatedAt)) { StringFormat = "dd.MM.yyyy HH:mm" },
+                Width = 130
+            });
+            grid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "Описание",
+                Binding = new Binding(nameof(RegulatedReportTemplate.Description)),
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star)
+            });
+
+            var uploadButton = new Button
+            {
+                Content = "Загрузить шаблон",
+                Width = 150,
+                Height = 34,
+                Background = (Brush)new BrushConverter().ConvertFrom("#27AE60"),
+                Foreground = Brushes.White
+            };
+            uploadButton.Click += async (_, _) =>
+            {
+                var openDialog = new OpenFileDialog
+                {
+                    Title = "Выберите Excel-шаблон регламентированного отчета",
+                    Filter = "Excel шаблоны (*.xls;*.xlsx)|*.xls;*.xlsx|Все файлы (*.*)|*.*",
+                    CheckFileExists = true,
+                    Multiselect = false
+                };
+                if (openDialog.ShowDialog(this) != true)
+                    return;
+
+                var draft = RegulatedReportTemplateService.InferDraftFromFileName(openDialog.FileName);
+                var dialog = new RegulatedTemplateUploadDialog(openDialog.FileName, draft) { Owner = this };
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    await _regulatedTemplateService.SaveTemplateAsync(openDialog.FileName, dialog.Draft);
+                    await ReloadRegulatedTemplatesAsync(templates);
+                    MessageBox.Show("Шаблон сохранен в БД.", "Шаблоны", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка загрузки шаблона: {ex.Message}", "Шаблоны",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            };
+
+            var activateButton = new Button
+            {
+                Content = "Сделать активным",
+                Width = 150,
+                Height = 34,
+                Margin = new Thickness(8, 0, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#2980B9"),
+                Foreground = Brushes.White
+            };
+            activateButton.Click += async (_, _) =>
+            {
+                if (grid.SelectedItem is not RegulatedReportTemplate selected)
+                    return;
+
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    await _regulatedTemplateService.SetActiveTemplateAsync(selected.Id);
+                    await ReloadRegulatedTemplatesAsync(templates);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка активации шаблона: {ex.Message}", "Шаблоны",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            };
+
+            var editButton = new Button
+            {
+                Content = "Изменить реквизиты",
+                Width = 160,
+                Height = 34,
+                Margin = new Thickness(8, 0, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
+                Foreground = Brushes.White
+            };
+            editButton.Click += async (_, _) =>
+            {
+                if (grid.SelectedItem is not RegulatedReportTemplate selected)
+                    return;
+
+                var draft = new RegulatedReportTemplateDraft
+                {
+                    Code = selected.Code,
+                    Name = selected.Name,
+                    Version = selected.Version,
+                    Description = selected.Description,
+                    IsActive = selected.IsActive
+                };
+
+                var dialog = new RegulatedTemplateUploadDialog(selected.OriginalFileName, draft)
+                {
+                    Owner = this,
+                    Title = "Реквизиты шаблона"
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    await _regulatedTemplateService.UpdateTemplateMetadataAsync(selected.Id, dialog.Draft);
+                    await ReloadRegulatedTemplatesAsync(templates);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка изменения реквизитов: {ex.Message}", "Шаблоны",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            };
+
+            var exportButton = new Button
+            {
+                Content = "Выгрузить копию",
+                Width = 140,
+                Height = 34,
+                Margin = new Thickness(8, 0, 0, 0)
+            };
+            exportButton.Click += async (_, _) =>
+            {
+                if (grid.SelectedItem is not RegulatedReportTemplate selected)
+                    return;
+
+                var defaultExtension = string.Equals(selected.FileExtension, ".xls", StringComparison.OrdinalIgnoreCase)
+                    ? "xls"
+                    : "xlsx";
+                var saveDialog = new SaveFileDialog
+                {
+                    Title = "Сохранить копию шаблона",
+                    Filter = "Excel файлы (*.xlsx)|*.xlsx|Excel 97-2003 (*.xls)|*.xls",
+                    DefaultExt = defaultExtension,
+                    FileName = string.IsNullOrWhiteSpace(selected.OriginalFileName)
+                        ? $"{selected.Code}_{selected.Version}.{defaultExtension}"
+                        : selected.OriginalFileName
+                };
+                if (saveDialog.ShowDialog(this) != true)
+                    return;
+
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    await _regulatedTemplateService.ExportTemplateCopyAsync(selected.Id, saveDialog.FileName);
+                    MessageBox.Show("Копия шаблона сохранена.", "Шаблоны", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка выгрузки шаблона: {ex.Message}", "Шаблоны",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            };
+
+            var deleteButton = new Button
+            {
+                Content = "Удалить",
+                Width = 110,
+                Height = 34,
+                Margin = new Thickness(8, 0, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#C0392B"),
+                Foreground = Brushes.White
+            };
+            deleteButton.Click += async (_, _) =>
+            {
+                if (grid.SelectedItem is not RegulatedReportTemplate selected)
+                    return;
+
+                if (MessageBox.Show(
+                        $"Удалить шаблон \"{selected.Name}\" ({selected.Code}) из БД?",
+                        "Шаблоны",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+
+                try
+                {
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    await _regulatedTemplateService.DeleteTemplateAsync(selected.Id);
+                    await ReloadRegulatedTemplatesAsync(templates);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Ошибка удаления шаблона: {ex.Message}", "Шаблоны",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
+            };
+
+            var refreshButton = new Button
+            {
+                Content = "Обновить",
+                Width = 110,
+                Height = 34,
+                Margin = new Thickness(8, 0, 0, 0)
+            };
+            refreshButton.Click += async (_, _) => await ReloadRegulatedTemplatesAsync(templates);
+
+            var toolbar = new StackPanel { Orientation = Orientation.Horizontal };
+            toolbar.Children.Add(uploadButton);
+            toolbar.Children.Add(activateButton);
+            toolbar.Children.Add(editButton);
+            toolbar.Children.Add(exportButton);
+            toolbar.Children.Add(deleteButton);
+            toolbar.Children.Add(refreshButton);
+
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(note);
+            PropertiesPanel.Children.Add(toolbar);
+            PropertiesPanel.Children.Add(grid);
+        }
+
+        private async Task ReloadRegulatedTemplatesAsync(ObservableCollection<RegulatedReportTemplate> target)
+        {
+            if (_regulatedTemplateService == null)
+                return;
+
+            var items = await _regulatedTemplateService.GetTemplatesAsync();
+            target.Clear();
+            foreach (var item in items)
+                target.Add(item);
         }
 
         // ДИНАМИЧЕСКИЕ МЕТОДЫ СОЗДАНИЯ

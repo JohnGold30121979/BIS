@@ -117,6 +117,7 @@ namespace BIS.ERP
                     await _userAccessService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
                     await new PrintFormService(context).EnsureSchemaAsync();
+                    await new RegulatedReportTemplateService(context).EnsureSchemaAsync();
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
                     await new DocumentationMetadataSeedService(context).EnsureAsync();
                     await new InvoiceMetadataSeedService(context).EnsureAsync();

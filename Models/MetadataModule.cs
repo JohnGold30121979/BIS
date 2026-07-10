@@ -10,7 +10,10 @@ namespace BIS.ERP.Models
         [MaxLength(600)] public string Description { get; set; } = string.Empty;
         [MaxLength(20)] public string Icon { get; set; } = "📁";
         public int Order { get; set; }
+        public int CloseOrder { get; set; } = 100;
         public bool IsActive { get; set; } = true;
+        public bool ParticipatesInPeriodClose { get; set; } = true;
+        public bool RequirePreviousModulesClosed { get; set; }
         public bool IsSystem { get; set; }
     }
 

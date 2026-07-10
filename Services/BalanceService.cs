@@ -3,7 +3,6 @@ using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -22,7 +21,8 @@ namespace BIS.ERP.Services
         {
             var periodStart = startDate.Date;
             var periodEndExclusive = endDate.Date.AddDays(1);
-            var postings = await GetAccountingPostingsAsync(null, periodEndExclusive.AddTicks(-1));
+            var postings = await new PostingService(_context)
+                .GetAllPostingsAsync(null, periodEndExclusive.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var utcStart = DateTime.SpecifyKind(periodStart, DateTimeKind.Utc);
             var openingBalances = (await _context.AccountOpeningBalances.AsNoTracking()
@@ -42,7 +42,6 @@ namespace BIS.ERP.Services
 
             return accountCodes.Select(code =>
             {
-                accounts.TryGetValue(code, out var account);
                 openingBalances.TryGetValue(code, out var initialBalance);
                 var openingFrom = initialBalance?.BalanceDate.Date ?? DateTime.MinValue;
                 var openingDebit = (initialBalance?.Debit ?? 0) + postings
@@ -60,18 +59,16 @@ namespace BIS.ERP.Services
 
                 var openingNet = openingDebit - openingCredit;
                 var closingNet = openingNet + turnoverDebit - turnoverCredit;
-                var openingBalance = SplitBalanceByType(account?.Type, openingNet);
-                var closingBalance = SplitBalanceByType(account?.Type, closingNet);
                 return new TurnoverBalance
                 {
                     AccountCode = code,
-                    AccountName = account?.Name ?? code,
-                    OpeningDebit = openingBalance.Debit,
-                    OpeningCredit = openingBalance.Credit,
+                    AccountName = accounts.TryGetValue(code, out var account) ? account.Name : code,
+                    OpeningDebit = Math.Max(openingNet, 0),
+                    OpeningCredit = Math.Max(-openingNet, 0),
                     TurnoverDebit = turnoverDebit,
                     TurnoverCredit = turnoverCredit,
-                    ClosingDebit = closingBalance.Debit,
-                    ClosingCredit = closingBalance.Credit
+                    ClosingDebit = Math.Max(closingNet, 0),
+                    ClosingCredit = Math.Max(-closingNet, 0)
                 };
             }).ToList();
         }
@@ -80,7 +77,7 @@ namespace BIS.ERP.Services
         {
             var start = new DateTime(year, 1, 1);
             var end = start.AddYears(1);
-            var postings = await GetAccountingPostingsAsync(start, end.AddTicks(-1));
+            var postings = await new PostingService(_context).GetAllPostingsAsync(start, end.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var annualBalances = (await GetTurnoverBalanceAsync(start, end.AddDays(-1)))
                 .ToDictionary(balance => balance.AccountCode, StringComparer.OrdinalIgnoreCase);
@@ -123,7 +120,7 @@ namespace BIS.ERP.Services
 
         public async Task<EnterpriseBalance> GetEnterpriseBalanceAsync(DateTime date)
         {
-            var postings = await GetAccountingPostingsAsync(null, date.Date.AddDays(1).AddTicks(-1));
+            var postings = await new PostingService(_context).GetAllPostingsAsync(null, date.Date.AddDays(1).AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var result = new EnterpriseBalance();
             var configuredLines = await LoadConfiguredLinesAsync("Balance");
@@ -201,7 +198,8 @@ namespace BIS.ERP.Services
         public async Task<FinancialResults> GetFinancialResultsAsync(DateTime startDate, DateTime endDate)
         {
             var endExclusive = endDate.Date.AddDays(1);
-            var postings = await GetAccountingPostingsAsync(startDate.Date, endExclusive.AddTicks(-1));
+            var postings = await new PostingService(_context)
+                .GetAllPostingsAsync(startDate.Date, endExclusive.AddTicks(-1));
             var accounts = await LoadAccountsAsync();
             var result = new FinancialResults();
             var configuredLines = await LoadConfiguredLinesAsync("ProfitLoss");
@@ -257,16 +255,27 @@ namespace BIS.ERP.Services
             DateTime startDate,
             DateTime endDate)
         {
+            await new RuntimeSchemaFixService(_context).EnsureAsync();
             var metadataService = new MetadataService(_context);
             var documents = await metadataService.GetDocumentsAsync();
             var result = new List<PurchaseSaleJournalEntry>();
 
+            var salesInvoiceDocument = documents.FirstOrDefault(document =>
+                document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase));
+            if (salesInvoiceDocument != null)
+                await AppendInvoiceJournalEntriesAsync(result, salesInvoiceDocument, startDate, endDate, "Продажи");
+
+            var purchaseInvoiceDocument = documents.FirstOrDefault(document =>
+                document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase));
+            if (purchaseInvoiceDocument != null)
+                await AppendInvoiceJournalEntriesAsync(result, purchaseInvoiceDocument, startDate, endDate, "Закупки");
+
             foreach (var document in documents.Where(document =>
                          document.Name.Equals("Приход товаров", StringComparison.OrdinalIgnoreCase) ||
                          document.Name.Equals("Расход товаров", StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase)))
+                         (document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase) &&
+                          !document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) &&
+                          !document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase))))
             {
                 var rows = await metadataService.GetCatalogDataAsync(document.Id);
                 var maps = await ReferenceDisplayHelper.LoadMapsAsync(document, metadataService);
@@ -282,48 +291,100 @@ namespace BIS.ERP.Services
                     var isSales = document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("Расход", StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("реализа", StringComparison.OrdinalIgnoreCase);
-                    var amount = GetDecimal(row, "Сумма", "Сумма в сом", "amount", "total_amount");
-                    var amountWithoutTax = GetDecimal(row,
-                        "Сумма без налогов",
-                        "Сумма без налога",
-                        "Сумма без НДС",
-                        "amount_without_tax");
-                    var vatAmount = GetDecimal(row, "Сумма НДС", "vat_total", "vat_amount", "ndc", "sumnds");
-                    var salesTaxAmount = GetDecimal(row,
-                        "Налог с продаж",
-                        "Сумма налога с продаж",
-                        "sales_tax_total",
-                        "sales_tax_amount",
-                        "nalog",
-                        "nal",
-                        "sumnal",
-                        "sum_n");
-                    var taxAmount = vatAmount + salesTaxAmount;
-                    if (amountWithoutTax == 0m && (amount != 0m || taxAmount != 0m))
-                        amountWithoutTax = amount - taxAmount;
-                    if (amount == 0m && (amountWithoutTax != 0m || taxAmount != 0m))
-                        amount = amountWithoutTax + taxAmount;
-
+                    var amount = GetDecimal(row, "Сумма", "Сумма в сом");
+                    var vatAmount = GetDecimal(row, "Сумма НДС", "vat_amount");
+                    var salesTaxAmount = GetDecimal(row, "Сумма налога с продаж", "sales_tax_amount");
                     result.Add(new PurchaseSaleJournalEntry
                     {
                         Section = isPurchase ? "Закупки" : isSales ? "Продажи" : "Продажи",
                         Date = date,
                         DocumentNumber = GetString(row, "Номер", "Номер документа", "doc_number"),
                         DocumentType = document.Name,
-                        Organization = GetString(row, "Организация", "organization_name", "name_org"),
+                        Organization = GetString(row, "Организация"),
                         Amount = amount,
-                        AmountWithoutTax = amountWithoutTax,
+                        AmountWithoutTax = amount - vatAmount - salesTaxAmount,
+                        TaxAmount = vatAmount,
                         VatAmount = vatAmount,
                         SalesTaxAmount = salesTaxAmount,
-                        TaxAmount = taxAmount,
-                        TaxType = BuildTaxType(row, vatAmount, salesTaxAmount),
+                        TaxType = GetString(row, "Ставка НДС", "vat_rate"),
                         IsPosted = GetBoolean(row, "Проведён", "Проведен", "is_posted"),
-                        Note = GetString(row, "Примечание", "Описание", "Основание", "basis")
+                        Note = GetString(row, "Примечание", "Описание")
                     });
                 }
             }
 
             return result.OrderBy(entry => entry.Date).ThenBy(entry => entry.DocumentNumber).ToList();
+        }
+
+        private async Task AppendInvoiceJournalEntriesAsync(
+            ICollection<PurchaseSaleJournalEntry> result,
+            MetadataObject document,
+            DateTime startDate,
+            DateTime endDate,
+            string section)
+        {
+            var invoiceService = new InvoiceService(_context);
+            invoiceService.Configure(document);
+            await invoiceService.EnsureSchemaAsync();
+
+            var invoices = await invoiceService.GetInvoicesAsync();
+            foreach (var invoiceRow in invoices.Where(item =>
+                         item.DocDate.Date >= startDate.Date &&
+                         item.DocDate.Date <= endDate.Date))
+            {
+                var invoice = await invoiceService.GetInvoiceAsync(invoiceRow.Id);
+                if (invoice == null)
+                    continue;
+
+                if (invoice.Lines.Count == 0)
+                {
+                    result.Add(new PurchaseSaleJournalEntry
+                    {
+                        Section = section,
+                        Date = invoice.DocDate,
+                        DocumentNumber = invoice.DocNumber,
+                        DocumentType = document.Name,
+                        Organization = invoice.OrganizationName,
+                        ModuleCode = invoice.ModuleCode,
+                        TaxBlankNumber = invoice.TaxBlankNumber,
+                        EsfNumber = invoice.EsfNumber,
+                        Amount = invoice.TotalAmount,
+                        AmountWithoutTax = invoice.AmountWithoutTax,
+                        TaxAmount = invoice.VatTotal,
+                        VatAmount = invoice.VatTotal,
+                        SalesTaxAmount = invoice.SalesTaxTotal,
+                        TaxType = ResolveInvoiceTaxType(invoice),
+                        IsPosted = invoice.IsPosted,
+                        Note = invoice.Basis
+                    });
+                    continue;
+                }
+
+                foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
+                {
+                    result.Add(new PurchaseSaleJournalEntry
+                    {
+                        Section = section,
+                        Date = invoice.DocDate,
+                        DocumentNumber = invoice.DocNumber,
+                        DocumentType = document.Name,
+                        Organization = invoice.OrganizationName,
+                        ModuleCode = invoice.ModuleCode,
+                        TaxBlankNumber = invoice.TaxBlankNumber,
+                        EsfNumber = invoice.EsfNumber,
+                        Amount = line.LineTotal,
+                        AmountWithoutTax = line.AmountWithoutTax,
+                        TaxAmount = line.VatAmount,
+                        VatAmount = line.VatAmount,
+                        SalesTaxAmount = line.SalesTaxAmount,
+                        TaxType = ResolveLineTaxType(line),
+                        VatTaxCode = line.VatTaxCode,
+                        SalesTaxCode = line.SalesTaxCode,
+                        IsPosted = invoice.IsPosted,
+                        Note = BuildInvoiceJournalNote(invoice, line)
+                    });
+                }
+            }
         }
 
         public async Task<PeriodCollectionResult> CollectPeriodInformationAsync(
@@ -355,25 +416,75 @@ namespace BIS.ERP.Services
                 });
             }
 
-            var postings = await GetAccountingPostingsAsync(startDate.Date, endDate.Date.AddDays(1).AddTicks(-1));
+            var postings = await new PostingService(_context).GetAllPostingsAsync(startDate.Date, endDate.Date.AddDays(1).AddTicks(-1));
             result.PostingCount = postings.Count;
-            result.DebitTurnover = postings
-                .Where(posting => !string.IsNullOrWhiteSpace(posting.DebitAccount))
-                .Sum(posting => posting.Amount);
-            result.CreditTurnover = postings
-                .Where(posting => !string.IsNullOrWhiteSpace(posting.CreditAccount))
-                .Sum(posting => posting.Amount);
+            result.DebitTurnover = postings.Sum(posting => posting.Amount);
+            result.CreditTurnover = postings.Sum(posting => posting.Amount);
+            result.Warnings.AddRange(await GetFixedAssetIntegrityWarningsAsync());
             return result;
         }
 
-        private Task<List<PostingViewModel>> GetAccountingPostingsAsync(
-            DateTime? startDate = null,
-            DateTime? endDate = null)
+        private async Task<List<string>> GetFixedAssetIntegrityWarningsAsync()
         {
-            return new PostingService(_context).GetAllPostingsAsync(
-                startDate,
-                endDate,
-                includeImportedDocuments: false);
+            var assetCatalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
+            if (assetCatalog == null)
+                return new List<string>();
+
+            var metadataService = new MetadataService(_context);
+            var rows = await metadataService.GetCatalogDataAsync(assetCatalog.Id);
+            var maps = await ReferenceDisplayHelper.LoadMapsAsync(assetCatalog, metadataService);
+            rows = ReferenceDisplayHelper.ResolveRows(rows, maps);
+            var warnings = new List<string>();
+
+            foreach (var row in rows)
+            {
+                var inventoryNumber = GetString(row, "Инвентарный номер", "Код");
+                var name = GetString(row, "Наименование", "name");
+                var assetLabel = string.IsNullOrWhiteSpace(inventoryNumber)
+                    ? name
+                    : $"{inventoryNumber} {name}".Trim();
+
+                var isActive = GetBoolean(row, "Активен", "is_active");
+                var initialCost = GetDecimal(row, "Первоначальная стоимость", "initial_cost");
+                var accumulatedDepreciation = GetDecimal(row, "Накопленная амортизация", "accumulated_depreciation");
+                var carryingAmount = GetDecimal(row, "Остаточная стоимость", "carrying_amount");
+                var expectedCarryingAmount = Math.Max(0m, initialCost - accumulatedDepreciation);
+                var status = GetString(row, "Статус", "status");
+
+                if (isActive)
+                {
+                    if (string.IsNullOrWhiteSpace(GetString(row, "Счет учета", "asset_account")) ||
+                        string.IsNullOrWhiteSpace(GetString(row, "Счет амортизации", "depreciation_account")) ||
+                        string.IsNullOrWhiteSpace(GetString(row, "Затратный счет", "expense_account")))
+                    {
+                        warnings.Add($"ОС {assetLabel}: не заполнены все учетные счета (учета, амортизации, затрат).");
+                    }
+
+                    if (Math.Abs(carryingAmount - expectedCarryingAmount) >= 0.01m)
+                    {
+                        warnings.Add(
+                            $"ОС {assetLabel}: остаточная стоимость {carryingAmount:N2} не равна расчетной {expectedCarryingAmount:N2}.");
+                    }
+                }
+
+                if (status.Contains("Выбыло", StringComparison.OrdinalIgnoreCase) && isActive)
+                    warnings.Add($"ОС {assetLabel}: статус 'Выбыло', но карточка все еще активна.");
+
+                var conservationDate = GetDate(row, "Дата консервации", "conservation_date");
+                if (conservationDate.HasValue &&
+                    !status.Contains("консервац", StringComparison.OrdinalIgnoreCase) &&
+                    !status.Contains("CONSERVATION", StringComparison.OrdinalIgnoreCase))
+                {
+                    warnings.Add($"ОС {assetLabel}: дата консервации заполнена, но статус не переведен на консервацию.");
+                }
+            }
+
+            return warnings
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(25)
+                .ToList();
         }
 
         private static decimal CalculateCurrentFinancialResult(
@@ -452,37 +563,62 @@ namespace BIS.ERP.Services
             return false;
         }
 
+        private static DateTime? GetDate(Dictionary<string, object> row, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (!row.TryGetValue(name, out var value) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is DateTime date)
+                    return date;
+                if (DateTime.TryParse(value.ToString(), out date))
+                    return date;
+            }
+
+            return null;
+        }
+
         private static string GetString(Dictionary<string, object> row, params string[] names)
         {
             return names.Select(name => row.GetValueOrDefault(name)?.ToString())
                 .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
         }
 
+        private static string ResolveInvoiceTaxType(InvoiceDocument invoice)
+        {
+            var firstLine = invoice.Lines.FirstOrDefault();
+            return firstLine == null ? string.Empty : ResolveLineTaxType(firstLine);
+        }
+
+        private static string ResolveLineTaxType(InvoiceLineRow line)
+        {
+            if (line.VatRate > 0)
+                return $"{line.VatRate:0.##}%";
+            if (!string.IsNullOrWhiteSpace(line.VatTaxCode))
+                return line.VatTaxCode;
+            if (line.SalesTaxRate > 0)
+                return $"НП {line.SalesTaxRate:0.##}%";
+            if (!string.IsNullOrWhiteSpace(line.SalesTaxCode))
+                return line.SalesTaxCode;
+            return string.Empty;
+        }
+
+        private static string BuildInvoiceJournalNote(InvoiceDocument invoice, InvoiceLineRow line)
+        {
+            if (string.IsNullOrWhiteSpace(invoice.Basis))
+                return line.Name;
+
+            return string.IsNullOrWhiteSpace(line.Name)
+                ? invoice.Basis
+                : $"{invoice.Basis}; {line.Name}";
+        }
+
         private static decimal GetDecimal(Dictionary<string, object> row, params string[] names)
         {
             foreach (var name in names)
             {
-                if (!row.TryGetValue(name, out var value) || value == null || value == DBNull.Value)
-                    continue;
-
-                if (value is decimal amount)
+                if (row.TryGetValue(name, out var value) && decimal.TryParse(value?.ToString(), out var amount))
                     return amount;
-                if (value is double doubleValue)
-                    return Convert.ToDecimal(doubleValue);
-                if (value is float floatValue)
-                    return Convert.ToDecimal(floatValue);
-                if (value is int intValue)
-                    return intValue;
-                if (value is long longValue)
-                    return longValue;
-
-                var text = value.ToString();
-                if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out amount) ||
-                    decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out amount) ||
-                    decimal.TryParse(text, NumberStyles.Any, new CultureInfo("ru-RU"), out amount))
-                {
-                    return amount;
-                }
             }
             return 0;
         }
@@ -495,80 +631,10 @@ namespace BIS.ERP.Services
                     continue;
                 if (value is bool boolean)
                     return boolean;
-
-                var text = value?.ToString()?.Trim();
-                if (string.IsNullOrWhiteSpace(text))
-                    continue;
-                if (bool.TryParse(text, out boolean))
+                if (bool.TryParse(value?.ToString(), out boolean))
                     return boolean;
-                if (text.Equals("1", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals("да", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals("t", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals(".t.", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-                if (text.Equals("0", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals("нет", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals("no", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals("f", StringComparison.OrdinalIgnoreCase) ||
-                    text.Equals(".f.", StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
             }
             return false;
-        }
-
-        private static string BuildTaxType(
-            Dictionary<string, object> row,
-            decimal vatAmount,
-            decimal salesTaxAmount)
-        {
-            var parts = new List<string>();
-            if (vatAmount != 0m)
-                parts.Add(FormatTaxLabel("НДС", GetString(row, "Ставка НДС", "vat_rate")));
-            if (salesTaxAmount != 0m)
-                parts.Add(FormatTaxLabel("Налог с продаж", GetString(row, "Ставка налога с продаж", "sales_tax_rate")));
-
-            if (parts.Count > 0)
-                return string.Join("; ", parts);
-
-            return GetString(row,
-                "Ставка НДС",
-                "vat_rate",
-                "Ставка налога с продаж",
-                "sales_tax_rate");
-        }
-
-        private static string FormatTaxLabel(string label, string rate)
-        {
-            var normalizedRate = rate.Trim();
-            if (string.IsNullOrWhiteSpace(normalizedRate))
-                return label;
-
-            if (normalizedRate.EndsWith("%", StringComparison.Ordinal))
-                return $"{label} {normalizedRate}";
-
-            if (decimal.TryParse(normalizedRate, NumberStyles.Any, CultureInfo.CurrentCulture, out var parsedRate) ||
-                decimal.TryParse(normalizedRate, NumberStyles.Any, CultureInfo.InvariantCulture, out parsedRate) ||
-                decimal.TryParse(normalizedRate, NumberStyles.Any, new CultureInfo("ru-RU"), out parsedRate))
-            {
-                return $"{label} {parsedRate:0.##}%";
-            }
-
-            return $"{label} {normalizedRate}";
-        }
-
-        private static BalanceSides SplitBalanceByType(string? accountType, decimal balance)
-        {
-            return NormalizeAccountType(accountType) switch
-            {
-                NormalizedAccountType.Active => new BalanceSides(balance, 0m),
-                NormalizedAccountType.Passive => new BalanceSides(0m, balance),
-                _ => new BalanceSides(Math.Max(balance, 0m), Math.Max(-balance, 0m))
-            };
         }
 
         private sealed class AccountInfo
@@ -579,35 +645,8 @@ namespace BIS.ERP.Services
         }
 
         private static bool IsPassiveType(string value) =>
-            NormalizeAccountType(value) == NormalizedAccountType.Passive;
-
-        private static NormalizedAccountType NormalizeAccountType(string? value)
-        {
-            var normalized = value?.Trim().ToLowerInvariant();
-            return normalized switch
-            {
-                "active" => NormalizedAccountType.Active,
-                "активный" => NormalizedAccountType.Active,
-                "1" => NormalizedAccountType.Active,
-                "passive" => NormalizedAccountType.Passive,
-                "пассивный" => NormalizedAccountType.Passive,
-                "2" => NormalizedAccountType.Passive,
-                "activepassive" => NormalizedAccountType.ActivePassive,
-                "активно-пассивный" => NormalizedAccountType.ActivePassive,
-                "0" => NormalizedAccountType.ActivePassive,
-                "3" => NormalizedAccountType.ActivePassive,
-                _ => NormalizedAccountType.ActivePassive
-            };
-        }
-
-        private readonly record struct BalanceSides(decimal Debit, decimal Credit);
-
-        private enum NormalizedAccountType
-        {
-            Active,
-            Passive,
-            ActivePassive
-        }
+            value.Equals("Passive", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("Пассивный", StringComparison.OrdinalIgnoreCase);
 
         private sealed class ConfiguredLine
         {
