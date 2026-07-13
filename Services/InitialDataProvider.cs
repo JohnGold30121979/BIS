@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using System.Globalization;
+using System;
 using BIS.ERP.Models;
 
 namespace BIS.ERP.Services
@@ -8,8 +10,191 @@ namespace BIS.ERP.Services
         // План счетов бухгалтерского учета КР (основные счета)
         public static List<ChartOfAccount> GetChartOfAccounts()
         {
-            return GetFallbackChartOfAccounts();
+            return GetFoxChartOfAccounts();
         }
+
+        public static List<ChartOfAccount> GetFoxChartOfAccounts()
+        {
+            var accounts = new List<ChartOfAccount>();
+            var rows = FoxChartOfAccountsData.Split(
+                new[] { "\r\n", "\n" },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var row in rows)
+            {
+                var values = row.Split('|');
+                if (values.Length < 16 || string.IsNullOrWhiteSpace(values[0]))
+                    continue;
+
+                accounts.Add(new ChartOfAccount
+                {
+                    Code = values[0].Trim(),
+                    Name = values[1].Trim(),
+                    Description = values[2].Trim(),
+                    AccountType = values[3].Trim(),
+                    Level = ReadChartInt(values, 4, 1),
+                    IsActive = true,
+                    ClosingSubsystemCode = ReadChartInt(values, 5),
+                    PrintModeCode = ReadChartInt(values, 6),
+                    BalanceModeCode = ReadChartInt(values, 7),
+                    UseOrganizations = ReadChartBool(values, 8),
+                    UseEmployees = ReadChartBool(values, 9),
+                    UseMaterials = ReadChartBool(values, 10),
+                    UseCurrencies = ReadChartBool(values, 11),
+                    UsePersonalAccounts = ReadChartBool(values, 12),
+                    UseSites = ReadChartBool(values, 13),
+                    TaxCode = ReadChartInt(values, 14),
+                    AnalyticsGroupCode = ReadChartInt(values, 15)
+                });
+            }
+
+            return accounts;
+        }
+
+        private static int ReadChartInt(IReadOnlyList<string> values, int index, int defaultValue = 0)
+        {
+            return index >= 0 &&
+                   index < values.Count &&
+                   int.TryParse(values[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var result)
+                ? result
+                : defaultValue;
+        }
+
+        private static bool ReadChartBool(IReadOnlyList<string> values, int index)
+        {
+            return index >= 0 &&
+                   index < values.Count &&
+                   bool.TryParse(values[index], out var result) &&
+                   result;
+        }
+
+        private const string FoxChartOfAccountsData = """
+11000000|КАССА ЦЕНТРАЛЬНАЯ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+12100000|ДЕНЕЖН. СРЕД-ВА БАНКЕ (сом)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+15200000|Дебитор. задолж.сотруд, (п/отчет)||Active|1|3|3|3|false|true|false|false|false|false|0|0
+15300000|НАЛОГИ ОПЛАЧЕН АВАНСОМ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+15301000|Подоходный налог оплаченный||Active|1|3|6|6|false|false|false|false|false|false|0|0
+15303000|НДС оплаченный||Active|1|3|6|6|false|false|false|false|false|false|0|0
+15304000|Налог с продаж||Active|1|3|6|6|false|false|false|false|false|false|0|0
+15400000|НДС К ВОЗМЕЩЕНИЮ||Active|1|3|6|2|false|false|false|false|false|false|0|0
+15490000|НДС с предоплаты||Active|1|3|6|0|false|false|false|false|false|false|0|0
+16100000|Э/ЭНЕРГИЯ||Active|1|6|0|0|false|false|false|false|false|false|0|0
+16300000|НЕЗАВЕРШ. ПРОИЗВОДСТВО||Active|1|3|6|0|false|false|false|false|false|false|0|0
+17100000|ТОПЛИВО И ГСМ||Active|1|6|7|0|false|false|false|false|false|false|0|0
+17200000|ЗАПАСНЫЕ ЧАСТИ для авто||Active|1|6|7|0|false|false|false|false|false|false|0|0
+17500000|МБП на складе||Active|1|6|7|0|false|false|false|false|false|false|0|0
+17950000|МБП в эксплуатации||Active|1|6|7|0|false|false|false|false|false|false|0|0
+18100000|Запасы оплаченные авансом||Active|1|3|2|2|true|false|false|false|false|false|0|0
+18200000|Услуги оплаченные авансом||Active|1|3|2|2|true|false|false|false|false|false|0|0
+21300000|Здания, сооружения||Active|1|7|6|0|false|false|false|false|false|false|0|0
+21400000|Производст. оборудование||Active|1|7|6|0|false|false|false|false|false|false|0|0
+21500000|Конторское оборудование||Active|1|7|6|0|false|false|false|false|false|false|0|0
+21600000|Мебель и принадлежности||Active|1|7|6|0|false|false|false|false|false|false|0|0
+21700000|Транспортные средства||Active|1|7|6|0|false|false|false|false|false|false|0|0
+21930000|Амортизация зданий и сооружений||Passive|1|7|6|0|false|false|false|false|false|false|0|0
+21940000|Амотризация оборудования||Passive|1|7|6|0|false|false|false|false|false|false|0|0
+21950000|Амортизация конторского оборуд||Passive|1|7|6|0|false|false|false|false|false|false|0|0
+21960000|Амортизация мебели||Passive|1|7|6|0|false|false|false|false|false|false|0|0
+21970000|Амортизация транспортных средс||Passive|1|7|6|0|false|false|false|false|false|false|0|0
+31100000|Счета к оплате за ТМЦ||Passive|1|3|2|2|true|false|false|false|false|false|0|0
+31200000|Счета к оплате за услуги||Passive|1|3|2|2|true|false|false|false|false|false|0|0
+34000000|НАЛОГИ К ОПЛАТЕ||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+34100000|П/налог начисленный||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+34003000|НДС начисленный||Passive|1|3|6|2|false|false|false|false|false|false|0|0
+34004000|Налог с продаж||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+34005000|Налог на имущество||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+34006000|Земельный налог начисленный||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+34007000|Налог на мусор начисленный||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+35200000|З/плата начисленная||Passive|1|2|6|0|false|true|false|false|false|false|0|0
+35210000|Депонированная з/плата||Passive|1|3|6|6|false|true|false|false|false|false|0|0
+35300000|Начисленный соц.фонд||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+35900000|ПРОЧИЕ НАЧИСЛЕННЫЕ ОБЯЗАТЕЛЬСТВА||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+35901000|Алименты начисленные||Passive|1|3|3|3|false|true|false|false|false|false|0|0
+36200000|Кредитор.задолж.сотрудн.(п/отчет)||Passive|1|3|3|3|false|true|false|false|false|false|0|0
+51300000|УСТАВНОЙ КАПИТАЛ||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+53000000|Нераспред. Прибыль/Убытки||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+59990000|Свод доходов и расходов||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+61200000|ДОХ.ОТ РЕАЛ Э/ЭНЕРГ (НАС)||Passive|1|3|7|0|false|false|false|false|false|false|0|0
+61500000|Доход от реал. ТМЗ||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+72000000|С/СТОИМ, РЕАЛИЗАЦИИ ТМЗ||Active|1|3|6|0|false|false|false|false|false|false|0|0
+71100000|С/С РЕАЛИЗ Э/ЭНЕРГИИ||Active|1|3|6|0|false|false|false|false|false|false|0|0
+75100000|Коммерческие расходы||Active|1|3|6|0|false|false|false|false|false|false|0|0
+75104000|Расходы Услуги связи||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80100000|Расходы по з/плате (админ)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80302000|Услуги связи (админ)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80301000|Электроэнергия (админ)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80304000|Услуги банка||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80300000|Прочие услуги (админ)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80600000|Канцелярские расходы (админ)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+82000000|расходы на вырубку деревьев||Active|1|3|6|0|true|false|false|false|false|false|0|0
+80303000|Расходы по компьютерному обес (адм)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+84900000|Прочие администр.расходы (админ)||Active|1|3|6|0|false|false|false|false|false|false|0|0
+91900000|ДОХОД ОТ НЕОПЕРАЦ ДЕЯТЕЛЬН||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+91901000|Доходы от демонтожа ОС||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+91902000|Доходы от реализации ОС||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+95400000|РАСХОДЫ ОТ НЕОПЕРАЦ ДЕЯТЕЛЬН||Active|1|3|6|0|false|false|false|false|false|false|0|0
+95401000|Списание дебиторской задолжнос||Active|1|3|6|0|false|false|false|false|false|false|0|0
+95402000|Пени штрафы ГНИ, соц.фонд.||Active|1|3|6|0|false|false|false|false|false|false|0|0
+95404000|Убытки от списания ОС||Active|1|3|6|0|false|false|false|false|false|false|0|0
+95405000|Убытки от реализации ОС||Active|1|3|6|0|false|false|false|false|false|false|0|0
+95406000|Материальная помощь (необлогаем||Active|1|3|6|0|false|false|false|false|false|false|0|0
+95407000|Спонсорская помощь||Active|1|3|6|0|false|false|false|false|false|false|0|0
+17400000|ПРОЧИЕ МАТЕРИАЛЫ||Active|1|6|7|6|false|false|false|false|false|false|0|0
+12500000|Денеж.средства в пути||Active|1|3|2|2|true|false|false|false|false|false|0|0
+14100000|Сч. к получ.за э/энерг. орг||Active|1|9|2|2|true|false|false|false|false|false|0|0
+14150000|Сч. к получ. от реал. ТМЗ||Active|1|3|2|2|true|false|false|false|false|false|0|0
+16202000|ВСПОМОГАТЕЛЬНЫЕ МАТЕРИАЛЫ||Active|1|6|7|0|false|false|false|false|false|false|0|0
+16340000|ПРОЧИЕ ПРОИЗ.РАСХОДЫ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+75109000|Расходы по рекламе||Active|1|3|6|0|false|false|false|false|false|false|0|0
+80500000|Налог на имущество||Active|1|3|6|0|false|false|false|false|false|false|0|0
+21210000|КАП. РЕМОНТ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+16330000|ОБЩЕПРОИЗВОДСТВЕН. РАСХОДЫ||Active|1|3|6|0|false|false|false|false|false|false|0|0
+16330100|ВСПОМ.ПРОИЗ. МЕХ ЦЕХ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+41900000|Прочие долгосрочные обязательства||Passive|1|0|0|0|false|false|false|false|false|false|0|0
+75102200|Охрана труда||Active|1|3|6|0|false|false|false|false|false|false|0|0
+16400000|ГОТОВАЯ ПРОДУКЦИЯ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+81910000|Расходы по зем налогу||Active|1|3|6|0|false|false|false|false|false|false|0|0
+35310000|ГОС. НАКОПИТЕЛЬНЫЙ СОЦ. ФОНД||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+16330200|ВСПОМ. ПРОИЗ.ТРАНСП ЦЕХ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+16330300|ВСПОМ.ПРОИЗ. ЭЛ.ЦЕХ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+95470000|Убытки от списания материалов||Active|1|3|6|6|false|false|false|false|false|false|0|0
+91940000|Прочие неоперационные доходы||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+16200000|ОСНОВНЫЕ МАТЕРИАЛЫ ДЛЯ ПРОИЗВОДСТВА||Active|1|6|7|5|false|false|false|false|false|false|0|0
+32150000|АВ ПОЛУЧ ЗА РЕАЛ ТМЗ||Passive|1|3|2|2|true|false|false|false|false|false|0|0
+32100000|АВАНСЫ э. э. орган||Passive|1|9|2|2|true|false|false|false|false|false|0|0
+61100000|ДОХОД ОТ РЕАЛ. Э/ЭНЕРГИ. ОРГ.||Passive|1|3|7|6|false|false|false|false|false|false|0|0
+21100000|ЗЕМЛЯ||Active|1|7|6|1|false|false|false|false|false|false|0|0
+34200000|НАЛОГ НА ПРИБЫЛЬ||Passive|1|3|6|0|false|false|false|false|false|false|0|0
+91400000|ДОХОД ОТ КУРСОВЫХ РАЗНИЦ||Passive|1|3|6|6|false|false|false|true|false|false|0|0
+95200000|УБЫТКИ ОТ КУРС РАЗНИЦ||Active|1|3|6|6|false|false|false|true|false|false|0|0
+99000000|НАЛОГИ НА ПРИБЫЛЬ||Passive|1|3|6|6|false|false|false|false|false|false|0|0
+12100100|ОАО БАКАЙ БАНК||Active|1|3|6|2|false|false|false|false|false|false|0|0
+12100101|ТЕРМИНАЛ ПЭЙ 24||Active|1|3|6|2|false|false|false|false|false|false|0|0
+14130000|СЧ. К ПОЛУЧ. ЗА Э/ЭНЕРГ (нас)||Active|1|3|2|2|true|false|false|false|false|false|0|0
+32130000|АВАНСЫ ОПЛАЧ. ЗА Э/ЭН.(нас)||Passive|1|3|2|2|true|false|false|false|false|false|0|0
+33200000|ЗАЙМЫ||Passive|1|3|2|2|true|false|false|false|false|false|0|0
+21220000|КАП. СТРОИТЕЛЬСТВО||Active|1|3|6|0|false|false|false|false|false|false|0|0
+76000000|ПОТЕРИ ПО Э/ЭНЕРГИИ||Active|1|3|6|6|false|false|false|false|false|false|0|0
+34300000|НДС к оплате||Active|1|3|6|0|true|false|false|false|false|false|0|0
+14170000|Пеня||Active|1|9|2|2|true|false|false|false|false|false|0|0
+14170100|Услуги по э/энергии||Active|1|9|2|2|true|false|false|false|false|false|0|0
+14170200|Пеня (насел)||Active|1|9|4|0|false|false|false|false|true|false|0|0
+32170000|Расчеты по пени||Passive|1|9|2|2|true|false|false|false|false|false|0|0
+32170100|Расчеты по э/энерг. (организации)||Passive|1|9|2|2|true|false|false|false|false|false|0|0
+32170200|Оасчеты по пени (населен.)_||Passive|1|9|4|4|false|false|false|false|true|false|0|0
+91903000|Доход в виде пени и шрафов (орган.)||Passive|1|3|6|6|false|false|false|false|false|false|0|0
+91904000|Доход в виде пени (населен.)||Passive|1|3|6|6|false|false|false|false|false|false|0|0
+11001000|рабочая касса||Active|1|3|6|2|true|false|false|false|false|false|0|0
+21210100|РЕМОНТ ПС 35/6||Active|1|3|6|6|false|true|true|false|false|false|0|0
+85550000|п/налог удерживаемый с работодателя||Active|1|0|7|6|false|false|false|false|false|false|0|0
+32140000|Оплата за э/энергию (нас)||Passive|1|9|4|4|false|false|false|false|true|false|0|0
+14140000|Счета к оплате за э/энергию (нас)||Active|1|9|4|4|false|false|false|false|true|false|0|0
+14160000|РОЧИЕ УСЛУГИ||Active|1|3|4|4|false|false|false|false|true|false|0|0
+32160000|ПРОЧИУ УСЛУГИ||Passive|1|3|4|4|false|false|false|false|true|false|0|0
+61140000|ДОХОД ПРОЧИЕ УСЛУГИ||Passive|1|3|6|6|false|false|false|false|false|false|0|0
+84700000|Аммортизация Основных средств||Active|1|0|0|0|false|false|false|false|false|false|0|0
+61101000|Доход от услуг э/энергии (орг)||Passive|1|0|0|0|false|false|false|false|false|false|0|0
+""";
 
         public static List<ChartOfAccount> GetFallbackChartOfAccounts()
         {

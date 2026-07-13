@@ -75,6 +75,38 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Курсы валют': {ex.Message}");
             }
         }
+
+        private async Task EnsureCurrencyCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Справочник валют");
+
+            if (catalog == null)
+                return;
+
+            var existingColumns = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .Select(field => field.DbColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetCurrencyFields(catalog.Id))
+            {
+                if (existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+                catalog.Fields.Add(field);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+            await AddCurrencyDataToTable(catalog);
+        }
+
         private async Task CreateMaterialTypesCatalog(MetadataConfiguration config)
         {
             try
@@ -1142,6 +1174,41 @@ namespace BIS.ERP.Services
         private async Task EnsurePaymentKindCatalogStructureAsync() =>
             await EnsureCatalogStructureAsync("Виды оплаты", GetPaymentKindFields);
 
+        // Справочник "Классификация платежей"
+        private async Task CreatePaymentClassificationCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalogId = Guid.NewGuid();
+                var catalog = new MetadataObject
+                {
+                    Id = catalogId,
+                    Name = "Классификация платежей",
+                    TableName = "catalog_payment_classifications",
+                    ObjectType = "Catalog",
+                    Description = "Классификация платежей из файла FoxPro.",
+                    Icon = "🏷",
+                    Order = 20,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetPaymentClassificationFields(catalogId)
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Классификация платежей' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Классификация платежей': {ex.Message}");
+            }
+        }
+
+        private async Task EnsurePaymentClassificationCatalogStructureAsync() =>
+            await EnsureCatalogStructureAsync("Классификация платежей", GetPaymentClassificationFields);
+
         // Справочник "Типы поставки"
         private async Task CreateDeliveryTypeCatalog(MetadataConfiguration config)
         {
@@ -1340,16 +1407,61 @@ namespace BIS.ERP.Services
             var accounts = InitialDataProvider.GetChartOfAccounts();
             var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
             var modules = await GetAvailableModulesAsync();
+            var sourceCodes = accounts
+                .Select(account => account.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             foreach (var account in accounts)
             {
-                if (existingCodes.Contains(account.Code))
-                    continue;
-
                 var values = BuildChartOfAccountsCatalogValues(account, modules);
                 await UpsertCatalogSeedRowAsync(catalog.TableName, account.Code, values);
                 existingCodes.Add(account.Code);
             }
+
+            await DeactivateLegacyFallbackChartAccountsAsync(catalog, sourceCodes);
+        }
+
+        private async Task<int> DeactivateLegacyFallbackChartAccountsAsync(
+            MetadataObject catalog,
+            ISet<string> sourceCodes)
+        {
+            var fallbackOnlyCodes = InitialDataProvider.GetFallbackChartOfAccounts()
+                .Select(account => account.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code) && !sourceCodes.Contains(code))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return await DeactivateChartAccountsByCodeAsync(catalog.TableName, fallbackOnlyCodes);
+        }
+
+        private async Task<int> DeactivateChartAccountsByCodeAsync(string tableName, IReadOnlyCollection<string> codes)
+        {
+            if (codes.Count == 0)
+                return 0;
+
+            var codeSql = string.Join(", ", codes.Select(ToSqlLiteral));
+            return await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE COALESCE(""code"", '') IN ({codeSql})
+                  AND COALESCE(""is_active"", true) = true;");
+        }
+
+        private async Task<int> DeactivateChartAccountsOutsideSourceAsync(string tableName, ISet<string> sourceCodes)
+        {
+            if (sourceCodes.Count == 0)
+                return 0;
+
+            var codeSql = string.Join(", ", sourceCodes.Select(ToSqlLiteral));
+            return await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE COALESCE(""code"", '') <> ''
+                  AND ""code"" NOT IN ({codeSql})
+                  AND COALESCE(""is_active"", true) = true;");
         }
 
         public async Task<ChartOfAccountsDbfImportResult> ImportChartOfAccountsFromDbfAsync(string filePath)
@@ -1373,6 +1485,10 @@ namespace BIS.ERP.Services
             var analysis = importService.Analyze(filePath);
             var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
             var modules = await GetAvailableModulesAsync();
+            var sourceCodes = analysis.Accounts
+                .Select(account => account.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var insertedCount = 0;
             var updatedCount = 0;
@@ -1395,6 +1511,7 @@ namespace BIS.ERP.Services
                     BuildChartOfAccountsCatalogValues(account, modules));
             }
 
+            var deactivatedCount = await DeactivateChartAccountsOutsideSourceAsync(catalog.TableName, sourceCodes);
             await NormalizeChartOfAccountsMetadataAsync(catalog);
 
             return new ChartOfAccountsDbfImportResult
@@ -1404,6 +1521,69 @@ namespace BIS.ERP.Services
                 LoadedAccountsCount = analysis.LoadedAccountsCount,
                 InsertedCount = insertedCount,
                 UpdatedCount = updatedCount,
+                DeactivatedCount = deactivatedCount,
+                DuplicateSourceCodesCount = analysis.DuplicateSourceCodesCount,
+                FieldMappings = analysis.FieldMappings,
+                IgnoredSourceFields = analysis.IgnoredSourceFields
+            };
+        }
+
+        public async Task<PaymentClassificationDbfImportResult> ImportPaymentClassificationsFromDbfAsync(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("Не указан путь к файлу классификации платежей.", nameof(filePath));
+
+            if (!File.Exists(filePath))
+                throw new FileNotFoundException("Файл классификации платежей не найден.", filePath);
+
+            await EnsureCatalogStructureAsync("Классификация платежей", GetPaymentClassificationFields);
+
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Классификация платежей");
+
+            if (catalog == null)
+                throw new InvalidOperationException("Справочник 'Классификация платежей' не найден.");
+
+            var importService = new PaymentClassificationDbfImportService();
+            var analysis = importService.Analyze(filePath);
+            var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
+            var sourceCodes = analysis.Items
+                .Select(item => item.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var insertedCount = 0;
+            var updatedCount = 0;
+
+            foreach (var item in analysis.Items)
+            {
+                if (existingCodes.Contains(item.Code))
+                {
+                    updatedCount++;
+                }
+                else
+                {
+                    insertedCount++;
+                    existingCodes.Add(item.Code);
+                }
+
+                await UpsertCatalogSeedRowAsync(
+                    catalog.TableName,
+                    item.Code,
+                    BuildPaymentClassificationCatalogValues(item));
+            }
+
+            var deactivatedCount = await DeactivatePaymentClassificationsOutsideSourceAsync(catalog.TableName, sourceCodes);
+
+            return new PaymentClassificationDbfImportResult
+            {
+                SourcePath = analysis.SourcePath,
+                SourceRecordCount = analysis.SourceRecordCount,
+                LoadedItemsCount = analysis.LoadedItemsCount,
+                InsertedCount = insertedCount,
+                UpdatedCount = updatedCount,
+                DeactivatedCount = deactivatedCount,
                 DuplicateSourceCodesCount = analysis.DuplicateSourceCodesCount,
                 FieldMappings = analysis.FieldMappings,
                 IgnoredSourceFields = analysis.IgnoredSourceFields
@@ -1441,6 +1621,36 @@ namespace BIS.ERP.Services
                 ["CreatedAt"] = DateTime.UtcNow,
                 ["UpdatedAt"] = DateTime.UtcNow
             };
+        }
+
+        private static Dictionary<string, object?> BuildPaymentClassificationCatalogValues(PaymentClassificationRecord item)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["Id"] = Guid.NewGuid(),
+                ["code"] = item.Code,
+                ["name"] = item.Name,
+                ["external_code"] = string.IsNullOrWhiteSpace(item.ExternalCode) ? null : item.ExternalCode,
+                ["is_active"] = item.IsActive,
+                ["description"] = null,
+                ["CreatedAt"] = DateTime.UtcNow,
+                ["UpdatedAt"] = DateTime.UtcNow
+            };
+        }
+
+        private async Task<int> DeactivatePaymentClassificationsOutsideSourceAsync(string tableName, ISet<string> sourceCodes)
+        {
+            if (sourceCodes.Count == 0)
+                return 0;
+
+            var codeSql = string.Join(", ", sourceCodes.Select(ToSqlLiteral));
+            return await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE COALESCE(""code"", '') <> ''
+                  AND ""code"" NOT IN ({codeSql})
+                  AND COALESCE(""is_active"", true) = true;");
         }
 
         private async Task<List<MetadataModule>> GetAvailableModulesAsync()
@@ -1720,11 +1930,13 @@ namespace BIS.ERP.Services
         private static readonly IReadOnlyDictionary<int, FoxClosingModuleMapping> FoxClosingModuleMappings =
             new Dictionary<int, FoxClosingModuleMapping>
             {
+                [2] = new(ModuleMetadataService.FinanceCode, "Финансы", "Финансы"),
                 [3] = new(ModuleMetadataService.FinanceCode, "Финансы", "Финансы"),
                 [4] = new(null, "Сбыт", "Сбыт", "Продажи", "Реализация", "Регистратура"),
                 [6] = new(ModuleMetadataService.InventoryCode, "Учет материальных ценностей", "УМЦ", "ТМЦ", "Материалы"),
                 [7] = new(ModuleMetadataService.FixedAssetsCode, "Основные средства", "Основные средства", "ОС"),
                 [8] = new(null, "Вспомогательное производство", "Вспомогательное производство"),
+                [9] = new(ModuleMetadataService.FinanceCode, "Финансы", "Финансы"),
                 [12] = new(ModuleMetadataService.InventoryCode, "Сырье", "Сырье", "Учет материальных ценностей", "Материалы"),
                 [66] = new(null, "Меню", "Меню")
             };

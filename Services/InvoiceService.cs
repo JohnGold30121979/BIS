@@ -17,7 +17,7 @@ namespace BIS.ERP.Services
         private const string DefaultSalesRevenueAccount = "61100000";
         private const string DefaultVatPayableAccount = "34300000";
         private const string DefaultVatRecoverableAccount = "15400000";
-        private const string DefaultSalesTaxAccount = "34900000";
+        private const string DefaultSalesTaxAccount = "34004000";
 
         private readonly AppDbContext _context;
         private readonly MetadataService _metadataService;

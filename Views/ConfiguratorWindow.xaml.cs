@@ -215,6 +215,16 @@ namespace BIS.ERP.Views
                 ShowModulesEditor();
             };
             rootItem.Items.Add(modulesItem);
+            var accountingSetupItem = new TreeViewItem
+            {
+                Header = "⚙ Настройка бухгалтерского учета"
+            };
+            accountingSetupItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowAccountingSetupEditor();
+            };
+            rootItem.Items.Add(accountingSetupItem);
             rootItem.Items.Add(documentsItem);
             rootItem.Items.Add(reportsItem);
             var regulatedTemplatesItem = new TreeViewItem
@@ -252,6 +262,17 @@ namespace BIS.ERP.Views
                 new BIS.ERP.Views.Configurator.ModuleManagementView(_context)));
         }
 
+        private void ShowAccountingSetupEditor()
+        {
+            if (_context == null)
+                return;
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Настройка бухгалтерского учета";
+            EditorDescription.Text = "Служебные параметры учета: входящие остатки, строки отчетности и расчет курсовой разницы";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new AccountingSetupView(_context)));
+        }
+
         private FrameworkElement CreateFixedPropertiesHost(UIElement content)
         {
             var host = new Grid
@@ -282,6 +303,8 @@ namespace BIS.ERP.Views
         }
 
         private void OnModulesClick(object sender, RoutedEventArgs e) => ShowModulesEditor();
+
+        private void OnAccountingSetupClick(object sender, RoutedEventArgs e) => ShowAccountingSetupEditor();
 
         private async void OnRegulatedTemplatesClick(object sender, RoutedEventArgs e) =>
             await ShowRegulatedTemplatesEditorAsync();

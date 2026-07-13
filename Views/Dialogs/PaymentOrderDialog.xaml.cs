@@ -18,12 +18,14 @@ namespace BIS.ERP.Views
         private readonly Guid? _editId;
         private Guid _selectedOurAccountId;
         private Guid _selectedCorrAccountId;
+        private Guid _selectedPaymentClassificationId;
         private List<ReferenceItem> _organizations;
         private List<ReferenceItem> _banks;
         private List<ReferenceItem> _ourAccounts;
         private List<ReferenceItem> _currencies;
         private List<ReferenceItem> _employees;
         private List<ReferenceItem> _materials;
+        private List<Dictionary<string, object>> _paymentClassificationRows = new();
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
@@ -192,6 +194,11 @@ namespace BIS.ERP.Views
 
             _materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
             Dispatcher.Invoke(() => MaterialCombo.ItemsSource = _materials);
+
+            var paymentClassificationCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Классификация платежей");
+            _paymentClassificationRows = paymentClassificationCatalog == null
+                ? new List<Dictionary<string, object>>()
+                : await _metadataService.GetCatalogDataAsync(paymentClassificationCatalog.Id);
         }
 
         private async Task LoadDataAsync(Guid id)
@@ -222,6 +229,8 @@ namespace BIS.ERP.Views
                     SelectComboByRecordValue(CurrencyCombo, record, "Валюта");
                     SelectComboByRecordValue(EmployeeCombo, record, "Сотрудник");
                     SelectComboByRecordValue(MaterialCombo, record, "Материал");
+                    if (record.TryGetValue("Классификация платежа", out var paymentClassificationValue))
+                        ApplySelectedPaymentClassification(paymentClassificationValue);
 
                     if (record.ContainsKey("Тип"))
                     {
@@ -250,6 +259,28 @@ namespace BIS.ERP.Views
                 CorrAccountBox.Text = displayName;
                 UpdateAccountControlledFieldsVisibility();
             });
+        }
+
+        private void SelectPaymentClassification_Click(object sender, RoutedEventArgs e)
+        {
+            if (_paymentClassificationRows.Count == 0)
+            {
+                MessageBox.Show(
+                    "Справочник классификации платежей пуст. Загрузите данные из DBF в справочнике 'Классификация платежей'.",
+                    "Классификация платежей",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new ReferenceSelectionDialog(_paymentClassificationRows, "Код", "Наименование")
+            {
+                Owner = this,
+                Title = "Выбор классификации платежа"
+            };
+
+            if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
+                ApplySelectedPaymentClassification(dialog.SelectedItem.GetValueOrDefault("Id"));
         }
 
         private async Task SelectPlanAccountAsync(Action<Guid, string> applySelection)
@@ -421,6 +452,8 @@ namespace BIS.ERP.Views
                         : string.Empty);
                 SetFieldValueIfExists(itemData, "Корр. счет",
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
+                SetFieldValueIfExists(itemData, "Классификация платежа",
+                    _selectedPaymentClassificationId != Guid.Empty ? _selectedPaymentClassificationId : string.Empty);
 
                 if (_editId.HasValue)
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
@@ -464,6 +497,22 @@ namespace BIS.ERP.Views
 
             _selectedCorrAccountId = account.Id;
             CorrAccountBox.Text = account.DisplayName;
+        }
+
+        private void ApplySelectedPaymentClassification(object value)
+        {
+            if (!Guid.TryParse(value?.ToString(), out var id))
+                return;
+
+            var row = _paymentClassificationRows.FirstOrDefault(item =>
+                item.TryGetValue("Id", out var rowId) &&
+                Guid.TryParse(rowId?.ToString(), out var parsedId) &&
+                parsedId == id);
+            if (row == null)
+                return;
+
+            _selectedPaymentClassificationId = id;
+            PaymentClassificationBox.Text = BuildDisplayName(row, "Код", "Наименование");
         }
 
         private void UpdateAccountControlledFieldsVisibility()

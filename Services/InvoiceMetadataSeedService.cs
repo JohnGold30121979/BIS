@@ -127,17 +127,17 @@ namespace BIS.ERP.Services
                         new CatalogSeedRow("НДС0", "НДС 0%", Rate: 0m, EsfVatCode: "10", SortOrder: 2,
                             VatPayableAccount: "34300000", VatRecoverableAccount: "15400000"),
                         new CatalogSeedRow("WITHOUT_TAX", "Без НДС / освобождено", Rate: 0m, EsfVatCode: "90", EsfSalesTaxCode: "50", SortOrder: 3, IsDefaultSalesTax: true,
-                            VatPayableAccount: "34300000", VatRecoverableAccount: "15400000", SalesTaxAccount: "34900000"),
+                            VatPayableAccount: "34300000", VatRecoverableAccount: "15400000", SalesTaxAccount: "34004000"),
                         new CatalogSeedRow("SALES_TAX", "Налог с продаж (базовый режим)", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 4,
-                            SalesTaxAccount: "34900000"),
+                            SalesTaxAccount: "34004000"),
                         new CatalogSeedRow("SALES_SERVICE", "Налог с продаж: услуги (неторг. деятельность)", Rate: 2.5m, EsfSalesTaxCode: "70", SortOrder: 5,
-                            SalesTaxAccount: "34900000"),
+                            SalesTaxAccount: "34004000"),
                         new CatalogSeedRow("SALES_TRADE", "Налог с продаж: торговая деятельность", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 6,
-                            SalesTaxAccount: "34900000"),
+                            SalesTaxAccount: "34004000"),
                         new CatalogSeedRow("SALES_EXEMPT", "Налог с продаж: необлагаемая деятельность", Rate: 0m, EsfSalesTaxCode: "50", SortOrder: 7,
-                            SalesTaxAccount: "34900000"),
+                            SalesTaxAccount: "34004000"),
                         new CatalogSeedRow("SALES_RETAIL_2009", "Налог с продаж: розничная продажа до 2009", Rate: 4m, EsfSalesTaxCode: "50", SortOrder: 8,
-                            SalesTaxAccount: "34900000")
+                            SalesTaxAccount: "34004000")
                     },
                     defaultCodesByColumn: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {

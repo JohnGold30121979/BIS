@@ -361,20 +361,40 @@ namespace BIS.ERP.Services
 
         private async Task EnsureFinanceReportsAsync()
         {
-            var paymentOrder = await _context.MetadataObjects.Include(item => item.Fields)
-                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Платежное поручение");
-            if (paymentOrder != null)
+            await RemoveObsoleteFinanceNavigationReportsAsync();
+        }
+
+        private async Task RemoveObsoleteFinanceNavigationReportsAsync()
+        {
+            await new ModuleMetadataService(_context).EnsureSchemaAsync();
+
+            var obsoleteCodes = new[]
             {
-                await EnsureReportAsync("Реестр платежных поручений", "finance.payment.registry", paymentOrder,
-                    "Номер", "Дата", "Тип", "Организация", "Сумма", "Валюта", "Назначение платежа", "Проведён");
-                await EnsureReportAsync("Выписка банка", "finance.bank.statement", paymentOrder,
-                    "Дата", "Номер", "Тип", "Организация", "Корр. счет", "Сумма", "Валюта", "Назначение платежа");
-            }
-            var advanceReport = await _context.MetadataObjects.Include(item => item.Fields)
-                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Авансовый отчет");
-            if (advanceReport != null)
-                await EnsureReportAsync("Акт сверки по подотчетному лицу", "finance.employee.reconciliation", advanceReport,
-                    "Дата", "Номер", "Сотрудник", "Организация", "Сумма", "Основание", "Проведен");
+                "finance.payment.registry",
+                "finance.bank.statement",
+                "finance.employee.reconciliation"
+            };
+            var obsoleteNames = new[]
+            {
+                "Реестр платежных поручений",
+                "Выписка банка",
+                "Акт сверки по подотчетному лицу"
+            };
+
+            var reports = await _context.Reports
+                .Where(report => obsoleteCodes.Contains(report.Code) || obsoleteNames.Contains(report.Name))
+                .ToListAsync();
+            if (reports.Count == 0)
+                return;
+
+            var reportIds = reports.Select(report => report.Id).ToList();
+            var moduleItems = await _context.MetadataModuleItems
+                .Where(item => item.ObjectType == "Report" && reportIds.Contains(item.ObjectId))
+                .ToListAsync();
+
+            _context.MetadataModuleItems.RemoveRange(moduleItems);
+            _context.Reports.RemoveRange(reports);
+            await _context.SaveChangesAsync();
         }
 
         private async Task EnsureInventoryReportsAsync()

@@ -230,7 +230,6 @@ namespace BIS.ERP
                     };
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
-                    financeTools.Children.Add(new NavigationItem { Id = "AccountingSetup", Name = "Настройка учета", Icon = "⚙", Type = "AccountingSetup" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
                 }
@@ -488,13 +487,6 @@ namespace BIS.ERP
                 Icon = "📈",
                 Type = "AccountingReports"
             });
-            accountingSection.Children.Add(new NavigationItem
-            {
-                Id = "AccountingSetup",
-                Name = "Настройка учета",
-                Icon = "⚙",
-                Type = "AccountingSetup"
-            });
             NavigationItems.Add(accountingSection);
 
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
@@ -725,11 +717,6 @@ namespace BIS.ERP
                     case "AccountingReports":
                         var accountingContext = await _infoBaseManager.GetCurrentDbContextAsync();
                         _navigation.NavigateTo(new AccountingReportsView(accountingContext));
-                        break;
-
-                    case "AccountingSetup":
-                        var setupContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        _navigation.NavigateTo(new AccountingSetupView(setupContext));
                         break;
 
                     case "Profile":

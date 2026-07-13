@@ -38,11 +38,19 @@ namespace BIS.ERP.Views
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
             SearchPanel.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
-            ImportChartDbfButton.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
+            ImportDbfButton.Visibility = CanImportDbf ? Visibility.Visible : Visibility.Collapsed;
+            ImportDbfButton.Content = IsPaymentClassificationCatalog
+                ? "📥 Загрузить классификацию"
+                : "📥 Загрузить DBF";
         }
 
         private bool IsChartOfAccountsCatalog =>
             string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase);
+
+        private bool IsPaymentClassificationCatalog =>
+            string.Equals(_catalog.Name, "Классификация платежей", StringComparison.OrdinalIgnoreCase);
+
+        private bool CanImportDbf => IsChartOfAccountsCatalog || IsPaymentClassificationCatalog;
 
         private bool IsAdvancePaymentsCatalog =>
             string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
@@ -791,17 +799,12 @@ namespace BIS.ERP.Views
             }
         }
 
-        private async void OnImportChartDbfClick(object sender, RoutedEventArgs e)
+        private async void OnImportDbfClick(object sender, RoutedEventArgs e)
         {
-            if (!IsChartOfAccountsCatalog)
+            if (!CanImportDbf)
                 return;
 
-            var openDialog = new OpenFileDialog
-            {
-                Title = "Выберите DBF файл плана счетов",
-                Filter = "Файл плана счетов (BUXSCH.DBF)|BUXSCH.DBF|DBF файлы (*.dbf)|*.dbf|Все файлы (*.*)|*.*",
-                FileName = "BUXSCH.DBF"
-            };
+            var openDialog = CreateDbfOpenDialog();
 
             if (openDialog.ShowDialog() != true)
                 return;
@@ -809,21 +812,37 @@ namespace BIS.ERP.Views
             try
             {
                 ProgressText.Text = "⏳ Импорт DBF...";
-                StatusText.Text = "Загрузка плана счетов из Fox DBF...";
+                StatusText.Text = IsPaymentClassificationCatalog
+                    ? "Загрузка классификации платежей из Fox DBF..."
+                    : "Загрузка плана счетов из Fox DBF...";
 
-                var result = await _metadataService.ImportChartOfAccountsFromDbfAsync(openDialog.FileName);
-                await LoadData();
+                if (IsPaymentClassificationCatalog)
+                {
+                    var result = await _metadataService.ImportPaymentClassificationsFromDbfAsync(openDialog.FileName);
+                    await LoadData();
 
-                MessageBox.Show(
-                    BuildChartOfAccountsImportMessage(result),
-                    "Импорт плана счетов",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                    MessageBox.Show(
+                        BuildPaymentClassificationImportMessage(result),
+                        "Импорт классификации платежей",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+                else
+                {
+                    var result = await _metadataService.ImportChartOfAccountsFromDbfAsync(openDialog.FileName);
+                    await LoadData();
+
+                    MessageBox.Show(
+                        BuildChartOfAccountsImportMessage(result),
+                        "Импорт плана счетов",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show(
-                    $"Ошибка загрузки плана счетов: {ex.Message}",
+                    $"Ошибка загрузки DBF: {ex.Message}",
                     "Ошибка",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
@@ -833,6 +852,26 @@ namespace BIS.ERP.Views
                 ProgressText.Text = string.Empty;
                 StatusText.Text = "✅ Готово";
             }
+        }
+
+        private OpenFileDialog CreateDbfOpenDialog()
+        {
+            if (IsPaymentClassificationCatalog)
+            {
+                return new OpenFileDialog
+                {
+                    Title = "Выберите DBF файл классификации платежей",
+                    Filter = "DBF файлы (*.dbf)|*.dbf|Все файлы (*.*)|*.*",
+                    FileName = "VID_PL.DBF"
+                };
+            }
+
+            return new OpenFileDialog
+            {
+                Title = "Выберите DBF файл плана счетов",
+                Filter = "Файл плана счетов (BUXSCH.DBF)|BUXSCH.DBF|DBF файлы (*.dbf)|*.dbf|Все файлы (*.*)|*.*",
+                FileName = "BUXSCH.DBF"
+            };
         }
 
         private void ExportToExcel(string filePath)
@@ -870,6 +909,28 @@ namespace BIS.ERP.Views
                 $"Уникальных счетов: {result.LoadedAccountsCount}{Environment.NewLine}" +
                 $"Добавлено: {result.InsertedCount}{Environment.NewLine}" +
                 $"Обновлено: {result.UpdatedCount}{Environment.NewLine}" +
+                $"Переведено в неактивные: {result.DeactivatedCount}{Environment.NewLine}" +
+                $"Повторов кодов в источнике: {result.DuplicateSourceCodesCount}{Environment.NewLine}{Environment.NewLine}" +
+                $"Разобранные поля DBF:{Environment.NewLine}{mappedFields}{Environment.NewLine}{Environment.NewLine}" +
+                $"Поля Fox без прямой загрузки в текущий набор реквизитов:{Environment.NewLine}{ignoredFields}";
+        }
+
+        private static string BuildPaymentClassificationImportMessage(PaymentClassificationDbfImportResult result)
+        {
+            var mappedFields = string.Join(Environment.NewLine,
+                result.FieldMappings.Select(item => $"• {item.SourceField} -> {item.TargetField}"));
+
+            var ignoredFields = result.IgnoredSourceFields.Count == 0
+                ? "нет"
+                : string.Join(", ", result.IgnoredSourceFields);
+
+            return
+                $"Файл: {result.SourcePath}{Environment.NewLine}{Environment.NewLine}" +
+                $"Обработано записей: {result.SourceRecordCount}{Environment.NewLine}" +
+                $"Загружено кодов платежей: {result.LoadedItemsCount}{Environment.NewLine}" +
+                $"Добавлено: {result.InsertedCount}{Environment.NewLine}" +
+                $"Обновлено: {result.UpdatedCount}{Environment.NewLine}" +
+                $"Переведено в неактивные: {result.DeactivatedCount}{Environment.NewLine}" +
                 $"Повторов кодов в источнике: {result.DuplicateSourceCodesCount}{Environment.NewLine}{Environment.NewLine}" +
                 $"Разобранные поля DBF:{Environment.NewLine}{mappedFields}{Environment.NewLine}{Environment.NewLine}" +
                 $"Поля Fox без прямой загрузки в текущий набор реквизитов:{Environment.NewLine}{ignoredFields}";

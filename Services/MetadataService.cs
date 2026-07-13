@@ -1025,6 +1025,7 @@ END $$;");
 
                 if (!existingCatalogs.Contains("Справочник валют"))
                     await CreateCurrencyCatalog(config);
+                await EnsureCurrencyCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Справочник курсов валют"))
                     await CreateCurrencyRatesCatalog(config);
@@ -1055,6 +1056,10 @@ END $$;");
                 if (!existingCatalogs.Contains("Виды оплаты"))
                     await CreatePaymentKindCatalog(config);
                 await EnsurePaymentKindCatalogStructureAsync();
+
+                if (!existingCatalogs.Contains("Классификация платежей"))
+                    await CreatePaymentClassificationCatalog(config);
+                await EnsurePaymentClassificationCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Типы поставки"))
                     await CreateDeliveryTypeCatalog(config);

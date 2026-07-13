@@ -3,7 +3,9 @@ using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,6 +25,7 @@ namespace BIS.ERP.Views
         private readonly ReportService _reportService;
         private readonly AccountingPeriodService _periodService;
         private readonly PostingService _postingService;
+        private readonly MetadataService _metadataService;
         private DataTable? _currentData;
         private Report? _currentReport;
         private AccountingPeriod? _currentPeriod;
@@ -37,6 +40,7 @@ namespace BIS.ERP.Views
             _reportService = new ReportService(context);
             _periodService = new AccountingPeriodService(context);
             _postingService = new PostingService(context);
+            _metadataService = new MetadataService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
         }
@@ -64,6 +68,9 @@ namespace BIS.ERP.Views
                     "OrganizationBalances" => await BuildOrganizationBalancesAsync(start, end),
                     "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
                     "CashBook" => await BuildCashBookAsync(start, end),
+                    "PaymentOrderRegister" => await BuildPaymentOrderRegisterAsync(start, end),
+                    "BankStatement" => await BuildBankStatementAsync(start, end),
+                    "OrganizationReconciliation" => await BuildOrganizationReconciliationAsync(start, end),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
 
@@ -313,6 +320,327 @@ namespace BIS.ERP.Views
             table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty,
                 totalReceipt, totalPayment, balance);
             return (table, CreateReport(table, $"Кассовая книга за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
+        }
+
+        private async Task<(DataTable, Report)> BuildPaymentOrderRegisterAsync(DateTime start, DateTime end)
+        {
+            var rows = await LoadPaymentOrderReportRowsAsync(start, end);
+            var table = new DataTable("Реестр платежных поручений");
+            table.Columns.Add("Дата", typeof(DateTime));
+            table.Columns.Add("Номер", typeof(string));
+            table.Columns.Add("Тип", typeof(string));
+            table.Columns.Add("Наш счет", typeof(string));
+            table.Columns.Add("Корр. счет", typeof(string));
+            table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Сумма", typeof(decimal));
+            table.Columns.Add("Валюта", typeof(string));
+            table.Columns.Add("Сумма в валюте", typeof(decimal));
+            table.Columns.Add("Курс", typeof(decimal));
+            table.Columns.Add("Назначение платежа", typeof(string));
+            table.Columns.Add("Проведен", typeof(string));
+            table.Columns.Add("Примечание", typeof(string));
+
+            foreach (var row in rows)
+            {
+                table.Rows.Add(row.Date, row.Number, row.OrderType, row.OurAccount, row.CorrespondentAccount,
+                    row.Organization, row.Amount, row.Currency, row.AmountCurrency, row.ExchangeRate,
+                    row.Purpose, LocalizationService.DisplayValue(row.IsPosted), row.Note);
+            }
+
+            table.Rows.Add(DBNull.Value, "ИТОГО", string.Empty, string.Empty, string.Empty, string.Empty,
+                rows.Sum(row => row.Amount), string.Empty, rows.Sum(row => row.AmountCurrency),
+                0m, string.Empty, string.Empty, string.Empty);
+
+            var report = CreateReport(table,
+                $"Реестр платежных поручений за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+            report.ShowGrandTotal = true;
+            report.SummaryText = "Отчет строится по документам платежных поручений и показывает только документы выбранного периода.";
+            return (table, report);
+        }
+
+        private async Task<(DataTable, Report)> BuildBankStatementAsync(DateTime start, DateTime end)
+        {
+            var allRows = await LoadPaymentOrderReportRowsAsync(null, end);
+            var openingRows = allRows.Where(row => row.Date.Date < start.Date).ToList();
+            var balance = openingRows.Sum(GetBankStatementSignedAmount);
+            var rows = allRows
+                .Where(row => row.Date.Date >= start.Date && row.Date.Date <= end.Date)
+                .OrderBy(row => row.Date)
+                .ThenBy(row => row.Number, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
+            var table = new DataTable("Выписка банка");
+            table.Columns.Add("Дата", typeof(DateTime));
+            table.Columns.Add("Номер", typeof(string));
+            table.Columns.Add("Операция", typeof(string));
+            table.Columns.Add("Наш счет", typeof(string));
+            table.Columns.Add("Корр. счет", typeof(string));
+            table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Приход", typeof(decimal));
+            table.Columns.Add("Расход", typeof(decimal));
+            table.Columns.Add("Остаток", typeof(decimal));
+            table.Columns.Add("Сумма в валюте", typeof(decimal));
+            table.Columns.Add("Валюта", typeof(string));
+            table.Columns.Add("Назначение платежа", typeof(string));
+
+            table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, string.Empty,
+                string.Empty, 0m, 0m, balance, 0m, string.Empty, string.Empty);
+
+            decimal totalIncome = 0m;
+            decimal totalExpense = 0m;
+            foreach (var row in rows)
+            {
+                var income = row.IsIncoming ? row.Amount : 0m;
+                var expense = row.IsOutgoing || !row.IsIncoming ? row.Amount : 0m;
+                totalIncome += income;
+                totalExpense += expense;
+                balance += income - expense;
+
+                table.Rows.Add(row.Date, row.Number, row.OrderType, row.OurAccount, row.CorrespondentAccount,
+                    row.Organization, income, expense, balance, row.AmountCurrency, row.Currency, row.Purpose);
+            }
+
+            table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty, string.Empty,
+                string.Empty, totalIncome, totalExpense, balance, rows.Sum(row => row.AmountCurrency),
+                string.Empty, string.Empty);
+
+            var report = CreateReport(table,
+                $"Выписка банка за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+            report.ShowGrandTotal = true;
+            report.SummaryText = "Остаток рассчитывается по платежным поручениям: входящие увеличивают остаток, исходящие уменьшают.";
+            return (table, report);
+        }
+
+        private async Task<(DataTable, Report)> BuildOrganizationReconciliationAsync(DateTime start, DateTime end)
+        {
+            var calculation = await _organizationBalanceService.CalculateAsync(start, end);
+            var table = new DataTable("Акт сверки");
+            table.Columns.Add("Организация", typeof(string));
+            table.Columns.Add("Вид расчета", typeof(string));
+            table.Columns.Add("Счет", typeof(string));
+            table.Columns.Add("Счет корр.", typeof(string));
+            table.Columns.Add("Сальдо нач. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо нач. Кт", typeof(decimal));
+            table.Columns.Add("Оборот Дт", typeof(decimal));
+            table.Columns.Add("Оборот Кт", typeof(decimal));
+            table.Columns.Add("Сальдо кон. Дт", typeof(decimal));
+            table.Columns.Add("Сальдо кон. Кт", typeof(decimal));
+            table.Columns.Add("Сальдо", typeof(decimal));
+            table.Columns.Add("Модуль", typeof(string));
+
+            foreach (var row in calculation.Rows)
+            {
+                table.Rows.Add(row.OrganizationName, row.IsOrganizationTotal ? "ИТОГО" : row.AccountPairName,
+                    row.AccountCode, row.CounterAccountCode, row.OpeningDebit, row.OpeningCredit,
+                    row.TurnoverDebit, row.TurnoverCredit, row.ClosingDebit, row.ClosingCredit,
+                    row.Balance, row.ModuleCode);
+            }
+
+            var report = CreateReport(table,
+                $"Акт сверки за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+            report.SummaryText = calculation.Warnings.Count == 0
+                ? "Акт сверки построен по активным настройкам взаиморасчетов с организациями."
+                : string.Join(Environment.NewLine, calculation.Warnings);
+            return (table, report);
+        }
+
+        private async Task<List<PaymentOrderReportRow>> LoadPaymentOrderReportRowsAsync(DateTime? start, DateTime end)
+        {
+            var document = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Платежное поручение");
+            if (document == null)
+                return new List<PaymentOrderReportRow>();
+
+            var rows = await _metadataService.GetCatalogDataAsync(document.Id);
+            var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(document, _metadataService);
+            var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+            var result = new List<PaymentOrderReportRow>();
+
+            foreach (var row in rows)
+            {
+                var date = ReadReportDate(row, "Дата", "doc_date");
+                if (!date.HasValue || date.Value.Date > end.Date)
+                    continue;
+                if (start.HasValue && date.Value.Date < start.Value.Date)
+                    continue;
+
+                var correspondentRaw = ReadReportString(row, "Корр. счет", "correspondent_account", "Корр счет", "Коррсчет");
+                var correspondentAccount = ResolveReportReference(row, referenceMaps, "Корр. счет", "correspondent_account", "Корр счет", "Коррсчет");
+                var analyticAccount = accountAnalytics.FindAccount(correspondentRaw);
+                if (analyticAccount != null)
+                    correspondentAccount = analyticAccount.DisplayName;
+
+                result.Add(new PaymentOrderReportRow
+                {
+                    Date = date.Value,
+                    Number = ReadReportString(row, "Номер", "doc_number"),
+                    OrderType = ReadReportString(row, "Тип", "order_type"),
+                    OurAccount = ResolveReportReference(row, referenceMaps, "Наш счет", "our_account_id"),
+                    CorrespondentAccount = correspondentAccount,
+                    Organization = ResolveReportReference(row, referenceMaps, "Организация", "organization_id"),
+                    Amount = ReadReportDecimal(row, "Сумма", "amount"),
+                    Currency = ResolveReportReference(row, referenceMaps, "Валюта", "currency_id"),
+                    AmountCurrency = ReadReportDecimal(row, "Сумма в валюте", "amount_currency"),
+                    ExchangeRate = ReadReportDecimal(row, "Курс", "exchange_rate"),
+                    Purpose = ReadReportString(row, "Назначение платежа", "purpose"),
+                    Note = ReadReportString(row, "Примечание", "description"),
+                    IsPosted = ReadReportBool(row, "Проведён", "Проведен", "is_posted")
+                });
+            }
+
+            return result
+                .OrderBy(row => row.Date)
+                .ThenBy(row => row.Number, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
+        private static decimal GetBankStatementSignedAmount(PaymentOrderReportRow row)
+        {
+            if (row.IsIncoming)
+                return row.Amount;
+            return -row.Amount;
+        }
+
+        private static string ResolveReportReference(
+            Dictionary<string, object> row,
+            IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps,
+            params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!TryGetReportValue(row, out var value, key) || value == null || value == DBNull.Value)
+                    continue;
+
+                var text = value.ToString() ?? string.Empty;
+                if (Guid.TryParse(text, out var id))
+                {
+                    foreach (var mapKey in keys)
+                    {
+                        if (referenceMaps.TryGetValue(mapKey, out var map) && map.TryGetValue(id, out var display))
+                            return display;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(text))
+                    return text;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ReadReportString(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (TryGetReportValue(row, out var value, key) && value != null && value != DBNull.Value)
+                    return value.ToString()?.Trim() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static DateTime? ReadReportDate(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!TryGetReportValue(row, out var value, key) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is DateTime date)
+                    return date;
+                if (value is DateTimeOffset dateTimeOffset)
+                    return dateTimeOffset.LocalDateTime;
+                if (DateTime.TryParse(value.ToString(), out var parsed))
+                    return parsed;
+            }
+
+            return null;
+        }
+
+        private static decimal ReadReportDecimal(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!TryGetReportValue(row, out var value, key) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is decimal decimalValue)
+                    return decimalValue;
+                if (value is double doubleValue)
+                    return Convert.ToDecimal(doubleValue);
+                if (value is int intValue)
+                    return intValue;
+                if (decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.CurrentCulture, out var parsed) ||
+                    decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out parsed))
+                {
+                    return parsed;
+                }
+            }
+
+            return 0m;
+        }
+
+        private static bool ReadReportBool(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!TryGetReportValue(row, out var value, key) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is bool boolValue)
+                    return boolValue;
+                if (bool.TryParse(value.ToString(), out var parsed))
+                    return parsed;
+                if (int.TryParse(value.ToString(), out var intValue))
+                    return intValue != 0;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetReportValue(Dictionary<string, object> row, out object? value, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out value))
+                    return true;
+
+                var match = row.FirstOrDefault(pair =>
+                    pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (!match.Equals(default(KeyValuePair<string, object>)))
+                {
+                    value = match.Value;
+                    return true;
+                }
+            }
+
+            value = null;
+            return false;
+        }
+
+        private sealed class PaymentOrderReportRow
+        {
+            public DateTime Date { get; init; }
+            public string Number { get; init; } = string.Empty;
+            public string OrderType { get; init; } = string.Empty;
+            public string OurAccount { get; init; } = string.Empty;
+            public string CorrespondentAccount { get; init; } = string.Empty;
+            public string Organization { get; init; } = string.Empty;
+            public decimal Amount { get; init; }
+            public string Currency { get; init; } = string.Empty;
+            public decimal AmountCurrency { get; init; }
+            public decimal ExchangeRate { get; init; }
+            public string Purpose { get; init; } = string.Empty;
+            public string Note { get; init; } = string.Empty;
+            public bool IsPosted { get; init; }
+
+            public bool IsIncoming =>
+                OrderType.Contains("вход", StringComparison.OrdinalIgnoreCase) ||
+                OrderType.Contains("приход", StringComparison.OrdinalIgnoreCase) ||
+                OrderType.Contains("поступ", StringComparison.OrdinalIgnoreCase);
+
+            public bool IsOutgoing =>
+                OrderType.Contains("исход", StringComparison.OrdinalIgnoreCase) ||
+                OrderType.Contains("расход", StringComparison.OrdinalIgnoreCase) ||
+                OrderType.Contains("оплат", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task<(DataTable, Report)> BuildGeneralLedgerAsync(int year)

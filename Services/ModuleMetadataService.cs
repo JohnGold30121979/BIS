@@ -211,8 +211,6 @@ namespace BIS.ERP.Services
                 "Ведомость амортизации", "Приход ОС за период", "Расшифровка баланса по ОС",
                 "Контроль состояния карточек ОС", "Журнал начисления амортизации ОС",
                 "Журнал переоценки ОС", "Журнал реализации ОС", "Журнал ликвидации ОС");
-            await AssignMissingByNameAsync(modules[FinanceCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
-                "Реестр платежных поручений", "Выписка банка", "Акт сверки по подотчетному лицу");
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Ведомость наличия материалов");
         }

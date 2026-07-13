@@ -12,110 +12,51 @@ namespace BIS.ERP.Services
     public partial class MetadataService
     {
 
-        private async Task AddCurrencyRatesDataToTable(MetadataObject catalog)
+        private Task AddCurrencyRatesDataToTable(MetadataObject catalog)
         {
-            var currencies = new Dictionary<string, Guid>();
-
-            try
-            {
-                // Используем обычный SQL запрос через ExecuteReader
-                using var command = _context.Database.GetDbConnection().CreateCommand();
-                command.CommandText = "SELECT \"Id\", \"code\", \"name\" FROM \"catalog_currencies\"";
-
-                await _context.Database.OpenConnectionAsync();
-                using var reader = await command.ExecuteReaderAsync();
-
-                while (await reader.ReadAsync())
-                {
-                    var id = reader.GetGuid(0);
-                    var code = reader.GetString(1);
-                    var name = reader.GetString(2);
-
-                    currencies[code] = id;
-                    System.Diagnostics.Debug.WriteLine($"Загружена валюта: {code} - {name} - {id}");
-                }
-                await _context.Database.CloseConnectionAsync();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки валют: {ex.Message}");
-                return;
-            }
-
-            var rates = new[]
-            {
-        new { date = new DateTime(2008, 6, 13), code = "USD", name = "доллар", rate_nb = 36.2886m, rate_com = 0.0000m },
-        new { date = new DateTime(2008, 6, 13), code = "RUB", name = "рубль", rate_nb = 1.5324m, rate_com = 0.0000m },
-        new { date = new DateTime(2008, 6, 13), code = "KZT", name = "тенге", rate_nb = 0.3009m, rate_com = 0.0000m },
-        new { date = new DateTime(2008, 6, 13), code = "CNY", name = "юань", rate_nb = 5.5000m, rate_com = 0.0000m },
-        new { date = new DateTime(2008, 6, 14), code = "USD", name = "доллар", rate_nb = 36.5000m, rate_com = 37.0000m },
-        new { date = new DateTime(2008, 6, 14), code = "RUB", name = "рубль", rate_nb = 1.5400m, rate_com = 1.5600m },
-        new { date = new DateTime(2008, 6, 15), code = "USD", name = "доллар", rate_nb = 36.7000m, rate_com = 37.2000m }
-    };
-
-            foreach (var rate in rates)
-            {
-                if (!currencies.ContainsKey(rate.code))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Валюта с кодом {rate.code} не найдена");
-                    continue;
-                }
-
-                var currencyId = currencies[rate.code];
-
-                var sql = $@"
-            INSERT INTO ""{catalog.TableName}"" 
-            (""Id"", ""rate_date"", ""currency_id"", ""rate_nb"", ""rate_commercial"", ""is_active"", ""description"", ""CreatedAt"", ""UpdatedAt"") 
-            VALUES (
-                '{Guid.NewGuid()}',
-                '{rate.date:yyyy-MM-dd HH:mm:ss}',
-                '{currencyId}',
-                {rate.rate_nb.ToString(System.Globalization.CultureInfo.InvariantCulture)},
-                {rate.rate_com.ToString(System.Globalization.CultureInfo.InvariantCulture)},
-                true,
-                '',
-                NOW(),
-                NOW()
-            )";
-                await _context.Database.ExecuteSqlRawAsync(sql);
-            }
-
-            System.Diagnostics.Debug.WriteLine($"Добавлено курсов валют: {rates.Length}");
+            System.Diagnostics.Debug.WriteLine(
+                "Seed курсов валют пропущен: в Fox KURS/KURS_R нет активных данных. Используйте загрузку курсов НБКР.");
+            return Task.CompletedTask;
         }
 
         private async Task AddCurrencyDataToTable(MetadataObject catalog)
         {
             var currencies = new[]
             {
-        new { code = "USD", name = "Доллар США", symbol = "$", rate = 85.50m, is_base = false, is_active = true },
-        new { code = "RUB", name = "Российский рубль", symbol = "₽", rate = 1.00m, is_base = false, is_active = true },
-        new { code = "KZT", name = "Казахстанский тенге", symbol = "₸", rate = 0.18m, is_base = false, is_active = true },
-        new { code = "CNY", name = "Китайский юань", symbol = "¥", rate = 11.80m, is_base = false, is_active = true },
-        new { code = "EUR", name = "Евро", symbol = "€", rate = 92.30m, is_base = false, is_active = true },
-        new { code = "GBP", name = "Фунт стерлингов", symbol = "£", rate = 108.50m, is_base = false, is_active = true },
-        new { code = "KGS", name = "Киргизский сом", symbol = "с", rate = 1.00m, is_base = true, is_active = true }
-    };
+                new { code = "KGS", name = "Киргизский сом", symbol = "с", rate = 1.0000m, is_base = true, is_active = true },
+                new { code = "USD", name = "Доллар США", symbol = "$", rate = 0.0000m, is_base = false, is_active = true },
+                new { code = "EUR", name = "Евро", symbol = "€", rate = 0.0000m, is_base = false, is_active = true },
+                new { code = "KZT", name = "Казахстанский тенге", symbol = "₸", rate = 0.0000m, is_base = false, is_active = true },
+                new { code = "RUB", name = "Российский рубль", symbol = "₽", rate = 0.0000m, is_base = false, is_active = true }
+            };
 
             foreach (var currency in currencies)
             {
-                var sql = $@"
-            INSERT INTO ""{catalog.TableName}"" 
-            (""Id"", ""code"", ""name"", ""symbol"", ""rate"", ""is_base"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
-            VALUES (
-                '{Guid.NewGuid()}',
-                '{currency.code}',
-                '{currency.name.Replace("'", "''")}',
-                '{currency.symbol}',
-                {currency.rate.ToString(System.Globalization.CultureInfo.InvariantCulture)},
-                {currency.is_base.ToString().ToLower()},
-                {currency.is_active.ToString().ToLower()},
-                NOW(),
-                NOW()
-            )";
-                await _context.Database.ExecuteSqlRawAsync(sql);
+                await UpsertCatalogSeedRowAsync(catalog.TableName, currency.code, new Dictionary<string, object?>
+                {
+                    ["Id"] = Guid.NewGuid(),
+                    ["code"] = currency.code,
+                    ["name"] = currency.name,
+                    ["symbol"] = currency.symbol,
+                    ["rate"] = currency.rate,
+                    ["is_base"] = currency.is_base,
+                    ["is_active"] = currency.is_active,
+                    ["CreatedAt"] = DateTime.UtcNow,
+                    ["UpdatedAt"] = DateTime.UtcNow
+                });
             }
 
+            await DeactivateLegacyCurrencyRowsAsync(catalog.TableName);
             System.Diagnostics.Debug.WriteLine($"Добавлено валют: {currencies.Length}");
+        }
+
+        private async Task DeactivateLegacyCurrencyRowsAsync(string tableName)
+        {
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE ""code"" IN ('CNY', 'GBP');");
         }
 
         private async Task AddMaterialCategoriesDataToTable(MetadataObject catalog)
@@ -644,12 +585,12 @@ namespace BIS.ERP.Services
             {
         new { code = "НДС12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
         new { code = "НДС0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "34900000", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
-        new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_TRADE", name = "Налог с продаж: торговая деятельность", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 6, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_EXEMPT", name = "Налог с продаж: необлагаемая деятельность", rate = 0m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 7, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_RETAIL_2009", name = "Налог с продаж: розничная продажа до 2009", rate = 4m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34900000", is_active = true, sort_order = 8, is_default_vat = false, is_default_sales_tax = false }
+        new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "34004000", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
+        new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_TRADE", name = "Налог с продаж: торговая деятельность", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 6, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_EXEMPT", name = "Налог с продаж: необлагаемая деятельность", rate = 0m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 7, is_default_vat = false, is_default_sales_tax = false },
+        new { code = "SALES_RETAIL_2009", name = "Налог с продаж: розничная продажа до 2009", rate = 4m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 8, is_default_vat = false, is_default_sales_tax = false }
         };
 
             foreach (var tax in taxes)

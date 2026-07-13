@@ -32,6 +32,7 @@
             <Button x:Name="btnReconciliation" Content="Акт сверки" Click="btnReconciliation_Click" Width="100" Margin="0,0,5,0"/>
             <Button x:Name="btnFilter" Content="Фильтр по счету" Click="btnFilter_Click" Width="130" Margin="0,0,5,0"/>
             <Button x:Name="btnPrint" Content="Печать" Click="btnPrint_Click" Width="80"/>
+            <TextBlock x:Name="txtStatus" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#5D6D7E" TextWrapping="Wrap"/>
         </StackPanel>
 
         <!-- Фильтр по счету -->

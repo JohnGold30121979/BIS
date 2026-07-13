@@ -28,6 +28,9 @@
                     <ComboBoxItem Tag="OrganizationBalances">Сальдо по организациям</ComboBoxItem>
                     <ComboBoxItem Tag="PeriodCollection">Сбор информации за период</ComboBoxItem>
                     <ComboBoxItem Tag="CashBook">Кассовая книга</ComboBoxItem>
+                    <ComboBoxItem Tag="PaymentOrderRegister">Реестр платежных поручений</ComboBoxItem>
+                    <ComboBoxItem Tag="BankStatement">Выписка банка</ComboBoxItem>
+                    <ComboBoxItem Tag="OrganizationReconciliation">Акт сверки</ComboBoxItem>
                 </ComboBox>
                 <TextBlock Text="С:" VerticalAlignment="Center" Margin="16,0,6,0"/>
                 <DatePicker x:Name="StartDatePicker" Width="130" Height="32"/>
