@@ -657,6 +657,7 @@ namespace BIS.ERP.Services
 
             try
             {
+                await EnsurePaymentOrderDocumentStructureAsync(documents);
                 await EnsureManagedDocumentAnalyticFieldsAsync(documents);
                 await EnsureInventoryDocumentStructureAsync(documents);
                 await EnsurePostingDocumentStructureAsync(documents);
@@ -2005,10 +2006,22 @@ END $$;");
 
         public async Task<List<MetadataObject>> GetAllMetadataObjectsAsync()
         {
-            return await _context.MetadataObjects
+            var objects = await _context.MetadataObjects
                 .Include(m => m.Fields)
                 .OrderBy(m => m.Order)
                 .ToListAsync();
+
+            try
+            {
+                var documents = objects.Where(item => item.ObjectType == "Document").ToList();
+                await EnsurePaymentOrderDocumentStructureAsync(documents);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации платежного поручения: {ex.Message}");
+            }
+
+            return objects;
         }
 
         public async Task CreateMetadataObjectAsync(MetadataObject obj)
@@ -2786,6 +2799,14 @@ END $$;");
             if (string.IsNullOrEmpty(description) && recordData.ContainsKey("Примечание"))
                 description = recordData["Примечание"].ToString();
 
+            var amountCurrency = GetDecimalValue(recordData, "amount_currency", "Сумма в валюте");
+            var exchangeRate = GetDecimalValue(recordData, "exchange_rate", "Курс");
+            var currencyId = GetStringValue(recordData, "currency_id", "Валюта");
+            if (amount <= 0 && amountCurrency > 0 && exchangeRate > 0)
+                amount = Math.Round(amountCurrency * exchangeRate, 2, MidpointRounding.AwayFromZero);
+            if (amountCurrency <= 0 && amount > 0 && exchangeRate > 0)
+                amountCurrency = Math.Round(amount / exchangeRate, 2, MidpointRounding.AwayFromZero);
+
             // Получаем код нашего счёта
             string ourAccountCode = string.Empty;
             if (recordData.ContainsKey("our_account_id") && recordData["our_account_id"] != null)
@@ -2861,13 +2882,22 @@ END $$;");
             System.Diagnostics.Debug.WriteLine($"debitAccount: {debitAccount}, creditAccount: {creditAccount}");
 
             // Создаём проводку с указанием типа документа
-            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description, documentType);
+            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description, documentType, amountCurrency, currencyId);
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
         }
 
-        private async Task CreatePosting(string docNumber, DateTime postingDate, string debitAccount, string creditAccount, decimal amount, string? description, string documentType = "")
+        private async Task CreatePosting(
+            string docNumber,
+            DateTime postingDate,
+            string debitAccount,
+            string creditAccount,
+            decimal amount,
+            string? description,
+            string documentType = "",
+            decimal amountCurrency = 0m,
+            string? currencyId = null)
         {
             try
             {
@@ -2883,7 +2913,7 @@ END $$;");
                 var sql = @"
                     INSERT INTO doc_postings 
                     (""Id"", posting_date, doc_number, document_type, module_code, debit_account, credit_account, 
-                     amount_kgs, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
+                     amount_kgs, amount_currency, currency_id, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
                     VALUES (
                         @id,
                         @postingDate,
@@ -2893,6 +2923,8 @@ END $$;");
                         @debitAccount,
                         @creditAccount,
                         @amount,
+                        @amountCurrency,
+                        @currencyId,
                         @description,
                         @isActive,
                         NOW(),
@@ -2908,6 +2940,8 @@ END $$;");
                     new NpgsqlParameter("@debitAccount", debitAccount),
                     new NpgsqlParameter("@creditAccount", creditAccount),
                     new NpgsqlParameter("@amount", amount),
+                    new NpgsqlParameter("@amountCurrency", amountCurrency),
+                    new NpgsqlParameter("@currencyId", string.IsNullOrWhiteSpace(currencyId) ? DBNull.Value : (object)currencyId),
                     new NpgsqlParameter("@description", (object?)description ?? DBNull.Value),
                     new NpgsqlParameter("@documentType", documentType),
                     new NpgsqlParameter("@isActive", true));
@@ -2927,6 +2961,8 @@ END $$;");
                 BEGIN
                     IF to_regclass('public.doc_postings') IS NOT NULL THEN
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2);
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
                     END IF;
                 END $$;");
         }
@@ -3244,11 +3280,19 @@ END $$;");
 
         private static decimal ResolveDocumentAmount(Dictionary<string, object> data)
         {
-            return GetDecimalValue(data,
+            var amount = GetDecimalValue(data,
                 "amount",
                 "depreciation_amount",
                 "Сумма",
                 "Сумма амортизации");
+            if (amount > 0)
+                return amount;
+
+            var amountCurrency = GetDecimalValue(data, "amount_currency", "Сумма в валюте");
+            var exchangeRate = GetDecimalValue(data, "exchange_rate", "Курс");
+            return amountCurrency > 0 && exchangeRate > 0
+                ? Math.Round(amountCurrency * exchangeRate, 2, MidpointRounding.AwayFromZero)
+                : amount;
         }
 
         private static bool RequiresPositiveDocumentAmount(string documentName)

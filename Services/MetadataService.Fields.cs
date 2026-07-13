@@ -2471,6 +2471,20 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
+            Name = "Наш счет",
+            DbColumnName = "our_account_id",
+            FieldType = "Reference",
+            ReferenceCatalog = "План счетов",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            IsRequired = true,
+            IsUnique = false,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
             Name = "Валюта",
             DbColumnName = "currency_id",
             FieldType = "Reference",
@@ -2479,7 +2493,33 @@ public partial class MetadataService
             DisplayFields = "Код,Наименование",
             IsRequired = false,
             IsUnique = false,
-            Order = 6,
+            Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Сумма в валюте",
+            DbColumnName = "amount_currency",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 2,
+            IsRequired = false,
+            IsUnique = false,
+            Order = 8,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Курс",
+            DbColumnName = "exchange_rate",
+            FieldType = "Decimal",
+            Precision = 18,
+            Scale = 4,
+            IsRequired = false,
+            IsUnique = false,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -2491,7 +2531,7 @@ public partial class MetadataService
             Length = 500,
             IsRequired = false,
             IsUnique = false,
-            Order = 7,
+            Order = 10,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -2505,7 +2545,7 @@ public partial class MetadataService
             DisplayFields = "Код,Наименование",
             IsRequired = false,
             IsUnique = false,
-            Order = 8,
+            Order = 11,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -2517,7 +2557,7 @@ public partial class MetadataService
             Length = 500,
             IsRequired = false,
             IsUnique = false,
-            Order = 9,
+            Order = 12,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -2528,7 +2568,7 @@ public partial class MetadataService
             FieldType = "Bool",
             IsRequired = true,
             IsUnique = false,
-            Order = 10,
+            Order = 13,
             MetadataObjectId = metadataObjectId
         }
     };

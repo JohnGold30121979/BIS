@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 namespace BIS.ERP.Services
 {
+    public sealed record CurrencyRateLookupResult(decimal Rate, DateTime RateDate, string Source);
+
     public partial class MetadataService
     {
         #region catalogs
@@ -380,6 +382,118 @@ namespace BIS.ERP.Services
             }
 
             await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsurePaymentOrderDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        {
+            var document = documents.FirstOrDefault(item =>
+                item.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase));
+            if (document == null)
+                return;
+
+            await RemoveDuplicateMetadataFieldsAsync(document);
+
+            var existingByColumn = document.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(field => field.Order).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetPaymentOrderFields(document.Id))
+            {
+                if (existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    existing.Name = desired.Name;
+                    existing.FieldType = desired.FieldType;
+                    existing.ReferenceCatalog = desired.ReferenceCatalog;
+                    existing.DisplayPattern = desired.DisplayPattern;
+                    existing.DisplayFields = desired.DisplayFields;
+                    existing.Order = desired.Order;
+                    existing.IsRequired = desired.IsRequired;
+                    existing.IsUnique = desired.IsUnique;
+                    existing.Length = desired.Length;
+                    existing.Precision = desired.Precision;
+                    existing.Scale = desired.Scale;
+                    continue;
+                }
+
+                desired.Id = Guid.NewGuid();
+                desired.MetadataObjectId = document.Id;
+                await _context.MetadataFields.AddAsync(desired);
+                await AddColumnToTableAsync(document.TableName, desired);
+                document.Fields.Add(desired);
+                existingByColumn[desired.DbColumnName] = desired;
+            }
+
+            document.UsePostings = true;
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task<CurrencyRateLookupResult?> GetCurrencyRateForDateAsync(Guid currencyId, DateTime documentDate)
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    item.Name == "Справочник курсов валют");
+            if (catalog == null)
+                return null;
+
+            var sql = $@"
+                SELECT rate_date,
+                       COALESCE(NULLIF(rate_nb, 0), NULLIF(rate_commercial, 0), 0) AS rate,
+                       CASE
+                           WHEN COALESCE(rate_nb, 0) <> 0 THEN 'НБКР'
+                           WHEN COALESCE(rate_commercial, 0) <> 0 THEN 'Коммерческий'
+                           ELSE ''
+                       END AS source
+                FROM {QuoteIdentifier(catalog.TableName)}
+                WHERE currency_id::text = @currencyId
+                  AND rate_date::date <= @documentDate
+                  AND COALESCE(is_active, true) = true
+                ORDER BY rate_date DESC
+                LIMIT 1;";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            var currencyParameter = command.CreateParameter();
+            currencyParameter.ParameterName = "@currencyId";
+            currencyParameter.Value = currencyId.ToString();
+            command.Parameters.Add(currencyParameter);
+
+            var dateParameter = command.CreateParameter();
+            dateParameter.ParameterName = "@documentDate";
+            dateParameter.Value = documentDate.Date;
+            command.Parameters.Add(dateParameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return null;
+
+                var rate = reader["rate"] == DBNull.Value ? 0m : Convert.ToDecimal(reader["rate"], CultureInfo.InvariantCulture);
+                if (rate <= 0)
+                    return null;
+
+                var rateDate = reader["rate_date"] is DateTime date ? date : documentDate.Date;
+                var source = reader["source"]?.ToString() ?? "Справочник курсов валют";
+                return new CurrencyRateLookupResult(rate, rateDate, source);
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
         }
 
         // Сотрудники

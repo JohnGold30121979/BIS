@@ -58,6 +58,13 @@ namespace BIS.ERP
         private Point _dragStartPoint;
         private NavigationItem _draggedItem;
         private bool _closeForModeSwitch;
+        private static readonly HashSet<string> NotReadyFinanceDocuments = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Авансовый отчет",
+            "Доверенность",
+            "Платежная ведомость",
+            "Расчет курсовой разницы"
+        };
 
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
@@ -140,7 +147,9 @@ namespace BIS.ERP
 
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
             var catalogs = allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты").ToList();
-            var documents = allMetadata.Where(item => item.ObjectType == "Document").ToList();
+            var documents = allMetadata
+                .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name))
+                .ToList();
             var reports = await _reportService.GetNavigationReportsAsync();
             var modules = await _moduleMetadataService.GetModulesAsync();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
@@ -372,7 +381,9 @@ namespace BIS.ERP
             }
 
             // Динамические документы
-            var documents = await _metadataService.GetDocumentsAsync();
+            var documents = (await _metadataService.GetDocumentsAsync())
+                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name))
+                .ToList();
             if (documents.Any())
             {
                 var docsGroup = new NavigationItem

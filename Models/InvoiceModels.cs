@@ -16,6 +16,10 @@ namespace BIS.ERP.Models
         public string ModuleCode { get; set; } = string.Empty;
         public string ExchangeCode { get; set; } = string.Empty;
         public string TaxStatus { get; set; } = string.Empty;
+        public Guid? CurrencyId { get; set; }
+        public string CurrencyName { get; set; } = string.Empty;
+        public decimal ExchangeRate { get; set; }
+        public decimal AmountCurrency { get; set; }
         public DateTime? ExportedAt { get; set; }
         public DateTime? TaxStatusDate { get; set; }
         public bool IsPosted { get; set; }
@@ -55,6 +59,10 @@ namespace BIS.ERP.Models
         public string TaxStatus { get; set; } = string.Empty;
         public DateTime? ExportedAt { get; set; }
         public DateTime? TaxStatusDate { get; set; }
+        public Guid? CurrencyId { get; set; }
+        public string CurrencyName { get; set; } = string.Empty;
+        public decimal ExchangeRate { get; set; }
+        public decimal AmountCurrency { get; set; }
         public Guid? OrganizationId { get; set; }
         public string OrganizationName { get; set; } = string.Empty;
         public string CounterpartyAccountCode { get; set; } = string.Empty;

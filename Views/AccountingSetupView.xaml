@@ -69,6 +69,41 @@
                     </DataGrid>
                 </Grid>
             </TabItem>
+            <TabItem Header="Курсовая разница">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="Расчет переоценки валютных остатков по счетам, где включена связь с валютами."
+                               Foreground="{DynamicResource AppSecondaryTextBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,12"/>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,12">
+                        <TextBlock Text="Дата расчета:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <DatePicker x:Name="ExchangeDifferenceDatePicker" Width="145" Height="32"/>
+                        <Button x:Name="CalculateExchangeDifferenceButton"
+                                Content="Рассчитать"
+                                Width="120" Height="32"
+                                Margin="12,0,0,0"
+                                Background="#27AE60"
+                                Foreground="White"
+                                Click="OnCalculateExchangeDifferenceClick"/>
+                    </WrapPanel>
+                    <Border Grid.Row="2"
+                            Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+                        <TextBlock x:Name="ExchangeDifferenceStatusText"
+                                   Text="Выберите дату и запустите расчет. Ранее созданный расчет за эту дату будет перезаписан после подтверждения."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </Grid>
+            </TabItem>
         </TabControl>
         <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
     </Grid>

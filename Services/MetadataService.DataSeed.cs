@@ -87,13 +87,13 @@ namespace BIS.ERP.Services
         {
             var currencies = new[]
             {
-        new { code = "USD", name = "Доллар США", symbol = "$", rate = 85.50m, is_base = true, is_active = true },
+        new { code = "USD", name = "Доллар США", symbol = "$", rate = 85.50m, is_base = false, is_active = true },
         new { code = "RUB", name = "Российский рубль", symbol = "₽", rate = 1.00m, is_base = false, is_active = true },
         new { code = "KZT", name = "Казахстанский тенге", symbol = "₸", rate = 0.18m, is_base = false, is_active = true },
         new { code = "CNY", name = "Китайский юань", symbol = "¥", rate = 11.80m, is_base = false, is_active = true },
         new { code = "EUR", name = "Евро", symbol = "€", rate = 92.30m, is_base = false, is_active = true },
         new { code = "GBP", name = "Фунт стерлингов", symbol = "£", rate = 108.50m, is_base = false, is_active = true },
-        new { code = "KGS", name = "Киргизский сом", symbol = "с", rate = 1.00m, is_base = false, is_active = true }
+        new { code = "KGS", name = "Киргизский сом", symbol = "с", rate = 1.00m, is_base = true, is_active = true }
     };
 
             foreach (var currency in currencies)

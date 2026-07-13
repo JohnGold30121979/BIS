@@ -1,6 +1,9 @@
-﻿using System;
+using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using BIS.ERP;
 using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
@@ -15,7 +18,6 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _settings = AppSettings.Instance;
 
-            // Устанавливаем текущую тему в ComboBox
             if (_settings.Theme == "Dark")
             {
                 ThemeComboBox.SelectedIndex = 1;
@@ -52,50 +54,70 @@ namespace BIS.ERP.Views
                 await LocalizationService.Current.SetCultureAsync(_settings.Language);
         }
 
-        /// <summary>
-        /// Обработчик изменения темы
-        /// </summary>
         private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (ThemeComboBox.SelectedItem is ComboBoxItem item)
+            if (ThemeComboBox.SelectedItem is not ComboBoxItem item)
+                return;
+
+            var theme = item.Tag?.ToString() ?? "Default";
+
+            try
             {
-                var theme = item.Tag?.ToString() ?? "Default";
+                _settings.Theme = theme;
+                _settings.Save();
 
-                try
-                {
-                    // Сохраняем тему в настройках
-                    _settings.Theme = theme;
-                    _settings.Save();
+                ThemeService.Apply(theme);
+                UpdateCurrentThemeText();
 
-                    // Применяем тему сразу
-                    ThemeService.Apply(theme);
-
-                    // Обновляем текст
-                    UpdateCurrentThemeText();
-
-                    // Показываем уведомление
-                    System.Diagnostics.Debug.WriteLine($"✅ Тема изменена на: {theme}");
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка применения темы: {ex.Message}",
-                        "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                System.Diagnostics.Debug.WriteLine($"Theme changed to: {theme}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка применения темы: {ex.Message}",
+                    "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
-        /// <summary>
-        /// Обновление текста текущей темы
-        /// </summary>
         private void UpdateCurrentThemeText()
         {
             var themeName = _settings.Theme == "Dark" ? "Темная" : "Светлая";
             CurrentThemeText.Text = $"Текущая тема: {themeName}";
         }
 
-        /// <summary>
-        /// Закрытие окна
-        /// </summary>
+        private async void OnLoadNationalBankRatesClick(object sender, RoutedEventArgs e)
+        {
+            LoadNationalBankRatesButton.IsEnabled = false;
+            NationalBankRatesStatusText.Text = "Загрузка...";
+            var previousCursor = Cursor;
+            Cursor = Cursors.Wait;
+
+            try
+            {
+                await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var importService = new NationalBankCurrencyRateImportService(context);
+                var results = await importService.ImportLatestOfficialRatesAsync();
+
+                var imported = results.Sum(result => result.Imported);
+                var skipped = results.Sum(result => result.Skipped);
+                var dates = string.Join(", ", results.Select(result => result.RateDate.ToString("dd.MM.yyyy")));
+                var message = $"Курсы загружены. Даты: {dates}. Загружено: {imported}, пропущено: {skipped}.";
+
+                NationalBankRatesStatusText.Text = message;
+                MessageBox.Show(message, "Загрузка курсов НБКР", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                NationalBankRatesStatusText.Text = "Ошибка загрузки";
+                MessageBox.Show($"Ошибка загрузки курсов НБКР: {ex.Message}",
+                    "Загрузка курсов НБКР", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = previousCursor;
+                LoadNationalBankRatesButton.IsEnabled = true;
+            }
+        }
+
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
             await _systemConfigurationService.SaveAsync(
