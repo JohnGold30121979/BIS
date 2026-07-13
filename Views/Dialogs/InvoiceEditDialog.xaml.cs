@@ -81,6 +81,7 @@ namespace BIS.ERP.Views.Dialogs
                 Cursor = System.Windows.Input.Cursors.Wait;
                 await _invoiceService.EnsureSchemaAsync();
                 var catalogs = await _metadataService.GetCatalogsAsync();
+                var assignedModuleName = await ResolveAssignedModuleNameAsync();
                 var organizationsCatalog = catalogs.FirstOrDefault(item => item.Name == "Организации");
                 if (organizationsCatalog != null)
                 {
@@ -121,7 +122,9 @@ namespace BIS.ERP.Views.Dialogs
                     DatePicker.SelectedDate = invoice.DocDate;
                     EsfNumberBox.Text = invoice.EsfNumber;
                     TaxBlankNumberBox.Text = invoice.TaxBlankNumber;
-                    ModuleCodeBox.Text = invoice.ModuleCode;
+                    ModuleCodeBox.Text = string.IsNullOrWhiteSpace(invoice.ModuleCode)
+                        ? assignedModuleName
+                        : invoice.ModuleCode;
                     SetHeaderAccount(invoice.CounterpartyAccountCode);
                     BasisBox.Text = invoice.Basis;
                     SelectStoredComboValue(PaymentKindCombo, invoice.PaymentKind);
@@ -168,6 +171,7 @@ namespace BIS.ERP.Views.Dialogs
                 {
                     DatePicker.SelectedDate = DateTime.Today;
                     NumberBox.Text = await _invoiceService.GenerateDocumentNumberAsync();
+                    ModuleCodeBox.Text = assignedModuleName;
                     SetHeaderAccount(GetDefaultHeaderAccountCode());
                     SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TRANSFER");
                     SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "GOODS");
@@ -188,6 +192,26 @@ namespace BIS.ERP.Views.Dialogs
             {
                 Cursor = System.Windows.Input.Cursors.Arrow;
             }
+        }
+
+        private async Task<string> ResolveAssignedModuleNameAsync()
+        {
+            try
+            {
+                var assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(
+                    _document.Id,
+                    _document.ObjectType);
+                if (!string.IsNullOrWhiteSpace(assignedModuleName))
+                    return assignedModuleName.Trim();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля документа {_document.Name}: {ex.Message}");
+            }
+
+            return InvoiceDocumentTypes.IsSales(_document.Name) || InvoiceDocumentTypes.IsPurchase(_document.Name)
+                ? "Финансы"
+                : string.Empty;
         }
 
         private void DisableEditing()

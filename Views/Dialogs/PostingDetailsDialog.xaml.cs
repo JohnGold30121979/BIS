@@ -13,6 +13,7 @@ namespace BIS.ERP.Views
             DocumentNumberText.Text = posting.DocumentNumber;
             DateText.Text = posting.Date.ToString("dd.MM.yyyy HH:mm");
             DocumentTypeText.Text = posting.DocumentType;
+            ModuleText.Text = posting.ModuleName;
             DebitText.Text = posting.DebitAccount;
             DebitNameText.Text = posting.DebitAccountName;
             CreditText.Text = posting.CreditAccount;

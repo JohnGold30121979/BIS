@@ -1,0 +1,382 @@
+<Window x:Class="BIS.ERP.TestRunner.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BIS ERP Test Runner"
+        Width="1360"
+        Height="860"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+            <Button Content="Обновить"
+                    Width="110"
+                    Height="34"
+                    HorizontalAlignment="Right"
+                    DockPanel.Dock="Right"
+                    Click="RefreshButton_Click"/>
+            <StackPanel>
+                <TextBlock Text="Тестовый центр BIS ERP"
+                           FontSize="24"
+                           FontWeight="Bold"/>
+                <TextBlock Text="Сценарии тестов и SQL-консоль для проверки бизнес-логики, проводок и обменов."
+                           Foreground="#55606E"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+        </DockPanel>
+
+        <TabControl Grid.Row="1">
+            <TabItem Header="Тесты">
+                <Grid Margin="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="2*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="VerifySelectedButton"
+                                    Content="Проверить"
+                                    Width="120"
+                                    Height="34"
+                                    Margin="0,0,8,8"
+                                    Click="VerifySelectedButton_Click"/>
+                            <Button x:Name="RunSelectedButton"
+                                    Content="Оставить данные"
+                                    Width="140"
+                                    Height="34"
+                                    Margin="0,0,8,8"
+                                    Click="RunSelectedButton_Click"/>
+                            <Button x:Name="CleanupSelectedButton"
+                                    Content="Очистить"
+                                    Width="120"
+                                    Height="34"
+                                    Margin="0,0,8,8"
+                                    Click="CleanupSelectedButton_Click"/>
+                            <Button x:Name="VerifyCategoryButton"
+                                    Content="Проверить вкладку"
+                                    Width="150"
+                                    Height="34"
+                                    Margin="0,0,8,8"
+                                    Click="VerifyCategoryButton_Click"/>
+                        </WrapPanel>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="110"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="Циклов" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding CycleCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"
+                                     Margin="0,0,12,0"/>
+
+                            <TextBlock Grid.Column="2" Text="Документов" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="3"
+                                     Text="{Binding DocumentCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"
+                                     Margin="0,0,12,0"/>
+
+                            <TextBox Grid.Column="4"
+                                     Text="{Binding OperationFilePath}"
+                                     IsReadOnly="True"
+                                     MinHeight="30"
+                                     Margin="0,0,12,0"/>
+
+                            <Button Grid.Column="5"
+                                    Content="JSON"
+                                    Width="90"
+                                    Height="30"
+                                    Margin="0,0,8,0"
+                                    Click="LoadJsonButton_Click"/>
+                            <Button Grid.Column="6"
+                                    Content="Excel"
+                                    Width="90"
+                                    Height="30"
+                                    Margin="0,0,8,0"
+                                    Click="LoadExcelButton_Click"/>
+                            <Button Grid.Column="7"
+                                    Content="Очистить файл"
+                                    Width="110"
+                                    Height="30"
+                                    Click="ClearOperationsButton_Click"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <TabControl x:Name="TestCategoryTabs"
+                                Grid.Row="1"
+                                ItemsSource="{Binding Categories}"
+                                SelectedItem="{Binding SelectedCategory, Mode=TwoWay}">
+                        <TabControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}"/>
+                            </DataTemplate>
+                        </TabControl.ItemTemplate>
+                        <TabControl.ContentTemplate>
+                            <DataTemplate>
+                                <DataGrid ItemsSource="{Binding Scenarios}"
+                                          SelectedItem="{Binding DataContext.SelectedScenario, RelativeSource={RelativeSource AncestorType=Window}, Mode=TwoWay}"
+                                          AutoGenerateColumns="False"
+                                          CanUserAddRows="False"
+                                          CanUserDeleteRows="False"
+                                          IsReadOnly="True"
+                                          SelectionMode="Single"
+                                          HeadersVisibility="Column"
+                                          GridLinesVisibility="Horizontal">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Код" Binding="{Binding Code}" Width="120"/>
+                                        <DataGridTextColumn Header="Сценарий" Binding="{Binding Name}" Width="220"/>
+                                        <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="*"/>
+                                        <DataGridTextColumn Header="Статус" Binding="{Binding StatusText}" Width="120"/>
+                                        <DataGridTextColumn Header="Последний результат" Binding="{Binding LastSummary}" Width="260"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DataTemplate>
+                        </TabControl.ContentTemplate>
+                    </TabControl>
+
+                    <Border Grid.Row="2"
+                            Margin="0,12,0,8"
+                            Padding="12"
+                            Background="#F4F7FB"
+                            CornerRadius="8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="2*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="3*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Выбранный сценарий"
+                                           FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SelectedScenario.Name, TargetNullValue=Сценарий не выбран}"
+                                           Margin="0,6,0,0"
+                                           FontSize="16"
+                                           FontWeight="Bold"/>
+                                <TextBlock Text="{Binding SelectedScenario.Description, TargetNullValue=Выберите строку в списке выше}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,0"/>
+                                <TextBlock Text="{Binding OperationImportStatus}"
+                                           Margin="0,10,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <GroupBox Grid.Column="2" Header="Операции из файла">
+                                <DataGrid ItemsSource="{Binding LoadedOperations}"
+                                          AutoGenerateColumns="False"
+                                          CanUserAddRows="False"
+                                          CanUserDeleteRows="False"
+                                          IsReadOnly="True"
+                                          HeadersVisibility="Column"
+                                          GridLinesVisibility="Horizontal">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Вид" Binding="{Binding DocumentKind}" Width="80"/>
+                                        <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="180"/>
+                                        <DataGridTextColumn Header="Сумма" Binding="{Binding AmountWithoutTax}" Width="100"/>
+                                        <DataGridTextColumn Header="НДС %" Binding="{Binding VatRate}" Width="70"/>
+                                        <DataGridTextColumn Header="НСП %" Binding="{Binding SalesTaxRate}" Width="70"/>
+                                        <DataGridTextColumn Header="Счет контр." Binding="{Binding CounterpartyAccountCode}" Width="110"/>
+                                        <DataGridTextColumn Header="Счет строки" Binding="{Binding LineAccountCode}" Width="110"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </GroupBox>
+                        </Grid>
+                    </Border>
+
+                    <GroupBox Grid.Row="3" Header="Журнал выполнения">
+                        <TextBox x:Name="ExecutionLogTextBox"
+                                 Text="{Binding ExecutionLog}"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"/>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="SQL-запросы">
+                <Grid Margin="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="180"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ComboBox x:Name="DatabaseComboBox"
+                                  Grid.Column="0"
+                                  ItemsSource="{Binding SqlCandidates}"
+                                  SelectedItem="{Binding SelectedDatabase, Mode=TwoWay}"
+                                  DisplayMemberPath="DatabaseName"
+                                  MinHeight="34"/>
+                        <Button Grid.Column="2"
+                                Content="Обновить базы"
+                                Width="130"
+                                Height="34"
+                                Click="RefreshDatabasesButton_Click"/>
+                        <Button Grid.Column="4"
+                                Content="Выполнить SQL"
+                                Width="130"
+                                Height="34"
+                                Click="ExecuteSqlButton_Click"/>
+                    </Grid>
+
+                    <GroupBox Grid.Row="1" Header="Редактор запроса" Margin="0,0,0,12">
+                        <TextBox x:Name="SqlEditorTextBox"
+                                 Text="{Binding SqlText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True"
+                                 AcceptsTab="True"
+                                 TextWrapping="NoWrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 FontSize="14"/>
+                    </GroupBox>
+
+                    <Border Grid.Row="2"
+                            Padding="10"
+                            Background="#F4F7FB"
+                            CornerRadius="8"
+                            Margin="0,0,0,12">
+                        <TextBlock Text="{Binding SqlStatus}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+
+                    <GroupBox Grid.Row="3" Header="Результат">
+                        <DataGrid ItemsSource="{Binding SqlResultView}"
+                                  AutoGenerateColumns="True"
+                                  CanUserAddRows="False"
+                                  CanUserDeleteRows="False"
+                                  IsReadOnly="True"
+                                  HeadersVisibility="Column"
+                                  GridLinesVisibility="Horizontal"/>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Настройки БД">
+                <Grid Margin="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            Padding="14"
+                            Background="#F4F7FB"
+                            CornerRadius="8"
+                            Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="220"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Хост" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="1"
+                                     Text="{Binding ConnectionHost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"
+                                     Margin="0,0,0,10"/>
+
+                            <TextBlock Grid.Row="0" Grid.Column="3" Text="Порт" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="0" Grid.Column="4"
+                                     Text="{Binding ConnectionPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"
+                                     Margin="0,0,0,10"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="База данных" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="1"
+                                     Text="{Binding ConnectionDatabaseName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"
+                                     Margin="0,0,0,10"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="3" Text="Пользователь" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="1" Grid.Column="4"
+                                     Text="{Binding ConnectionUsername, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"
+                                     Margin="0,0,0,10"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Пароль" VerticalAlignment="Center"/>
+                            <TextBox Grid.Row="2" Grid.Column="1"
+                                     Text="{Binding ConnectionPassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     MinHeight="30"/>
+
+                            <StackPanel Grid.Row="2" Grid.Column="3" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Left">
+                                <Button x:Name="SaveConnectionSettingsButton"
+                                        Content="Сохранить"
+                                        Width="130"
+                                        Height="32"
+                                        Margin="0,0,8,0"
+                                        Click="SaveConnectionSettingsButton_Click"/>
+                                <Button x:Name="TestConnectionSettingsButton"
+                                        Content="Проверить подключение"
+                                        Width="190"
+                                        Height="32"
+                                        Click="TestConnectionSettingsButton_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Row="1"
+                            Padding="14"
+                            Background="#F4F7FB"
+                            CornerRadius="8"
+                            Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="{Binding ConnectionSettingsStatus}"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding ConnectionSettingsFilePath}"
+                                       Margin="0,8,0,0"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding LogsDirectoryPath}"
+                                       Margin="0,6,0,0"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <GroupBox Grid.Row="2" Header="Назначение">
+                        <TextBlock Margin="12"
+                                   TextWrapping="Wrap">
+                            Эти настройки используются тестовым центром, SQL-консолью и консольным запуском BIS.ERP.TESTS.
+                            После сохранения данные попадают в config\testsettings.json, а текстовые журналы пишутся в папку logs.
+                        </TextBlock>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</Window>

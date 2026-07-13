@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/BIS.ERP.TESTS.Core/">
+    <Project Path="BIS.ERP.TESTS.Core/BIS.ERP.Testing.csproj" />
+  </Folder>
+  <Folder Name="/BIS.ERP.TESTS.UI/">
+    <Project Path="BIS.ERP.TESTS.UI/BIS.ERP.TestRunner.csproj" />
+  </Folder>
+  <Project Path="../BIS.ERP.csproj" />
+  <Project Path="BIS.ERP.TESTS.Console/BIS.ERP.TESTS.Console.csproj" />
+</Solution>

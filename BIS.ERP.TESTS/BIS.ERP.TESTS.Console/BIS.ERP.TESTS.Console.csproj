@@ -5,10 +5,11 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>BIS.ERP.TESTS.Console</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BIS.ERP.Testing\BIS.ERP.Testing.csproj" />
+    <ProjectReference Include="..\BIS.ERP.TESTS.Core\BIS.ERP.Testing.csproj" />
   </ItemGroup>
 
 </Project>

@@ -128,8 +128,14 @@ namespace BIS.ERP.Views
             var selected = PostingsGrid.SelectedItem as Dictionary<string, object>;
             if (selected == null) return;
 
-            if (await TryOpenInvoiceFromPostingAsync(selected, isReadOnly: false))
+            if (await PostingSourceDocumentOpener.TryOpenAsync(
+                    BuildPostingViewModel(selected),
+                    _metadataService,
+                    Window.GetWindow(this),
+                    isReadOnly: false))
+            {
                 return;
+            }
 
             if (selected.ContainsKey("Id") && selected["Id"] != null)
             {
@@ -186,8 +192,14 @@ namespace BIS.ERP.Views
             if (selected == null)
                 return;
 
-            if (await TryOpenInvoiceFromPostingAsync(selected, isReadOnly: true))
+            if (await PostingSourceDocumentOpener.TryOpenAsync(
+                    BuildPostingViewModel(selected),
+                    _metadataService,
+                    Window.GetWindow(this),
+                    isReadOnly: true))
+            {
                 return;
+            }
 
             var dialog = new PostingDetailsDialog(BuildPostingViewModel(selected));
             dialog.Owner = Window.GetWindow(this);
@@ -202,8 +214,8 @@ namespace BIS.ERP.Views
             if (!InvoiceDocumentTypes.IsSales(documentType) && !InvoiceDocumentTypes.IsPurchase(documentType))
                 return false;
 
-            var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(
-                GetRowString(posting, "Номер документа", "doc_number"));
+            var rawDocumentNumber = GetRowString(posting, "Номер документа", "doc_number");
+            var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(rawDocumentNumber);
             if (string.IsNullOrWhiteSpace(documentNumber))
             {
                 MessageBox.Show("В проводке не указан номер счет-фактуры.", "Счет-фактура",
@@ -227,14 +239,14 @@ namespace BIS.ERP.Views
             await invoiceService.EnsureSchemaAsync();
 
             var documentDate = GetRowDate(posting, "Дата", "posting_date");
-            var invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber, documentDate);
-            if (!invoiceId.HasValue && documentDate.HasValue)
-                invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber);
+            var invoiceId = await invoiceService.FindInvoiceIdByPostingNumberAsync(rawDocumentNumber, documentDate);
             if (!invoiceId.HasValue)
             {
-                MessageBox.Show($"Счет-фактура №{documentNumber} не найдена.", "Счет-фактура",
+                MessageBox.Show(
+                    $"Проводка есть, но исходная счет-фактура №{documentNumber} не найдена. Будут открыты детали проводки.",
+                    "Счет-фактура",
                     MessageBoxButton.OK, MessageBoxImage.Information);
-                return true;
+                return false;
             }
 
             var dialog = new InvoiceEditDialog(

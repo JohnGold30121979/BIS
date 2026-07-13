@@ -2234,6 +2234,8 @@ END $$;");
                 recordData.GetValueOrDefault("number")?.ToString() ??
                 recordData.GetValueOrDefault("doc_number")?.ToString());
             var description = recordData.GetValueOrDefault("description")?.ToString() ?? string.Empty;
+            await EnsurePostingModuleColumnAsync();
+            var moduleName = await ResolvePostingModuleNameAsync(document);
 
             foreach (var rule in document.PostingRules.OrderBy(rule => rule.Order))
             {
@@ -2262,10 +2264,10 @@ END $$;");
                 const string sql = @"
                     INSERT INTO ""doc_postings""
                     (""Id"", ""posting_date"", ""doc_number"", ""document_type"",
-                     ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
+                     ""module_code"", ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
                      ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
                     VALUES
-                    (@id, @date, @number, @type, @debit, @credit, @amount, 0,
+                    (@id, @date, @number, @type, @moduleCode, @debit, @credit, @amount, 0,
                      @description, true, NOW(), NOW())";
 
                 await _context.Database.ExecuteSqlRawAsync(sql,
@@ -2273,6 +2275,7 @@ END $$;");
                     new NpgsqlParameter("@date", postingDate),
                     new NpgsqlParameter("@number", documentNumber),
                     new NpgsqlParameter("@type", document.Name),
+                    new NpgsqlParameter("@moduleCode", (object?)moduleName ?? DBNull.Value),
                     new NpgsqlParameter("@debit", debit),
                     new NpgsqlParameter("@credit", credit),
                     new NpgsqlParameter("@amount", amount),
@@ -2874,20 +2877,23 @@ END $$;");
                 {
                     documentType = "Бухгалтерская проводка";
                 }
+                await EnsurePostingModuleColumnAsync();
+                var moduleName = await ResolvePostingModuleNameAsync(documentType);
 
                 var sql = @"
                     INSERT INTO doc_postings 
-                    (""Id"", posting_date, doc_number, debit_account, credit_account, 
-                     amount_kgs, description, document_type, is_active, ""CreatedAt"", ""UpdatedAt"") 
+                    (""Id"", posting_date, doc_number, document_type, module_code, debit_account, credit_account, 
+                     amount_kgs, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
                     VALUES (
                         @id,
                         @postingDate,
                         @docNumber,
+                        @documentType,
+                        @moduleCode,
                         @debitAccount,
                         @creditAccount,
                         @amount,
                         @description,
-                        @documentType,
                         @isActive,
                         NOW(),
                         NOW()
@@ -2898,6 +2904,7 @@ END $$;");
                     new NpgsqlParameter("@id", postingId),
                     new NpgsqlParameter("@postingDate", postingDate),
                     new NpgsqlParameter("@docNumber", docNumber),
+                    new NpgsqlParameter("@moduleCode", (object?)moduleName ?? DBNull.Value),
                     new NpgsqlParameter("@debitAccount", debitAccount),
                     new NpgsqlParameter("@creditAccount", creditAccount),
                     new NpgsqlParameter("@amount", amount),
@@ -2911,6 +2918,96 @@ END $$;");
                 System.Diagnostics.Debug.WriteLine($"❌ Ошибка CreatePosting: {ex.Message}");
                 throw;
             }
+        }
+
+        private async Task EnsurePostingModuleColumnAsync()
+        {
+            await _context.Database.ExecuteSqlRawAsync(@"
+                DO $$
+                BEGIN
+                    IF to_regclass('public.doc_postings') IS NOT NULL THEN
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
+                    END IF;
+                END $$;");
+        }
+
+        private async Task<string> ResolvePostingModuleNameAsync(MetadataObject document)
+        {
+            try
+            {
+                var assignedModuleName = await GetAssignedModuleNameAsync(document.Id, document.ObjectType);
+                if (!string.IsNullOrWhiteSpace(assignedModuleName))
+                    return NormalizePostingModuleName(assignedModuleName);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля документа {document.Name}: {ex.Message}");
+            }
+
+            return InferPostingModuleName(document.Name);
+        }
+
+        private async Task<string> ResolvePostingModuleNameAsync(string documentType)
+        {
+            try
+            {
+                var document = await _context.MetadataObjects.AsNoTracking()
+                    .FirstOrDefaultAsync(item =>
+                        item.ObjectType == "Document" &&
+                        item.Name == documentType);
+
+                if (document != null)
+                    return await ResolvePostingModuleNameAsync(document);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля типа документа {documentType}: {ex.Message}");
+            }
+
+            return InferPostingModuleName(documentType);
+        }
+
+        private static string NormalizePostingModuleName(string moduleName)
+        {
+            var trimmed = moduleName.Trim();
+            return trimmed.ToUpperInvariant() switch
+            {
+                "ФИН" or "ФИНАНСЫ" or "FIN" or "FINANCE" => "Финансы",
+                "ОС" or "FIXEDASSETS" => "Основные средства",
+                "ТМЦ" or "МАТЕРИАЛЫ" or "INVENTORY" => "Учет материальных ценностей",
+                _ => trimmed
+            };
+        }
+
+        private static string InferPostingModuleName(string? documentType)
+        {
+            if (string.IsNullOrWhiteSpace(documentType))
+                return string.Empty;
+
+            if (InvoiceDocumentTypes.IsSales(documentType) ||
+                InvoiceDocumentTypes.IsPurchase(documentType) ||
+                documentType.Contains("кассов", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("платеж", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("провод", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("курсов", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Финансы";
+            }
+
+            if (documentType.Contains("ОС", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("амортиз", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Основные средства";
+            }
+
+            if (documentType.Contains("ТМЦ", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("товар", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("материал", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Учет материальных ценностей";
+            }
+
+            return string.Empty;
         }
 
         private async Task UpdateDocumentPostedStatus(string tableName, Guid recordId)

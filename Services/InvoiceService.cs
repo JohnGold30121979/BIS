@@ -154,6 +154,12 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
                 DO $$
                 BEGIN
+                    IF to_regclass('public.doc_postings') IS NOT NULL THEN
+                        ALTER TABLE ""doc_postings"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
+                    END IF;
+                END $$;
+                DO $$
+                BEGIN
                     IF EXISTS (
                         SELECT 1
                         FROM information_schema.columns
@@ -365,6 +371,76 @@ namespace BIS.ERP.Services
             }
         }
 
+        public async Task<Guid?> FindInvoiceIdByPostingNumberAsync(string postingDocumentNumber, DateTime? documentDate = null)
+        {
+            var numbers = BuildInvoiceLookupNumbers(postingDocumentNumber);
+            if (numbers.Count == 0)
+                return null;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE LOWER(COALESCE(""doc_number"", '')) = ANY(@numbers)
+                   OR LOWER(COALESCE(""tax_blank_number"", '')) = ANY(@numbers)
+                   OR LOWER(COALESCE(""esf_number"", '')) = ANY(@numbers)
+                   OR LOWER(COALESCE(""exchange_code"", '')) = ANY(@numbers)";
+
+            if (documentDate.HasValue)
+            {
+                sql += @"
+                ORDER BY CASE WHEN DATE(""doc_date"") = DATE(@date) THEN 0 ELSE 1 END,
+                         ""UpdatedAt"" DESC
+                LIMIT 1";
+            }
+            else
+            {
+                sql += @"
+                ORDER BY ""UpdatedAt"" DESC
+                LIMIT 1";
+            }
+
+            await using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.Add(new NpgsqlParameter("@numbers", numbers.Select(item => item.ToLowerInvariant()).ToArray()));
+            if (documentDate.HasValue)
+                command.Parameters.Add(new NpgsqlParameter("@date", documentDate.Value.Date));
+
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                var value = await command.ExecuteScalarAsync();
+                return value is Guid id ? id : null;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private static IReadOnlyCollection<string> BuildInvoiceLookupNumbers(string? documentNumber)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            AddCandidate(documentNumber);
+            AddCandidate(MetadataService.NormalizeLegacyDocumentNumber(documentNumber));
+
+            if (!string.IsNullOrWhiteSpace(documentNumber))
+            {
+                var digitsOnly = new string(documentNumber.Where(char.IsDigit).ToArray());
+                AddCandidate(digitsOnly);
+            }
+
+            return result.ToArray();
+
+            void AddCandidate(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                    return;
+
+                result.Add(value.Trim());
+            }
+        }
+
         public async Task<Guid?> FindInvoiceIdByExchangeCodeAsync(string exchangeCode)
         {
             if (string.IsNullOrWhiteSpace(exchangeCode))
@@ -500,6 +576,8 @@ namespace BIS.ERP.Services
         public async Task<Guid> SaveInvoiceAsync(InvoiceDocument invoice, Guid? existingId = null)
         {
             RecalculateTotals(invoice);
+            invoice.DocNumber = MetadataService.NormalizeLegacyDocumentNumber(invoice.DocNumber);
+            invoice.ModuleCode = await ResolveInvoiceModuleNameAsync(invoice.ModuleCode);
             var id = existingId ?? Guid.NewGuid();
             var isNew = !existingId.HasValue;
             var existing = isNew ? null : await GetInvoiceAsync(id);
@@ -540,9 +618,6 @@ namespace BIS.ERP.Services
                 }
                 else
                 {
-                    if (existing != null)
-                        await DeletePostingsAsync(existing.DocNumber);
-
                     await _context.Database.ExecuteSqlRawAsync($@"
                         UPDATE ""{HeaderTableName}""
                         SET ""doc_number"" = @number, ""doc_date"" = @date, ""esf_number"" = @esf,
@@ -585,6 +660,8 @@ namespace BIS.ERP.Services
                 foreach (var line in invoice.Lines)
                 {
                     RecalculateLine(line);
+                    line.Id = line.Id == Guid.Empty ? Guid.NewGuid() : line.Id;
+                    line.LineNumber = lineNumber;
                     await _context.Database.ExecuteSqlRawAsync($@"
                         INSERT INTO ""{LinesTableName}""
                         (""Id"", ""invoice_id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"", ""vat_tax_code"",
@@ -593,7 +670,7 @@ namespace BIS.ERP.Services
                         VALUES (@lineId, @invoiceId, @lineNumber, @name, @unitName, @quantity, @account, @vatTaxCode,
                                 @amountWithoutTax, @vatRate, @vatAmount, @salesTaxCode, @salesTaxRate, @salesTaxAmount,
                                 @lineTotal, NOW(), NOW())",
-                        new NpgsqlParameter("@lineId", line.Id == Guid.Empty ? Guid.NewGuid() : line.Id),
+                        new NpgsqlParameter("@lineId", line.Id),
                         new NpgsqlParameter("@invoiceId", id),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
                         new NpgsqlParameter("@name", line.Name),
@@ -610,6 +687,7 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@lineTotal", line.LineTotal));
                 }
 
+                await PostInvoiceWithinCurrentTransactionAsync(invoice, id, existing?.DocNumber);
                 await transaction.CommitAsync();
             }
             catch
@@ -625,9 +703,13 @@ namespace BIS.ERP.Services
                 id,
                 new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
 
-            // По требованиям заказчика у счет-фактуры нет отдельной кнопки проведения:
-            // запись документа сразу должна сформировать бухгалтерские проводки.
-            await PostInvoiceAsync(id);
+            await new EventLogService(_context).LogAsync(
+                "Post",
+                "Document",
+                DocumentName,
+                id,
+                new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
+
             return id;
         }
 
@@ -681,72 +763,26 @@ namespace BIS.ERP.Services
                 ?? throw new InvalidOperationException("Документ не найден.");
             if (invoice.IsPosted)
                 throw new InvalidOperationException("Документ уже проведён.");
-            if (invoice.Lines.Count == 0)
-                throw new InvalidOperationException("Добавьте хотя бы одну строку счета-фактуры.");
-            if (invoice.TotalAmount <= 0)
-                throw new InvalidOperationException("Сумма документа должна быть больше нуля.");
-
-            var counterpartyAccount = string.IsNullOrWhiteSpace(invoice.CounterpartyAccountCode)
-                ? InvoiceDocumentTypes.IsSales(DocumentName) ? DefaultSalesAccount : DefaultPurchaseAccount
-                : invoice.CounterpartyAccountCode.Trim();
-            var taxPostingEntries = await LoadTaxPostingEntriesAsync();
+            ValidateInvoiceForPosting(invoice);
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                await DeletePostingsAsync(invoice.DocNumber);
-
-                foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
-                {
-                    var lineAccount = string.IsNullOrWhiteSpace(line.AccountCode)
-                        ? GetDefaultLineAccount()
-                        : line.AccountCode.Trim();
-                    lineAccount = NormalizeLineAccountForPosting(counterpartyAccount, lineAccount);
-                    var lineDescription = BuildLineDescription(invoice, line);
-                    var taxPosting = ResolveTaxPostingEntry(line, taxPostingEntries);
-
-                    if (line.AmountWithoutTax > 0)
-                    {
-                        if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, lineAccount, line.AmountWithoutTax, lineDescription);
-                        else
-                            await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.AmountWithoutTax, lineDescription);
-                    }
-
-                    if (line.VatAmount > 0)
-                    {
-                        if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.VatPayableAccount, line.VatAmount, $"НДС: {lineDescription}");
-                        else
-                            await CreatePostingAsync(invoice, taxPosting.VatRecoverableAccount, counterpartyAccount, line.VatAmount, $"НДС: {lineDescription}");
-                    }
-
-                    if (line.SalesTaxAmount > 0)
-                    {
-                        if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.SalesTaxAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
-                        else
-                            await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
-                    }
-                }
-
-                await _context.Database.ExecuteSqlRawAsync(
-                    $@"UPDATE ""{HeaderTableName}"" SET ""is_posted"" = true, ""UpdatedAt"" = NOW() WHERE ""Id"" = @id;",
-                    new NpgsqlParameter("@id", invoiceId));
-
+                await PostInvoiceWithinCurrentTransactionAsync(invoice, invoiceId);
                 await transaction.CommitAsync();
-                await new EventLogService(_context).LogAsync(
-                    "Post",
-                    "Document",
-                    DocumentName,
-                    invoiceId,
-                    new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
             }
             catch
             {
                 await transaction.RollbackAsync();
                 throw;
             }
+
+            await new EventLogService(_context).LogAsync(
+                "Post",
+                "Document",
+                DocumentName,
+                invoiceId,
+                new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
         }
 
         public async Task<int> EnsureSavedInvoicesPostedAsync()
@@ -810,7 +846,84 @@ namespace BIS.ERP.Services
             invoice.TotalAmount = invoice.Lines.Sum(line => line.LineTotal);
         }
 
-        private async Task CreatePostingAsync(InvoiceDocument invoice, string debit, string credit, decimal amount, string description)
+        private static void ValidateInvoiceForPosting(InvoiceDocument invoice)
+        {
+            if (invoice.Lines.Count == 0)
+                throw new InvalidOperationException("Добавьте хотя бы одну строку счета-фактуры.");
+            if (invoice.TotalAmount <= 0)
+                throw new InvalidOperationException("Сумма документа должна быть больше нуля.");
+        }
+
+        private async Task PostInvoiceWithinCurrentTransactionAsync(
+            InvoiceDocument invoice,
+            Guid invoiceId,
+            string? previousDocumentNumber = null)
+        {
+            ValidateInvoiceForPosting(invoice);
+
+            var counterpartyAccount = string.IsNullOrWhiteSpace(invoice.CounterpartyAccountCode)
+                ? InvoiceDocumentTypes.IsSales(DocumentName) ? DefaultSalesAccount : DefaultPurchaseAccount
+                : invoice.CounterpartyAccountCode.Trim();
+            var taxPostingEntries = await LoadTaxPostingEntriesAsync();
+
+            if (!string.IsNullOrWhiteSpace(previousDocumentNumber) &&
+                !previousDocumentNumber.Trim().Equals(invoice.DocNumber, StringComparison.OrdinalIgnoreCase))
+            {
+                await DeletePostingsAsync(previousDocumentNumber);
+            }
+
+            await DeletePostingsAsync(invoice.DocNumber);
+
+            var createdPostings = 0;
+            foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
+            {
+                var lineAccount = string.IsNullOrWhiteSpace(line.AccountCode)
+                    ? GetDefaultLineAccount()
+                    : line.AccountCode.Trim();
+                lineAccount = NormalizeLineAccountForPosting(counterpartyAccount, lineAccount);
+                var lineDescription = BuildLineDescription(invoice, line);
+                var taxPosting = ResolveTaxPostingEntry(line, taxPostingEntries);
+
+                if (line.AmountWithoutTax > 0)
+                {
+                    if (InvoiceDocumentTypes.IsSales(DocumentName))
+                        createdPostings += await CreatePostingAsync(invoice, counterpartyAccount, lineAccount, line.AmountWithoutTax, lineDescription) ? 1 : 0;
+                    else
+                        createdPostings += await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.AmountWithoutTax, lineDescription) ? 1 : 0;
+                }
+
+                if (line.VatAmount > 0)
+                {
+                    if (InvoiceDocumentTypes.IsSales(DocumentName))
+                        createdPostings += await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.VatPayableAccount, line.VatAmount, $"НДС: {lineDescription}") ? 1 : 0;
+                    else
+                        createdPostings += await CreatePostingAsync(invoice, taxPosting.VatRecoverableAccount, counterpartyAccount, line.VatAmount, $"НДС: {lineDescription}") ? 1 : 0;
+                }
+
+                if (line.SalesTaxAmount > 0)
+                {
+                    if (InvoiceDocumentTypes.IsSales(DocumentName))
+                        createdPostings += await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.SalesTaxAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}") ? 1 : 0;
+                    else
+                        createdPostings += await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}") ? 1 : 0;
+                }
+            }
+
+            if (createdPostings == 0)
+            {
+                throw new InvalidOperationException(
+                    "Не удалось сформировать проводки по счет-фактуре. Проверьте счета документа и налоговые счета в справочнике налогов.");
+            }
+
+            await _context.Database.ExecuteSqlRawAsync(
+                $@"UPDATE ""{HeaderTableName}"" SET ""is_posted"" = true, ""UpdatedAt"" = NOW() WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", invoiceId));
+
+            invoice.Id = invoiceId;
+            invoice.IsPosted = true;
+        }
+
+        private async Task<bool> CreatePostingAsync(InvoiceDocument invoice, string debit, string credit, decimal amount, string description)
         {
             if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit))
                 throw new InvalidOperationException("Не удалось сформировать проводку: не указаны счета.");
@@ -818,25 +931,70 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"Пропущена проводка счет-фактуры {invoice.DocNumber}: одинаковые счета дебета и кредита {debit}. {description}");
-                return;
+                return false;
             }
 
             await _context.Database.ExecuteSqlRawAsync(@"
                 INSERT INTO ""doc_postings""
                 (""Id"", ""posting_date"", ""doc_number"", ""document_type"",
-                 ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
+                 ""module_code"", ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
                  ""description"", ""organization_id"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
                 VALUES
-                (@id, @date, @number, @type, @debit, @credit, @amount, 0, @description, @org, true, NOW(), NOW())",
+                (@id, @date, @number, @type, @moduleCode, @debit, @credit, @amount, 0, @description, @org, true, NOW(), NOW())",
                 new NpgsqlParameter("@id", Guid.NewGuid()),
                 new NpgsqlParameter("@date", invoice.DocDate),
                 new NpgsqlParameter("@number", invoice.DocNumber),
                 new NpgsqlParameter("@type", DocumentName),
+                new NpgsqlParameter("@moduleCode", (object?)invoice.ModuleCode ?? DBNull.Value),
                 new NpgsqlParameter("@debit", debit),
                 new NpgsqlParameter("@credit", credit),
                 new NpgsqlParameter("@amount", amount),
                 new NpgsqlParameter("@description", description),
                 new NpgsqlParameter("@org", (object?)invoice.OrganizationId ?? DBNull.Value));
+            return true;
+        }
+
+        private async Task<string> ResolveInvoiceModuleNameAsync(string? currentModule)
+        {
+            if (!string.IsNullOrWhiteSpace(currentModule))
+                return NormalizeModuleName(currentModule);
+
+            try
+            {
+                var metadata = await _context.MetadataObjects.AsNoTracking()
+                    .FirstOrDefaultAsync(item =>
+                        item.ObjectType == "Document" &&
+                        item.Name == DocumentName);
+
+                if (metadata != null)
+                {
+                    var assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(
+                        metadata.Id,
+                        metadata.ObjectType);
+                    if (!string.IsNullOrWhiteSpace(assignedModuleName))
+                        return NormalizeModuleName(assignedModuleName);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля счет-фактуры: {ex.Message}");
+            }
+
+            return InvoiceDocumentTypes.IsSales(DocumentName) || InvoiceDocumentTypes.IsPurchase(DocumentName)
+                ? "Финансы"
+                : string.Empty;
+        }
+
+        private static string NormalizeModuleName(string moduleName)
+        {
+            var trimmed = moduleName.Trim();
+            return trimmed.ToUpperInvariant() switch
+            {
+                "ФИН" or "ФИНАНСЫ" or "FIN" or "FINANCE" => "Финансы",
+                "ОС" or "FIXEDASSETS" => "Основные средства",
+                "ТМЦ" or "МАТЕРИАЛЫ" or "INVENTORY" => "Учет материальных ценностей",
+                _ => trimmed
+            };
         }
 
         private string NormalizeLineAccountForPosting(string counterpartyAccount, string lineAccount)

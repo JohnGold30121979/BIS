@@ -36,6 +36,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Документ:" FontWeight="Bold" Margin="0,5"/>
@@ -47,47 +48,50 @@
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Тип:" FontWeight="Bold" Margin="0,5"/>
                 <TextBlock x:Name="DocumentTypeText" Grid.Row="2" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Дебет:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DebitText" Grid.Row="3" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Модуль:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="ModuleText" Grid.Row="3" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Расшифровка дебета:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DebitNameText" Grid.Row="4" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Дебет:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="DebitText" Grid.Row="4" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="Кредит:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CreditText" Grid.Row="5" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Расшифровка дебета:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="DebitNameText" Grid.Row="5" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
 
-                <TextBlock Grid.Row="6" Grid.Column="0" Text="Расшифровка кредита:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CreditNameText" Grid.Row="6" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="6" Grid.Column="0" Text="Кредит:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="CreditText" Grid.Row="6" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="7" Grid.Column="0" Text="Корр. счет:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CorrespondentText" Grid.Row="7" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="7" Grid.Column="0" Text="Расшифровка кредита:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="CreditNameText" Grid.Row="7" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
 
-                <TextBlock Grid.Row="8" Grid.Column="0" Text="Операция:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DirectionText" Grid.Row="8" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="8" Grid.Column="0" Text="Корр. счет:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="CorrespondentText" Grid.Row="8" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="9" Grid.Column="0" Text="Сумма (сом):" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="AmountText" Grid.Row="9" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="9" Grid.Column="0" Text="Операция:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="DirectionText" Grid.Row="9" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="10" Grid.Column="0" Text="Сумма (валюта):" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="AmountCurrencyText" Grid.Row="10" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="10" Grid.Column="0" Text="Сумма (сом):" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="AmountText" Grid.Row="10" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="11" Grid.Column="0" Text="Валюта:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CurrencyText" Grid.Row="11" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="11" Grid.Column="0" Text="Сумма (валюта):" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="AmountCurrencyText" Grid.Row="11" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="12" Grid.Column="0" Text="Организация:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="OrganizationText" Grid.Row="12" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="12" Grid.Column="0" Text="Валюта:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="CurrencyText" Grid.Row="12" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="13" Grid.Column="0" Text="Сотрудник:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="EmployeeText" Grid.Row="13" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="13" Grid.Column="0" Text="Организация:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="OrganizationText" Grid.Row="13" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
 
-                <TextBlock Grid.Row="14" Grid.Column="0" Text="Создана:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CreatedAtText" Grid.Row="14" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="14" Grid.Column="0" Text="Сотрудник:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="EmployeeText" Grid.Row="14" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
 
-                <TextBlock Grid.Row="15" Grid.Column="0" Text="Статус:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="StatusText" Grid.Row="15" Grid.Column="1" Margin="0,5"/>
+                <TextBlock Grid.Row="15" Grid.Column="0" Text="Создана:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="CreatedAtText" Grid.Row="15" Grid.Column="1" Margin="0,5"/>
 
-                <TextBlock Grid.Row="16" Grid.Column="0" Text="Примечание:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="NoteText" Grid.Row="16" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
+                <TextBlock Grid.Row="16" Grid.Column="0" Text="Статус:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="StatusText" Grid.Row="16" Grid.Column="1" Margin="0,5"/>
+
+                <TextBlock Grid.Row="17" Grid.Column="0" Text="Примечание:" FontWeight="Bold" Margin="0,5"/>
+                <TextBlock x:Name="NoteText" Grid.Row="17" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
             </Grid>
         </ScrollViewer>
 

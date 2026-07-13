@@ -393,7 +393,6 @@ flowchart TD
 | `PostingsJournalView` | Общий журнал бухгалтерских проводок. |
 | `AccountingReportsView` | Бухгалтерские отчеты и анализ счета. |
 | `AccountingSetupView` | Настройка бухгалтерского учета. |
-| `OperationsView` | Операции. |
 | `DbfImportWindow` | Импорт DBF. |
 | `DynamicDocumentsView` | Список импортированных DBF/динамических документов. |
 | `FrxImportWindow` | Импорт FRX/FRT. |

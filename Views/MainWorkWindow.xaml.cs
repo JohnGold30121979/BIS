@@ -219,7 +219,6 @@ namespace BIS.ERP
                     {
                         Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
                     };
-                    financeTools.Children.Add(new NavigationItem { Id = "Operations", Name = "Операции", Icon = "📋", Type = "Operations" });
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingSetup", Name = "Настройка учета", Icon = "⚙", Type = "AccountingSetup" });
@@ -453,15 +452,6 @@ namespace BIS.ERP
                 Badge = dbfCount > 0 ? dbfCount.ToString() : ""
             });
 
-            // Операции
-            dataSection.Children.Add(new NavigationItem
-            {
-                Id = "Operations",
-                Name = "Операции",
-                Icon = "📋",
-                Type = "Operations"
-            });
-
             // Журнал проводок
             dataSection.Children.Add(new NavigationItem
             {
@@ -665,11 +655,6 @@ namespace BIS.ERP
                     case "DbfDocuments":
                         var dbfView = new DynamicDocumentsView(_documentService);
                         _navigation.NavigateTo(dbfView);
-                        break;
-
-                    case "Operations":
-                        var operationsView = new OperationsView();
-                        _navigation.NavigateTo(operationsView);
                         break;
 
                     case "PostingsJournal":

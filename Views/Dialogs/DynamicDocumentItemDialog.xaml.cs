@@ -15,6 +15,7 @@ namespace BIS.ERP.Views.Dialogs
     {
         private readonly MetadataObject _metadata;
         private readonly Guid? _editId;
+        private readonly bool _isReadOnly;
         private readonly Dictionary<string, Control> _fieldControls = new();
         private readonly Dictionary<string, FrameworkElement> _fieldPanels = new();
         private readonly Dictionary<string, MetadataField> _fieldsByName = new();
@@ -25,13 +26,20 @@ namespace BIS.ERP.Views.Dialogs
 
         public Dictionary<string, object> ItemData { get; private set; } = new();
 
-        public DynamicDocumentItemDialog(MetadataObject metadata, MetadataService metadataService, Guid? editId = null)
+        public DynamicDocumentItemDialog(MetadataObject metadata, MetadataService metadataService, Guid? editId = null, bool isReadOnly = false)
         {
             InitializeComponent();
             _metadata = metadata;
             _metadataService = metadataService;
             _editId = editId;
-            Title = $"{(editId.HasValue ? "Редактирование" : "Добавление")}: {metadata.Name}";
+            _isReadOnly = isReadOnly;
+            Title = $"{(isReadOnly ? "Просмотр" : editId.HasValue ? "Редактирование" : "Добавление")}: {metadata.Name}";
+
+            if (_isReadOnly)
+            {
+                SaveButton.Visibility = Visibility.Collapsed;
+                CancelButton.Content = "Закрыть";
+            }
 
             Loaded += async (s, e) => await BuildFormAsync();
         }
@@ -61,6 +69,8 @@ namespace BIS.ERP.Views.Dialogs
                 });
 
                 var inputControl = await CreateControlAsync(field, catalogsDict);
+                if (_isReadOnly)
+                    ApplyReadOnly(inputControl);
 
                 if (_metadata.ObjectType == "Document" &&
                     MetadataService.IsDocumentNumberFieldName(field.Name) &&
@@ -387,6 +397,12 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            if (_isReadOnly)
+            {
+                Close();
+                return;
+            }
+
             try
             {
                 ItemData.Clear();
@@ -482,6 +498,29 @@ namespace BIS.ERP.Views.Dialogs
         {
             DialogResult = false;
             Close();
+        }
+
+        private static void ApplyReadOnly(Control control)
+        {
+            switch (control)
+            {
+                case TextBox textBox:
+                    textBox.IsReadOnly = true;
+                    textBox.Background = Brushes.LightGray;
+                    break;
+                case ComboBox comboBox:
+                    comboBox.IsEnabled = false;
+                    break;
+                case DatePicker datePicker:
+                    datePicker.IsEnabled = false;
+                    break;
+                case CheckBox checkBox:
+                    checkBox.IsEnabled = false;
+                    break;
+                default:
+                    control.IsEnabled = false;
+                    break;
+            }
         }
     }
 }
