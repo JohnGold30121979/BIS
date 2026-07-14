@@ -1,0 +1,296 @@
+<Window x:Class="BIS.ERP.Views.FinanceDocumentDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Финансовый документ"
+        Height="820"
+        Width="760"
+        MinHeight="620"
+        MinWidth="620"
+        ResizeMode="CanResize"
+        WindowStartupLocation="CenterOwner">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="14">
+            <TextBlock x:Name="DialogTitle" FontSize="18" FontWeight="Bold" Foreground="#1F3448" Margin="0,0,0,12"/>
+
+            <GroupBox Header="Основные реквизиты" Padding="10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Номер:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBox x:Name="NumberBox" Grid.Row="0" Grid.Column="1" Height="30" IsReadOnly="True" Background="#F2F4F7" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Дата:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <DatePicker x:Name="DatePicker" Grid.Row="1" Grid.Column="1" Height="30" SelectedDateChanged="OnRateInputChanged" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Организация:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="OrganizationCombo" Grid.Row="2" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id" Margin="0,0,0,8"/>
+
+                    <Grid x:Name="CommonAmountPanel" Grid.Row="3" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Сумма:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="AmountBox" Grid.Column="1" Height="30" Text="0"/>
+                    </Grid>
+
+                    <Grid x:Name="DebitAccountPanel" Grid.Row="4" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Счет дебета:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="DebitAccountBox" Grid.Column="1" Height="30" IsReadOnly="True" Background="#F2F4F7"/>
+                        <Button Grid.Column="2" Content="?" Width="34" Height="30" Margin="6,0,0,0" Click="SelectDebitAccount_Click"/>
+                    </Grid>
+
+                    <Grid x:Name="CreditAccountPanel" Grid.Row="5" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Счет кредита:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="CreditAccountBox" Grid.Column="1" Height="30" IsReadOnly="True" Background="#F2F4F7"/>
+                        <Button Grid.Column="2" Content="?" Width="34" Height="30" Margin="6,0,0,0" Click="SelectCreditAccount_Click"/>
+                    </Grid>
+
+                    <Grid Grid.Row="6" Grid.ColumnSpan="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Основание:" VerticalAlignment="Top" Margin="0,0,8,8"/>
+                        <TextBox x:Name="BasisBox" Grid.Row="0" Grid.Column="1" Height="52" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Примечание:" VerticalAlignment="Top" Margin="0,0,8,0"/>
+                        <TextBox x:Name="DescriptionBox" Grid.Row="1" Grid.Column="1" Height="52" TextWrapping="Wrap"/>
+                    </Grid>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox x:Name="AdvanceReportPanel" Header="Авансовый отчет" Padding="10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Сотрудник:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="AdvanceEmployeeCombo" Grid.Row="0" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Вид расчета:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="AdvancePaymentCombo" Grid.Row="1" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                              SelectionChanged="AdvancePaymentCombo_SelectionChanged" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Период отчета:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                        <DatePicker x:Name="ReportStartDatePicker" Width="150" Height="30"/>
+                        <TextBlock Text="по" VerticalAlignment="Center" Margin="10,0"/>
+                        <DatePicker x:Name="ReportEndDatePicker" Width="150" Height="30"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Документ выдачи:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBox x:Name="IssueDocumentBox" Width="220" Height="30"/>
+                        <TextBlock Text="от" VerticalAlignment="Center" Margin="10,0"/>
+                        <DatePicker x:Name="IssueDocumentDatePicker" Width="150" Height="30"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Принято к учету:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBox x:Name="AcceptedAmountBox" Grid.Row="4" Grid.Column="1" Height="30" Text="0" Margin="0,0,0,8"/>
+
+                    <StackPanel Grid.Row="5" Grid.ColumnSpan="2" Orientation="Horizontal">
+                        <TextBlock Text="Перерасход:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="OverrunAmountBox" Width="130" Height="30" Text="0" Margin="0,0,18,0"/>
+                        <TextBlock Text="Остаток к возврату:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="ReturnAmountBox" Width="130" Height="30" Text="0"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox x:Name="PowerOfAttorneyPanel" Header="Доверенность" Padding="10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Представитель:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="RepresentativeCombo" Grid.Row="0" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Поставщик:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="CounterpartyCombo" Grid.Row="1" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Расчетный счет:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBox x:Name="BankAccountBox" Grid.Row="2" Grid.Column="1" Height="30" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Банк:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBox x:Name="BankNameBox" Grid.Row="3" Grid.Column="1" Height="30" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Документ личности:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBox x:Name="IdentityDocumentNameBox" Width="180" Height="30"/>
+                        <TextBlock Text="номер" VerticalAlignment="Center" Margin="10,0"/>
+                        <TextBox x:Name="IdentityDocumentNumberBox" Width="170" Height="30"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Дата документа:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <DatePicker x:Name="IdentityDocumentDatePicker" Grid.Row="5" Grid.Column="1" Width="150" Height="30"
+                                HorizontalAlignment="Left" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Кем выдан:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBox x:Name="IdentityDocumentIssuerBox" Grid.Row="6" Grid.Column="1" Height="30" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Срок действия:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <DatePicker x:Name="ValidUntilDatePicker" Grid.Row="7" Grid.Column="1" Width="150" Height="30"
+                                HorizontalAlignment="Left" Margin="0,0,0,8"/>
+
+                    <Grid Grid.Row="8" Grid.ColumnSpan="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Документ-основание:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBox x:Name="SourceDocumentNumberBox" Width="220" Height="30"/>
+                            <TextBlock Text="от" VerticalAlignment="Center" Margin="10,0"/>
+                            <DatePicker x:Name="SourceDocumentDatePicker" Width="150" Height="30"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Ценности:" VerticalAlignment="Top" Margin="0,0,8,8"/>
+                        <TextBox x:Name="ItemsDescriptionBox" Grid.Row="1" Grid.Column="1" Height="64" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Text="Количество:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="QuantityBox" Width="110" Height="30" Text="0" Margin="0,0,18,0"/>
+                            <TextBlock Text="Ед. изм.:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="UnitNameBox" Width="130" Height="30"/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox x:Name="PayrollStatementPanel" Header="Платежная ведомость" Padding="10" Margin="0,0,0,10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Сотрудник:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="PayrollEmployeeCombo" Grid.Row="0" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Период:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
+                        <DatePicker x:Name="PeriodStartDatePicker" Width="150" Height="30"/>
+                        <TextBlock Text="по" VerticalAlignment="Center" Margin="10,0"/>
+                        <DatePicker x:Name="PeriodEndDatePicker" Width="150" Height="30"/>
+                    </StackPanel>
+
+                    <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="170"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Счет выплаты:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="PaymentAccountBox" Grid.Column="1" Height="30" IsReadOnly="True" Background="#F2F4F7"/>
+                        <Button Grid.Column="2" Content="?" Width="34" Height="30" Margin="6,0,0,0" Click="SelectPaymentAccount_Click"/>
+                    </Grid>
+
+                    <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Orientation="Horizontal">
+                        <TextBlock Text="Начислено:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="AccruedAmountBox" Width="115" Height="30" Text="0" TextChanged="PayrollAmountBox_TextChanged" Margin="0,0,18,0"/>
+                        <TextBlock Text="Удержано:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="WithheldAmountBox" Width="115" Height="30" Text="0" TextChanged="PayrollAmountBox_TextChanged" Margin="0,0,18,0"/>
+                        <TextBlock Text="К выплате:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="PayableAmountBox" Width="115" Height="30" Text="0"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox x:Name="CurrencyPanel" Header="Валюта" Padding="10" Margin="0,0,0,10" Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="CurrencyCombo" Grid.Row="0" Grid.Column="1" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                              SelectionChanged="OnRateInputChanged" Margin="0,0,0,8"/>
+
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                        <TextBlock Text="Сумма в валюте:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="AmountCurrencyBox" Width="130" Height="30" Text="0" TextChanged="CurrencyAmountBox_TextChanged" Margin="0,0,18,0"/>
+                        <TextBlock Text="Курс:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="ExchangeRateBox" Width="130" Height="30" Text="0" TextChanged="CurrencyAmountBox_TextChanged"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
+                <Button Content="Сохранить" Width="120" Height="36" Margin="0,0,10,0" Click="OnSaveClick"
+                        Background="#27AE60" Foreground="White"/>
+                <Button Content="Отмена" Width="120" Height="36" Click="OnCancelClick"
+                        Background="#95A5A6" Foreground="White"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

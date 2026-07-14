@@ -167,6 +167,16 @@ namespace BIS.ERP.Views
                     if (row.ContainsKey("Материал") && row["Материал"] != null && referenceCache.TryGetValue("Материал", out var materialDict) && Guid.TryParse(row["Материал"].ToString(), out var materialId))
                         newRow.MaterialName = materialDict.ContainsKey(materialId) ? materialDict[materialId] : row["Материал"].ToString();
 
+                    if (row.ContainsKey("Классификация платежа") &&
+                        row["Классификация платежа"] != null &&
+                        referenceCache.TryGetValue("Классификация платежа", out var paymentClassificationDict) &&
+                        Guid.TryParse(row["Классификация платежа"].ToString(), out var paymentClassificationId))
+                    {
+                        newRow.PaymentClassificationName = paymentClassificationDict.TryGetValue(paymentClassificationId, out var displayName)
+                            ? displayName
+                            : row["Классификация платежа"].ToString();
+                    }
+
                     // Корр. счет
                     string corrValue = null;
                     string[] possibleCorrNames = { "correspondent_account", "Корр. счет", "Корр счет", "Коррсчет" };
@@ -326,6 +336,7 @@ namespace BIS.ERP.Views
         public string EmployeeName { get; set; } = string.Empty;
         public string MaterialName { get; set; } = string.Empty;
         public string CorrespondentAccountName { get; set; } = string.Empty;
+        public string PaymentClassificationName { get; set; } = string.Empty;
         public string Purpose { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public bool IsPosted { get; set; }

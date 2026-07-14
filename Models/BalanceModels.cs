@@ -59,8 +59,10 @@
     {
         public List<BalanceItem> Income { get; set; } = new();
         public List<BalanceItem> Expenses { get; set; } = new();
-        public decimal TotalIncome => Income.Sum(item => item.Amount);
-        public decimal TotalExpenses => Expenses.Sum(item => item.Amount);
+        public decimal? TotalIncomeOverride { get; set; }
+        public decimal? TotalExpensesOverride { get; set; }
+        public decimal TotalIncome => TotalIncomeOverride ?? Income.Sum(item => item.Amount);
+        public decimal TotalExpenses => TotalExpensesOverride ?? Expenses.Sum(item => item.Amount);
         public decimal ProfitOrLoss => TotalIncome - TotalExpenses;
     }
 

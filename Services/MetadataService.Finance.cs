@@ -44,16 +44,31 @@ public partial class MetadataService
         return new List<MetadataField>
         {
             new MetadataField { Id = Guid.NewGuid(), Name = "Код", DbColumnName = "code", FieldType = "String", Length = 50, IsRequired = true, IsUnique = true, Order = 1, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Счет", DbColumnName = "account_id", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 2, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Способ расчета", DbColumnName = "calc_method", FieldType = "String", Length = 50, IsRequired = false, Order = 3, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Валюта", DbColumnName = "currency_id", FieldType = "Reference", ReferenceCatalog = "Справочник валют", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = false, Order = 4, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", IsRequired = true, Order = 5, MetadataObjectId = metadataObjectId }
+            new MetadataField { Id = Guid.NewGuid(), Name = "Основной счет", DbColumnName = "account_id", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 2, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Парный счет", DbColumnName = "paired_account_id", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = false, Order = 3, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Счет дохода", DbColumnName = "gain_account_id", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = false, Order = 4, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Счет расхода", DbColumnName = "loss_account_id", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = false, Order = 5, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Разрез расчета", DbColumnName = "calculation_detail_mode", FieldType = "Int", IsRequired = false, Order = 6, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Валюта", DbColumnName = "currency_id", FieldType = "Reference", ReferenceCatalog = "Справочник валют", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = false, Order = 7, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Модуль", DbColumnName = "module_code", FieldType = "String", Length = 50, IsRequired = false, Order = 8, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Алгоритм расчета", DbColumnName = "calculation_algorithm", FieldType = "Int", IsRequired = false, Order = 9, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Строка отчета по дебету", DbColumnName = "debit_report_line", FieldType = "Int", IsRequired = false, Order = 10, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Строка отчета по кредиту", DbColumnName = "credit_report_line", FieldType = "Int", IsRequired = false, Order = 11, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Способ расчета", DbColumnName = "calculation_method", FieldType = "String", Length = 50, IsRequired = false, Order = 12, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", IsRequired = true, Order = 13, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Примечание", DbColumnName = "description", FieldType = "String", Length = 500, IsRequired = false, Order = 14, MetadataObjectId = metadataObjectId }
         };
     }
 
     #endregion
 
     #region Finance catalogs creation
+
+    public async Task EnsureFinanceCatalogStructuresAsync()
+    {
+        await EnsureAdvancePaymentsCatalogStructureAsync();
+        await EnsureExchangeRateDiffCatalogStructureAsync();
+    }
 
     private async Task CreateAdvancePaymentsCatalog(MetadataConfiguration config)
     {
@@ -246,12 +261,13 @@ public partial class MetadataService
     {
         try
         {
+            var catalogId = Guid.NewGuid();
             var catalog = new MetadataObject
             {
-                Id = Guid.NewGuid(), Name = "Настройка доступа к счетам", TableName = "catalog_account_access",
+                Id = catalogId, Name = "Настройка доступа к счетам", TableName = "catalog_account_access",
                 ObjectType = "Catalog", Description = "Настройка доступа операторов к счетам",
                 Icon = "🔐", Order = 21, IsSystem = true, MetadataConfigId = config.Id,
-                Fields = GetAccountAccessFields(Guid.NewGuid())
+                Fields = GetAccountAccessFields(catalogId)
             };
             await _context.MetadataObjects.AddAsync(catalog);
             await _context.SaveChangesAsync();
@@ -268,12 +284,13 @@ public partial class MetadataService
     {
         try
         {
+            var catalogId = Guid.NewGuid();
             var catalog = new MetadataObject
             {
-                Id = Guid.NewGuid(), Name = "Расчет курсовой разницы", TableName = "catalog_exchange_rate_diff",
+                Id = catalogId, Name = "Расчет курсовой разницы", TableName = "catalog_exchange_rate_diff",
                 ObjectType = "Catalog", Description = "Справочник счетов для расчета курсовой разницы",
                 Icon = "💱", Order = 22, IsSystem = true, MetadataConfigId = config.Id,
-                Fields = GetExchangeRateDiffFields(Guid.NewGuid())
+                Fields = GetExchangeRateDiffFields(catalogId)
             };
             await _context.MetadataObjects.AddAsync(catalog);
             await _context.SaveChangesAsync();
@@ -284,6 +301,124 @@ public partial class MetadataService
         {
             System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Расчет курсовой разницы': {ex.Message}");
         }
+    }
+
+    private async Task EnsureExchangeRateDiffCatalogStructureAsync()
+    {
+        var catalog = await _context.MetadataObjects
+            .Include(metadata => metadata.Fields)
+            .FirstOrDefaultAsync(metadata => metadata.ObjectType == "Catalog" && metadata.Name == "Расчет курсовой разницы");
+
+        if (catalog == null)
+            return;
+
+        await MigrateExchangeRateDifferenceFieldsAsync(catalog);
+
+        var existingColumns = catalog.Fields
+            .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+            .Select(field => field.DbColumnName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var template in GetExchangeRateDiffFields(catalog.Id))
+        {
+            var existingField = catalog.Fields.FirstOrDefault(field =>
+                field.DbColumnName.Equals(template.DbColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (existingField == null)
+            {
+                template.Id = Guid.NewGuid();
+                template.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(template);
+                await AddColumnToTableAsync(catalog.TableName, template);
+                catalog.Fields.Add(template);
+                existingColumns.Add(template.DbColumnName);
+                continue;
+            }
+
+            existingField.Name = template.Name;
+            existingField.FieldType = template.FieldType;
+            existingField.Length = template.Length;
+            existingField.Precision = template.Precision;
+            existingField.Scale = template.Scale;
+            existingField.IsRequired = template.IsRequired;
+            existingField.IsUnique = template.IsUnique;
+            existingField.Order = template.Order;
+            existingField.ReferenceCatalog = template.ReferenceCatalog;
+            existingField.DisplayPattern = template.DisplayPattern;
+            existingField.DisplayFields = template.DisplayFields;
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task MigrateExchangeRateDifferenceFieldsAsync(MetadataObject catalog)
+    {
+        var detailModeField = catalog.Fields.FirstOrDefault(field =>
+            field.DbColumnName?.Equals("calculation_detail_mode", StringComparison.OrdinalIgnoreCase) == true);
+        var legacyDetailModeField = catalog.Fields.FirstOrDefault(field =>
+            field.DbColumnName?.Equals("expense_direction", StringComparison.OrdinalIgnoreCase) == true);
+        if (legacyDetailModeField != null)
+        {
+            if (detailModeField == null)
+            {
+                legacyDetailModeField.DbColumnName = "calculation_detail_mode";
+                legacyDetailModeField.Name = "Разрез расчета";
+                legacyDetailModeField.FieldType = "Int";
+                legacyDetailModeField.Order = 6;
+            }
+            else
+            {
+                _context.MetadataFields.Remove(legacyDetailModeField);
+                catalog.Fields.Remove(legacyDetailModeField);
+            }
+        }
+
+        var calculationMethodField = catalog.Fields.FirstOrDefault(field =>
+            field.DbColumnName?.Equals("calculation_method", StringComparison.OrdinalIgnoreCase) == true);
+        var legacyCalculationMethodField = catalog.Fields.FirstOrDefault(field =>
+            field.DbColumnName?.Equals("calc_method", StringComparison.OrdinalIgnoreCase) == true);
+        if (legacyCalculationMethodField != null)
+        {
+            if (calculationMethodField == null)
+            {
+                legacyCalculationMethodField.DbColumnName = "calculation_method";
+                legacyCalculationMethodField.Name = "Способ расчета";
+                legacyCalculationMethodField.FieldType = "String";
+                legacyCalculationMethodField.Length = Math.Max(legacyCalculationMethodField.Length, 50);
+                legacyCalculationMethodField.Order = 12;
+            }
+            else
+            {
+                _context.MetadataFields.Remove(legacyCalculationMethodField);
+                catalog.Fields.Remove(legacyCalculationMethodField);
+            }
+        }
+
+        await _context.Database.ExecuteSqlRawAsync($@"
+            ALTER TABLE ""{catalog.TableName}"" ADD COLUMN IF NOT EXISTS ""calculation_detail_mode"" integer;
+            ALTER TABLE ""{catalog.TableName}"" ADD COLUMN IF NOT EXISTS ""calculation_method"" varchar(50);
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = '{catalog.TableName}'
+                      AND column_name = 'expense_direction') THEN
+                    UPDATE ""{catalog.TableName}""
+                    SET ""calculation_detail_mode"" = COALESCE(""calculation_detail_mode"", ""expense_direction"")
+                    WHERE ""calculation_detail_mode"" IS NULL;
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = '{catalog.TableName}'
+                      AND column_name = 'calc_method') THEN
+                    UPDATE ""{catalog.TableName}""
+                    SET ""calculation_method"" = COALESCE(NULLIF(""calculation_method"", ''), ""calc_method"")
+                    WHERE COALESCE(NULLIF(""calculation_method"", ''), '') = '';
+                END IF;
+            END $$;");
     }
 
     #endregion

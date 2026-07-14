@@ -138,7 +138,8 @@ namespace BIS.ERP.Views
                 _reportLines.Add(new ReportLineEditorRow
                 {
                     Id = line.Id, LineCode = line.LineCode, SectionCode = line.SectionCode, Name = line.Name,
-                    SortOrder = line.SortOrder, Sign = line.Sign, IsTotal = line.IsTotal,
+                    SortOrder = line.SortOrder, Sign = line.Sign, Formula = line.Formula,
+                    FixedAmount = line.FixedAmount, IsTotal = line.IsTotal,
                     AccountCodes = string.Join(", ", links.Where(link => link.LineId == line.Id).Select(link => link.AccountCode))
                 });
         }
@@ -180,6 +181,8 @@ namespace BIS.ERP.Views
                     entity.Name = row.Name.Trim();
                     entity.SortOrder = row.SortOrder;
                     entity.Sign = row.Sign == -1 ? -1 : 1;
+                    entity.Formula = row.Formula.Trim();
+                    entity.FixedAmount = row.FixedAmount;
                     entity.IsTotal = row.IsTotal;
                     entity.IsActive = true;
                     if (row.Id == Guid.Empty)
@@ -270,6 +273,8 @@ namespace BIS.ERP.Views
         public string Name { get; set; } = string.Empty;
         public int SortOrder { get; set; }
         public int Sign { get; set; } = 1;
+        public string Formula { get; set; } = string.Empty;
+        public decimal FixedAmount { get; set; }
         public bool IsTotal { get; set; }
         public string AccountCodes { get; set; } = string.Empty;
     }

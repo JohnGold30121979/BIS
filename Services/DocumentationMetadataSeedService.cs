@@ -573,12 +573,90 @@ namespace BIS.ERP.Services
 
         private static List<MetadataField> FinanceDocumentFields(string name)
         {
-            var fields = StandardDocumentFields();
-            fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, name is "Платежная ведомость" or "Авансовый отчет", "Сотрудники (Списочный состав)"));
-            fields.Add(Field(Guid.Empty, "Валюта", "currency_id", "Reference", 20, false, "Справочник валют"));
-            fields.Add(Field(Guid.Empty, "Курс", "exchange_rate", "Decimal", 21));
-            fields.Add(Field(Guid.Empty, "Срок действия", "valid_until", "DateTime", 22));
+            var fields = name switch
+            {
+                "Авансовый отчет" => AdvanceReportFields(),
+                "Доверенность" => PowerOfAttorneyFields(),
+                "Платежная ведомость" => PayrollStatementFields(),
+                "Расчет курсовой разницы" => ExchangeRateDifferenceDocumentFields(),
+                _ => StandardDocumentFields()
+            };
+
             Reorder(fields);
+            return fields;
+        }
+
+        private static List<MetadataField> AdvanceReportFields()
+        {
+            var fields = StandardDocumentFields();
+            RequireDocumentPostingFields(fields);
+            fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
+            fields.Add(Field(Guid.Empty, "Вид авансового расчета", "advance_payment_id", "Reference", 20, true, "Авансовые платежи"));
+            fields.Add(Field(Guid.Empty, "Дата начала отчета", "report_start_date", "DateTime", 21));
+            fields.Add(Field(Guid.Empty, "Дата окончания отчета", "report_end_date", "DateTime", 22));
+            fields.Add(Field(Guid.Empty, "Документ выдачи", "issue_document_number", "String", 23));
+            fields.Add(Field(Guid.Empty, "Дата выдачи", "issue_document_date", "DateTime", 24));
+            fields.Add(Field(Guid.Empty, "Валюта", "currency_id", "Reference", 25, false, "Справочник валют"));
+            fields.Add(Field(Guid.Empty, "Курс", "exchange_rate", "Decimal", 26));
+            fields.Add(Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 27));
+            fields.Add(Field(Guid.Empty, "Принято к учету", "accepted_amount", "Decimal", 28));
+            fields.Add(Field(Guid.Empty, "Перерасход", "overrun_amount", "Decimal", 29));
+            fields.Add(Field(Guid.Empty, "Остаток к возврату", "return_amount", "Decimal", 30));
+            return fields;
+        }
+
+        private static List<MetadataField> PowerOfAttorneyFields()
+        {
+            var fields = StandardDocumentFields();
+            fields.Insert(2, Field(Guid.Empty, "Представитель", "representative_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
+            fields.Add(Field(Guid.Empty, "Поставщик", "counterparty_id", "Reference", 20, false, "Организации"));
+            fields.Add(Field(Guid.Empty, "Расчетный счет", "bank_account", "String", 21));
+            fields.Add(Field(Guid.Empty, "Банк", "bank_name", "String", 22));
+            fields.Add(Field(Guid.Empty, "Документ личности", "identity_document_name", "String", 23));
+            fields.Add(Field(Guid.Empty, "Номер документа личности", "identity_document_number", "String", 24));
+            fields.Add(Field(Guid.Empty, "Дата документа личности", "identity_document_date", "DateTime", 25));
+            fields.Add(Field(Guid.Empty, "Кем выдан документ", "identity_document_issuer", "String", 26));
+            fields.Add(Field(Guid.Empty, "Срок действия", "valid_until", "DateTime", 27, true));
+            fields.Add(Field(Guid.Empty, "Документ-основание", "source_document_number", "String", 28));
+            fields.Add(Field(Guid.Empty, "Дата документа-основания", "source_document_date", "DateTime", 29));
+            fields.Add(Field(Guid.Empty, "Перечень ценностей", "items_description", "String", 30));
+            fields.Add(Field(Guid.Empty, "Количество", "quantity", "Decimal", 31));
+            fields.Add(Field(Guid.Empty, "Единица измерения", "unit_name", "String", 32));
+            return fields;
+        }
+
+        private static List<MetadataField> PayrollStatementFields()
+        {
+            var fields = StandardDocumentFields();
+            RequireDocumentPostingFields(fields);
+            fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
+            fields.Add(Field(Guid.Empty, "Дата начала периода", "period_start_date", "DateTime", 20, true));
+            fields.Add(Field(Guid.Empty, "Дата окончания периода", "period_end_date", "DateTime", 21, true));
+            fields.Add(Field(Guid.Empty, "Счет выплаты", "payment_account", "Reference", 22, true, "План счетов"));
+            fields.Add(Field(Guid.Empty, "Начислено", "accrued_amount", "Decimal", 23));
+            fields.Add(Field(Guid.Empty, "Удержано", "withheld_amount", "Decimal", 24));
+            fields.Add(Field(Guid.Empty, "К выплате", "payable_amount", "Decimal", 25));
+            fields.Add(Field(Guid.Empty, "Валюта", "currency_id", "Reference", 26, false, "Справочник валют"));
+            fields.Add(Field(Guid.Empty, "Курс", "exchange_rate", "Decimal", 27));
+            fields.Add(Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 28));
+            return fields;
+        }
+
+        private static List<MetadataField> ExchangeRateDifferenceDocumentFields()
+        {
+            var fields = StandardDocumentFields();
+            fields.Add(Field(Guid.Empty, "Дата расчета", "calculation_date", "DateTime", 20, true));
+            fields.Add(Field(Guid.Empty, "Дата начала периода", "period_start_date", "DateTime", 21));
+            fields.Add(Field(Guid.Empty, "Дата окончания периода", "period_end_date", "DateTime", 22, true));
+            fields.Add(Field(Guid.Empty, "Валюта", "currency_id", "Reference", 23, false, "Справочник валют"));
+            fields.Add(Field(Guid.Empty, "Курс", "exchange_rate", "Decimal", 24));
+            fields.Add(Field(Guid.Empty, "Валютный счет", "currency_account", "Reference", 25, false, "План счетов"));
+            fields.Add(Field(Guid.Empty, "Счет дохода", "gain_account", "Reference", 26, false, "План счетов"));
+            fields.Add(Field(Guid.Empty, "Счет расхода", "loss_account", "Reference", 27, false, "План счетов"));
+            fields.Add(Field(Guid.Empty, "Обработано остатков", "processed_balances", "Int", 28));
+            fields.Add(Field(Guid.Empty, "Создано проводок", "created_postings", "Int", 29));
+            fields.Add(Field(Guid.Empty, "Сумма дохода", "gain_amount", "Decimal", 30));
+            fields.Add(Field(Guid.Empty, "Сумма расхода", "loss_amount", "Decimal", 31));
             return fields;
         }
 

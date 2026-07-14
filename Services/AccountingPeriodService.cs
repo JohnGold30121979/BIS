@@ -12,6 +12,18 @@ namespace BIS.ERP.Services
     {
         private readonly AppDbContext _context;
 
+        private sealed record FinancialReportLinePreset(
+            string ReportCode,
+            string LineCode,
+            string SectionCode,
+            string Name,
+            int SortOrder,
+            int Sign,
+            bool IsTotal,
+            string Formula,
+            decimal FixedAmount,
+            string[] AccountCodePrefixes);
+
         public AccountingPeriodService(AppDbContext context)
         {
             _context = context;
@@ -52,7 +64,10 @@ namespace BIS.ERP.Services
                     ""Id"" uuid PRIMARY KEY, ""ReportCode"" varchar(30) NOT NULL, ""LineCode"" varchar(30) NOT NULL,
                     ""SectionCode"" varchar(30) NOT NULL, ""Name"" varchar(300) NOT NULL,
                     ""SortOrder"" integer NOT NULL, ""Sign"" integer NOT NULL, ""IsTotal"" boolean NOT NULL,
+                    ""Formula"" varchar(500) NOT NULL DEFAULT '', ""FixedAmount"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""IsActive"" boolean NOT NULL);
+                ALTER TABLE ""FinancialReportLines"" ADD COLUMN IF NOT EXISTS ""Formula"" varchar(500) NOT NULL DEFAULT '';
+                ALTER TABLE ""FinancialReportLines"" ADD COLUMN IF NOT EXISTS ""FixedAmount"" numeric(18,2) NOT NULL DEFAULT 0;
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_FinancialReportLines_Report_Line""
                     ON ""FinancialReportLines"" (""ReportCode"", ""LineCode"");
                 CREATE TABLE IF NOT EXISTS ""FinancialReportLineAccounts"" (
@@ -209,6 +224,9 @@ namespace BIS.ERP.Services
             if (!module.ParticipatesInPeriodClose)
                 throw new InvalidOperationException("Для модуля отключено участие в закрытии периода.");
 
+            if (IsFinanceModule(module))
+                await EnsureFinanceModuleCanBeClosedAsync(periodId, module.Id);
+
             if (module.RequirePreviousModulesClosed)
             {
                 var previousModules = await _context.MetadataModules.AsNoTracking()
@@ -346,6 +364,41 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task EnsureFinanceModuleCanBeClosedAsync(Guid periodId, Guid financeModuleId)
+        {
+            var modules = await _context.MetadataModules.AsNoTracking()
+                .Where(item =>
+                    item.IsActive &&
+                    item.ParticipatesInPeriodClose &&
+                    item.Id != financeModuleId)
+                .OrderBy(item => item.CloseOrder)
+                .ThenBy(item => item.Name)
+                .ToListAsync();
+
+            if (modules.Count == 0)
+                return;
+
+            var moduleIds = modules.Select(item => item.Id).ToHashSet();
+            var states = await _context.AccountingPeriodModuleStates.AsNoTracking()
+                .Where(item => item.PeriodId == periodId && moduleIds.Contains(item.ModuleId))
+                .ToListAsync();
+
+            var openModules = modules
+                .Where(module => states.All(state => state.ModuleId != module.Id || !state.IsClosed))
+                .Select(module => module.Name)
+                .ToList();
+
+            if (openModules.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Модуль «Финансы» можно закрыть только после модулей: {string.Join(", ", openModules)}.");
+            }
+        }
+
+        private static bool IsFinanceModule(MetadataModule module) =>
+            module.Code.Equals(ModuleMetadataService.FinanceCode, StringComparison.OrdinalIgnoreCase) ||
+            module.Name.Equals("Финансы", StringComparison.OrdinalIgnoreCase);
+
         private async Task SynchronizeTaxJournalAsync(DateTime startDate, DateTime endDate)
         {
             var entries = await new BalanceService(_context).GetPurchaseSalesJournalAsync(startDate, endDate);
@@ -370,20 +423,123 @@ namespace BIS.ERP.Services
 
         private async Task SeedFinancialReportLinesAsync()
         {
-            var defaults = new[]
+            foreach (var preset in BuildFinancialReportLinePresets())
             {
-                new FinancialReportLine { ReportCode = "Balance", LineCode = "A", SectionCode = "Assets", Name = "Активы", SortOrder = 10, IsTotal = true },
-                new FinancialReportLine { ReportCode = "Balance", LineCode = "L", SectionCode = "Liabilities", Name = "Обязательства", SortOrder = 20, IsTotal = true },
-                new FinancialReportLine { ReportCode = "Balance", LineCode = "E", SectionCode = "Equity", Name = "Капитал", SortOrder = 30, IsTotal = true },
-                new FinancialReportLine { ReportCode = "ProfitLoss", LineCode = "I", SectionCode = "Income", Name = "Доходы", SortOrder = 10, IsTotal = true },
-                new FinancialReportLine { ReportCode = "ProfitLoss", LineCode = "X", SectionCode = "Expenses", Name = "Расходы", SortOrder = 20, IsTotal = true }
-            };
-            foreach (var line in defaults)
-            {
-                if (!await _context.FinancialReportLines.AnyAsync(item => item.ReportCode == line.ReportCode && item.LineCode == line.LineCode))
+                var line = await _context.FinancialReportLines
+                    .FirstOrDefaultAsync(item => item.ReportCode == preset.ReportCode && item.LineCode == preset.LineCode);
+                var isNewLine = false;
+
+                if (line == null)
+                {
+                    line = new FinancialReportLine
+                    {
+                        ReportCode = preset.ReportCode,
+                        LineCode = preset.LineCode,
+                        SectionCode = preset.SectionCode,
+                        Name = preset.Name,
+                        SortOrder = preset.SortOrder,
+                        Sign = preset.Sign,
+                        IsTotal = preset.IsTotal,
+                        Formula = preset.Formula,
+                        FixedAmount = preset.FixedAmount,
+                        IsActive = true
+                    };
                     await _context.FinancialReportLines.AddAsync(line);
+                    isNewLine = true;
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(line.SectionCode))
+                        line.SectionCode = preset.SectionCode;
+                    if (string.IsNullOrWhiteSpace(line.Name))
+                        line.Name = preset.Name;
+                    if (line.SortOrder == 0)
+                        line.SortOrder = preset.SortOrder;
+                    if (line.Sign == 0)
+                        line.Sign = preset.Sign;
+                    if (string.IsNullOrWhiteSpace(line.Formula) && !string.IsNullOrWhiteSpace(preset.Formula))
+                        line.Formula = preset.Formula;
+                    if (line.FixedAmount == 0 && preset.FixedAmount != 0)
+                        line.FixedAmount = preset.FixedAmount;
+                }
+
+                await _context.SaveChangesAsync();
+
+                if (preset.AccountCodePrefixes.Length == 0)
+                    continue;
+
+                var hasConfiguredAccounts = await _context.FinancialReportLineAccounts
+                    .AnyAsync(item => item.LineId == line.Id);
+                if (!isNewLine && hasConfiguredAccounts)
+                    continue;
+
+                foreach (var accountCodePrefix in preset.AccountCodePrefixes
+                    .Where(item => !string.IsNullOrWhiteSpace(item))
+                    .Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    var exists = await _context.FinancialReportLineAccounts
+                        .AnyAsync(item => item.LineId == line.Id && item.AccountCode == accountCodePrefix);
+                    if (exists)
+                        continue;
+
+                    await _context.FinancialReportLineAccounts.AddAsync(new FinancialReportLineAccount
+                    {
+                        LineId = line.Id,
+                        AccountCode = accountCodePrefix
+                    });
+                }
             }
+
             await _context.SaveChangesAsync();
+        }
+
+        private static FinancialReportLinePreset[] BuildFinancialReportLinePresets()
+        {
+            return new[]
+            {
+                new FinancialReportLinePreset(
+                    "Balance", "100", "Assets", "Активы", 100, 1, true, "110+120", 0m, Array.Empty<string>()),
+                new FinancialReportLinePreset(
+                    "Balance", "110", "Assets", "Внеоборотные активы", 110, 1, false, string.Empty, 0m,
+                    new[] { "11", "12", "13" }),
+                new FinancialReportLinePreset(
+                    "Balance", "120", "Assets", "Оборотные активы", 120, 1, false, string.Empty, 0m,
+                    new[] { "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29" }),
+
+                new FinancialReportLinePreset(
+                    "Balance", "200", "Liabilities", "Обязательства", 200, 1, true, "210+220", 0m, Array.Empty<string>()),
+                new FinancialReportLinePreset(
+                    "Balance", "210", "Liabilities", "Краткосрочные обязательства", 210, 1, false, string.Empty, 0m,
+                    new[] { "31", "32", "33", "34", "35", "36", "37", "38", "39" }),
+                new FinancialReportLinePreset(
+                    "Balance", "220", "Liabilities", "Долгосрочные обязательства", 220, 1, false, string.Empty, 0m,
+                    new[] { "41", "42", "43", "44", "45", "46", "47", "48", "49" }),
+
+                new FinancialReportLinePreset(
+                    "Balance", "300", "Equity", "Капитал", 300, 1, true, string.Empty, 0m,
+                    new[] { "51", "52", "53", "54", "55", "56", "57", "58", "59" }),
+
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "100", "Income", "Выручка от операционной деятельности", 100, 1, false, string.Empty, 0m,
+                    new[] { "61", "62", "63" }),
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "110", "Income", "Прочие доходы", 110, 1, false, string.Empty, 0m,
+                    new[] { "91" }),
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "190", "Income", "Итого доходы", 190, 1, true, "100+110", 0m, Array.Empty<string>()),
+
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "200", "Expenses", "Себестоимость и прямые расходы", 200, 1, false, string.Empty, 0m,
+                    new[] { "71", "72", "73", "74" }),
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "210", "Expenses", "Коммерческие и административные расходы", 210, 1, false, string.Empty, 0m,
+                    new[] { "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89" }),
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "220", "Expenses", "Прочие расходы и налоги", 220, 1, false, string.Empty, 0m,
+                    new[] { "95", "99" }),
+                new FinancialReportLinePreset(
+                    "ProfitLoss", "290", "Expenses", "Итого расходы", 290, 1, true, "200+210+220", 0m, Array.Empty<string>())
+            };
         }
 
         private async Task EnsureFixedAssetPeriodClosingAsync(DateTime startDate, DateTime endDate)

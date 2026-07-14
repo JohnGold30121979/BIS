@@ -75,7 +75,7 @@
                             CornerRadius="6"
                             Padding="10"
                             Margin="0,0,0,8">
-                        <TextBlock Text="Для чего: здесь задается, какие счета попадают в строки баланса и отчета о финансовых результатах. Если счет не указан в строках отчетности, он может быть виден в ОСВ, но не попадет в нужную строку итоговой формы."
+                        <TextBlock Text="Для чего: здесь задается, какие счета попадают в строки баланса и отчета о финансовых результатах. Можно задавать формулы строк по кодам строк, например 110+120-130 или n110:n190. Это нужно для совместимости с Fox-отчетами, где итоговые строки считались формулами."
                                    Foreground="{DynamicResource AppSecondaryTextBrush}"
                                    TextWrapping="Wrap"/>
                     </Border>
@@ -96,13 +96,15 @@
                                 ToolTip="Сохраняет структуру строк и список счетов для выбранной формы."/>
                     </WrapPanel>
                     <DataGrid x:Name="ReportLinesGrid" Grid.Row="2" AutoGenerateColumns="False" CanUserAddRows="False"
-                              ToolTip="В поле 'Счета' указывайте 8-значные коды через запятую, например 14100000, 32100000. Знак -1 разворачивает сумму в противоположную сторону.">
+                              ToolTip="В поле 'Счета' указывайте 8-значные коды через запятую, например 14100000, 32100000. Формула считает строки по их кодам. Знак -1 разворачивает сумму в противоположную сторону.">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Код" Binding="{Binding LineCode}" Width="90"/>
                             <DataGridTextColumn Header="Раздел" Binding="{Binding SectionCode}" Width="130"/>
                             <DataGridTextColumn Header="Наименование строки" Binding="{Binding Name}" Width="*"/>
                             <DataGridTextColumn Header="Порядок" Binding="{Binding SortOrder}" Width="80"/>
                             <DataGridTextColumn Header="Знак" Binding="{Binding Sign}" Width="60"/>
+                            <DataGridTextColumn Header="Формула" Binding="{Binding Formula}" Width="180"/>
+                            <DataGridTextColumn Header="Фикс. сумма" Binding="{Binding FixedAmount}" Width="100"/>
                             <DataGridCheckBoxColumn Header="Итог" Binding="{Binding IsTotal}" Width="60"/>
                             <DataGridTextColumn Header="Счета (через запятую)" Binding="{Binding AccountCodes}" Width="240"/>
                         </DataGrid.Columns>

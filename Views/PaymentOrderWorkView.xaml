@@ -51,6 +51,7 @@
                 <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding EmployeeName}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="MaterialColumn" Header="Материал" Binding="{Binding MaterialName}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn Header="Корр. счет" Binding="{Binding CorrespondentAccountName}" Width="120"/>
+                <DataGridTextColumn Header="Классификация платежа" Binding="{Binding PaymentClassificationName}" Width="220"/>
                 <DataGridTextColumn Header="Назначение" Binding="{Binding Purpose}" Width="200"/>
                 <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150"/>

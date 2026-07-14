@@ -1077,6 +1077,7 @@ END $$;");
 
                 if (!existingCatalogs.Contains("Расчет курсовой разницы"))
                     await CreateExchangeRateDiffCatalog(config);
+                await EnsureExchangeRateDiffCatalogStructureAsync();
 
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
                 await EnsureStandardReportTemplatesAsync(config);
@@ -2099,6 +2100,22 @@ END $$;");
                 {
                     await ProcessPaymentOrderAsync(document, recordData, recordId, amount);
                 }
+                else if (document.Name == "Авансовый отчет")
+                {
+                    await ProcessAdvanceReportAsync(document, recordData, recordId, amount);
+                }
+                else if (document.Name == "Доверенность")
+                {
+                    await ProcessPowerOfAttorneyAsync(document, recordData, recordId);
+                }
+                else if (document.Name == "Платежная ведомость")
+                {
+                    await ProcessPayrollStatementAsync(document, recordData, recordId, amount);
+                }
+                else if (document.Name == "Расчет курсовой разницы")
+                {
+                    await ProcessExchangeRateDifferenceDocumentAsync(document, recordData, recordId);
+                }
                 else if (document.Name == "Покупка ОС")
                 {
                     await ProcessFixedAssetPurchaseDocumentAsync(document, recordData, recordId, amount);
@@ -2804,6 +2821,14 @@ END $$;");
             if (string.IsNullOrEmpty(description) && recordData.ContainsKey("Примечание"))
                 description = recordData["Примечание"].ToString();
 
+            var paymentClassificationDisplay = await GetPaymentClassificationDisplayAsync(recordData);
+            if (!string.IsNullOrWhiteSpace(paymentClassificationDisplay))
+            {
+                description = string.IsNullOrWhiteSpace(description)
+                    ? paymentClassificationDisplay
+                    : $"{paymentClassificationDisplay}; {description}";
+            }
+
             var amountCurrency = GetDecimalValue(recordData, "amount_currency", "Сумма в валюте");
             var exchangeRate = GetDecimalValue(recordData, "exchange_rate", "Курс");
             var currencyId = GetStringValue(recordData, "currency_id", "Валюта");
@@ -2891,6 +2916,61 @@ END $$;");
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
+        }
+
+        private async Task<string> GetPaymentClassificationDisplayAsync(Dictionary<string, object> recordData)
+        {
+            var rawValue = GetStringValue(recordData, "payment_classification_id", "Классификация платежа");
+            if (string.IsNullOrWhiteSpace(rawValue))
+                return string.Empty;
+
+            if (!Guid.TryParse(rawValue, out var classificationId))
+                return rawValue;
+
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    item.Name == "Классификация платежей");
+            if (catalog == null)
+                return string.Empty;
+
+            var connection = _context.Database.GetDbConnection();
+            var wasClosed = connection.State != System.Data.ConnectionState.Open;
+
+            try
+            {
+                if (wasClosed)
+                    await _context.Database.OpenConnectionAsync();
+
+                using var command = connection.CreateCommand();
+                command.CommandText = $@"
+                    SELECT ""code"", ""name""
+                    FROM {QuoteIdentifier(catalog.TableName)}
+                    WHERE ""Id"" = @id
+                    LIMIT 1;";
+
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = "@id";
+                parameter.Value = classificationId;
+                command.Parameters.Add(parameter);
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return string.Empty;
+
+                var code = reader["code"]?.ToString()?.Trim() ?? string.Empty;
+                var name = reader["name"]?.ToString()?.Trim() ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(name))
+                    return $"{code} - {name}";
+
+                return !string.IsNullOrWhiteSpace(code) ? code : name;
+            }
+            finally
+            {
+                if (wasClosed)
+                    await _context.Database.CloseConnectionAsync();
+            }
         }
 
         private async Task CreatePosting(
@@ -3308,7 +3388,9 @@ END $$;");
                    !documentName.Equals("Передача ОС в подотчет", StringComparison.OrdinalIgnoreCase) &&
                    !documentName.Equals("Смена затратного счета", StringComparison.OrdinalIgnoreCase) &&
                    !documentName.Equals("Ликвидация ОС", StringComparison.OrdinalIgnoreCase) &&
-                   !documentName.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase);
+                   !documentName.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase) &&
+                   !documentName.Equals("Доверенность", StringComparison.OrdinalIgnoreCase) &&
+                   !documentName.Equals("Расчет курсовой разницы", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool RequiresNonZeroDocumentAmount(string documentName)

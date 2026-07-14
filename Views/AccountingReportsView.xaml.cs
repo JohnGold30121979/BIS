@@ -336,6 +336,7 @@ namespace BIS.ERP.Views
             table.Columns.Add("Валюта", typeof(string));
             table.Columns.Add("Сумма в валюте", typeof(decimal));
             table.Columns.Add("Курс", typeof(decimal));
+            table.Columns.Add("Классификация платежа", typeof(string));
             table.Columns.Add("Назначение платежа", typeof(string));
             table.Columns.Add("Проведен", typeof(string));
             table.Columns.Add("Примечание", typeof(string));
@@ -344,12 +345,12 @@ namespace BIS.ERP.Views
             {
                 table.Rows.Add(row.Date, row.Number, row.OrderType, row.OurAccount, row.CorrespondentAccount,
                     row.Organization, row.Amount, row.Currency, row.AmountCurrency, row.ExchangeRate,
-                    row.Purpose, LocalizationService.DisplayValue(row.IsPosted), row.Note);
+                    row.PaymentClassification, row.Purpose, LocalizationService.DisplayValue(row.IsPosted), row.Note);
             }
 
             table.Rows.Add(DBNull.Value, "ИТОГО", string.Empty, string.Empty, string.Empty, string.Empty,
                 rows.Sum(row => row.Amount), string.Empty, rows.Sum(row => row.AmountCurrency),
-                0m, string.Empty, string.Empty, string.Empty);
+                0m, string.Empty, string.Empty, string.Empty, string.Empty);
 
             var report = CreateReport(table,
                 $"Реестр платежных поручений за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
@@ -381,10 +382,11 @@ namespace BIS.ERP.Views
             table.Columns.Add("Остаток", typeof(decimal));
             table.Columns.Add("Сумма в валюте", typeof(decimal));
             table.Columns.Add("Валюта", typeof(string));
+            table.Columns.Add("Классификация платежа", typeof(string));
             table.Columns.Add("Назначение платежа", typeof(string));
 
             table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, string.Empty,
-                string.Empty, 0m, 0m, balance, 0m, string.Empty, string.Empty);
+                string.Empty, 0m, 0m, balance, 0m, string.Empty, string.Empty, string.Empty);
 
             decimal totalIncome = 0m;
             decimal totalExpense = 0m;
@@ -397,12 +399,13 @@ namespace BIS.ERP.Views
                 balance += income - expense;
 
                 table.Rows.Add(row.Date, row.Number, row.OrderType, row.OurAccount, row.CorrespondentAccount,
-                    row.Organization, income, expense, balance, row.AmountCurrency, row.Currency, row.Purpose);
+                    row.Organization, income, expense, balance, row.AmountCurrency, row.Currency,
+                    row.PaymentClassification, row.Purpose);
             }
 
             table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty, string.Empty,
                 string.Empty, totalIncome, totalExpense, balance, rows.Sum(row => row.AmountCurrency),
-                string.Empty, string.Empty);
+                string.Empty, string.Empty, string.Empty);
 
             var report = CreateReport(table,
                 $"Выписка банка за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
@@ -483,6 +486,7 @@ namespace BIS.ERP.Views
                     Currency = ResolveReportReference(row, referenceMaps, "Валюта", "currency_id"),
                     AmountCurrency = ReadReportDecimal(row, "Сумма в валюте", "amount_currency"),
                     ExchangeRate = ReadReportDecimal(row, "Курс", "exchange_rate"),
+                    PaymentClassification = ResolveReportReference(row, referenceMaps, "Классификация платежа", "payment_classification_id"),
                     Purpose = ReadReportString(row, "Назначение платежа", "purpose"),
                     Note = ReadReportString(row, "Примечание", "description"),
                     IsPosted = ReadReportBool(row, "Проведён", "Проведен", "is_posted")
@@ -628,6 +632,7 @@ namespace BIS.ERP.Views
             public string Currency { get; init; } = string.Empty;
             public decimal AmountCurrency { get; init; }
             public decimal ExchangeRate { get; init; }
+            public string PaymentClassification { get; init; } = string.Empty;
             public string Purpose { get; init; } = string.Empty;
             public string Note { get; init; } = string.Empty;
             public bool IsPosted { get; init; }

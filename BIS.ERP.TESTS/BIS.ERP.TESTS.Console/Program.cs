@@ -2,15 +2,15 @@ using BIS.ERP.Testing;
 
 var logWriter = TestLogWriter.Create("console");
 var parsed = await ParseOptionsAsync(args);
-var scenario = SmokeTestRegistry.FindByCode("invoice-esf")
-    ?? throw new InvalidOperationException("Сценарий invoice-esf не найден.");
+var scenario = SmokeTestRegistry.FindByCode(parsed.ScenarioCode)
+    ?? throw new InvalidOperationException($"Сценарий {parsed.ScenarioCode} не найден.");
 
-LogLine($"Запуск сценария {scenario.Code} в режиме {parsed.Command}.", logWriter);
+LogLine($"Запуск сценария {scenario.Code} в режиме {parsed.Options.Command}.", logWriter);
 LogLine($"Файл настроек: {TestEnvironment.GetSettingsFilePath()}", logWriter);
 LogLine($"Папка логов: {TestEnvironment.GetLogsDirectory()}", logWriter);
 
 var progress = new Progress<string>(message => LogLine(message, logWriter));
-var result = await scenario.ExecuteAsync(parsed, progress);
+var result = await scenario.ExecuteAsync(parsed.Options, progress);
 
 if (result.IsSuccess)
 {
@@ -25,11 +25,12 @@ foreach (var detail in result.Details)
     LogError($"- {detail}", logWriter);
 return 1;
 
-static async Task<SmokeTestRunOptions> ParseOptionsAsync(string[] arguments)
+static async Task<ConsoleRunOptions> ParseOptionsAsync(string[] arguments)
 {
     var command = SmokeTestCommand.Verify;
     var cycleCount = 1;
     var documentCount = 1;
+    var scenarioCode = "invoice-esf";
     string? filePath = null;
 
     for (var index = 0; index < arguments.Length; index++)
@@ -49,6 +50,10 @@ static async Task<SmokeTestRunOptions> ParseOptionsAsync(string[] arguments)
             case "check":
                 command = SmokeTestCommand.Verify;
                 break;
+            case "--scenario":
+            case "-s":
+                scenarioCode = ReadString(arguments, ref index, "scenario");
+                break;
             case "--cycles":
             case "-c":
                 cycleCount = ReadInt(arguments, ref index, 1, "cycles");
@@ -62,8 +67,14 @@ static async Task<SmokeTestRunOptions> ParseOptionsAsync(string[] arguments)
                 filePath = ReadString(arguments, ref index, "file");
                 break;
             default:
+                if (!argument.StartsWith("-", StringComparison.Ordinal))
+                {
+                    scenarioCode = argument;
+                    break;
+                }
+
                 throw new InvalidOperationException(
-                    $"Неизвестный параметр '{argument}'. Используйте run|verify|cleanup, --cycles, --documents, --file.");
+                    $"Неизвестный параметр '{argument}'. Используйте [код-сценария], run|verify|cleanup, --scenario, --cycles, --documents, --file.");
         }
     }
 
@@ -74,14 +85,16 @@ static async Task<SmokeTestRunOptions> ParseOptionsAsync(string[] arguments)
         operations = await loader.LoadAsync(filePath);
     }
 
-    return new SmokeTestRunOptions
-    {
-        Command = command,
-        CycleCount = Math.Max(1, cycleCount),
-        DocumentCount = Math.Max(1, documentCount),
-        OperationsFilePath = filePath,
-        Operations = operations
-    };
+    return new ConsoleRunOptions(
+        scenarioCode,
+        new SmokeTestRunOptions
+        {
+            Command = command,
+            CycleCount = Math.Max(1, cycleCount),
+            DocumentCount = Math.Max(1, documentCount),
+            OperationsFilePath = filePath,
+            Operations = operations
+        });
 }
 
 static int ReadInt(string[] arguments, ref int index, int fallback, string optionName)
@@ -118,3 +131,5 @@ static void LogError(string message, TestLogWriter logWriter)
     Console.Error.WriteLine(entry);
     logWriter.WriteLine(entry);
 }
+
+internal sealed record ConsoleRunOptions(string ScenarioCode, SmokeTestRunOptions Options);

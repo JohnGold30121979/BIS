@@ -60,9 +60,6 @@ namespace BIS.ERP
         private bool _closeForModeSwitch;
         private static readonly HashSet<string> NotReadyFinanceDocuments = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Авансовый отчет",
-            "Доверенность",
-            "Платежная ведомость",
             "Расчет курсовой разницы"
         };
 
@@ -284,6 +281,7 @@ namespace BIS.ERP
             {
                 "Приходный кассовый ордер" or "Расходный кассовый ордер" => "CashOrder",
                 "Платежное поручение" => "PaymentOrder",
+                "Авансовый отчет" or "Доверенность" or "Платежная ведомость" => "FinanceDocument",
                 "Проводки" => "PostingsDocument",
                 InvoiceDocumentTypes.SalesIssue or InvoiceDocumentTypes.PurchaseRegistration => "InvoiceDocument",
                 _ => "DynamicDocument"
@@ -417,6 +415,20 @@ namespace BIS.ERP
                             Name = doc.Name,
                             Icon = doc.Icon,
                             Type = "PaymentOrder",
+                            Tag = doc,
+                            Order = doc.Order
+                        });
+                    }
+                    else if (doc.Name == "Авансовый отчет" ||
+                             doc.Name == "Доверенность" ||
+                             doc.Name == "Платежная ведомость")
+                    {
+                        docsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = doc.Id.ToString(),
+                            Name = doc.Name,
+                            Icon = doc.Icon,
+                            Type = "FinanceDocument",
                             Tag = doc,
                             Order = doc.Order
                         });
@@ -696,6 +708,14 @@ namespace BIS.ERP
                         {
                             var paymentView = new PaymentOrderWorkView(document3, _metadataService);
                             _navigation.NavigateTo(paymentView);
+                        }
+                        break;
+
+                    case "FinanceDocument":
+                        if (item.Tag is MetadataObject financeDocument)
+                        {
+                            var financeDocumentView = new FinanceDocumentWorkView(financeDocument, _metadataService);
+                            _navigation.NavigateTo(financeDocumentView);
                         }
                         break;
 

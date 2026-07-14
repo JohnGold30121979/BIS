@@ -80,6 +80,8 @@ namespace BIS.ERP.Models
         [MaxLength(300)] public string Name { get; set; } = string.Empty;
         public int SortOrder { get; set; }
         public int Sign { get; set; } = 1;
+        [MaxLength(500)] public string Formula { get; set; } = string.Empty;
+        [Column(TypeName = "numeric(18,2)")] public decimal FixedAmount { get; set; }
         public bool IsTotal { get; set; }
         public bool IsActive { get; set; } = true;
     }

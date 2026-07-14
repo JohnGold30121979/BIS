@@ -3,6 +3,7 @@ using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -126,23 +127,29 @@ namespace BIS.ERP.Services
             var configuredLines = await LoadConfiguredLinesAsync("Balance");
             var closingBalances = await GetTurnoverBalanceAsync(date.Date, date.Date);
 
-            if (configuredLines.Any(line => line.AccountCodes.Count > 0))
+            if (configuredLines.Any(HasReportCalculationRule))
             {
-                foreach (var line in configuredLines.Where(line => !line.IsTotal && line.AccountCodes.Count > 0))
+                var lineAmounts = CalculateBalanceLineAmounts(configuredLines, closingBalances);
+
+                foreach (var line in configuredLines.Where(line => !line.IsTotal))
                 {
-                    var amount = closingBalances.Where(balance => line.AccountCodes.Any(code => balance.AccountCode.StartsWith(code)))
-                        .Sum(balance => balance.ClosingDebit - balance.ClosingCredit) * line.Sign;
+                    if (!lineAmounts.TryGetValue(line.LineCode, out var amount))
+                        continue;
+                    if (amount == 0 && !HasReportCalculationRule(line))
+                        continue;
+
                     var item = new BalanceItem { AccountCode = line.LineCode, AccountName = line.Name, Amount = amount };
-                    if (line.SectionCode.Equals("Assets", StringComparison.OrdinalIgnoreCase) || line.SectionCode.Equals("Активы", StringComparison.OrdinalIgnoreCase))
+                    if (IsSection(line, "Assets", "Активы"))
                         result.Assets.Add(item);
-                    else if (line.SectionCode.Equals("Equity", StringComparison.OrdinalIgnoreCase) || line.SectionCode.Equals("Капитал", StringComparison.OrdinalIgnoreCase))
+                    else if (IsSection(line, "Equity", "Капитал"))
                         result.Equity.Add(item);
                     else
                         result.Liabilities.Add(item);
                 }
-                result.TotalAssets = result.Assets.Sum(item => item.Amount);
-                result.TotalLiabilities = result.Liabilities.Sum(item => item.Amount);
-                result.TotalEquity = result.Equity.Sum(item => item.Amount);
+
+                result.TotalAssets = ResolveConfiguredSectionTotal(configuredLines, lineAmounts, "Assets", "Активы", result.Assets.Sum(item => item.Amount));
+                result.TotalLiabilities = ResolveConfiguredSectionTotal(configuredLines, lineAmounts, "Liabilities", "Обязательства", result.Liabilities.Sum(item => item.Amount));
+                result.TotalEquity = ResolveConfiguredSectionTotal(configuredLines, lineAmounts, "Equity", "Капитал", result.Equity.Sum(item => item.Amount));
                 return result;
             }
 
@@ -204,23 +211,26 @@ namespace BIS.ERP.Services
             var result = new FinancialResults();
             var configuredLines = await LoadConfiguredLinesAsync("ProfitLoss");
 
-            if (configuredLines.Any(line => line.AccountCodes.Count > 0))
+            if (configuredLines.Any(HasReportCalculationRule))
             {
-                foreach (var line in configuredLines.Where(line => !line.IsTotal && line.AccountCodes.Count > 0))
+                var lineAmounts = CalculateProfitLossLineAmounts(configuredLines, accounts, postings);
+
+                foreach (var line in configuredLines.Where(line => !line.IsTotal))
                 {
-                    var matchingAccounts = accounts.Where(pair => line.AccountCodes.Any(code => pair.Key.StartsWith(code)));
-                    var amount = matchingAccounts.Sum(pair =>
-                    {
-                        var debit = postings.Where(posting => posting.DebitAccount == pair.Key).Sum(posting => posting.Amount);
-                        var credit = postings.Where(posting => posting.CreditAccount == pair.Key).Sum(posting => posting.Amount);
-                        return IsPassiveType(pair.Value.Type) ? credit - debit : debit - credit;
-                    }) * line.Sign;
+                    if (!lineAmounts.TryGetValue(line.LineCode, out var amount))
+                        continue;
+                    if (amount == 0 && !HasReportCalculationRule(line))
+                        continue;
+
                     var item = new BalanceItem { AccountCode = line.LineCode, AccountName = line.Name, Amount = amount };
-                    if (line.SectionCode.Equals("Income", StringComparison.OrdinalIgnoreCase) || line.SectionCode.Equals("Доходы", StringComparison.OrdinalIgnoreCase))
+                    if (IsSection(line, "Income", "Доходы"))
                         result.Income.Add(item);
                     else
                         result.Expenses.Add(item);
                 }
+
+                result.TotalIncomeOverride = ResolveConfiguredSectionTotal(configuredLines, lineAmounts, "Income", "Доходы", result.Income.Sum(item => item.Amount));
+                result.TotalExpensesOverride = ResolveConfiguredSectionTotal(configuredLines, lineAmounts, "Expenses", "Расходы", result.Expenses.Sum(item => item.Amount));
                 return result;
             }
 
@@ -538,10 +548,192 @@ namespace BIS.ERP.Services
                 LineCode = line.LineCode,
                 SectionCode = line.SectionCode,
                 Name = line.Name,
+                SortOrder = line.SortOrder,
                 Sign = line.Sign,
+                Formula = line.Formula,
+                FixedAmount = line.FixedAmount,
                 IsTotal = line.IsTotal,
                 AccountCodes = links.Where(link => link.LineId == line.Id).Select(link => link.AccountCode).ToList()
             }).ToList();
+        }
+
+        private static Dictionary<string, decimal> CalculateBalanceLineAmounts(
+            IReadOnlyCollection<ConfiguredLine> lines,
+            IReadOnlyCollection<TurnoverBalance> closingBalances)
+        {
+            var lineAmounts = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in lines)
+            {
+                var accountAmount = line.AccountCodes.Count == 0
+                    ? 0m
+                    : closingBalances
+                        .Where(balance => line.AccountCodes.Any(code =>
+                            balance.AccountCode.StartsWith(code, StringComparison.OrdinalIgnoreCase)))
+                        .Sum(balance => balance.ClosingDebit - balance.ClosingCredit);
+
+                lineAmounts[line.LineCode] = (accountAmount + line.FixedAmount) * NormalizeSign(line.Sign);
+            }
+
+            ApplyConfiguredFormulas(lines, lineAmounts);
+            return lineAmounts;
+        }
+
+        private static Dictionary<string, decimal> CalculateProfitLossLineAmounts(
+            IReadOnlyCollection<ConfiguredLine> lines,
+            IReadOnlyDictionary<string, AccountInfo> accounts,
+            IReadOnlyCollection<PostingViewModel> postings)
+        {
+            var lineAmounts = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in lines)
+            {
+                var accountAmount = line.AccountCodes.Count == 0
+                    ? 0m
+                    : accounts
+                        .Where(pair => line.AccountCodes.Any(code =>
+                            pair.Key.StartsWith(code, StringComparison.OrdinalIgnoreCase)))
+                        .Sum(pair =>
+                        {
+                            var debit = postings
+                                .Where(posting => posting.DebitAccount.Equals(pair.Key, StringComparison.OrdinalIgnoreCase))
+                                .Sum(posting => posting.Amount);
+                            var credit = postings
+                                .Where(posting => posting.CreditAccount.Equals(pair.Key, StringComparison.OrdinalIgnoreCase))
+                                .Sum(posting => posting.Amount);
+                            return IsPassiveType(pair.Value.Type) ? credit - debit : debit - credit;
+                        });
+
+                lineAmounts[line.LineCode] = (accountAmount + line.FixedAmount) * NormalizeSign(line.Sign);
+            }
+
+            ApplyConfiguredFormulas(lines, lineAmounts);
+            return lineAmounts;
+        }
+
+        private static void ApplyConfiguredFormulas(
+            IReadOnlyCollection<ConfiguredLine> lines,
+            Dictionary<string, decimal> lineAmounts)
+        {
+            var formulaLines = lines
+                .Where(line => !string.IsNullOrWhiteSpace(line.Formula))
+                .OrderBy(line => line.SortOrder)
+                .ToList();
+            if (formulaLines.Count == 0)
+                return;
+
+            for (var pass = 0; pass < Math.Max(3, formulaLines.Count); pass++)
+            {
+                foreach (var line in formulaLines)
+                {
+                    lineAmounts[line.LineCode] =
+                        (EvaluateReportFormula(line.Formula, lineAmounts) + line.FixedAmount) *
+                        NormalizeSign(line.Sign);
+                }
+            }
+        }
+
+        private static decimal EvaluateReportFormula(
+            string formula,
+            IReadOnlyDictionary<string, decimal> lineAmounts)
+        {
+            var expression = formula
+                .Replace(" ", string.Empty, StringComparison.Ordinal)
+                .Replace(";", "+", StringComparison.Ordinal);
+            if (string.IsNullOrWhiteSpace(expression))
+                return 0m;
+
+            var total = 0m;
+            var sign = 1;
+            var index = 0;
+            while (index < expression.Length)
+            {
+                var current = expression[index];
+                if (current == '+' || current == '-')
+                {
+                    sign = current == '-' ? -1 : 1;
+                    index++;
+                    continue;
+                }
+
+                var start = index;
+                while (index < expression.Length && expression[index] != '+' && expression[index] != '-')
+                    index++;
+
+                var term = expression[start..index];
+                if (!string.IsNullOrWhiteSpace(term))
+                    total += sign * EvaluateFormulaTerm(term, lineAmounts);
+                sign = 1;
+            }
+
+            return total;
+        }
+
+        private static decimal EvaluateFormulaTerm(
+            string term,
+            IReadOnlyDictionary<string, decimal> lineAmounts)
+        {
+            var rangeParts = term.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (rangeParts.Length == 2 &&
+                TryGetLineNumber(rangeParts[0], out var fromLine) &&
+                TryGetLineNumber(rangeParts[1], out var toLine))
+            {
+                var min = Math.Min(fromLine, toLine);
+                var max = Math.Max(fromLine, toLine);
+                return lineAmounts
+                    .Where(pair => TryGetLineNumber(pair.Key, out var lineNumber) &&
+                                   lineNumber >= min && lineNumber <= max)
+                    .Sum(pair => pair.Value);
+            }
+
+            var lineCode = NormalizeLineReference(term);
+            if (lineAmounts.TryGetValue(lineCode, out var lineAmount))
+                return lineAmount;
+
+            return decimal.TryParse(term, NumberStyles.Any, CultureInfo.InvariantCulture, out var invariantValue) ||
+                   decimal.TryParse(term, NumberStyles.Any, CultureInfo.CurrentCulture, out invariantValue)
+                ? invariantValue
+                : 0m;
+        }
+
+        private static decimal ResolveConfiguredSectionTotal(
+            IReadOnlyCollection<ConfiguredLine> lines,
+            IReadOnlyDictionary<string, decimal> lineAmounts,
+            string englishSectionCode,
+            string russianSectionCode,
+            decimal fallback)
+        {
+            var totalLine = lines
+                .Where(line => line.IsTotal && IsSection(line, englishSectionCode, russianSectionCode))
+                .OrderBy(line => line.SortOrder)
+                .LastOrDefault(line => lineAmounts.ContainsKey(line.LineCode) && HasReportCalculationRule(line));
+
+            return totalLine != null && lineAmounts.TryGetValue(totalLine.LineCode, out var total)
+                ? total
+                : fallback;
+        }
+
+        private static bool HasReportCalculationRule(ConfiguredLine line) =>
+            line.AccountCodes.Count > 0 ||
+            !string.IsNullOrWhiteSpace(line.Formula) ||
+            line.FixedAmount != 0;
+
+        private static bool IsSection(ConfiguredLine line, string englishSectionCode, string russianSectionCode) =>
+            line.SectionCode.Equals(englishSectionCode, StringComparison.OrdinalIgnoreCase) ||
+            line.SectionCode.Equals(russianSectionCode, StringComparison.OrdinalIgnoreCase);
+
+        private static int NormalizeSign(int sign) => sign == -1 ? -1 : 1;
+
+        private static bool TryGetLineNumber(string value, out int lineNumber)
+        {
+            var normalized = NormalizeLineReference(value);
+            return int.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out lineNumber);
+        }
+
+        private static string NormalizeLineReference(string value)
+        {
+            var normalized = value.Trim().Trim('[', ']', '(', ')');
+            if (normalized.StartsWith("n", StringComparison.OrdinalIgnoreCase) && normalized.Length > 1)
+                normalized = normalized[1..];
+            return normalized;
         }
 
         private static bool TryGetDate(Dictionary<string, object> row, out DateTime date)
@@ -653,7 +845,10 @@ namespace BIS.ERP.Services
             public string LineCode { get; init; } = string.Empty;
             public string SectionCode { get; init; } = string.Empty;
             public string Name { get; init; } = string.Empty;
+            public int SortOrder { get; init; }
             public int Sign { get; init; }
+            public string Formula { get; init; } = string.Empty;
+            public decimal FixedAmount { get; init; }
             public bool IsTotal { get; init; }
             public List<string> AccountCodes { get; init; } = new();
         }

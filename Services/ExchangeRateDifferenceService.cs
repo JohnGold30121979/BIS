@@ -38,39 +38,35 @@ namespace BIS.ERP.Services
             DateTime periodEnd,
             bool replaceExistingCalculation = true)
         {
+            return await CalculateForDateAsync(periodEnd, null, replaceExistingCalculation);
+        }
+
+        public async Task<ExchangeRateDifferenceCalculationResult> CalculateForDateAsync(
+            DateTime periodEnd,
+            DateTime? periodStart,
+            bool replaceExistingCalculation = true)
+        {
             var calculationDate = DateTime.SpecifyKind(periodEnd.Date, DateTimeKind.Utc);
+            var calculationStart = DateTime.SpecifyKind(
+                (periodStart?.Date ?? new DateTime(calculationDate.Year, calculationDate.Month, 1)).Date,
+                DateTimeKind.Utc);
+            if (calculationStart > calculationDate)
+                calculationStart = new DateTime(calculationDate.Year, calculationDate.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+
             var documentNumber = BuildDocumentNumber(calculationDate);
             var warnings = new List<string>();
 
             await EnsurePostingCurrencyColumnsAsync();
 
             if (replaceExistingCalculation)
-                await DeleteExistingCalculationAsync(calculationDate, documentNumber);
+                await DeleteExistingCalculationAsync(documentNumber);
 
             var currencyReferences = await LoadCurrencyReferencesAsync();
             var configuredRules = await LoadConfiguredRulesAsync(currencyReferences);
             var currencyAccountCodes = await LoadCurrencyAccountCodesAsync();
-            var balances = await LoadCurrencyBalancesAsync(calculationDate);
-
-            if (configuredRules.Count > 0)
-            {
-                balances = balances
-                    .Where(balance => configuredRules.Any(rule =>
-                        rule.AccountCode.Equals(balance.AccountCode, StringComparison.OrdinalIgnoreCase) &&
-                        (!rule.CurrencyId.HasValue ||
-                         rule.CurrencyId.Value.ToString().Equals(balance.CurrencyId, StringComparison.OrdinalIgnoreCase))))
-                    .ToList();
-            }
-            else if (currencyAccountCodes.Count == 0)
-            {
-                warnings.Add("В плане счетов не найдены счета с признаком связи с валютами. Расчет выполнен по всем проводкам, где заполнена валюта.");
-            }
-            else
-            {
-                balances = balances
-                    .Where(balance => currencyAccountCodes.Contains(balance.AccountCode))
-                    .ToList();
-            }
+            var accountKinds = await LoadAccountKindsAsync();
+            var movements = await LoadCurrencyMovementsAsync(calculationDate);
+            var balances = BuildCurrencyBalances(movements, configuredRules, currencyAccountCodes, warnings);
 
             var processedBalances = 0;
             var createdPostings = 0;
@@ -88,50 +84,23 @@ namespace BIS.ERP.Services
                 if (currencyReferences.TryGetValue(currencyId, out var currencyReference) && currencyReference.IsBaseCurrency)
                     continue;
 
-                var currencyRate = await _metadataService.GetCurrencyRateForDateAsync(currencyId, calculationDate);
-                if (currencyRate == null)
-                {
-                    var currencyName = ResolveCurrencyDisplay(currencyReferences, currencyId);
-                    warnings.Add($"Не найден курс валюты {currencyName} на {calculationDate:dd.MM.yyyy} или более раннюю дату.");
-                    continue;
-                }
+                var calculatedPostings = balance.Rule?.CalculationAlgorithm == 3
+                    ? await BuildMovementAwarePostingsAsync(balance, currencyId, calculationStart, calculationDate, warnings, accountKinds)
+                    : await BuildBalancePostingsAsync(balance, currencyId, calculationDate, warnings, accountKinds);
 
-                var revaluedAmount = RoundMoney(balance.AmountInCurrency * currencyRate.Rate);
-                var difference = RoundMoney(revaluedAmount - balance.AmountInNationalCurrency);
-                if (Math.Abs(difference) < 0.01m)
+                if (calculatedPostings.Count == 0)
                     continue;
 
                 processedBalances++;
-
-                if (difference > 0)
+                foreach (var posting in calculatedPostings)
                 {
-                    await InsertCalculationPostingAsync(
-                        calculationDate,
-                        documentNumber,
-                        balance.AccountCode,
-                        ExchangeGainAccountCode,
-                        difference,
-                        currencyId,
-                        balance.AmountInCurrency,
-                        currencyRate.Rate);
-                    gainAmount += difference;
+                    await InsertCalculationPostingAsync(documentNumber, posting);
+                    createdPostings++;
+                    if (posting.IsGain)
+                        gainAmount += posting.Amount;
+                    else
+                        lossAmount += posting.Amount;
                 }
-                else
-                {
-                    var loss = Math.Abs(difference);
-                    await InsertCalculationPostingAsync(
-                        calculationDate,
-                        documentNumber,
-                        ExchangeLossAccountCode,
-                        balance.AccountCode,
-                        loss,
-                        currencyId,
-                        balance.AmountInCurrency,
-                        currencyRate.Rate);
-                    lossAmount += loss;
-                }
-
-                createdPostings++;
             }
 
             return new ExchangeRateDifferenceCalculationResult(
@@ -152,33 +121,44 @@ namespace BIS.ERP.Services
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2);
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS exchange_rate numeric(18,4);
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS debit_report_line integer;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS credit_report_line integer;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS organization_id uuid;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS employee_id uuid;
                     END IF;
                 END $$;");
         }
 
-        private async Task DeleteExistingCalculationAsync(DateTime calculationDate, string documentNumber)
+        private async Task DeleteExistingCalculationAsync(string documentNumber)
         {
             await _context.Database.ExecuteSqlRawAsync(@"
                 DELETE FROM doc_postings
                 WHERE document_type = @documentType
-                  AND doc_number = @documentNumber
-                  AND posting_date::date = @calculationDate;",
+                  AND doc_number = @documentNumber;",
                 new NpgsqlParameter("@documentType", CalculationDocumentType),
-                new NpgsqlParameter("@documentNumber", documentNumber),
-                new NpgsqlParameter("@calculationDate", calculationDate.Date));
+                new NpgsqlParameter("@documentNumber", documentNumber));
         }
 
-        private async Task<List<CurrencyBalance>> LoadCurrencyBalancesAsync(DateTime calculationDate)
+        private async Task<List<CurrencyMovement>> LoadCurrencyMovementsAsync(DateTime calculationDate)
         {
-            var balances = new List<CurrencyBalance>();
+            var movements = new List<CurrencyMovement>();
             const string sql = @"
-                SELECT account_code,
+                SELECT posting_date,
+                       account_code,
                        currency_id,
-                       SUM(amount_in_national_currency) AS amount_in_national_currency,
-                       SUM(amount_in_currency) AS amount_in_currency
+                       module_code,
+                       organization_id,
+                       employee_id,
+                       amount_in_national_currency,
+                       amount_in_currency
                 FROM (
-                    SELECT debit_account AS account_code,
+                    SELECT posting_date::date AS posting_date,
+                           debit_account AS account_code,
                            currency_id,
+                           COALESCE(module_code, '') AS module_code,
+                           COALESCE(organization_id::text, '') AS organization_id,
+                           COALESCE(employee_id::text, '') AS employee_id,
                            COALESCE(amount_kgs, 0) AS amount_in_national_currency,
                            COALESCE(amount_currency, 0) AS amount_in_currency
                     FROM doc_postings
@@ -188,8 +168,12 @@ namespace BIS.ERP.Services
 
                     UNION ALL
 
-                    SELECT credit_account AS account_code,
+                    SELECT posting_date::date AS posting_date,
+                           credit_account AS account_code,
                            currency_id,
+                           COALESCE(module_code, '') AS module_code,
+                           COALESCE(organization_id::text, '') AS organization_id,
+                           COALESCE(employee_id::text, '') AS employee_id,
                            -COALESCE(amount_kgs, 0) AS amount_in_national_currency,
                            -COALESCE(amount_currency, 0) AS amount_in_currency
                     FROM doc_postings
@@ -198,9 +182,7 @@ namespace BIS.ERP.Services
                       AND COALESCE(NULLIF(currency_id, ''), '') <> ''
                 ) movements
                 WHERE COALESCE(NULLIF(account_code, ''), '') <> ''
-                GROUP BY account_code, currency_id
-                HAVING ABS(SUM(amount_in_currency)) >= 0.005
-                ORDER BY account_code, currency_id;";
+                ORDER BY account_code, currency_id, posting_date;";
 
             await using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
@@ -218,9 +200,13 @@ namespace BIS.ERP.Services
                 await using var reader = await command.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
-                    balances.Add(new CurrencyBalance(
+                    movements.Add(new CurrencyMovement(
+                        DateTime.SpecifyKind(Convert.ToDateTime(reader["posting_date"], CultureInfo.InvariantCulture).Date, DateTimeKind.Utc),
                         reader["account_code"]?.ToString() ?? string.Empty,
                         reader["currency_id"]?.ToString() ?? string.Empty,
+                        NormalizeModuleName(reader["module_code"]?.ToString()),
+                        reader["organization_id"]?.ToString() ?? string.Empty,
+                        reader["employee_id"]?.ToString() ?? string.Empty,
                         ReadDecimal(reader["amount_in_national_currency"]),
                         ReadDecimal(reader["amount_in_currency"])));
                 }
@@ -231,7 +217,256 @@ namespace BIS.ERP.Services
                     await _context.Database.CloseConnectionAsync();
             }
 
-            return balances;
+            return movements;
+        }
+
+        private static List<CurrencyBalance> BuildCurrencyBalances(
+            IReadOnlyList<CurrencyMovement> movements,
+            IReadOnlyList<ExchangeRateDifferenceRule> configuredRules,
+            IReadOnlySet<string> currencyAccountCodes,
+            List<string> warnings)
+        {
+            if (configuredRules.Count > 0)
+                return BuildRuleBalances(movements, configuredRules);
+
+            if (currencyAccountCodes.Count == 0)
+            {
+                warnings.Add("В плане счетов не найдены счета с признаком связи с валютами. Расчет выполнен по всем проводкам, где заполнена валюта.");
+            }
+
+            return movements
+                .Where(movement => currencyAccountCodes.Count == 0 || currencyAccountCodes.Contains(movement.AccountCode))
+                .GroupBy(movement => new { movement.AccountCode, movement.CurrencyId })
+                .Select(group => new CurrencyBalance(
+                    group.Key.AccountCode,
+                    null,
+                    group.Key.CurrencyId,
+                    string.Empty,
+                    string.Empty,
+                    string.Empty,
+                    group.Sum(item => item.AmountInNationalCurrency),
+                    group.Sum(item => item.AmountInCurrency),
+                    null,
+                    group.ToList()))
+                .Where(balance => Math.Abs(balance.AmountInCurrency) >= 0.005m)
+                .OrderBy(balance => balance.AccountCode)
+                .ThenBy(balance => balance.CurrencyId)
+                .ToList();
+        }
+
+        private static List<CurrencyBalance> BuildRuleBalances(
+            IReadOnlyList<CurrencyMovement> movements,
+            IReadOnlyList<ExchangeRateDifferenceRule> configuredRules)
+        {
+            var balances = new List<CurrencyBalance>();
+
+            foreach (var rule in configuredRules)
+            {
+                var matchingMovements = movements
+                    .Where(movement => RuleMatchesMovement(rule, movement))
+                    .ToList();
+
+                var groupedMovements = matchingMovements.GroupBy(movement => new
+                {
+                    rule.AccountCode,
+                    rule.PairedAccountCode,
+                    movement.CurrencyId,
+                    ModuleName = string.IsNullOrWhiteSpace(rule.ModuleName) ? string.Empty : movement.ModuleName,
+                    OrganizationId = rule.DetailMode == CalculationDetailMode.Organization ? movement.OrganizationId : string.Empty,
+                    EmployeeId = rule.DetailMode == CalculationDetailMode.Employee ? movement.EmployeeId : string.Empty
+                });
+
+                foreach (var group in groupedMovements)
+                {
+                    var amountInCurrency = group.Sum(item => item.AmountInCurrency);
+                    if (Math.Abs(amountInCurrency) < 0.005m)
+                        continue;
+
+                    balances.Add(new CurrencyBalance(
+                        group.Key.AccountCode,
+                        group.Key.PairedAccountCode,
+                        group.Key.CurrencyId,
+                        group.Key.ModuleName,
+                        group.Key.OrganizationId,
+                        group.Key.EmployeeId,
+                        group.Sum(item => item.AmountInNationalCurrency),
+                        amountInCurrency,
+                        rule,
+                        group.ToList()));
+                }
+            }
+
+            return balances
+                .OrderBy(balance => balance.AccountCode)
+                .ThenBy(balance => balance.PairedAccountCode)
+                .ThenBy(balance => balance.CurrencyId)
+                .ToList();
+        }
+
+        private async Task<List<CalculatedPosting>> BuildBalancePostingsAsync(
+            CurrencyBalance balance,
+            Guid currencyId,
+            DateTime calculationDate,
+            List<string> warnings,
+            IReadOnlyDictionary<string, AccountBalanceKind> accountKinds)
+        {
+            var currencyRate = await _metadataService.GetCurrencyRateForDateAsync(currencyId, calculationDate);
+            if (currencyRate == null)
+            {
+                warnings.Add($"Не найден курс валюты {currencyId} на {calculationDate:dd.MM.yyyy} или более раннюю дату.");
+                return new List<CalculatedPosting>();
+            }
+
+            var revaluedAmount = RoundMoney(balance.AmountInCurrency * currencyRate.Rate);
+            var difference = RoundMoney(revaluedAmount - balance.AmountInNationalCurrency);
+            if (Math.Abs(difference) < 0.01m)
+                return new List<CalculatedPosting>();
+
+            return
+            [
+                CreateCalculatedPosting(
+                    balance,
+                    calculationDate,
+                    difference,
+                    currencyId,
+                    balance.AmountInCurrency,
+                    currencyRate.Rate,
+                    null,
+                    warnings,
+                    accountKinds)
+            ];
+        }
+
+        private async Task<List<CalculatedPosting>> BuildMovementAwarePostingsAsync(
+            CurrencyBalance balance,
+            Guid currencyId,
+            DateTime periodStart,
+            DateTime periodEnd,
+            List<string> warnings,
+            IReadOnlyDictionary<string, AccountBalanceKind> accountKinds)
+        {
+            var result = new List<CalculatedPosting>();
+            var accumulatedDifference = 0m;
+            var periodMovements = balance.Movements
+                .Where(movement => movement.PostingDate.Date >= periodStart.Date && movement.PostingDate.Date <= periodEnd.Date)
+                .Where(movement => Math.Abs(movement.AmountInCurrency) >= 0.005m)
+                .GroupBy(movement => movement.PostingDate.Date)
+                .OrderBy(group => group.Key)
+                .ToList();
+
+            foreach (var movementGroup in periodMovements)
+            {
+                var currencyRate = await _metadataService.GetCurrencyRateForDateAsync(currencyId, movementGroup.Key);
+                if (currencyRate == null)
+                {
+                    warnings.Add($"Не найден курс валюты {currencyId} на {movementGroup.Key:dd.MM.yyyy} или более раннюю дату.");
+                    continue;
+                }
+
+                var amountInCurrency = movementGroup.Sum(item => item.AmountInCurrency);
+                var amountInNationalCurrency = movementGroup.Sum(item => item.AmountInNationalCurrency);
+                var movementDifference = RoundMoney(amountInCurrency * currencyRate.Rate - amountInNationalCurrency);
+                accumulatedDifference += movementDifference;
+                if (Math.Abs(movementDifference) < 0.01m)
+                    continue;
+
+                result.Add(CreateCalculatedPosting(
+                    balance,
+                    movementGroup.Key,
+                    movementDifference,
+                    currencyId,
+                    amountInCurrency,
+                    currencyRate.Rate,
+                    $"оборот {movementGroup.Key:dd.MM.yyyy}",
+                    warnings,
+                    accountKinds));
+            }
+
+            var periodEndRate = await _metadataService.GetCurrencyRateForDateAsync(currencyId, periodEnd);
+            if (periodEndRate == null)
+            {
+                warnings.Add($"Не найден курс валюты {currencyId} на {periodEnd:dd.MM.yyyy} или более раннюю дату.");
+                return result;
+            }
+
+            var finalDifference = RoundMoney(balance.AmountInCurrency * periodEndRate.Rate - (balance.AmountInNationalCurrency + accumulatedDifference));
+            if (Math.Abs(finalDifference) >= 0.01m)
+            {
+                result.Add(CreateCalculatedPosting(
+                    balance,
+                    periodEnd,
+                    finalDifference,
+                    currencyId,
+                    balance.AmountInCurrency,
+                    periodEndRate.Rate,
+                    "остаток периода",
+                    warnings,
+                    accountKinds));
+            }
+
+            return result;
+        }
+
+        private static CalculatedPosting CreateCalculatedPosting(
+            CurrencyBalance balance,
+            DateTime postingDate,
+            decimal difference,
+            Guid currencyId,
+            decimal amountInCurrency,
+            decimal exchangeRate,
+            string? sourceDescription,
+            List<string> warnings,
+            IReadOnlyDictionary<string, AccountBalanceKind> accountKinds)
+        {
+            var rule = balance.Rule;
+            var amount = Math.Abs(difference);
+            var isGain = difference > 0;
+
+            string debitAccount;
+            string creditAccount;
+            int? debitReportLine = null;
+            int? creditReportLine = null;
+
+            if (isGain)
+            {
+                debitAccount = ResolvePositiveDifferenceAccount(balance, accountKinds);
+                creditAccount = ResolveConfiguredAccount(
+                    rule?.GainAccountCode,
+                    ExchangeGainAccountCode,
+                    balance.AccountCode,
+                    "дохода",
+                    warnings);
+                debitReportLine = rule?.DebitReportLine;
+            }
+            else
+            {
+                debitAccount = ResolveConfiguredAccount(
+                    rule?.LossAccountCode,
+                    ExchangeLossAccountCode,
+                    balance.AccountCode,
+                    "расхода",
+                    warnings);
+                creditAccount = ResolveBalanceAccount(balance);
+                creditReportLine = rule?.CreditReportLine;
+            }
+
+            return new CalculatedPosting(
+                postingDate,
+                debitAccount,
+                creditAccount,
+                amount,
+                currencyId,
+                amountInCurrency,
+                exchangeRate,
+                isGain,
+                debitReportLine,
+                creditReportLine,
+                balance.ModuleName,
+                balance.OrganizationId,
+                balance.EmployeeId,
+                sourceDescription,
+                balance.AccountCode,
+                balance.PairedAccountCode);
         }
 
         private async Task<List<ExchangeRateDifferenceRule>> LoadConfiguredRulesAsync(
@@ -250,25 +485,50 @@ namespace BIS.ERP.Services
 
             foreach (var row in rows)
             {
-                if (!ReadBool(row.GetValueOrDefault("Активен")) &&
-                    !ReadBool(row.GetValueOrDefault("is_active")))
-                {
+                if (!IsActiveRule(row))
                     continue;
-                }
 
                 var accountCode = ExtractAccountCode(
-                    row.GetValueOrDefault("account_id")?.ToString() ??
-                    row.GetValueOrDefault("Счет")?.ToString(),
+                    GetRowString(row, "account_id", "Основной счет", "Счет"),
                     accountCodeById);
                 if (string.IsNullOrWhiteSpace(accountCode))
                     continue;
 
                 var currencyId = ResolveCurrencyId(
-                    row.GetValueOrDefault("currency_id")?.ToString() ??
-                    row.GetValueOrDefault("Валюта")?.ToString(),
+                    GetRowString(row, "currency_id", "Валюта"),
                     currencyReferences);
 
-                rules.Add(new ExchangeRateDifferenceRule(accountCode, currencyId));
+                var pairedAccountCode = ExtractAccountCode(
+                    GetRowString(row, "paired_account_id", "Парный счет"),
+                    accountCodeById);
+
+                var gainAccountCode = ExtractAccountCode(
+                    GetRowString(row, "gain_account_id", "Счет дохода"),
+                    accountCodeById);
+
+                var lossAccountCode = ExtractAccountCode(
+                    GetRowString(row, "loss_account_id", "Счет расхода"),
+                    accountCodeById);
+
+                var detailMode = ResolveCalculationDetailMode(ReadInt(row, "calculation_detail_mode", "expense_direction", "Разрез расчета", "Признак расхода"));
+                var moduleName = NormalizeModuleName(GetRowString(row, "module_code", "Модуль"));
+                var calculationAlgorithm = ReadInt(row, "calculation_algorithm", "Алгоритм расчета");
+                var debitReportLine = ReadNullableInt(row, "debit_report_line", "Строка отчета по дебету");
+                var creditReportLine = ReadNullableInt(row, "credit_report_line", "Строка отчета по кредиту");
+                var calculationMethod = GetRowString(row, "calculation_method", "calc_method", "Способ расчета");
+
+                rules.Add(new ExchangeRateDifferenceRule(
+                    accountCode,
+                    string.IsNullOrWhiteSpace(pairedAccountCode) ? null : pairedAccountCode,
+                    currencyId,
+                    string.IsNullOrWhiteSpace(gainAccountCode) ? null : gainAccountCode,
+                    string.IsNullOrWhiteSpace(lossAccountCode) ? null : lossAccountCode,
+                    detailMode,
+                    moduleName,
+                    calculationAlgorithm,
+                    debitReportLine,
+                    creditReportLine,
+                    calculationMethod));
             }
 
             return rules;
@@ -285,6 +545,26 @@ namespace BIS.ERP.Services
                                string.Empty)
                 .Where(code => !string.IsNullOrWhiteSpace(code))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private async Task<Dictionary<string, AccountBalanceKind>> LoadAccountKindsAsync()
+        {
+            var rows = await _metadataService.GetChartOfAccountsSelectionDataAsync();
+            var result = new Dictionary<string, AccountBalanceKind>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+            {
+                var code = row.GetValueOrDefault("Код")?.ToString() ??
+                           row.GetValueOrDefault("code")?.ToString() ??
+                           string.Empty;
+                if (string.IsNullOrWhiteSpace(code))
+                    continue;
+
+                var accountType = row.GetValueOrDefault("Тип счета")?.ToString() ??
+                                  row.GetValueOrDefault("account_type")?.ToString();
+                result[code.Trim()] = ResolveAccountKind(accountType);
+            }
+
+            return result;
         }
 
         private async Task<Dictionary<Guid, string>> LoadAccountCodeByIdAsync()
@@ -335,46 +615,160 @@ namespace BIS.ERP.Services
         }
 
         private async Task InsertCalculationPostingAsync(
-            DateTime calculationDate,
             string documentNumber,
-            string debitAccount,
-            string creditAccount,
-            decimal amount,
-            Guid currencyId,
-            decimal amountInCurrency,
-            decimal exchangeRate)
+            CalculatedPosting posting)
         {
             const string sql = @"
                 INSERT INTO doc_postings
                     (""Id"", posting_date, doc_number, document_type, module_code,
-                     debit_account, credit_account, amount_kgs, amount_currency, currency_id,
-                     description, is_active, ""CreatedAt"", ""UpdatedAt"")
+                     debit_account, credit_account, amount_kgs, amount_currency, currency_id, exchange_rate,
+                     debit_report_line, credit_report_line, description, is_active, ""CreatedAt"", ""UpdatedAt"")
                 VALUES
                     (@id, @postingDate, @documentNumber, @documentType, @moduleName,
-                     @debitAccount, @creditAccount, @amount, 0, @currencyId,
-                     @description, true, NOW(), NOW());";
+                     @debitAccount, @creditAccount, @amount, 0, @currencyId, @exchangeRate,
+                     @debitReportLine, @creditReportLine, @description, true, NOW(), NOW());";
 
-            var description =
-                $"Автоматический расчет курсовой разницы на {calculationDate:dd.MM.yyyy}. " +
-                $"Валютный остаток: {amountInCurrency.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}, " +
-                $"курс: {exchangeRate.ToString("N6", CultureInfo.GetCultureInfo("ru-RU"))}.";
+            var description = BuildPostingDescription(posting);
 
             await _context.Database.ExecuteSqlRawAsync(
                 sql,
                 new NpgsqlParameter("@id", Guid.NewGuid()),
-                new NpgsqlParameter("@postingDate", calculationDate),
+                new NpgsqlParameter("@postingDate", posting.PostingDate),
                 new NpgsqlParameter("@documentNumber", documentNumber),
                 new NpgsqlParameter("@documentType", CalculationDocumentType),
-                new NpgsqlParameter("@moduleName", FinanceModuleName),
-                new NpgsqlParameter("@debitAccount", debitAccount),
-                new NpgsqlParameter("@creditAccount", creditAccount),
-                new NpgsqlParameter("@amount", amount),
-                new NpgsqlParameter("@currencyId", currencyId.ToString()),
+                new NpgsqlParameter("@moduleName", string.IsNullOrWhiteSpace(posting.ModuleName) ? FinanceModuleName : posting.ModuleName),
+                new NpgsqlParameter("@debitAccount", posting.DebitAccount),
+                new NpgsqlParameter("@creditAccount", posting.CreditAccount),
+                new NpgsqlParameter("@amount", posting.Amount),
+                new NpgsqlParameter("@currencyId", posting.CurrencyId.ToString()),
+                new NpgsqlParameter("@exchangeRate", posting.ExchangeRate),
+                new NpgsqlParameter("@debitReportLine", (object?)posting.DebitReportLine ?? DBNull.Value),
+                new NpgsqlParameter("@creditReportLine", (object?)posting.CreditReportLine ?? DBNull.Value),
                 new NpgsqlParameter("@description", description));
+        }
+
+        private static string BuildPostingDescription(CalculatedPosting posting)
+        {
+            var parts = new List<string>
+            {
+                $"Автоматический расчет курсовой разницы на {posting.PostingDate:dd.MM.yyyy}",
+                $"счет {posting.SourceAccountCode}",
+                $"валютный остаток {posting.AmountInCurrency.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"))}",
+                $"курс {posting.ExchangeRate.ToString("N4", CultureInfo.GetCultureInfo("ru-RU"))}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(posting.PairedAccountCode))
+                parts.Add($"парный счет {posting.PairedAccountCode}");
+            if (!string.IsNullOrWhiteSpace(posting.SourceDescription))
+                parts.Add(posting.SourceDescription);
+
+            return string.Join("; ", parts) + ".";
         }
 
         private static string BuildDocumentNumber(DateTime calculationDate) =>
             $"Курсовая разница {calculationDate:yyyyMMdd}";
+
+        private static bool RuleMatchesMovement(ExchangeRateDifferenceRule rule, CurrencyMovement movement)
+        {
+            var accountMatches =
+                rule.AccountCode.Equals(movement.AccountCode, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(rule.PairedAccountCode) &&
+                 rule.PairedAccountCode.Equals(movement.AccountCode, StringComparison.OrdinalIgnoreCase));
+            if (!accountMatches)
+                return false;
+
+            if (rule.CurrencyId.HasValue &&
+                !rule.CurrencyId.Value.ToString().Equals(movement.CurrencyId, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return ModuleMatches(rule.ModuleName, movement.ModuleName);
+        }
+
+        private static bool ModuleMatches(string? ruleModuleName, string? movementModuleName)
+        {
+            var normalizedRuleModule = NormalizeModuleName(ruleModuleName);
+            if (string.IsNullOrWhiteSpace(normalizedRuleModule))
+                return true;
+
+            var normalizedMovementModule = NormalizeModuleName(movementModuleName);
+            return string.IsNullOrWhiteSpace(normalizedMovementModule) ||
+                   normalizedRuleModule.Equals(normalizedMovementModule, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolvePositiveDifferenceAccount(
+            CurrencyBalance balance,
+            IReadOnlyDictionary<string, AccountBalanceKind> accountKinds)
+        {
+            var accountKind = accountKinds.TryGetValue(balance.AccountCode, out var kind)
+                ? kind
+                : AccountBalanceKind.ActivePassive;
+
+            if (accountKind == AccountBalanceKind.Active)
+                return balance.AccountCode;
+
+            return string.IsNullOrWhiteSpace(balance.PairedAccountCode)
+                ? balance.AccountCode
+                : balance.PairedAccountCode;
+        }
+
+        private static string ResolveBalanceAccount(CurrencyBalance balance) =>
+            string.IsNullOrWhiteSpace(balance.PairedAccountCode)
+                ? balance.AccountCode
+                : balance.PairedAccountCode;
+
+        private static string ResolveConfiguredAccount(
+            string? configuredAccountCode,
+            string fallbackAccountCode,
+            string balanceAccountCode,
+            string accountPurpose,
+            List<string> warnings)
+        {
+            if (!string.IsNullOrWhiteSpace(configuredAccountCode))
+                return configuredAccountCode;
+
+            warnings.Add(
+                $"Для валютного счета {balanceAccountCode} не настроен счет {accountPurpose}; используется счет {fallbackAccountCode}.");
+            return fallbackAccountCode;
+        }
+
+        private static AccountBalanceKind ResolveAccountKind(string? rawValue)
+        {
+            var value = rawValue?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(value))
+                return AccountBalanceKind.ActivePassive;
+
+            if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("Актив", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("Пассив", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("Active", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("Passive", StringComparison.OrdinalIgnoreCase))
+            {
+                return AccountBalanceKind.Active;
+            }
+
+            if (value.Equals("2", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("Пассив", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("Актив", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("Passive", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("Active", StringComparison.OrdinalIgnoreCase))
+            {
+                return AccountBalanceKind.Passive;
+            }
+
+            return AccountBalanceKind.ActivePassive;
+        }
+
+        private static CalculationDetailMode ResolveCalculationDetailMode(int rawValue)
+        {
+            return rawValue switch
+            {
+                2 => CalculationDetailMode.Organization,
+                3 => CalculationDetailMode.Employee,
+                _ => CalculationDetailMode.None
+            };
+        }
 
         private static string ExtractAccountCode(
             string? value,
@@ -415,21 +809,54 @@ namespace BIS.ERP.Services
             return null;
         }
 
-        private static string ResolveCurrencyDisplay(
-            IReadOnlyDictionary<Guid, CurrencyReference> references,
-            Guid currencyId)
-        {
-            if (!references.TryGetValue(currencyId, out var reference))
-                return currencyId.ToString();
-
-            if (!string.IsNullOrWhiteSpace(reference.Code) && !string.IsNullOrWhiteSpace(reference.Name))
-                return $"{reference.Code} - {reference.Name}";
-
-            return string.IsNullOrWhiteSpace(reference.Code) ? currencyId.ToString() : reference.Code;
-        }
+        private static string NormalizeModuleName(string? value) =>
+            ChartOfAccountsSelectionMetadata.NormalizeModuleDisplayName(value);
 
         private static decimal RoundMoney(decimal value) =>
             Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+        private static bool IsActiveRule(IReadOnlyDictionary<string, object> row)
+        {
+            var value = row.GetValueOrDefault("is_active") ?? row.GetValueOrDefault("Активен");
+            return value == null || value is DBNull || ReadBool(value);
+        }
+
+        private static string GetRowString(IReadOnlyDictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value.ToString()?.Trim() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static int ReadInt(IReadOnlyDictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value is DBNull)
+                    continue;
+
+                if (value is int intValue)
+                    return intValue;
+                if (value is long longValue)
+                    return Convert.ToInt32(longValue, CultureInfo.InvariantCulture);
+                if (value is decimal decimalValue)
+                    return Convert.ToInt32(decimalValue, CultureInfo.InvariantCulture);
+                if (int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                    return parsed;
+            }
+
+            return 0;
+        }
+
+        private static int? ReadNullableInt(IReadOnlyDictionary<string, object> row, params string[] keys)
+        {
+            var value = ReadInt(row, keys);
+            return value == 0 ? null : value;
+        }
 
         private static decimal ReadDecimal(object? value)
         {
@@ -457,11 +884,41 @@ namespace BIS.ERP.Services
             };
         }
 
-        private sealed record CurrencyBalance(
+        private enum AccountBalanceKind
+        {
+            Active,
+            Passive,
+            ActivePassive
+        }
+
+        private enum CalculationDetailMode
+        {
+            None,
+            Organization,
+            Employee
+        }
+
+        private sealed record CurrencyMovement(
+            DateTime PostingDate,
             string AccountCode,
             string CurrencyId,
+            string ModuleName,
+            string OrganizationId,
+            string EmployeeId,
             decimal AmountInNationalCurrency,
             decimal AmountInCurrency);
+
+        private sealed record CurrencyBalance(
+            string AccountCode,
+            string? PairedAccountCode,
+            string CurrencyId,
+            string ModuleName,
+            string OrganizationId,
+            string EmployeeId,
+            decimal AmountInNationalCurrency,
+            decimal AmountInCurrency,
+            ExchangeRateDifferenceRule? Rule,
+            IReadOnlyList<CurrencyMovement> Movements);
 
         private sealed record CurrencyReference(
             string Code,
@@ -470,6 +927,33 @@ namespace BIS.ERP.Services
 
         private sealed record ExchangeRateDifferenceRule(
             string AccountCode,
-            Guid? CurrencyId);
+            string? PairedAccountCode,
+            Guid? CurrencyId,
+            string? GainAccountCode,
+            string? LossAccountCode,
+            CalculationDetailMode DetailMode,
+            string ModuleName,
+            int CalculationAlgorithm,
+            int? DebitReportLine,
+            int? CreditReportLine,
+            string CalculationMethod);
+
+        private sealed record CalculatedPosting(
+            DateTime PostingDate,
+            string DebitAccount,
+            string CreditAccount,
+            decimal Amount,
+            Guid CurrencyId,
+            decimal AmountInCurrency,
+            decimal ExchangeRate,
+            bool IsGain,
+            int? DebitReportLine,
+            int? CreditReportLine,
+            string ModuleName,
+            string OrganizationId,
+            string EmployeeId,
+            string? SourceDescription,
+            string SourceAccountCode,
+            string? PairedAccountCode);
     }
 }

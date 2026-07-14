@@ -27,8 +27,7 @@ namespace BIS.ERP.Views
             metadataService ??= new MetadataService(context);
 
             var documents = await metadataService.GetDocumentsAsync();
-            var documentMetadata = documents.FirstOrDefault(document =>
-                document.Name.Equals(posting.DocumentType, StringComparison.OrdinalIgnoreCase));
+            var documentMetadata = ResolveSourceDocumentMetadata(documents, posting.DocumentType);
             if (documentMetadata == null)
                 return false;
 
@@ -42,7 +41,8 @@ namespace BIS.ERP.Views
                 documentMetadata,
                 metadataService,
                 posting.DocumentNumber,
-                posting.Date);
+                posting.Date,
+                posting.DocumentType);
             if (!recordId.HasValue)
                 return false;
 
@@ -54,6 +54,26 @@ namespace BIS.ERP.Views
             dialog.Owner = owner;
             dialog.ShowDialog();
             return true;
+        }
+
+        private static MetadataObject? ResolveSourceDocumentMetadata(
+            IReadOnlyCollection<MetadataObject> documents,
+            string postingDocumentType)
+        {
+            var normalizedDocumentType = NormalizeDocumentTypeForLookup(postingDocumentType);
+            return documents.FirstOrDefault(document =>
+                document.Name.Equals(normalizedDocumentType, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string NormalizeDocumentTypeForLookup(string documentType)
+        {
+            if (documentType.Equals("Исходящее платежное поручение", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Equals("Входящее платежное поручение", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Платежное поручение";
+            }
+
+            return documentType;
         }
 
         private static async Task<bool> TryOpenInvoiceAsync(
@@ -97,7 +117,8 @@ namespace BIS.ERP.Views
             MetadataObject documentMetadata,
             MetadataService metadataService,
             string documentNumber,
-            DateTime? documentDate)
+            DateTime? documentDate,
+            string postingDocumentType)
         {
             var normalizedNumber = MetadataService.NormalizeLegacyDocumentNumber(documentNumber);
             if (string.IsNullOrWhiteSpace(normalizedNumber))
@@ -114,6 +135,16 @@ namespace BIS.ERP.Views
             if (matches.Count == 0)
                 return null;
 
+            var typeMatched = matches
+                .Where(row => DocumentTypeMatches(
+                    postingDocumentType,
+                    documentMetadata.Name,
+                    GetRowString(row, "Тип", "document_type", "DocumentType")))
+                .ToList();
+
+            if (typeMatched.Count > 0)
+                matches = typeMatched;
+
             var dateMatched = documentDate.HasValue
                 ? matches.FirstOrDefault(row =>
                     GetRowDate(row, "Дата", "doc_date", "date")?.Date == documentDate.Value.Date)
@@ -121,6 +152,18 @@ namespace BIS.ERP.Views
 
             var selected = dateMatched ?? matches.First();
             return Guid.TryParse(GetRowString(selected, "Id"), out var id) ? id : null;
+        }
+
+        private static bool DocumentTypeMatches(
+            string postingDocumentType,
+            string metadataDocumentName,
+            string recordDocumentType)
+        {
+            if (string.IsNullOrWhiteSpace(recordDocumentType))
+                return true;
+
+            return recordDocumentType.Equals(postingDocumentType, StringComparison.OrdinalIgnoreCase) ||
+                   recordDocumentType.Equals(metadataDocumentName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string GetRowString(Dictionary<string, object> row, params string[] keys)

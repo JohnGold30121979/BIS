@@ -520,7 +520,7 @@ public sealed class InvoiceEsfSmokeTestScenario : SmokeTestScenarioBase
         if (line.SalesTaxAmount > 0)
         {
             result.Add(isSales
-                ? new ExpectedPosting(counterpartyAccount, "34900000", line.SalesTaxAmount)
+                ? new ExpectedPosting(counterpartyAccount, "34004000", line.SalesTaxAmount)
                 : new ExpectedPosting(lineAccount, counterpartyAccount, line.SalesTaxAmount));
         }
 
