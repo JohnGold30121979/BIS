@@ -290,6 +290,66 @@ public class InfoBaseManager
             _currentInfoBase = infoBase;
     }
 
+    public async Task<List<InfoBaseModuleAvailability>> GetModuleAvailabilityAsync(Guid infoBaseId)
+    {
+        var infoBase = await _masterContext.InfoBases.FindAsync(infoBaseId)
+            ?? throw new InvalidOperationException("Информационная база не найдена.");
+
+        await using var context = new AppDbContext(infoBase.ConnectionString);
+        await new RuntimeSchemaFixService(context).EnsureAsync();
+        var moduleService = new ModuleMetadataService(context);
+        await moduleService.EnsureDefaultModulesAsync();
+
+        var modules = await context.MetadataModules.AsNoTracking()
+            .OrderBy(module => module.Order)
+            .ThenBy(module => module.Name)
+            .ToListAsync();
+
+        return modules.Select(module => new InfoBaseModuleAvailability
+        {
+            ModuleId = module.Id,
+            Code = module.Code,
+            Name = module.Name,
+            Description = module.Description,
+            Icon = module.Icon,
+            Order = module.Order,
+            CloseOrder = module.CloseOrder,
+            IsActive = module.IsActive,
+            ParticipatesInPeriodClose = module.ParticipatesInPeriodClose,
+            RequirePreviousModulesClosed = module.RequirePreviousModulesClosed,
+            IsSystem = module.IsSystem
+        }).ToList();
+    }
+
+    public async Task SaveModuleAvailabilityAsync(
+        Guid infoBaseId,
+        IEnumerable<InfoBaseModuleAvailability> moduleAvailability)
+    {
+        var infoBase = await _masterContext.InfoBases.FindAsync(infoBaseId)
+            ?? throw new InvalidOperationException("Информационная база не найдена.");
+
+        var requestedModules = moduleAvailability
+            .GroupBy(module => module.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().IsActive, StringComparer.OrdinalIgnoreCase);
+
+        if (requestedModules.Count == 0 || requestedModules.All(item => !item.Value))
+            throw new InvalidOperationException("В информационной базе должен быть включен хотя бы один модуль.");
+
+        await using var context = new AppDbContext(infoBase.ConnectionString);
+        await new RuntimeSchemaFixService(context).EnsureAsync();
+        var moduleService = new ModuleMetadataService(context);
+        await moduleService.EnsureDefaultModulesAsync();
+
+        var modules = await context.MetadataModules.ToListAsync();
+        foreach (var module in modules)
+        {
+            if (requestedModules.TryGetValue(module.Code, out var isActive))
+                module.IsActive = isActive;
+        }
+
+        await context.SaveChangesAsync();
+    }
+
     public async Task RefreshCurrentInfoBaseVersionAsync()
     {
         var current = await GetCurrentInfoBaseAsync();

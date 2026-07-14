@@ -6,9 +6,14 @@ namespace BIS.ERP.Services
 {
     public class ModuleMetadataService
     {
+        public const string BalanceCode = "Balance";
         public const string FinanceCode = "Finance";
         public const string FixedAssetsCode = "FixedAssets";
         public const string InventoryCode = "Inventory";
+        public const string PayrollCode = "Payroll";
+        public const string SalesCode = "Sales";
+        public const string RawMaterialsCode = "RawMaterials";
+        public const string CostAccountingCode = "CostAccounting";
 
         private readonly AppDbContext _context;
 
@@ -53,9 +58,43 @@ namespace BIS.ERP.Services
         public async Task EnsureDefaultModulesAsync()
         {
             await EnsureSchemaAsync();
-            await EnsureModuleAsync(FinanceCode, "Финансы", "Кассовые, банковские операции и финансовая отчетность", "💰", 10, 900, true, true);
-            await EnsureModuleAsync(FixedAssetsCode, "Основные средства", "Учет движения, состояния и амортизации основных средств", "🏗", 20, 200);
-            await EnsureModuleAsync(InventoryCode, "Учет материальных ценностей", "Поступление, движение, списание и остатки ТМЦ", "📦", 30, 300);
+            await EnsureModuleAsync(
+                FinanceCode, "Финансы", "Кассовые, банковские операции и финансовый учет",
+                "💰", 10, 900,
+                requirePreviousModulesClosed: true,
+                participatesInPeriodClose: true,
+                isActiveByDefault: true);
+            await EnsureModuleAsync(
+                BalanceCode, "Баланс", "Итоговая отчетность, баланс и финансовые результаты",
+                "📊", 20, 1000,
+                requirePreviousModulesClosed: true,
+                participatesInPeriodClose: false,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                FixedAssetsCode, "Основные средства", "Учет движения, состояния и амортизации основных средств",
+                "🏗", 30, 200,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                InventoryCode, "Материалы", "Поступление, движение, списание и остатки материалов",
+                "📦", 40, 300,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                PayrollCode, "Зарплата", "Расчет зарплаты и связанных удержаний",
+                "👥", 50, 400,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                SalesCode, "Сбыт", "Продажи, отгрузки и расчеты по реализации",
+                "🚚", 60, 500,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                RawMaterialsCode, "Сырье", "Учет сырья и производственных запасов",
+                "🌾", 70, 600,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                CostAccountingCode, "Себестоимость", "Расчет и анализ производственной себестоимости",
+                "🧮", 80, 800,
+                requirePreviousModulesClosed: true,
+                isActiveByDefault: false);
             await SynchronizeDefaultAssignmentsAsync();
         }
 
@@ -154,7 +193,8 @@ namespace BIS.ERP.Services
             int order,
             int closeOrder,
             bool requirePreviousModulesClosed = false,
-            bool participatesInPeriodClose = true)
+            bool participatesInPeriodClose = true,
+            bool isActiveByDefault = false)
         {
             var existing = await _context.MetadataModules.FirstOrDefaultAsync(module => module.Code == code);
             if (existing != null)
@@ -179,7 +219,7 @@ namespace BIS.ERP.Services
                 Icon = icon,
                 Order = order,
                 CloseOrder = closeOrder,
-                IsActive = true,
+                IsActive = isActiveByDefault,
                 ParticipatesInPeriodClose = participatesInPeriodClose,
                 RequirePreviousModulesClosed = requirePreviousModulesClosed,
                 IsSystem = true

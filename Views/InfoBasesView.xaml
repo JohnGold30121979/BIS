@@ -58,6 +58,9 @@
                                     <StackPanel Grid.Column="2" Orientation="Horizontal">
                                         <Button Content="Выбрать" Width="80" Click="OnSelectClick" 
                                                 Tag="{Binding}" Background="#2C3E50" Foreground="White"/>
+                                        <Button Content="Модули" Width="80" Click="OnModulesClick"
+                                                Tag="{Binding}" Background="#3498DB" Foreground="White"
+                                                Margin="5,0,0,0"/>
                                         <Button Content="Удалить" Width="80" Click="OnDeleteClick" 
                                                 Tag="{Binding}" Background="#E74C3C" Foreground="White"
                                                 Margin="5,0,0,0"/>

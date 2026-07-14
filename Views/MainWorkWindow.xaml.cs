@@ -150,6 +150,8 @@ namespace BIS.ERP
             var reports = await _reportService.GetNavigationReportsAsync();
             var modules = await _moduleMetadataService.GetModulesAsync();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
+            var isBalanceModuleActive = modules.Any(module =>
+                module.Code.Equals(ModuleMetadataService.BalanceCode, StringComparison.OrdinalIgnoreCase));
             if (modules.Count == 0 && (await _moduleMetadataService.GetModulesAsync(true)).Count == 0)
             {
                 await BuildLegacyNavigationTree();
@@ -226,9 +228,20 @@ namespace BIS.ERP
                         Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
                     };
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
-                    financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
+                    if (!isBalanceModuleActive)
+                        financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
+                }
+
+                if (module.Code == ModuleMetadataService.BalanceCode)
+                {
+                    var balanceTools = new NavigationItem
+                    {
+                        Id = "BalanceTools", Name = "Отчеты", Icon = "📊", Type = "Group"
+                    };
+                    balanceTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
+                    moduleSection.Children.Add(balanceTools);
                 }
 
                 if (moduleSection.Children.Count > 0)
