@@ -238,6 +238,9 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
             errors);
 
         var statuses = await service.GetModuleStatusesAsync(period.Id);
+        if (statuses.Any(item => item.ModuleCode.Equals(ModuleMetadataService.BalanceCode, StringComparison.OrdinalIgnoreCase)))
+            errors.Add($"{databaseName}: баланс попал в список рабочих модулей закрытия периода.");
+
         var financeModule = FindModule(statuses, ModuleMetadataService.FinanceCode, "Финансы");
         await ExpectFailureAsync(
             () => service.CloseModuleAsync(period.Id, financeModule.ModuleId),

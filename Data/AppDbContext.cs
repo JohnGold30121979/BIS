@@ -52,6 +52,7 @@ public class AppDbContext : DbContext
     public DbSet<AccountingPeriodModuleState> AccountingPeriodModuleStates { get; set; }
     public DbSet<AccountOpeningBalance> AccountOpeningBalances { get; set; }
     public DbSet<AccountTurnoverSnapshot> AccountTurnoverSnapshots { get; set; }
+    public DbSet<FixedAssetPeriodBalance> FixedAssetPeriodBalances { get; set; }
     public DbSet<FinancialReportLine> FinancialReportLines { get; set; }
     public DbSet<FinancialReportLineAccount> FinancialReportLineAccounts { get; set; }
     public DbSet<TaxJournalRecord> TaxJournalRecords { get; set; }
@@ -186,6 +187,7 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<AccountingPeriodModuleState>().HasIndex(state => new { state.PeriodId, state.ModuleId }).IsUnique();
         modelBuilder.Entity<AccountOpeningBalance>().HasIndex(balance => new { balance.BalanceDate, balance.AccountCode }).IsUnique();
         modelBuilder.Entity<AccountTurnoverSnapshot>().HasIndex(snapshot => new { snapshot.PeriodId, snapshot.AccountCode }).IsUnique();
+        modelBuilder.Entity<FixedAssetPeriodBalance>().HasIndex(balance => new { balance.PeriodId, balance.AssetId }).IsUnique();
         modelBuilder.Entity<FinancialReportLine>().HasIndex(line => new { line.ReportCode, line.LineCode }).IsUnique();
         modelBuilder.Entity<FinancialReportLineAccount>().HasIndex(link => new { link.LineId, link.AccountCode }).IsUnique();
         modelBuilder.Entity<LocalizationEntry>().HasIndex(entry => new { entry.Culture, entry.Key }).IsUnique();

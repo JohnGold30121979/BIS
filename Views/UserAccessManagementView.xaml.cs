@@ -121,7 +121,12 @@ namespace BIS.ERP.Views
         public User User { get; }
         public string Login => User.Login;
         public string FullName => string.IsNullOrWhiteSpace(User.FullName) ? User.Login : User.FullName;
-        public string RoleDisplay => User.Role == UserRole.Admin ? "Администратор" : "Пользователь";
+        public string RoleDisplay => User.Role switch
+        {
+            UserRole.Admin => "Администратор",
+            UserRole.Accountant => "Бухгалтер",
+            _ => "Пользователь"
+        };
     }
 
     public sealed class AccessTreeNode : INotifyPropertyChanged

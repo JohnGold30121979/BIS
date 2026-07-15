@@ -7,6 +7,9 @@
         Height="550" Width="500"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
         ShowInTaskbar="False">
 
     <Window.Resources>
@@ -14,7 +17,8 @@
     </Window.Resources>
 
     <Border Background="#2C3E50" CornerRadius="10" Margin="10">
-        <Grid Margin="30">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="30">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -73,6 +77,7 @@
                         BorderBrush="#3498DB" BorderThickness="1" Command="{Binding BackCommand}"
                         IsCancel="True"/>
             </StackPanel>
-        </Grid>
+            </Grid>
+        </ScrollViewer>
     </Border>
 </Window>

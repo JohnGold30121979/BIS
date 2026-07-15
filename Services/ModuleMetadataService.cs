@@ -14,6 +14,7 @@ namespace BIS.ERP.Services
         public const string SalesCode = "Sales";
         public const string RawMaterialsCode = "RawMaterials";
         public const string CostAccountingCode = "CostAccounting";
+        public const int FinalBalanceCloseOrder = 10000;
 
         private readonly AppDbContext _context;
 
@@ -65,8 +66,8 @@ namespace BIS.ERP.Services
                 participatesInPeriodClose: true,
                 isActiveByDefault: true);
             await EnsureModuleAsync(
-                BalanceCode, "Баланс", "Итоговая отчетность, баланс и финансовые результаты",
-                "📊", 20, 1000,
+                BalanceCode, "Баланс", "Итоговый этап закрытия периода, баланс и финансовые результаты",
+                "📊", 20, FinalBalanceCloseOrder,
                 requirePreviousModulesClosed: true,
                 participatesInPeriodClose: false,
                 isActiveByDefault: false);
@@ -98,12 +99,16 @@ namespace BIS.ERP.Services
             await SynchronizeDefaultAssignmentsAsync();
         }
 
-        public async Task<List<MetadataModule>> GetModulesAsync(bool includeInactive = false)
+        public async Task<List<MetadataModule>> GetModulesAsync(
+            bool includeInactive = false,
+            bool includeFinalBalanceStage = false)
         {
             await EnsureSchemaAsync();
             var query = _context.MetadataModules.AsNoTracking();
             if (!includeInactive)
                 query = query.Where(module => module.IsActive);
+            if (!includeFinalBalanceStage)
+                query = query.Where(module => module.Code != BalanceCode);
             return await query.OrderBy(module => module.Order).ThenBy(module => module.Name).ToListAsync();
         }
 
@@ -123,6 +128,7 @@ namespace BIS.ERP.Services
             module.CloseOrder = module.CloseOrder <= 0 ? module.Order : module.CloseOrder;
             module.Icon = string.IsNullOrWhiteSpace(module.Icon) ? "📁" : module.Icon.Trim();
             module.Description = module.Description?.Trim() ?? string.Empty;
+            ApplyFinalBalanceStageRules(module);
             if (module.Id == Guid.Empty)
                 module.Id = Guid.NewGuid();
 
@@ -140,6 +146,7 @@ namespace BIS.ERP.Services
                 existing.IsActive = module.IsActive;
                 existing.ParticipatesInPeriodClose = module.ParticipatesInPeriodClose;
                 existing.RequirePreviousModulesClosed = module.RequirePreviousModulesClosed;
+                ApplyFinalBalanceStageRules(existing);
             }
             await _context.SaveChangesAsync();
             return existing ?? module;
@@ -207,11 +214,12 @@ namespace BIS.ERP.Services
                 existing.ParticipatesInPeriodClose = participatesInPeriodClose;
                 existing.RequirePreviousModulesClosed = requirePreviousModulesClosed;
                 existing.IsSystem = true;
+                ApplyFinalBalanceStageRules(existing);
                 await _context.SaveChangesAsync();
                 return;
             }
 
-            await _context.MetadataModules.AddAsync(new MetadataModule
+            var module = new MetadataModule
             {
                 Code = code,
                 Name = name,
@@ -223,8 +231,31 @@ namespace BIS.ERP.Services
                 ParticipatesInPeriodClose = participatesInPeriodClose,
                 RequirePreviousModulesClosed = requirePreviousModulesClosed,
                 IsSystem = true
-            });
+            };
+            ApplyFinalBalanceStageRules(module);
+            await _context.MetadataModules.AddAsync(module);
             await _context.SaveChangesAsync();
+        }
+
+        public static bool IsFinalBalanceStageModule(MetadataModule module) =>
+            module.Code.Equals(BalanceCode, StringComparison.OrdinalIgnoreCase);
+
+        public static bool IsFinalBalanceStageCode(string? moduleCode) =>
+            !string.IsNullOrWhiteSpace(moduleCode) &&
+            moduleCode.Equals(BalanceCode, StringComparison.OrdinalIgnoreCase);
+
+        public static void ApplyFinalBalanceStageRules(MetadataModule module)
+        {
+            if (!IsFinalBalanceStageModule(module))
+                return;
+
+            module.Name = "Баланс";
+            module.Description = "Итоговый этап закрытия периода, баланс и финансовые результаты";
+            module.CloseOrder = FinalBalanceCloseOrder;
+            module.IsActive = false;
+            module.ParticipatesInPeriodClose = false;
+            module.RequirePreviousModulesClosed = true;
+            module.IsSystem = true;
         }
 
         private async Task SynchronizeDefaultAssignmentsAsync()

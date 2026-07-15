@@ -33,7 +33,7 @@ namespace BIS.ERP.Views.Dialogs
                 foreach (var module in modules)
                     _modules.Add(module);
 
-                StatusText.Text = $"Модулей в конфигурации: {_modules.Count}.";
+                StatusText.Text = $"Рабочих модулей в конфигурации: {_modules.Count}.";
             }
             catch (Exception ex)
             {
@@ -62,7 +62,7 @@ namespace BIS.ERP.Views.Dialogs
                 module.IsActive = true;
 
             ModulesGrid.Items.Refresh();
-            StatusText.Text = "Все модули отмечены как доступные.";
+            StatusText.Text = "Все рабочие модули отмечены как доступные.";
         }
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)

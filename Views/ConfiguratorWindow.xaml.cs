@@ -62,7 +62,16 @@ namespace BIS.ERP.Views
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
                 SystemIconText.Text = GetSystemIcon(systemConfiguration.Icon);
-                Title = $"{systemConfiguration.SystemName} - Конфигуратор";
+                var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+                InfoBaseNameText.Text = currentInfoBase == null
+                    ? "Инфобаза: не выбрана"
+                    : $"Инфобаза: {currentInfoBase.Name}";
+                InfoBaseNameText.ToolTip = currentInfoBase == null
+                    ? "Инфобаза не выбрана"
+                    : $"{currentInfoBase.Name}\nБаза: {currentInfoBase.DatabaseName}\nСервер: {currentInfoBase.Host}:{currentInfoBase.Port}";
+                Title = currentInfoBase == null
+                    ? $"{systemConfiguration.SystemName} - Конфигуратор"
+                    : $"{systemConfiguration.SystemName} - Конфигуратор - {currentInfoBase.Name}";
 
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 await new RuntimeSchemaFixService(_context).EnsureAsync();
@@ -84,6 +93,7 @@ namespace BIS.ERP.Views
                 await new InvoiceMetadataSeedService(_context).EnsureAsync();
                 await printFormService.SeedCashOrderFormsAsync();
                 await printFormService.SeedInvoiceFormsAsync();
+                await _metadataService.EnsureStandardReportsAsync();
 
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Name).ToList();
@@ -2054,7 +2064,16 @@ namespace BIS.ERP.Views
             var configuration = await new SystemConfigurationService().GetAsync();
             SystemNameText.Text = configuration.SystemName;
             SystemIconText.Text = GetSystemIcon(configuration.Icon);
-            Title = $"{configuration.SystemName} - Конфигуратор";
+            var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            InfoBaseNameText.Text = currentInfoBase == null
+                ? "Инфобаза: не выбрана"
+                : $"Инфобаза: {currentInfoBase.Name}";
+            InfoBaseNameText.ToolTip = currentInfoBase == null
+                ? "Инфобаза не выбрана"
+                : $"{currentInfoBase.Name}\nБаза: {currentInfoBase.DatabaseName}\nСервер: {currentInfoBase.Host}:{currentInfoBase.Port}";
+            Title = currentInfoBase == null
+                ? $"{configuration.SystemName} - Конфигуратор"
+                : $"{configuration.SystemName} - Конфигуратор - {currentInfoBase.Name}";
         }
 
         private static string GetSystemIcon(string? icon)

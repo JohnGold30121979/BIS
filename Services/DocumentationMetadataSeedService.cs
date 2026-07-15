@@ -23,10 +23,12 @@ namespace BIS.ERP.Services
             await ExtendFixedAssetCardAsync();
             await EnsureFixedAssetCanonicalModelAsync();
             await EnsureDocumentsAsync();
+            await EnsureFixedAssetPeriodBalanceReportSourceAsync();
             await EnsureFixedAssetReportsAsync();
             await EnsureFinanceReportsAsync();
             await EnsureInventoryReportsAsync();
             await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
+            await _metadataService.EnsureStandardReportsAsync();
         }
 
         private async Task EnsureFixedAssetCatalogsAsync()
@@ -205,24 +207,26 @@ namespace BIS.ERP.Services
 
             var additions = new[]
             {
-                Field(asset.Id, "Подгруппа ОС", "asset_subgroup_id", "Reference", 21, false, "Подгруппы ОС"),
-                Field(asset.Id, "Вид ОС", "asset_type_id", "Reference", 22, false, "Виды ОС"),
-                Field(asset.Id, "Затратный счет", "expense_account", "String", 23),
-                Field(asset.Id, "Месячная амортизация", "monthly_depreciation", "Decimal", 24),
-                Field(asset.Id, "Налоговая группа", "tax_group", "Reference", 25, false, "Налоговые группы ОС"),
-                Field(asset.Id, "Дата консервации", "conservation_date", "DateTime", 26),
-                Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 27),
-                Field(asset.Id, "Дата выбытия", "disposal_date", "DateTime", 28)
+                Field(asset.Id, "Подгруппа ОС", "asset_subgroup_id", "Reference", 5, false, "Подгруппы ОС"),
+                Field(asset.Id, "Вид ОС", "asset_type_id", "Reference", 6, false, "Виды ОС"),
+                Field(asset.Id, "Дата начала амортизации", "depreciation_start_date", "DateTime", 9),
+                Field(asset.Id, "Ликвидационная стоимость", "salvage_value", "Decimal", 11),
+                Field(asset.Id, "Месячная амортизация", "monthly_depreciation", "Decimal", 17),
+                Field(asset.Id, "Амортизация по пробегу", "use_mileage_depreciation", "Bool", 18),
+                Field(asset.Id, "Месячный пробег", "monthly_mileage", "Decimal", 19),
+                Field(asset.Id, "Ресурс пробега", "mileage_resource", "Decimal", 20),
+                Field(asset.Id, "Затратный счет", "expense_account", "Reference", 23, false, "План счетов"),
+                Field(asset.Id, "Налоговая группа", "tax_group", "Reference", 24, false, "Налоговые группы ОС"),
+                Field(asset.Id, "Класс ОС", "asset_class", "Int", 28),
+                Field(asset.Id, "Дата консервации", "conservation_date", "DateTime", 31),
+                Field(asset.Id, "Дата расконсервации", "reopening_date", "DateTime", 32),
+                Field(asset.Id, "Дата выбытия", "disposal_date", "DateTime", 33)
             };
             foreach (var field in additions.Where(candidate => asset.Fields.All(existing => existing.DbColumnName != candidate.DbColumnName)))
             {
                 await _context.MetadataFields.AddAsync(field);
-                var sqlType = field.FieldType switch
-                {
-                    "Reference" => "uuid", "Decimal" => "numeric(18,2)", "DateTime" => "timestamp", _ => "varchar(200)"
-                };
                 await _context.Database.ExecuteSqlRawAsync(
-                    $"ALTER TABLE \"{asset.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {sqlType};");
+                    $"ALTER TABLE \"{asset.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {GetSqlType(field)};");
             }
             await _context.SaveChangesAsync();
         }
@@ -246,38 +250,44 @@ namespace BIS.ERP.Services
             ConfigureField(asset, "name", type: "String", order: 3, required: true, length: 300);
             ConfigureField(asset, "asset_group", type: "Reference", order: 4, reference: "Группы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "acquisition_date", type: "DateTime", order: 5);
-            ConfigureField(asset, "commissioning_date", type: "DateTime", order: 6);
-            ConfigureField(asset, "initial_cost", type: "Decimal", order: 7);
-            ConfigureField(asset, "accumulated_depreciation", type: "Decimal", order: 8);
-            ConfigureField(asset, "carrying_amount", type: "Decimal", order: 9);
-            ConfigureField(asset, "useful_life_months", type: "Int", order: 10);
-            ConfigureField(asset, "depreciation_method", type: "Reference", order: 11, reference: "Методы амортизации ОС",
+            ConfigureField(asset, "asset_subgroup_id", type: "Reference", order: 5, reference: "Подгруппы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "depreciation_rate", type: "Decimal", order: 12);
-            ConfigureField(asset, "asset_account", type: "Reference", order: 13, reference: "План счетов",
+            ConfigureField(asset, "asset_type_id", type: "Reference", order: 6, reference: "Виды ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "depreciation_account", type: "Reference", order: 14, reference: "План счетов",
+            ConfigureField(asset, "acquisition_date", type: "DateTime", order: 7);
+            ConfigureField(asset, "commissioning_date", type: "DateTime", order: 8);
+            ConfigureField(asset, "depreciation_start_date", type: "DateTime", order: 9);
+            ConfigureField(asset, "initial_cost", type: "Decimal", order: 10);
+            ConfigureField(asset, "salvage_value", type: "Decimal", order: 11);
+            ConfigureField(asset, "accumulated_depreciation", type: "Decimal", order: 12);
+            ConfigureField(asset, "carrying_amount", type: "Decimal", order: 13);
+            ConfigureField(asset, "useful_life_months", type: "Int", order: 14);
+            ConfigureField(asset, "depreciation_method", type: "Reference", order: 15, reference: "Методы амортизации ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "organization_id", type: "Reference", order: 15, reference: "Организации");
-            ConfigureField(asset, "responsible_person_id", type: "Reference", order: 16, reference: "МОЛ");
-            ConfigureField(asset, "site_id", type: "Reference", order: 17, reference: "Участки");
-            ConfigureField(asset, "status", type: "Reference", order: 18, reference: "Статусы ОС",
+            ConfigureField(asset, "depreciation_rate", type: "Decimal", order: 16);
+            ConfigureField(asset, "monthly_depreciation", type: "Decimal", order: 17);
+            ConfigureField(asset, "use_mileage_depreciation", type: "Bool", order: 18);
+            ConfigureField(asset, "monthly_mileage", type: "Decimal", order: 19);
+            ConfigureField(asset, "mileage_resource", type: "Decimal", order: 20);
+            ConfigureField(asset, "asset_account", type: "Reference", order: 21, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "is_active", type: "Bool", order: 19, required: true);
-            ConfigureField(asset, "description", type: "String", order: 20, length: 500);
-            ConfigureField(asset, "asset_subgroup_id", type: "Reference", order: 21, reference: "Подгруппы ОС",
-                displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "asset_type_id", type: "Reference", order: 22, reference: "Виды ОС",
+            ConfigureField(asset, "depreciation_account", type: "Reference", order: 22, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
             ConfigureField(asset, "expense_account", type: "Reference", order: 23, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "monthly_depreciation", type: "Decimal", order: 24);
-            ConfigureField(asset, "tax_group", type: "Reference", order: 25, reference: "Налоговые группы ОС",
+            ConfigureField(asset, "tax_group", type: "Reference", order: 24, reference: "Налоговые группы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "conservation_date", type: "DateTime", order: 26);
-            ConfigureField(asset, "reopening_date", type: "DateTime", order: 27);
-            ConfigureField(asset, "disposal_date", type: "DateTime", order: 28);
+            ConfigureField(asset, "organization_id", type: "Reference", order: 25, reference: "Организации");
+            ConfigureField(asset, "responsible_person_id", type: "Reference", order: 26, reference: "МОЛ");
+            ConfigureField(asset, "site_id", type: "Reference", order: 27, reference: "Участки");
+            ConfigureField(asset, "asset_class", type: "Int", order: 28);
+            ConfigureField(asset, "status", type: "Reference", order: 29, reference: "Статусы ОС",
+                displayPattern: chartPattern, displayFields: chartFields);
+            ConfigureField(asset, "is_active", type: "Bool", order: 30, required: true);
+            ConfigureField(asset, "conservation_date", type: "DateTime", order: 31);
+            ConfigureField(asset, "reopening_date", type: "DateTime", order: 32);
+            ConfigureField(asset, "disposal_date", type: "DateTime", order: 33);
+            ConfigureField(asset, "description", type: "String", order: 34, length: 500);
 
             await EnsureFixedAssetAutoCalculationsAsync(asset);
             await _context.SaveChangesAsync();
@@ -304,33 +314,45 @@ namespace BIS.ERP.Services
 
         private async Task EnsureFixedAssetReportsAsync()
         {
-            var source = await _context.MetadataObjects.Include(item => item.Fields)
+            var currentCardSource = await _context.MetadataObjects.Include(item => item.Fields)
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
-            if (source == null)
+            var periodBalanceSource = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "ReportSource" && item.Name == "Снимки остатков ОС");
+            if (currentCardSource == null || periodBalanceSource == null)
                 return;
 
-            await EnsureReportAsync("Ведомость основных средств", "assets.statement", source,
-                "Инвентарный номер", "Наименование", "Организация", "МОЛ", "Участок",
-                "Первоначальная стоимость", "Накопленная амортизация", "Остаточная стоимость", "Статус");
-            await EnsureReportAsync("Оборотная ведомость по ОС", "assets.turnover", source,
-                "Инвентарный номер", "Наименование", "Дата приобретения", "Первоначальная стоимость",
-                "Накопленная амортизация", "Остаточная стоимость", "МОЛ", "Участок");
-            await EnsureReportAsync("Ведомость ОС по счету", "assets.by.account", source,
-                "Счет учета", "Инвентарный номер", "Наименование", "Первоначальная стоимость",
+            await EnsureReportAsync("Ведомость основных средств", "assets.statement", periodBalanceSource,
+                "Период конец", "Инвентарный номер", "Наименование", "Организация", "МОЛ", "Участок",
+                "Первоначальная стоимость", "Ликвидационная стоимость", "Накопленная амортизация",
+                "Остаточная стоимость", "Статус");
+            await EnsureReportAsync("Оборотная ведомость по ОС", "assets.turnover", periodBalanceSource,
+                "Период начало", "Период конец", "Инвентарный номер", "Наименование",
+                "Стоимость на начало", "Амортизация на начало", "Остаточная стоимость на начало",
+                "Поступление", "Выбытие", "Внутреннее поступление", "Внутреннее выбытие",
+                "Переоценка стоимости", "Автоматическая амортизация", "Ручная амортизация",
+                "Списание амортизации", "Амортизация выбывших ОС",
+                "Стоимость на конец", "Амортизация на конец", "Остаточная стоимость на конец",
+                "МОЛ", "Участок");
+            await EnsureReportAsync("Ведомость ОС по счету", "assets.by.account", periodBalanceSource,
+                "Период конец", "Счет учета", "Инвентарный номер", "Наименование", "Первоначальная стоимость",
                 "Накопленная амортизация", "Остаточная стоимость");
-            await EnsureReportAsync("Ведомость амортизации", "assets.depreciation", source,
-                "Инвентарный номер", "Наименование", "Счет амортизации", "Затратный счет",
-                "Первоначальная стоимость", "Накопленная амортизация", "Месячная амортизация");
-            await EnsureReportAsync("Приход ОС за период", "assets.receipts", source,
+            await EnsureReportAsync("Ведомость амортизации", "assets.depreciation", periodBalanceSource,
+                "Период конец", "Инвентарный номер", "Наименование", "Счет амортизации", "Затратный счет",
+                "Стоимость на начало", "Амортизация на начало", "Автоматическая амортизация",
+                "Ручная амортизация", "Корректировка амортизации", "Списание амортизации",
+                "Амортизация на конец", "Остаточная стоимость на конец", "Месячная амортизация");
+            await EnsureReportAsync("Приход ОС за период", "assets.receipts", periodBalanceSource,
                 "Инвентарный номер", "Наименование", "Дата приобретения", "Дата ввода в эксплуатацию",
-                "Первоначальная стоимость", "Организация", "МОЛ", "Участок");
-            await EnsureReportAsync("Расшифровка баланса по ОС", "assets.balance.details", source,
-                "Счет учета", "Инвентарный номер", "Наименование", "Первоначальная стоимость",
-                "Накопленная амортизация", "Остаточная стоимость");
-            await EnsureReportAsync("Контроль состояния карточек ОС", "assets.control", source,
+                "Дата начала амортизации", "Поступление", "Стоимость на конец", "Ликвидационная стоимость",
+                "Организация", "МОЛ", "Участок");
+            await EnsureReportAsync("Расшифровка баланса по ОС", "assets.balance.details", periodBalanceSource,
+                "Период конец", "Счет учета", "Инвентарный номер", "Наименование", "Стоимость на конец",
+                "Амортизация на конец", "Остаточная стоимость на конец");
+            await EnsureReportAsync("Контроль состояния карточек ОС", "assets.control", currentCardSource,
                 "Инвентарный номер", "Наименование", "Статус", "Активен", "Счет учета",
                 "Счет амортизации", "Затратный счет", "Первоначальная стоимость",
                 "Накопленная амортизация", "Остаточная стоимость", "Месячная амортизация",
+                "Ликвидационная стоимость", "Дата начала амортизации", "Класс ОС",
                 "Дата консервации", "Дата расконсервации", "Дата выбытия");
 
             var depreciationDocument = await _context.MetadataObjects.Include(item => item.Fields)
@@ -359,6 +381,59 @@ namespace BIS.ERP.Services
                     "Номер", "Дата", "Основное средство", "Организация", "Сумма", "Счет дебета", "Счет кредита", "Дата выбытия", "Проведен");
         }
 
+        private async Task EnsureFixedAssetPeriodBalanceReportSourceAsync()
+        {
+            await new AccountingPeriodService(_context).EnsureSchemaAsync();
+            await EnsureObjectAsync("Снимки остатков ОС", "FixedAssetPeriodBalances", "ReportSource",
+                "Системный источник отчетов ОС по зафиксированным остаткам периода", "📌",
+                new List<MetadataField>
+                {
+                    Field(Guid.Empty, "Период", "PeriodId", "Reference", 1),
+                    Field(Guid.Empty, "Период начало", "PeriodStart", "DateTime", 2),
+                    Field(Guid.Empty, "Период конец", "PeriodEnd", "DateTime", 3),
+                    Field(Guid.Empty, "Идентификатор ОС", "AssetId", "Reference", 4),
+                    Field(Guid.Empty, "Инвентарный номер", "InventoryNumber", "String", 5),
+                    Field(Guid.Empty, "Наименование", "AssetName", "String", 6),
+                    Field(Guid.Empty, "Организация", "OrganizationName", "String", 7),
+                    Field(Guid.Empty, "МОЛ", "ResponsiblePersonName", "String", 8),
+                    Field(Guid.Empty, "Участок", "SiteName", "String", 9),
+                    Field(Guid.Empty, "Счет учета", "AssetAccount", "String", 10),
+                    Field(Guid.Empty, "Счет амортизации", "DepreciationAccount", "String", 11),
+                    Field(Guid.Empty, "Затратный счет", "ExpenseAccount", "String", 12),
+                    Field(Guid.Empty, "Дата приобретения", "AcquisitionDate", "DateTime", 13),
+                    Field(Guid.Empty, "Дата ввода в эксплуатацию", "CommissioningDate", "DateTime", 14),
+                    Field(Guid.Empty, "Дата начала амортизации", "DepreciationStartDate", "DateTime", 15),
+                    Field(Guid.Empty, "Первоначальная стоимость", "InitialCost", "Decimal", 16),
+                    Field(Guid.Empty, "Ликвидационная стоимость", "SalvageValue", "Decimal", 17),
+                    Field(Guid.Empty, "Накопленная амортизация", "AccumulatedDepreciation", "Decimal", 18),
+                    Field(Guid.Empty, "Остаточная стоимость", "CarryingAmount", "Decimal", 19),
+                    Field(Guid.Empty, "Месячная амортизация", "MonthlyDepreciation", "Decimal", 20),
+                    Field(Guid.Empty, "Активен", "IsActive", "Bool", 21),
+                    Field(Guid.Empty, "Статус", "LifecycleStatus", "String", 22),
+                    Field(Guid.Empty, "Стоимость на начало", "OpeningCost", "Decimal", 23),
+                    Field(Guid.Empty, "Амортизация на начало", "OpeningDepreciation", "Decimal", 24),
+                    Field(Guid.Empty, "Остаточная стоимость на начало", "OpeningCarryingAmount", "Decimal", 25),
+                    Field(Guid.Empty, "Поступление", "AcquisitionCost", "Decimal", 26),
+                    Field(Guid.Empty, "Выбытие", "DisposalCost", "Decimal", 27),
+                    Field(Guid.Empty, "Внутреннее поступление", "TransferInCost", "Decimal", 28),
+                    Field(Guid.Empty, "Внутреннее выбытие", "TransferOutCost", "Decimal", 29),
+                    Field(Guid.Empty, "Переоценка стоимости", "RevaluationCost", "Decimal", 30),
+                    Field(Guid.Empty, "Автоматическая амортизация", "AutomaticDepreciation", "Decimal", 31),
+                    Field(Guid.Empty, "Ручная амортизация", "ManualDepreciation", "Decimal", 32),
+                    Field(Guid.Empty, "Корректировка амортизации", "DepreciationAdjustment", "Decimal", 33),
+                    Field(Guid.Empty, "Списание амортизации", "DepreciationWriteOff", "Decimal", 34),
+                    Field(Guid.Empty, "Амортизация выбывших ОС", "DisposalDepreciation", "Decimal", 35),
+                    Field(Guid.Empty, "Амортизация внутреннего поступления", "TransferInDepreciation", "Decimal", 36),
+                    Field(Guid.Empty, "Амортизация внутреннего выбытия", "TransferOutDepreciation", "Decimal", 37),
+                    Field(Guid.Empty, "Стоимость на конец", "ClosingCost", "Decimal", 38),
+                    Field(Guid.Empty, "Амортизация на конец", "ClosingDepreciation", "Decimal", 39),
+                    Field(Guid.Empty, "Остаточная стоимость на конец", "ClosingCarryingAmount", "Decimal", 40),
+                    Field(Guid.Empty, "Пробег на начало", "OpeningMileage", "Decimal", 41),
+                    Field(Guid.Empty, "Пробег за период", "PeriodMileage", "Decimal", 42),
+                    Field(Guid.Empty, "Пробег на конец", "ClosingMileage", "Decimal", 43)
+                });
+        }
+
         private async Task EnsureFinanceReportsAsync()
         {
             await RemoveObsoleteFinanceNavigationReportsAsync();
@@ -382,7 +457,9 @@ namespace BIS.ERP.Services
             };
 
             var reports = await _context.Reports
-                .Where(report => obsoleteCodes.Contains(report.Code) || obsoleteNames.Contains(report.Name))
+                .Where(report =>
+                    obsoleteCodes.Contains(report.Code) ||
+                    (obsoleteNames.Contains(report.Name) && !report.Code.StartsWith("standard.finance.")))
                 .ToListAsync();
             if (reports.Count == 0)
                 return;
@@ -408,8 +485,33 @@ namespace BIS.ERP.Services
 
         private async Task EnsureReportAsync(string name, string code, MetadataObject source, params string[] fieldNames)
         {
-            if (await _context.Reports.AnyAsync(report => report.Code == code || report.Name == name))
+            var existingReport = await _context.Reports
+                .Include(report => report.Fields)
+                .FirstOrDefaultAsync(report => report.Code == code || report.Name == name);
+            if (existingReport != null)
+            {
+                var sourceChanged = existingReport.DataSourceId != source.Id ||
+                                    !string.Equals(existingReport.DataSourceType, source.ObjectType, StringComparison.OrdinalIgnoreCase);
+                existingReport.DataSourceType = source.ObjectType;
+                existingReport.DataSourceId = source.Id;
+                existingReport.SourceFormat = "Native";
+                existingReport.UpdatedAt = DateTime.UtcNow;
+
+                if (sourceChanged && existingReport.Fields.Count > 0)
+                {
+                    await _context.ReportFields
+                        .Where(field => field.ReportId == existingReport.Id)
+                        .ExecuteDeleteAsync();
+                    foreach (var field in existingReport.Fields.ToList())
+                        _context.Entry(field).State = EntityState.Detached;
+                    existingReport.Fields.Clear();
+                }
+
+                await EnsureReportFieldsAsync(existingReport, source, fieldNames);
+                await _context.SaveChangesAsync();
                 return;
+            }
+
             var report = new Report
             {
                 Name = name, Code = code, Description = $"Настраиваемый отчет: {name}",
@@ -423,6 +525,7 @@ namespace BIS.ERP.Services
                 var metadataField = source.Fields.FirstOrDefault(field => field.Name == fieldName);
                 if (metadataField == null)
                     continue;
+
                 report.Fields.Add(new ReportField
                 {
                     ReportId = report.Id, FieldName = metadataField.DbColumnName,
@@ -431,6 +534,32 @@ namespace BIS.ERP.Services
             }
             await _context.Reports.AddAsync(report);
             await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureReportFieldsAsync(Report report, MetadataObject source, params string[] fieldNames)
+        {
+            var existingFieldNames = report.Fields
+                .Select(field => field.FieldName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var nextOrder = (report.Fields.Select(field => (int?)field.Order).Max() ?? 0) + 1;
+
+            foreach (var fieldName in fieldNames)
+            {
+                var metadataField = source.Fields.FirstOrDefault(field => field.Name == fieldName);
+                if (metadataField == null || existingFieldNames.Contains(metadataField.DbColumnName))
+                    continue;
+
+                await _context.ReportFields.AddAsync(new ReportField
+                {
+                    ReportId = report.Id,
+                    FieldName = metadataField.DbColumnName,
+                    DisplayName = metadataField.Name,
+                    Order = nextOrder++,
+                    Width = 120,
+                    IsVisible = true
+                });
+                existingFieldNames.Add(metadataField.DbColumnName);
+            }
         }
 
         private async Task EnsureObjectAsync(
@@ -501,6 +630,16 @@ namespace BIS.ERP.Services
             var fields = StandardDocumentFields();
             fields.Insert(2, Field(Guid.Empty, "Основное средство", "asset_id", "Reference", 3, true, "Основные средства"));
 
+            static void AddDepreciationDetails(List<MetadataField> target, int startOrder)
+            {
+                target.Add(Field(Guid.Empty, "Ликвидационная стоимость", "salvage_value", "Decimal", startOrder));
+                target.Add(Field(Guid.Empty, "Дата начала амортизации", "depreciation_start_date", "DateTime", startOrder + 1));
+                target.Add(Field(Guid.Empty, "Амортизация по пробегу", "use_mileage_depreciation", "Bool", startOrder + 2));
+                target.Add(Field(Guid.Empty, "Месячный пробег", "monthly_mileage", "Decimal", startOrder + 3));
+                target.Add(Field(Guid.Empty, "Ресурс пробега", "mileage_resource", "Decimal", startOrder + 4));
+                target.Add(Field(Guid.Empty, "Класс ОС", "asset_class", "Int", startOrder + 5));
+            }
+
             switch (documentName)
             {
                 case "Покупка ОС":
@@ -518,6 +657,7 @@ namespace BIS.ERP.Services
                     fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 28, false, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 29, false, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Налоговая группа", "tax_group", "Reference", 30, false, "Налоговые группы ОС"));
+                    AddDepreciationDetails(fields, 31);
                     break;
                 case "Ввод ОС в эксплуатацию":
                     RequireDocumentPostingFields(fields);
@@ -528,6 +668,7 @@ namespace BIS.ERP.Services
                     fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 24, true, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 25, true, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Налоговая группа", "tax_group", "Reference", 26, false, "Налоговые группы ОС"));
+                    AddDepreciationDetails(fields, 27);
                     break;
                 case "Начисление амортизации":
                     fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20));
@@ -539,6 +680,11 @@ namespace BIS.ERP.Services
                     fields.Add(Field(Guid.Empty, "Сумма амортизации", "depreciation_amount", "Decimal", 20, true));
                     fields.Add(Field(Guid.Empty, "Дата окончания", "end_date", "DateTime", 21));
                     break;
+                case "Переоценка ОС":
+                    fields.Add(Field(Guid.Empty, "Сумма изменения стоимости", "cost_adjustment_amount", "Decimal", 20));
+                    fields.Add(Field(Guid.Empty, "Сумма изменения амортизации", "depreciation_adjustment_amount", "Decimal", 21));
+                    fields.Add(Field(Guid.Empty, "Счет переоценки", "revaluation_account", "Reference", 22, false, "План счетов"));
+                    break;
                 case "Смена затратного счета":
                     fields.Add(Field(Guid.Empty, "Новый затратный счет", "new_expense_account", "Reference", 20, true, "План счетов"));
                     break;
@@ -546,6 +692,13 @@ namespace BIS.ERP.Services
                 case "Ликвидация ОС":
                 case "Частичная реализация ОС":
                     fields.Add(Field(Guid.Empty, "Дата выбытия", "disposal_date", "DateTime", 20));
+                    fields.Add(Field(Guid.Empty, "Сумма реализации", "proceeds_amount", "Decimal", 21));
+                    fields.Add(Field(Guid.Empty, "Счет расчетов по реализации", "settlement_account", "Reference", 22, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Счет дохода от реализации", "disposal_income_account", "Reference", 23, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Счет списания остаточной стоимости", "disposal_expense_account", "Reference", 24, false, "План счетов"));
+                    fields.Add(Field(Guid.Empty, "Списываемая стоимость", "disposal_cost_amount", "Decimal", 25));
+                    fields.Add(Field(Guid.Empty, "Списываемая амортизация", "disposal_depreciation_amount", "Decimal", 26));
+                    fields.Add(Field(Guid.Empty, "Списываемая остаточная стоимость", "disposal_carrying_amount", "Decimal", 27));
                     break;
                 case "Консервация ОС":
                 case "Расконсервация ОС":
@@ -860,6 +1013,7 @@ namespace BIS.ERP.Services
             "Int" => "integer",
             "DateTime" => "timestamp",
             "Bool" => "boolean",
+            "Reference" => "uuid",
             _ => "varchar(200)"
         };
 

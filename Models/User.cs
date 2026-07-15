@@ -3,7 +3,8 @@
     public enum UserRole
     {
         User = 0,
-        Admin = 1
+        Admin = 1,
+        Accountant = 2
     }
 
     public class User
@@ -14,6 +15,7 @@
         public string PasswordHash { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;
         public UserRole Role { get; set; } = UserRole.User;
+        public string RoleChecksum { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public bool IsActive { get; set; } = true;
         public DateTime? LastLoginDate { get; set; }

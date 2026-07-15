@@ -27,6 +27,7 @@
             <TextBlock Foreground="#0B5CAD" TextWrapping="Wrap">
                 Здесь администратор выбирает, какие модули доступны в этой информационной базе.
                 Для новой базы модуль «Финансы» включается по умолчанию, остальные можно включить вручную.
+                Баланс не выбирается здесь как модуль: это итоговый этап закрытия периода после рабочих модулей.
             </TextBlock>
         </Border>
 
@@ -39,7 +40,7 @@
             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                 <Button Content="Только финансы" Width="130" Height="34" Click="OnFinanceOnlyClick"
                         Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
-                <Button Content="Включить все" Width="120" Height="34" Margin="8,0,0,0" Click="OnEnableAllClick"
+                <Button Content="Все рабочие" Width="120" Height="34" Margin="8,0,0,0" Click="OnEnableAllClick"
                         Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
                 <ProgressBar x:Name="LoadingProgress" Width="170" Height="6" Margin="14,14,0,0"
                              IsIndeterminate="True" Visibility="Collapsed"/>

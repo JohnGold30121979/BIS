@@ -27,6 +27,7 @@ namespace BIS.ERP.ViewModels
 
         public event EventHandler? LoginSucceeded;
         public event EventHandler? CloseRequested;
+        public event EventHandler? BackRequested;
 
         public LoginViewModel(IAuthService authService, IDialogService dialogService)
         {
@@ -92,6 +93,12 @@ namespace BIS.ERP.ViewModels
         private void Close()
         {
             CloseRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        [RelayCommand]
+        private void Back()
+        {
+            BackRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 }

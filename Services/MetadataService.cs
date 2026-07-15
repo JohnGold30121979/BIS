@@ -592,6 +592,7 @@ namespace BIS.ERP.Services
             var query = _context.MetadataModules.AsNoTracking();
             if (!includeInactive)
                 query = query.Where(module => module.IsActive);
+            query = query.Where(module => module.Code != ModuleMetadataService.BalanceCode);
 
             return await query
                 .OrderBy(module => module.Order)
@@ -1533,15 +1534,61 @@ END $$;");
         private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
         {
             var initialCost = GetDecimalValue(data, "initial_cost", "InitialCost", "Первоначальная стоимость");
+            var salvageValue = GetDecimalValue(data, "salvage_value", "SalvageValue", "Ликвидационная стоимость");
             var usefulLife = GetIntValue(data, "useful_life_months", "UsefulLife", "useful_life", "Срок полезного использования, мес.");
             var depreciationRate = GetDecimalValue(data, "depreciation_rate", "DepreciationRate", "Норма амортизации, %");
+            var useMileageDepreciation = GetBoolValue(data, "use_mileage_depreciation", "Амортизация по пробегу");
+            var monthlyMileage = GetDecimalValue(data, "monthly_mileage", "Месячный пробег");
+            var mileageResource = GetDecimalValue(data, "mileage_resource", "Ресурс пробега");
+            var protectedResidualValue = initialCost > 0
+                ? Math.Min(Math.Max(0m, salvageValue), initialCost)
+                : 0m;
+            var depreciableAmount = Math.Max(0m, initialCost - protectedResidualValue);
 
+            if (depreciableAmount <= 0)
+                return 0;
+
+            if (useMileageDepreciation && monthlyMileage > 0 && mileageResource > 0)
+                return Math.Round(depreciableAmount * monthlyMileage / mileageResource, 2);
             if (usefulLife > 0)
-                return initialCost / usefulLife;
+                return Math.Round(depreciableAmount / usefulLife, 2);
             if (depreciationRate > 0)
-                return initialCost * depreciationRate / 100;
+                return Math.Round(depreciableAmount * depreciationRate / 100 / 12, 2);
 
             return 0;
+        }
+
+        private static bool GetBoolValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is bool boolValue)
+                    return boolValue;
+
+                var text = value.ToString();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                if (bool.TryParse(text, out var parsed))
+                    return parsed;
+                if (text.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("Да", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (text.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("Нет", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("No", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return false;
         }
 
         private static int GetIntValue(Dictionary<string, object> data, params string[] keys)
@@ -2212,8 +2259,10 @@ END $$;");
                 var document = await _context.MetadataObjects.Include(item => item.Fields)
                     .FirstOrDefaultAsync(item => item.Id == documentId)
                     ?? throw new InvalidOperationException("Документ не найден.");
-                if (document.Name != "Приходный кассовый ордер" && document.Name != "Расходный кассовый ордер")
-                    throw new InvalidOperationException("Отмена проведения пока поддерживается для ПКО и РКО.");
+                var isCashOrder = document.Name == "Приходный кассовый ордер" || document.Name == "Расходный кассовый ордер";
+                var isFixedAssetDocument = ModuleMetadataService.FixedAssetDocumentNames.Contains(document.Name);
+                if (!isCashOrder && !isFixedAssetDocument)
+                    throw new InvalidOperationException("Отмена проведения поддерживается для кассовых документов и документов основных средств.");
 
                 var record = await GetRecordDataAsync(document.TableName, recordId);
                 await EnsureDocumentDateCanBeModifiedAsync(document, record);
@@ -2222,10 +2271,14 @@ END $$;");
 
                 var amount = Convert.ToDecimal(record.GetValueOrDefault("amount") ?? 0m);
                 var documentNumber = NormalizeLegacyDocumentNumber(record.GetValueOrDefault("doc_number")?.ToString());
-                if (TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk"))
+                if (isCashOrder && TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk"))
                 {
                     var wasReceipt = document.Name == "Приходный кассовый ордер";
                     await UpdateCashDeskBalance(cashDeskId, amount, !wasReceipt);
+                }
+                else if (isFixedAssetDocument)
+                {
+                    await ReverseFixedAssetDocumentAsync(document, record, recordId);
                 }
 
                 await _context.Database.ExecuteSqlRawAsync(@"
@@ -2321,6 +2374,218 @@ END $$;");
                 await UpdateDocumentPostedStatus(document.TableName, recordId);
         }
 
+        private async Task ReverseFixedAssetDocumentAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            Guid recordId)
+        {
+            if (!TryGetGuid(recordData, out var assetId, "asset_id", "Основное средство"))
+                return;
+
+            var assetMetadata = await GetFixedAssetMetadataAsync();
+            var assetRecord = await GetRecordDataAsync(assetMetadata.TableName, assetId);
+            if (assetRecord.Count == 0)
+                throw new InvalidOperationException("Выбранное основное средство не найдено.");
+
+            var amount = GetDecimalValue(recordData, "amount", "Сумма");
+            var initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
+            var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
+            var carryingAmount = GetDecimalValue(assetRecord, "carrying_amount", "Остаточная стоимость");
+
+            switch (document.Name)
+            {
+                case "Покупка ОС":
+                case "Приход из производства ОС":
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        Math.Max(0m, initialCost - amount),
+                        accumulatedDepreciation,
+                        Math.Max(0m, carryingAmount - amount));
+                    break;
+                case "Ввод ОС в эксплуатацию":
+                    await SetFixedAssetStatusAsync(assetMetadata, assetId, "RECEIVED");
+                    await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "commissioning_date", DBNull.Value);
+                    break;
+                case "Начисление амортизации":
+                    var depreciationAmount = PositiveAmount(
+                        GetDecimalValue(recordData, "depreciation_amount", "Сумма амортизации"),
+                        amount);
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        initialCost,
+                        Math.Max(0m, accumulatedDepreciation - depreciationAmount),
+                        Math.Max(0m, carryingAmount + depreciationAmount));
+                    break;
+                case "Списание амортизации":
+                    var writeOffAmount = PositiveAmount(
+                        GetDecimalValue(recordData, "depreciation_amount", "Сумма амортизации"),
+                        amount);
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        initialCost,
+                        accumulatedDepreciation + writeOffAmount,
+                        Math.Max(0m, carryingAmount - writeOffAmount));
+                    break;
+                case "Переоценка ОС":
+                    var costAdjustment = GetDecimalValue(recordData, "cost_adjustment_amount", "Сумма изменения стоимости");
+                    if (costAdjustment == 0)
+                        costAdjustment = amount;
+                    var depreciationAdjustment = GetDecimalValue(recordData, "depreciation_adjustment_amount", "Сумма изменения амортизации");
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        Math.Max(0m, initialCost - costAdjustment),
+                        Math.Max(0m, accumulatedDepreciation - depreciationAdjustment),
+                        Math.Max(0m, carryingAmount - costAdjustment + depreciationAdjustment));
+                    break;
+                case "Укомплектация ОС":
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        Math.Max(0m, initialCost - amount),
+                        accumulatedDepreciation,
+                        Math.Max(0m, carryingAmount - amount));
+                    break;
+                case "Разукомплектация ОС":
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        initialCost + amount,
+                        accumulatedDepreciation,
+                        carryingAmount + amount);
+                    break;
+                case "Частичная реализация ОС":
+                case "Реализация ОС":
+                case "Ликвидация ОС":
+                    var disposedCost = PositiveAmount(
+                        GetDecimalValue(recordData, "disposal_cost_amount", "Списываемая стоимость"),
+                        document.Name == "Частичная реализация ОС" ? amount : initialCost);
+                    var disposedDepreciation = GetDecimalValue(recordData, "disposal_depreciation_amount", "Списываемая амортизация");
+                    var disposedCarryingAmount = PositiveAmount(
+                        GetDecimalValue(recordData, "disposal_carrying_amount", "Списываемая остаточная стоимость"),
+                        Math.Max(0m, disposedCost - disposedDepreciation));
+                    await SetFixedAssetAmountsAsync(
+                        assetMetadata,
+                        assetId,
+                        document.Name == "Частичная реализация ОС" ? initialCost + disposedCost : Math.Max(initialCost, disposedCost),
+                        Math.Max(0m, accumulatedDepreciation - disposedDepreciation),
+                        carryingAmount + disposedCarryingAmount);
+                    await SetFixedAssetStatusAsync(assetMetadata, assetId, "ACTIVE");
+                    await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "disposal_date", DBNull.Value);
+                    await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "is_active", true);
+                    break;
+                case "Консервация ОС":
+                    await SetFixedAssetStatusAsync(assetMetadata, assetId, "ACTIVE");
+                    await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "conservation_date", DBNull.Value);
+                    break;
+                case "Расконсервация ОС":
+                    await SetFixedAssetStatusAsync(assetMetadata, assetId, "CONSERVATION");
+                    await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "reopening_date", DBNull.Value);
+                    break;
+                case "Передача ОС в подотчет":
+                    await RestorePreviousFixedAssetAssignmentAsync(assetMetadata, assetId, recordData, recordId);
+                    break;
+                case "Смена затратного счета":
+                    await RestorePreviousFixedAssetExpenseAccountAsync(assetMetadata, assetId, recordData, recordId);
+                    break;
+            }
+        }
+
+        private async Task SetFixedAssetAmountsAsync(
+            MetadataObject assetMetadata,
+            Guid assetId,
+            decimal initialCost,
+            decimal accumulatedDepreciation,
+            decimal carryingAmount)
+        {
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "initial_cost", Math.Max(0m, initialCost));
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "accumulated_depreciation", Math.Max(0m, accumulatedDepreciation));
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "carrying_amount", Math.Max(0m, carryingAmount));
+        }
+
+        private async Task SetFixedAssetStatusAsync(MetadataObject assetMetadata, Guid assetId, string statusCode)
+        {
+            var statusValue = await GetReferenceCodeOrIdValueAsync("Статусы ОС", statusCode);
+            if (!string.IsNullOrWhiteSpace(statusValue))
+                await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "status", statusValue);
+        }
+
+        private async Task RestorePreviousFixedAssetAssignmentAsync(
+            MetadataObject assetMetadata,
+            Guid assetId,
+            Dictionary<string, object> currentRecord,
+            Guid currentRecordId)
+        {
+            var previous = await FindPreviousFixedAssetDocumentRecordAsync(
+                "Передача ОС в подотчет",
+                assetId,
+                currentRecord,
+                currentRecordId);
+            if (previous == null)
+                throw new InvalidOperationException("Для отмены передачи ОС не найдено предыдущее назначение. Создайте обратную передачу или скорректируйте карточку ОС вручную.");
+
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, previous, "organization_id", "organization_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, previous, "responsible_person_id", "responsible_person_id");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, previous, "site_id", "site_id");
+        }
+
+        private async Task RestorePreviousFixedAssetExpenseAccountAsync(
+            MetadataObject assetMetadata,
+            Guid assetId,
+            Dictionary<string, object> currentRecord,
+            Guid currentRecordId)
+        {
+            var previous = await FindPreviousFixedAssetDocumentRecordAsync(
+                "Смена затратного счета",
+                assetId,
+                currentRecord,
+                currentRecordId);
+            if (previous == null)
+                throw new InvalidOperationException("Для отмены смены затратного счета не найден предыдущий затратный счет. Создайте обратную смену или скорректируйте карточку ОС вручную.");
+
+            var previousExpenseAccount = GetStringValue(previous, "new_expense_account", "Новый затратный счет");
+            if (string.IsNullOrWhiteSpace(previousExpenseAccount))
+                throw new InvalidOperationException("В предыдущей смене затратного счета не указан счет.");
+
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "expense_account", previousExpenseAccount);
+        }
+
+        private async Task<Dictionary<string, object>?> FindPreviousFixedAssetDocumentRecordAsync(
+            string documentName,
+            Guid assetId,
+            Dictionary<string, object> currentRecord,
+            Guid currentRecordId)
+        {
+            var document = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == documentName);
+            if (document == null)
+                return null;
+
+            var currentDate = GetDateValue(currentRecord, "doc_date", "Дата") ?? DateTime.Today;
+            var rows = await GetCatalogDataAsync(document.Id);
+            return rows
+                .Where(row =>
+                    GetBoolValue(row, "is_posted", "Проведен", "Проведён") &&
+                    TryGetGuid(row, out var rowAssetId, "asset_id", "Основное средство") &&
+                    rowAssetId == assetId &&
+                    (!TryGetGuid(row, out var rowId, "Id") || rowId != currentRecordId))
+                .Select(row => new
+                {
+                    Row = row,
+                    Date = GetDateValue(row, "doc_date", "Дата") ?? DateTime.MinValue
+                })
+                .Where(item => item.Date <= currentDate)
+                .OrderByDescending(item => item.Date)
+                .Select(item => item.Row)
+                .FirstOrDefault();
+        }
+
+        private static decimal PositiveAmount(decimal primary, decimal fallback) =>
+            primary > 0 ? primary : Math.Max(0m, fallback);
+
         private async Task ProcessFixedAssetPurchaseDocumentAsync(
             MetadataObject document,
             Dictionary<string, object> recordData,
@@ -2382,9 +2647,15 @@ END $$;");
                 depreciationAmount = GetDecimalValue(assetRecord, "monthly_depreciation", "Месячная амортизация");
 
             var initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
+            var salvageValue = GetDecimalValue(assetRecord, "salvage_value", "Ликвидационная стоимость");
             var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
             var carryingAmount = GetDecimalValue(assetRecord, "carrying_amount", "Остаточная стоимость");
-            var depreciationBase = initialCost > 0 ? initialCost : accumulatedDepreciation + carryingAmount;
+            var protectedResidualValue = initialCost > 0
+                ? Math.Min(Math.Max(0m, salvageValue), initialCost)
+                : 0m;
+            var depreciationBase = initialCost > 0
+                ? Math.Max(0m, initialCost - protectedResidualValue)
+                : accumulatedDepreciation + carryingAmount;
             var availableAmount = depreciationBase > 0
                 ? Math.Max(0m, depreciationBase - accumulatedDepreciation)
                 : depreciationAmount;
@@ -2412,8 +2683,8 @@ END $$;");
             await ProcessDocumentByPostingRulesAsync(document, recordData, recordId, depreciationAmount, updatePostedStatus: false);
 
             var newAccumulatedDepreciation = accumulatedDepreciation + depreciationAmount;
-            var newCarryingAmount = depreciationBase > 0
-                ? Math.Max(0m, depreciationBase - newAccumulatedDepreciation)
+            var newCarryingAmount = initialCost > 0
+                ? Math.Max(protectedResidualValue, initialCost - newAccumulatedDepreciation)
                 : Math.Max(0m, carryingAmount - depreciationAmount);
 
             await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "accumulated_depreciation", newAccumulatedDepreciation);
@@ -2525,16 +2796,38 @@ END $$;");
             var initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
             var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
             var carryingAmount = GetDecimalValue(assetRecord, "carrying_amount", "Остаточная стоимость");
+            if (document.Name.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase))
+            {
+                var explicitCostAdjustment = GetDecimalValue(recordData, "cost_adjustment_amount", "Сумма изменения стоимости");
+                if (explicitCostAdjustment != 0)
+                {
+                    initialCostDelta = explicitCostAdjustment;
+                    carryingAmountDelta = explicitCostAdjustment;
+                }
+            }
+            var depreciationAdjustment = document.Name.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase)
+                ? GetDecimalValue(recordData, "depreciation_adjustment_amount", "Сумма изменения амортизации")
+                : 0m;
 
             var newInitialCost = Math.Max(0m, initialCost + initialCostDelta);
-            var newCarryingAmount = Math.Max(0m, carryingAmount + carryingAmountDelta);
-            var minimumCarryingAmount = Math.Max(0m, newInitialCost - accumulatedDepreciation);
+            var newAccumulatedDepreciation = Math.Max(0m, accumulatedDepreciation + depreciationAdjustment);
+            var newCarryingAmount = Math.Max(0m, carryingAmount + carryingAmountDelta - depreciationAdjustment);
+            var minimumCarryingAmount = Math.Max(0m, newInitialCost - newAccumulatedDepreciation);
             if (initialCostDelta >= 0)
                 newCarryingAmount = Math.Max(newCarryingAmount, minimumCarryingAmount);
             else
                 newCarryingAmount = Math.Min(newCarryingAmount, minimumCarryingAmount);
 
-            if (CanPostByRules(recordData, Math.Abs(initialCostDelta)))
+            if (document.Name.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase))
+            {
+                await CreateFixedAssetRevaluationPostingsAsync(
+                    document,
+                    recordData,
+                    assetRecord,
+                    initialCostDelta,
+                    depreciationAdjustment);
+            }
+            else if (CanPostByRules(recordData, Math.Abs(initialCostDelta)))
             {
                 var postingData = new Dictionary<string, object>(recordData)
                 {
@@ -2544,6 +2837,7 @@ END $$;");
             }
 
             await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "initial_cost", newInitialCost);
+            await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "accumulated_depreciation", newAccumulatedDepreciation);
             await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "carrying_amount", Math.Max(0m, newCarryingAmount));
 
             if (newInitialCost <= 0 && Math.Max(0m, newCarryingAmount) <= 0)
@@ -2567,8 +2861,24 @@ END $$;");
             if (assetRecord.Count == 0)
                 throw new InvalidOperationException("Выбранное основное средство не найдено.");
 
-            if (CanPostByRules(recordData, amount))
-                await ProcessDocumentByPostingRulesAsync(document, recordData, recordId, amount, updatePostedStatus: false);
+            var initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
+            var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
+            var carryingAmount = GetDecimalValue(assetRecord, "carrying_amount", "Остаточная стоимость");
+            var costReductionAmount = fullDisposal ? initialCost : Math.Min(amount, initialCost);
+            var depreciationReductionAmount = fullDisposal
+                ? accumulatedDepreciation
+                : initialCost > 0
+                    ? Math.Round(accumulatedDepreciation * costReductionAmount / initialCost, 2)
+                    : 0m;
+            var residualReductionAmount = fullDisposal
+                ? carryingAmount
+                : Math.Max(0m, costReductionAmount - depreciationReductionAmount);
+
+            await EnsureDocumentFieldValueAsync(document.TableName, recordId, recordData, "disposal_cost_amount", costReductionAmount);
+            await EnsureDocumentFieldValueAsync(document.TableName, recordId, recordData, "disposal_depreciation_amount", depreciationReductionAmount);
+            await EnsureDocumentFieldValueAsync(document.TableName, recordId, recordData, "disposal_carrying_amount", residualReductionAmount);
+
+            await CreateFixedAssetDisposalPostingsAsync(document, recordData, assetRecord, amount, fullDisposal);
 
             if (fullDisposal)
             {
@@ -2579,17 +2889,9 @@ END $$;");
 
             if (amount <= 0)
                 throw new InvalidOperationException("Для частичной реализации необходимо указать сумму уменьшения стоимости.");
-
-            var initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
-            var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
-            var carryingAmount = GetDecimalValue(assetRecord, "carrying_amount", "Остаточная стоимость");
-
-            var newInitialCost = Math.Max(0m, initialCost - amount);
-            var newCarryingAmount = Math.Max(0m, carryingAmount - amount);
-            var maximumAccumulatedDepreciation = Math.Max(0m, newInitialCost);
-            var newAccumulatedDepreciation = Math.Min(accumulatedDepreciation, maximumAccumulatedDepreciation);
-            if (newCarryingAmount > Math.Max(0m, newInitialCost - newAccumulatedDepreciation))
-                newCarryingAmount = Math.Max(0m, newInitialCost - newAccumulatedDepreciation);
+            var newInitialCost = Math.Max(0m, initialCost - costReductionAmount);
+            var newAccumulatedDepreciation = Math.Max(0m, accumulatedDepreciation - depreciationReductionAmount);
+            var newCarryingAmount = Math.Max(0m, carryingAmount - residualReductionAmount);
 
             await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "initial_cost", newInitialCost);
             await UpdateRecordFieldAsync(assetMetadata.TableName, assetId, "accumulated_depreciation", newAccumulatedDepreciation);
@@ -2599,6 +2901,220 @@ END $$;");
                 await SetFixedAssetDisposedAsync(assetMetadata, assetId, recordData);
 
             await UpdateDocumentPostedStatus(document.TableName, recordId);
+        }
+
+        private async Task CreateFixedAssetRevaluationPostingsAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            Dictionary<string, object> assetRecord,
+            decimal costAdjustmentAmount,
+            decimal depreciationAdjustmentAmount)
+        {
+            if (costAdjustmentAmount == 0 && depreciationAdjustmentAmount == 0)
+                return;
+
+            var assetAccount = await GetRequiredAccountCodeAsync(
+                "счет учета ОС",
+                recordData,
+                ["asset_account", "debit_account", "Счет учета", "Счет дебета"],
+                assetRecord,
+                ["asset_account", "Счет учета"]);
+            var revaluationAccount = await GetRequiredAccountCodeAsync(
+                "счет переоценки",
+                recordData,
+                ["revaluation_account", "credit_account", "Счет переоценки", "Счет кредита"]);
+            var assetName = GetStringValue(assetRecord, "name", "Наименование");
+
+            if (costAdjustmentAmount > 0)
+            {
+                await CreateFixedAssetPostingAsync(
+                    document,
+                    recordData,
+                    assetAccount,
+                    revaluationAccount,
+                    costAdjustmentAmount,
+                    $"Увеличение стоимости ОС: {assetName}");
+            }
+            else if (costAdjustmentAmount < 0)
+            {
+                await CreateFixedAssetPostingAsync(
+                    document,
+                    recordData,
+                    revaluationAccount,
+                    assetAccount,
+                    Math.Abs(costAdjustmentAmount),
+                    $"Уменьшение стоимости ОС: {assetName}");
+            }
+
+            if (depreciationAdjustmentAmount == 0)
+                return;
+
+            var depreciationAccount = await GetRequiredAccountCodeAsync(
+                "счет амортизации",
+                recordData,
+                ["depreciation_account", "Счет амортизации"],
+                assetRecord,
+                ["depreciation_account", "Счет амортизации"]);
+
+            if (depreciationAdjustmentAmount > 0)
+            {
+                await CreateFixedAssetPostingAsync(
+                    document,
+                    recordData,
+                    revaluationAccount,
+                    depreciationAccount,
+                    depreciationAdjustmentAmount,
+                    $"Увеличение амортизации ОС при переоценке: {assetName}");
+            }
+            else
+            {
+                await CreateFixedAssetPostingAsync(
+                    document,
+                    recordData,
+                    depreciationAccount,
+                    revaluationAccount,
+                    Math.Abs(depreciationAdjustmentAmount),
+                    $"Уменьшение амортизации ОС при переоценке: {assetName}");
+            }
+        }
+
+        private async Task CreateFixedAssetDisposalPostingsAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            Dictionary<string, object> assetRecord,
+            decimal documentAmount,
+            bool fullDisposal)
+        {
+            var initialCost = GetDecimalValue(assetRecord, "initial_cost", "Первоначальная стоимость");
+            var accumulatedDepreciation = GetDecimalValue(assetRecord, "accumulated_depreciation", "Накопленная амортизация");
+            var carryingAmount = GetDecimalValue(assetRecord, "carrying_amount", "Остаточная стоимость");
+            var costReductionAmount = fullDisposal ? initialCost : Math.Min(documentAmount, initialCost);
+            var depreciationReductionAmount = fullDisposal
+                ? accumulatedDepreciation
+                : initialCost > 0
+                    ? Math.Round(accumulatedDepreciation * costReductionAmount / initialCost, 2)
+                    : 0m;
+            var residualAmount = fullDisposal
+                ? carryingAmount
+                : Math.Max(0m, costReductionAmount - depreciationReductionAmount);
+
+            var assetName = GetStringValue(assetRecord, "name", "Наименование");
+            var assetAccount = await GetRequiredAccountCodeAsync(
+                "счет учета ОС",
+                recordData,
+                ["asset_account", "credit_account", "Счет учета", "Счет кредита"],
+                assetRecord,
+                ["asset_account", "Счет учета"]);
+
+            if (depreciationReductionAmount > 0)
+            {
+                var depreciationAccount = await GetRequiredAccountCodeAsync(
+                    "счет амортизации",
+                    recordData,
+                    ["depreciation_account", "Счет амортизации"],
+                    assetRecord,
+                    ["depreciation_account", "Счет амортизации"]);
+                await CreateFixedAssetPostingAsync(
+                    document,
+                    recordData,
+                    depreciationAccount,
+                    assetAccount,
+                    depreciationReductionAmount,
+                    $"Списание накопленной амортизации ОС: {assetName}");
+            }
+
+            if (residualAmount > 0)
+            {
+                var residualExpenseAccount = await GetRequiredAccountCodeAsync(
+                    "счет списания остаточной стоимости",
+                    recordData,
+                    ["disposal_expense_account", "debit_account", "Счет списания остаточной стоимости", "Счет дебета"]);
+                await CreateFixedAssetPostingAsync(
+                    document,
+                    recordData,
+                    residualExpenseAccount,
+                    assetAccount,
+                    residualAmount,
+                    $"Списание остаточной стоимости ОС: {assetName}");
+            }
+
+            var proceedsAmount = GetDecimalValue(recordData, "proceeds_amount", "Сумма реализации");
+            if (proceedsAmount <= 0 &&
+                fullDisposal &&
+                document.Name.Equals("Реализация ОС", StringComparison.OrdinalIgnoreCase))
+            {
+                proceedsAmount = documentAmount;
+            }
+
+            if (proceedsAmount <= 0)
+                return;
+
+            var settlementAccount = await GetRequiredAccountCodeAsync(
+                "счет расчетов по реализации",
+                recordData,
+                ["settlement_account", "debit_account", "Счет расчетов по реализации", "Счет дебета"]);
+            var incomeAccount = await GetRequiredAccountCodeAsync(
+                "счет дохода от реализации",
+                recordData,
+                ["disposal_income_account", "credit_account", "Счет дохода от реализации", "Счет кредита"]);
+
+            await CreateFixedAssetPostingAsync(
+                document,
+                recordData,
+                settlementAccount,
+                incomeAccount,
+                proceedsAmount,
+                $"Доход от реализации ОС: {assetName}");
+        }
+
+        private async Task CreateFixedAssetPostingAsync(
+            MetadataObject document,
+            Dictionary<string, object> recordData,
+            string debitAccount,
+            string creditAccount,
+            decimal amount,
+            string description)
+        {
+            var debitCode = await ResolveAccountCodeValueAsync(debitAccount);
+            var creditCode = await ResolveAccountCodeValueAsync(creditAccount);
+            if (string.IsNullOrWhiteSpace(debitCode) || string.IsNullOrWhiteSpace(creditCode))
+                throw new InvalidOperationException("Для проводки ОС не определены счет дебета и счет кредита.");
+            if (debitCode.Equals(creditCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Проводка ОС сформировала одинаковые счета дебета и кредита.");
+            if (amount <= 0)
+                return;
+
+            var documentNumber = NormalizeLegacyDocumentNumber(
+                recordData.GetValueOrDefault("doc_number")?.ToString() ??
+                recordData.GetValueOrDefault("number")?.ToString());
+            var postingDate = GetDateValue(recordData, "doc_date", "date", "Дата") ?? DateTime.Today;
+
+            await CreatePosting(
+                documentNumber,
+                postingDate,
+                debitCode,
+                creditCode,
+                amount,
+                description,
+                document.Name);
+        }
+
+        private async Task<string> GetRequiredAccountCodeAsync(
+            string label,
+            Dictionary<string, object> source,
+            string[] sourceKeys,
+            Dictionary<string, object>? fallback = null,
+            string[]? fallbackKeys = null)
+        {
+            var accountValue = GetStringValue(source, sourceKeys);
+            if (string.IsNullOrWhiteSpace(accountValue) && fallback != null && fallbackKeys != null)
+                accountValue = GetStringValue(fallback, fallbackKeys);
+
+            var accountCode = await ResolveAccountCodeValueAsync(accountValue);
+            if (string.IsNullOrWhiteSpace(accountCode))
+                throw new InvalidOperationException($"Для проводки ОС не указан {label}.");
+
+            return accountCode;
         }
 
         private async Task<MetadataObject> GetFixedAssetMetadataAsync()
@@ -2671,6 +3187,12 @@ END $$;");
             await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_method", "depreciation_method");
             await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "useful_life_months", "useful_life_months");
             await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_rate", "depreciation_rate");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "salvage_value", "salvage_value");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_start_date", "depreciation_start_date");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "use_mileage_depreciation", "use_mileage_depreciation");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "monthly_mileage", "monthly_mileage");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "mileage_resource", "mileage_resource");
+            await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "asset_class", "asset_class");
             await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "asset_account", "debit_account");
             await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "depreciation_account", "depreciation_account");
             await UpdateAssetFieldFromDocumentAsync(assetMetadata, assetId, recordData, "expense_account", "expense_account");
@@ -3395,7 +3917,7 @@ END $$;");
 
         private static bool RequiresNonZeroDocumentAmount(string documentName)
         {
-            return documentName.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase);
+            return false;
         }
 
         private static bool CanPostByRules(Dictionary<string, object> data, decimal amount)

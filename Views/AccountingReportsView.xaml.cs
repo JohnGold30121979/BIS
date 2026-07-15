@@ -125,8 +125,9 @@ namespace BIS.ERP.Views
                 }
                 else
                 {
-                    if (MessageBox.Show("Закрыть период? Документы с датами этого периода нельзя будет изменять.",
-                            "Учетный период", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    if (MessageBox.Show(
+                            "Выполнить итоговое закрытие баланса? После этого документы с датами выбранного периода нельзя будет изменять.",
+                            "Итоговое закрытие баланса", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                         return;
                     await _periodService.CloseAsync(_currentPeriod.Id);
                 }
@@ -143,8 +144,10 @@ namespace BIS.ERP.Views
             _currentPeriod = await _periodService.FindAsync(start, end);
             PeriodStatusText.Text = _currentPeriod == null
                 ? "Период не собран"
-                : $"Статус: {LocalizationService.DisplayValue(_currentPeriod.Status)}";
-            PeriodStateButton.Content = _currentPeriod?.IsLocked == true ? "Открыть период" : "Закрыть период";
+                : _currentPeriod.IsLocked
+                    ? "Статус: итоговый баланс закрыт"
+                    : $"Статус: {LocalizationService.DisplayValue(_currentPeriod.Status)}";
+            PeriodStateButton.Content = _currentPeriod?.IsLocked == true ? "Открыть баланс" : "Закрыть баланс";
             await LoadPeriodModuleStatesAsync();
         }
 
@@ -164,6 +167,17 @@ namespace BIS.ERP.Views
 
             _currentModuleStates = await _periodService.GetModuleStatusesAsync(_currentPeriod.Id);
             PeriodModuleCombo.ItemsSource = _currentModuleStates;
+            if (_currentModuleStates.Count == 0)
+            {
+                PeriodModuleCombo.IsEnabled = false;
+                CloseModuleButton.IsEnabled = false;
+                ReopenModuleButton.IsEnabled = false;
+                PeriodModuleStatusText.Text = _currentPeriod.IsLocked
+                    ? "Рабочих модулей нет; итоговый баланс закрыт."
+                    : "Рабочих модулей для закрытия нет. Можно выполнить итоговое закрытие баланса.";
+                return;
+            }
+
             PeriodModuleCombo.IsEnabled = _currentModuleStates.Count > 0 && _currentPeriod.IsLocked == false;
             PeriodModuleCombo.SelectedItem = _currentModuleStates.FirstOrDefault(item => !item.IsClosed) ??
                                              _currentModuleStates.FirstOrDefault();

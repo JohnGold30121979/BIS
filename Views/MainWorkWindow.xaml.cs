@@ -128,6 +128,7 @@ namespace BIS.ERP
                     var printFormService = new PrintFormService(context);
                     await printFormService.SeedCashOrderFormsAsync();
                     await printFormService.SeedInvoiceFormsAsync();
+                    await _metadataService.EnsureStandardReportsAsync();
                     await BuildNavigationTree();
                 }
             }
@@ -150,8 +151,6 @@ namespace BIS.ERP
             var reports = await _reportService.GetNavigationReportsAsync();
             var modules = await _moduleMetadataService.GetModulesAsync();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
-            var isBalanceModuleActive = modules.Any(module =>
-                module.Code.Equals(ModuleMetadataService.BalanceCode, StringComparison.OrdinalIgnoreCase));
             if (modules.Count == 0 && (await _moduleMetadataService.GetModulesAsync(true)).Count == 0)
             {
                 await BuildLegacyNavigationTree();
@@ -228,20 +227,9 @@ namespace BIS.ERP
                         Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
                     };
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
-                    if (!isBalanceModuleActive)
-                        financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
+                    financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
-                }
-
-                if (module.Code == ModuleMetadataService.BalanceCode)
-                {
-                    var balanceTools = new NavigationItem
-                    {
-                        Id = "BalanceTools", Name = "Отчеты", Icon = "📊", Type = "Group"
-                    };
-                    balanceTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
-                    moduleSection.Children.Add(balanceTools);
                 }
 
                 if (moduleSection.Children.Count > 0)
@@ -994,14 +982,15 @@ namespace BIS.ERP
         private async void OnProfileClick(object sender, RoutedEventArgs e)
         {
             var user = _authService.CurrentUser;
-            if (user != null)
+            if (user == null)
+                return;
+
+            var currentInfoBase = await _infoBaseManager.GetCurrentInfoBaseAsync();
+            var profileDialog = new UserProfileDialog(_authService, currentInfoBase?.Name ?? "не выбрана")
             {
-                MessageBox.Show($"Пользователь: {user.FullName}\n" +
-                                $"Логин: {user.Login}\n" +
-                                $"Email: {user.Email}\n" +
-                                $"Роль: {(user.Role == UserRole.Admin ? "Администратор" : "Пользователь")}",
-                                "Профиль", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
+                Owner = this
+            };
+            profileDialog.ShowDialog();
         }
 
         private void OnLogoutClick(object sender, RoutedEventArgs e)

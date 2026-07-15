@@ -17,6 +17,11 @@ namespace BIS.ERP.Views
                 DialogResult = true;
                 Close();
             };
+            viewModel.BackRequested += (_, _) =>
+            {
+                DialogResult = false;
+                Close();
+            };
             viewModel.CloseRequested += (_, _) =>
             {
                 try

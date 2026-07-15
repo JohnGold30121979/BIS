@@ -10,7 +10,12 @@ namespace BIS.ERP.ViewModels
         public bool IsConfigMode { get; private set; }
         public string UserFullName => CurrentUser.FullName;
         public string UserLogin => CurrentUser.Login;
-        public string UserRoleText => CurrentUser.Role == UserRole.Admin ? "Администратор" : "Пользователь";
+        public string UserRoleText => CurrentUser.Role switch
+        {
+            UserRole.Admin => "Администратор",
+            UserRole.Accountant => "Бухгалтер",
+            _ => "Пользователь"
+        };
         public bool IsAdminVisible => CurrentUser.Role == UserRole.Admin;
 
         public event EventHandler? ModeSelected;

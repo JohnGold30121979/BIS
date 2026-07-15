@@ -86,7 +86,12 @@
                                                TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="Режим конфигуратора" FontSize="11"
                                                Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"
-                                               Margin="0,2,0,8"/>
+                                               Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="InfoBaseNameText" FontSize="11"
+                                               Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"
+                                               Text="Инфобаза: -"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,0,0,8"/>
                                     <Border Background="{DynamicResource ConfiguratorPatchBadgeBackgroundBrush}"
                                             CornerRadius="10" Padding="8,3" HorizontalAlignment="Left">
                                         <TextBlock x:Name="PatchVersionText" FontSize="11" FontWeight="SemiBold"

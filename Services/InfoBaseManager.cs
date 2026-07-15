@@ -133,7 +133,11 @@ public class InfoBaseManager
             await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
             await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
             await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
-            await new PrintFormService(dbContext).SeedCashOrderFormsAsync();
+            await new InvoiceMetadataSeedService(dbContext).EnsureAsync();
+            var printFormService = new PrintFormService(dbContext);
+            await printFormService.SeedCashOrderFormsAsync();
+            await printFormService.SeedInvoiceFormsAsync();
+            await metadataService.EnsureStandardReportsAsync();
             await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
 
             _masterContext.InfoBases.Add(infoBase);
@@ -301,6 +305,7 @@ public class InfoBaseManager
         await moduleService.EnsureDefaultModulesAsync();
 
         var modules = await context.MetadataModules.AsNoTracking()
+            .Where(module => module.Code != ModuleMetadataService.BalanceCode)
             .OrderBy(module => module.Order)
             .ThenBy(module => module.Name)
             .ToListAsync();
@@ -329,6 +334,7 @@ public class InfoBaseManager
             ?? throw new InvalidOperationException("Информационная база не найдена.");
 
         var requestedModules = moduleAvailability
+            .Where(module => !ModuleMetadataService.IsFinalBalanceStageCode(module.Code))
             .GroupBy(module => module.Code, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().IsActive, StringComparer.OrdinalIgnoreCase);
 
@@ -343,6 +349,12 @@ public class InfoBaseManager
         var modules = await context.MetadataModules.ToListAsync();
         foreach (var module in modules)
         {
+            if (ModuleMetadataService.IsFinalBalanceStageModule(module))
+            {
+                ModuleMetadataService.ApplyFinalBalanceStageRules(module);
+                continue;
+            }
+
             if (requestedModules.TryGetValue(module.Code, out var isActive))
                 module.IsActive = isActive;
         }

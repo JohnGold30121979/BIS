@@ -7,6 +7,7 @@ namespace BIS.ERP.Services
     {
         Task<AuthResult> LoginAsync(string login, string password);
         Task<bool> RegisterAsync(string login, string password, string fullName, string email);
+        Task<AuthResult> ChangePasswordAsync(string currentPassword, string newPassword);
         void Logout();
         User? CurrentUser { get; }
         bool IsAdmin { get; }

@@ -6,6 +6,7 @@ namespace BIS.ERP.Services
 {
     public class UserAccessService
     {
+        private const string RoleChecksumPatchId = "system-user-role-checksum-v1";
         private readonly AppDbContext _context;
 
         public UserAccessService(AppDbContext context)
@@ -23,6 +24,7 @@ namespace BIS.ERP.Services
                     ""PasswordHash"" text NOT NULL,
                     ""FullName"" varchar(200) NOT NULL DEFAULT '',
                     ""Role"" integer NOT NULL DEFAULT 0,
+                    ""RoleChecksum"" text NOT NULL DEFAULT '',
                     ""CreatedAt"" timestamp with time zone NOT NULL,
                     ""IsActive"" boolean NOT NULL DEFAULT true,
                     ""LastLoginDate"" timestamp with time zone NULL,
@@ -40,16 +42,23 @@ namespace BIS.ERP.Services
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserAccessPermissions_User_Key""
                     ON ""UserAccessPermissions"" (""UserId"", ""NavigationKey"");
             ");
+            await _context.Database.ExecuteSqlRawAsync(@"
+                ALTER TABLE ""Users""
+                ADD COLUMN IF NOT EXISTS ""RoleChecksum"" text NOT NULL DEFAULT '';
+            ");
 
             await SeedUserAsync("admin", "admin", "Администратор", "admin@local", UserRole.Admin);
+            await SeedUserAsync("accountant", "accountant", "Бухгалтер", "accountant@local", UserRole.Accountant);
             await SeedUserAsync("user", "user", "Пользователь", "user@local", UserRole.User);
+            await EnsureRoleChecksumsAsync();
         }
 
         public async Task<List<User>> GetUsersAsync()
         {
             await EnsureSchemaAsync();
             return await _context.Users.AsNoTracking()
-                .OrderByDescending(user => user.Role)
+                .OrderByDescending(user => user.Role == UserRole.Admin)
+                .ThenByDescending(user => user.Role == UserRole.Accountant)
                 .ThenBy(user => user.Login)
                 .ToListAsync();
         }
@@ -91,22 +100,138 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        public async Task UpdateUserRoleAsync(int userId, UserRole role)
+        {
+            await EnsureSchemaAsync();
+            var user = await _context.Users.FindAsync(userId)
+                ?? throw new InvalidOperationException("Пользователь не найден.");
+
+            user.Role = role;
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+        }
+
         private async Task SeedUserAsync(string login, string password, string fullName, string email, UserRole role)
         {
-            if (await _context.Users.AnyAsync(user => user.Login == login))
+            var normalizedLogin = NormalizeLogin(login);
+            if (await _context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
                 return;
 
-            await _context.Users.AddAsync(new User
+            var user = new User
             {
-                Login = login,
+                Login = normalizedLogin,
                 FullName = fullName,
                 Email = email,
                 PasswordHash = global::BCrypt.Net.BCrypt.HashPassword(password),
                 Role = role,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
-            });
+            };
+
+            await _context.Users.AddAsync(user);
             await _context.SaveChangesAsync();
+
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureRoleChecksumsAsync()
+        {
+            await new BisPatchService(_context).EnsureSchemaAsync();
+            if (await IsSystemPatchAppliedAsync(RoleChecksumPatchId))
+                return;
+
+            var unsignedUsers = await _context.Users
+                .Where(user => user.RoleChecksum == "")
+                .ToListAsync();
+
+            if (unsignedUsers.Count > 0)
+            {
+                foreach (var user in unsignedUsers)
+                    UserRoleIntegrityService.RefreshChecksum(user);
+
+                await _context.SaveChangesAsync();
+            }
+
+            await MarkSystemPatchAppliedAsync(RoleChecksumPatchId);
+        }
+
+        private static string NormalizeLogin(string login) =>
+            (login ?? string.Empty).Trim().ToLowerInvariant();
+
+        private async Task<bool> IsSystemPatchAppliedAsync(string patchId)
+        {
+            var connection = _context.Database.GetDbConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM system_patches
+                    WHERE patch_id = @patch_id AND status = 'Applied'
+                );";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@patch_id";
+            parameter.Value = patchId;
+            command.Parameters.Add(parameter);
+
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                var result = await command.ExecuteScalarAsync();
+                return result is bool isApplied && isApplied;
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
+        }
+
+        private async Task MarkSystemPatchAppliedAsync(string patchId)
+        {
+            var connection = _context.Database.GetDbConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+                INSERT INTO system_patches
+                    (patch_id, version, name, description, checksum, applied_at, applied_by, app_version, status, error, created_at)
+                VALUES
+                    (@patch_id, '2.0.0', 'User role checksum initialization',
+                     'Initializes checksums for existing user roles.',
+                     '', @applied_at, 'system', '2.0.0', 'Applied', '', @created_at)
+                ON CONFLICT (patch_id) DO NOTHING;";
+
+            var patchParameter = command.CreateParameter();
+            patchParameter.ParameterName = "@patch_id";
+            patchParameter.Value = patchId;
+            command.Parameters.Add(patchParameter);
+
+            var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+            var appliedAtParameter = command.CreateParameter();
+            appliedAtParameter.ParameterName = "@applied_at";
+            appliedAtParameter.Value = now;
+            command.Parameters.Add(appliedAtParameter);
+
+            var createdAtParameter = command.CreateParameter();
+            createdAtParameter.ParameterName = "@created_at";
+            createdAtParameter.Value = now;
+            command.Parameters.Add(createdAtParameter);
+
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
         }
     }
 }
