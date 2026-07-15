@@ -24,7 +24,8 @@ namespace BIS.ERP.Services
                 return new AuthResult { Success = false, ErrorMessage = "Неверный логин или пароль" };
             }
 
-            if (!UserRoleIntegrityService.HasValidChecksum(user))
+            var hasRoleChecksum = !string.IsNullOrWhiteSpace(user.RoleChecksum);
+            if (hasRoleChecksum && !UserRoleIntegrityService.HasValidChecksum(user))
             {
                 System.Diagnostics.Debug.WriteLine($"[AuthService] Контрольная сумма роли пользователя '{normalizedLogin}' не совпала.");
                 return new AuthResult
@@ -57,6 +58,8 @@ namespace BIS.ERP.Services
             if (!user.IsActive)
                 return new AuthResult { Success = false, ErrorMessage = "Пользователь заблокирован" };
 
+            if (!hasRoleChecksum)
+                UserRoleIntegrityService.RefreshChecksum(user);
             if (!IsBcryptHash(user.PasswordHash))
                 user.PasswordHash = HashPassword(password);
             user.LastLoginDate = DateTime.UtcNow;
@@ -66,9 +69,10 @@ namespace BIS.ERP.Services
             return new AuthResult { Success = true, User = user };
         }
 
-        public async Task<bool> RegisterAsync(string login, string password, string fullName, string email)
+        public async Task<bool> RegisterAsync(string login, string password, string fullName, string email, UserRole role)
         {
             var normalizedLogin = NormalizeLogin(login);
+            var safeRole = role == UserRole.Accountant ? UserRole.Accountant : UserRole.User;
             await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             await new UserAccessService(context).EnsureSchemaAsync();
             if (await context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
@@ -95,7 +99,7 @@ namespace BIS.ERP.Services
                 Email = email,
                 FullName = fullName,
                 PasswordHash = passwordHash,
-                Role = UserRole.User,
+                Role = safeRole,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
@@ -126,7 +130,8 @@ namespace BIS.ERP.Services
             if (user == null)
                 return new AuthResult { Success = false, ErrorMessage = "Пользователь не найден в текущей инфобазе" };
 
-            if (!UserRoleIntegrityService.HasValidChecksum(user))
+            var hasRoleChecksum = !string.IsNullOrWhiteSpace(user.RoleChecksum);
+            if (hasRoleChecksum && !UserRoleIntegrityService.HasValidChecksum(user))
                 return new AuthResult
                 {
                     Success = false,
@@ -147,6 +152,8 @@ namespace BIS.ERP.Services
             if (!currentPasswordValid)
                 return new AuthResult { Success = false, ErrorMessage = "Текущий пароль указан неверно" };
 
+            if (!hasRoleChecksum)
+                UserRoleIntegrityService.RefreshChecksum(user);
             user.PasswordHash = HashPassword(newPassword);
             await context.SaveChangesAsync();
 

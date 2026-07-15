@@ -35,20 +35,32 @@ namespace BIS.ERP.Services
             return MessageBox.Show(_owner, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
         }
 
-        public Task<bool> ShowLoginAsync()
+        public async Task<bool> ShowLoginAsync()
         {
-            var loginWindow = new LoginWindow
+            var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            var infoBaseText = currentInfoBase == null
+                ? string.Empty
+                : $"Инфобаза: {currentInfoBase.Name} ({currentInfoBase.DatabaseName})";
+
+            var loginWindow = new LoginWindow(infoBaseText)
             {
                 Owner = _owner,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner
             };
 
-            return Task.FromResult(loginWindow.ShowDialog() == true);
+            return loginWindow.ShowDialog() == true;
         }
 
         public bool ShowRegister()
         {
-            var registerWindow = new RegisterWindow
+            var currentInfoBase = ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync()
+                .GetAwaiter()
+                .GetResult();
+            var infoBaseText = currentInfoBase == null
+                ? string.Empty
+                : $"Инфобаза: {currentInfoBase.Name} ({currentInfoBase.DatabaseName})";
+
+            var registerWindow = new RegisterWindow(infoBaseText)
             {
                 Owner = _owner,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner

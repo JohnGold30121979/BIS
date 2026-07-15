@@ -6,7 +6,7 @@ namespace BIS.ERP.Services
 {
     public class UserAccessService
     {
-        private const string RoleChecksumPatchId = "system-user-role-checksum-v1";
+        private const string RoleChecksumPatchId = "system-user-role-checksum-v2";
         private readonly AppDbContext _context;
 
         public UserAccessService(AppDbContext context)
@@ -50,6 +50,9 @@ namespace BIS.ERP.Services
             await SeedUserAsync("admin", "admin", "Администратор", "admin@local", UserRole.Admin);
             await SeedUserAsync("accountant", "accountant", "Бухгалтер", "accountant@local", UserRole.Accountant);
             await SeedUserAsync("user", "user", "Пользователь", "user@local", UserRole.User);
+            await EnsureSeededUserRoleAsync("admin", UserRole.Admin);
+            await EnsureSeededUserRoleAsync("accountant", UserRole.Accountant);
+            await EnsureSeededUserRoleAsync("user", UserRole.User);
             await EnsureRoleChecksumsAsync();
         }
 
@@ -135,19 +138,32 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsureSeededUserRoleAsync(string login, UserRole expectedRole)
+        {
+            var normalizedLogin = NormalizeLogin(login);
+            var user = await _context.Users.FirstOrDefaultAsync(item => item.Login.ToLower() == normalizedLogin);
+            if (user == null)
+                return;
+
+            if (user.Role == expectedRole && UserRoleIntegrityService.HasValidChecksum(user))
+                return;
+
+            user.Role = expectedRole;
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+        }
+
         private async Task EnsureRoleChecksumsAsync()
         {
             await new BisPatchService(_context).EnsureSchemaAsync();
             if (await IsSystemPatchAppliedAsync(RoleChecksumPatchId))
                 return;
 
-            var unsignedUsers = await _context.Users
-                .Where(user => user.RoleChecksum == "")
-                .ToListAsync();
+            var users = await _context.Users.ToListAsync();
 
-            if (unsignedUsers.Count > 0)
+            if (users.Count > 0)
             {
-                foreach (var user in unsignedUsers)
+                foreach (var user in users)
                     UserRoleIntegrityService.RefreshChecksum(user);
 
                 await _context.SaveChangesAsync();

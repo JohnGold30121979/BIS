@@ -7,11 +7,11 @@ namespace BIS.ERP.Views
 {
     public partial class RegisterWindow : Window
     {
-        public RegisterWindow()
+        public RegisterWindow(string selectedInfoBaseText = "")
         {
             InitializeComponent();
 
-            var viewModel = new RegisterViewModel(ServiceLocator.AuthService);
+            var viewModel = new RegisterViewModel(ServiceLocator.AuthService, selectedInfoBaseText);
             viewModel.RegisterSucceeded += (_, _) =>
             {
                 DialogResult = true;
@@ -42,6 +42,13 @@ namespace BIS.ERP.Views
         }
 
         private void OnEmailPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (!HandleEnter(e))
+                return;
+            RoleBox.Focus();
+        }
+
+        private void OnRolePreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (!HandleEnter(e))
                 return;

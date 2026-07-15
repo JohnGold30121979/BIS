@@ -7,11 +7,14 @@ namespace BIS.ERP.Views
 {
     public partial class LoginWindow : Window
     {
-        public LoginWindow()
+        public LoginWindow(string selectedInfoBaseText = "")
         {
             InitializeComponent();
 
-            var viewModel = new LoginViewModel(ServiceLocator.AuthService, new WindowDialogService(this));
+            var viewModel = new LoginViewModel(
+                ServiceLocator.AuthService,
+                new WindowDialogService(this),
+                selectedInfoBaseText);
             viewModel.LoginSucceeded += (_, _) =>
             {
                 DialogResult = true;

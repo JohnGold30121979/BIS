@@ -6,7 +6,7 @@ namespace BIS.ERP.Services
 {
     public static class UserRoleIntegrityService
     {
-        private const string SignatureKey = "BIS.ERP.UserRoleIntegrity.v1";
+        private const string SignatureKey = "BIS.ERP.UserRoleIntegrity.v2";
 
         public static void RefreshChecksum(User user)
         {
@@ -33,16 +33,11 @@ namespace BIS.ERP.Services
 
         private static string BuildPayload(User user)
         {
-            var createdAt = user.CreatedAt.Kind == DateTimeKind.Utc
-                ? user.CreatedAt
-                : user.CreatedAt.ToUniversalTime();
-
             return string.Join("|",
-                "v1",
+                "v2",
                 user.Id,
                 NormalizeLogin(user.Login),
-                (int)user.Role,
-                createdAt.Ticks);
+                (int)user.Role);
         }
 
         private static string NormalizeLogin(string login) =>
