@@ -58,6 +58,10 @@ namespace BIS.ERP
         private Point _dragStartPoint;
         private NavigationItem _draggedItem;
         private bool _closeForModeSwitch;
+        private static readonly HashSet<string> NotReadyFinanceDocuments = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Расчет курсовой разницы"
+        };
 
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
@@ -124,6 +128,7 @@ namespace BIS.ERP
                     var printFormService = new PrintFormService(context);
                     await printFormService.SeedCashOrderFormsAsync();
                     await printFormService.SeedInvoiceFormsAsync();
+                    await _metadataService.EnsureStandardReportsAsync();
                     await BuildNavigationTree();
                 }
             }
@@ -140,7 +145,9 @@ namespace BIS.ERP
 
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
             var catalogs = allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты").ToList();
-            var documents = allMetadata.Where(item => item.ObjectType == "Document").ToList();
+            var documents = allMetadata
+                .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name))
+                .ToList();
             var reports = await _reportService.GetNavigationReportsAsync();
             var modules = await _moduleMetadataService.GetModulesAsync();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
@@ -219,10 +226,8 @@ namespace BIS.ERP
                     {
                         Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
                     };
-                    financeTools.Children.Add(new NavigationItem { Id = "Operations", Name = "Операции", Icon = "📋", Type = "Operations" });
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
-                    financeTools.Children.Add(new NavigationItem { Id = "AccountingSetup", Name = "Настройка учета", Icon = "⚙", Type = "AccountingSetup" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
                 }
@@ -277,6 +282,7 @@ namespace BIS.ERP
             {
                 "Приходный кассовый ордер" or "Расходный кассовый ордер" => "CashOrder",
                 "Платежное поручение" => "PaymentOrder",
+                "Авансовый отчет" or "Доверенность" or "Платежная ведомость" => "FinanceDocument",
                 "Проводки" => "PostingsDocument",
                 InvoiceDocumentTypes.SalesIssue or InvoiceDocumentTypes.PurchaseRegistration => "InvoiceDocument",
                 _ => "DynamicDocument"
@@ -308,6 +314,9 @@ namespace BIS.ERP
             if (_authService.IsAdmin)
             {
                 adminSection.Children.Add(new NavigationItem { Id = "Settings", Name = "Настройки системы", Icon = "⚙", Type = "Settings" });
+            }
+            if (UserAccessService.CanManageUsers(_authService.CurrentUser))
+            {
                 adminSection.Children.Add(new NavigationItem { Id = "UserAccessManagement", Name = "Пользователи и права", Icon = "🔐", Type = "UserAccessManagement" });
             }
             adminSection.Children.Add(new NavigationItem { Id = "SwitchMode", Name = "Сменить пользователя или базу", Icon = "🔄", Type = "SwitchMode" });
@@ -373,7 +382,9 @@ namespace BIS.ERP
             }
 
             // Динамические документы
-            var documents = await _metadataService.GetDocumentsAsync();
+            var documents = (await _metadataService.GetDocumentsAsync())
+                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name))
+                .ToList();
             if (documents.Any())
             {
                 var docsGroup = new NavigationItem
@@ -408,6 +419,20 @@ namespace BIS.ERP
                             Name = doc.Name,
                             Icon = doc.Icon,
                             Type = "PaymentOrder",
+                            Tag = doc,
+                            Order = doc.Order
+                        });
+                    }
+                    else if (doc.Name == "Авансовый отчет" ||
+                             doc.Name == "Доверенность" ||
+                             doc.Name == "Платежная ведомость")
+                    {
+                        docsGroup.Children.Add(new NavigationItem
+                        {
+                            Id = doc.Id.ToString(),
+                            Name = doc.Name,
+                            Icon = doc.Icon,
+                            Type = "FinanceDocument",
                             Tag = doc,
                             Order = doc.Order
                         });
@@ -453,15 +478,6 @@ namespace BIS.ERP
                 Badge = dbfCount > 0 ? dbfCount.ToString() : ""
             });
 
-            // Операции
-            dataSection.Children.Add(new NavigationItem
-            {
-                Id = "Operations",
-                Name = "Операции",
-                Icon = "📋",
-                Type = "Operations"
-            });
-
             // Журнал проводок
             dataSection.Children.Add(new NavigationItem
             {
@@ -486,13 +502,6 @@ namespace BIS.ERP
                 Name = "Бухгалтерские отчеты",
                 Icon = "📈",
                 Type = "AccountingReports"
-            });
-            accountingSection.Children.Add(new NavigationItem
-            {
-                Id = "AccountingSetup",
-                Name = "Настройка учета",
-                Icon = "⚙",
-                Type = "AccountingSetup"
             });
             NavigationItems.Add(accountingSection);
 
@@ -566,6 +575,9 @@ namespace BIS.ERP
                     Icon = "⚙️",
                     Type = "Settings"
                 });
+            }
+            if (UserAccessService.CanManageUsers(_authService.CurrentUser))
+            {
                 adminSection.Children.Add(new NavigationItem
                 {
                     Id = "UserAccessManagement",
@@ -667,11 +679,6 @@ namespace BIS.ERP
                         _navigation.NavigateTo(dbfView);
                         break;
 
-                    case "Operations":
-                        var operationsView = new OperationsView();
-                        _navigation.NavigateTo(operationsView);
-                        break;
-
                     case "PostingsJournal":
                         var journalContext = await _infoBaseManager.GetCurrentDbContextAsync();
                         var postingService = new PostingService(journalContext);
@@ -711,6 +718,14 @@ namespace BIS.ERP
                         }
                         break;
 
+                    case "FinanceDocument":
+                        if (item.Tag is MetadataObject financeDocument)
+                        {
+                            var financeDocumentView = new FinanceDocumentWorkView(financeDocument, _metadataService);
+                            _navigation.NavigateTo(financeDocumentView);
+                        }
+                        break;
+
                     case "InvoiceDocument":
                         if (item.Tag is MetadataObject invoiceDocument)
                         {
@@ -731,11 +746,6 @@ namespace BIS.ERP
                         _navigation.NavigateTo(new AccountingReportsView(accountingContext));
                         break;
 
-                    case "AccountingSetup":
-                        var setupContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        _navigation.NavigateTo(new AccountingSetupView(setupContext));
-                        break;
-
                     case "Profile":
                         OnProfileClick(null, null);
                         break;
@@ -746,7 +756,7 @@ namespace BIS.ERP
 
                     case "UserAccessManagement":
                         var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems));
+                        _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser));
                         break;
 
                     case "AboutSystem":
@@ -790,6 +800,8 @@ namespace BIS.ERP
             if (hadChildren)
                 return item.Children.Count > 0;
             if (item.Id is "UserProfile" or "SwitchMode" or "Logout" or "AboutSystem")
+                return true;
+            if (item.Id is "UserAccessManagement")
                 return true;
             return allowedKeys.Contains(item.Id);
         }
@@ -978,14 +990,15 @@ namespace BIS.ERP
         private async void OnProfileClick(object sender, RoutedEventArgs e)
         {
             var user = _authService.CurrentUser;
-            if (user != null)
+            if (user == null)
+                return;
+
+            var currentInfoBase = await _infoBaseManager.GetCurrentInfoBaseAsync();
+            var profileDialog = new UserProfileDialog(_authService, currentInfoBase?.Name ?? "не выбрана")
             {
-                MessageBox.Show($"Пользователь: {user.FullName}\n" +
-                                $"Логин: {user.Login}\n" +
-                                $"Email: {user.Email}\n" +
-                                $"Роль: {(user.Role == UserRole.Admin ? "Администратор" : "Пользователь")}",
-                                "Профиль", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
+                Owner = this
+            };
+            profileDialog.ShowDialog();
         }
 
         private void OnLogoutClick(object sender, RoutedEventArgs e)

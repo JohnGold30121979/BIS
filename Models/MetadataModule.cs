@@ -25,4 +25,19 @@ namespace BIS.ERP.Models
         [MaxLength(30)] public string ObjectType { get; set; } = string.Empty;
         public int Order { get; set; }
     }
+
+    public class InfoBaseModuleAvailability
+    {
+        public Guid ModuleId { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Icon { get; set; } = "📁";
+        public int Order { get; set; }
+        public int CloseOrder { get; set; }
+        public bool IsActive { get; set; }
+        public bool ParticipatesInPeriodClose { get; set; }
+        public bool RequirePreviousModulesClosed { get; set; }
+        public bool IsSystem { get; set; }
+    }
 }

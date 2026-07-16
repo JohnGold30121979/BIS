@@ -95,6 +95,7 @@ namespace BIS.ERP.Views
                     p.DebitAccount.ToLower().Contains(searchText) ||
                     p.CreditAccount.ToLower().Contains(searchText) ||
                     p.DocumentNumber.ToLower().Contains(searchText) ||
+                    (p.ModuleName?.ToLower().Contains(searchText) ?? false) ||
                     (p.Note?.ToLower().Contains(searchText) ?? false) ||
                     (p.Organization?.ToLower().Contains(searchText) ?? false) ||
                     (p.Employee?.ToLower().Contains(searchText) ?? false));
@@ -158,8 +159,14 @@ namespace BIS.ERP.Views
             if (selected == null)
                 return;
 
-            if (await TryOpenInvoiceFromPostingAsync(selected))
+            if (await PostingSourceDocumentOpener.TryOpenAsync(
+                    selected,
+                    null,
+                    Window.GetWindow(this),
+                    isReadOnly: true))
+            {
                 return;
+            }
 
             var dialog = new PostingDetailsDialog(selected);
             dialog.Owner = Window.GetWindow(this);
@@ -199,15 +206,15 @@ namespace BIS.ERP.Views
                 invoiceService.Configure(invoiceMetadata);
                 await invoiceService.EnsureSchemaAsync();
 
-                var invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber, posting.Date);
-                if (!invoiceId.HasValue)
-                    invoiceId = await invoiceService.FindInvoiceIdAsync(documentNumber);
+                var invoiceId = await invoiceService.FindInvoiceIdByPostingNumberAsync(posting.DocumentNumber, posting.Date);
 
                 if (!invoiceId.HasValue)
                 {
-                    MessageBox.Show($"Счет-фактура №{documentNumber} не найдена.", "Счет-фактура",
+                    MessageBox.Show(
+                        $"Проводка есть, но исходная счет-фактура №{documentNumber} не найдена. Будут открыты детали проводки.",
+                        "Счет-фактура",
                         MessageBoxButton.OK, MessageBoxImage.Information);
-                    return true;
+                    return false;
                 }
 
                 var dialog = new InvoiceEditDialog(

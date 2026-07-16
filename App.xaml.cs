@@ -20,6 +20,7 @@ namespace BIS.ERP
             {
                 // Инициализация поведения навигации
                 EnterKeyNavigationBehavior.Initialize();
+                ResponsiveWindowBehavior.Initialize();
 
                 // Регистрируем кодировки для поддержки CP866 (DOS кириллица)
                 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);

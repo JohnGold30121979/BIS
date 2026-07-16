@@ -78,10 +78,17 @@ namespace BIS.ERP.Views
                         balance = row.Balance
                     })
                     .ToList();
+                txtStatus.Text = calculation.Warnings.Count == 0
+                    ? $"Загружено строк: {_allData.Count}"
+                    : string.Join(" ", calculation.Warnings.Take(2));
+                txtStatus.ToolTip = calculation.Warnings.Count == 0
+                    ? null
+                    : string.Join(Environment.NewLine, calculation.Warnings);
                 ApplyFilters();
             }
             catch (Exception ex)
             {
+                txtStatus.Text = "Ошибка загрузки взаиморасчетов";
                 MessageBox.Show($"Ошибка загрузки данных: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }

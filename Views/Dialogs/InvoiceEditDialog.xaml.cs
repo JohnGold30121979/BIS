@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -24,10 +25,12 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<string, ReferenceOption> _vatTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ReferenceOption> _salesTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
         private string _selectedHeaderAccountCode = string.Empty;
+        private AccountAnalyticsRegistry _accountAnalytics = new();
         private bool _isRecalculating;
         private bool _isPosted;
         private bool _synchronizingHeaderTaxSelection;
         private bool _isInvoiceEditingEnabled = true;
+        private bool _isApplyingCurrencyValues;
         private const string DefaultSalesCounterpartyAccount = "14100000";
         private const string DefaultPurchaseCounterpartyAccount = "31100000";
         private const string DefaultSalesLineAccount = "61100000";
@@ -81,6 +84,8 @@ namespace BIS.ERP.Views.Dialogs
                 Cursor = System.Windows.Input.Cursors.Wait;
                 await _invoiceService.EnsureSchemaAsync();
                 var catalogs = await _metadataService.GetCatalogsAsync();
+                _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                var assignedModuleName = await ResolveAssignedModuleNameAsync();
                 var organizationsCatalog = catalogs.FirstOrDefault(item => item.Name == "Организации");
                 if (organizationsCatalog != null)
                 {
@@ -104,6 +109,7 @@ namespace BIS.ERP.Views.Dialogs
                 PaymentKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Виды оплаты");
                 DeliveryKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Виды поставки");
                 SupplyKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Типы поставки");
+                CurrencyCombo.ItemsSource = await LoadCurrencyOptionsAsync(catalogs);
                 await LoadTaxItemsAsync(catalogs);
 
                 if (_editId.HasValue)
@@ -121,12 +127,18 @@ namespace BIS.ERP.Views.Dialogs
                     DatePicker.SelectedDate = invoice.DocDate;
                     EsfNumberBox.Text = invoice.EsfNumber;
                     TaxBlankNumberBox.Text = invoice.TaxBlankNumber;
-                    ModuleCodeBox.Text = invoice.ModuleCode;
+                    ModuleCodeBox.Text = string.IsNullOrWhiteSpace(invoice.ModuleCode)
+                        ? assignedModuleName
+                        : invoice.ModuleCode;
                     SetHeaderAccount(invoice.CounterpartyAccountCode);
                     BasisBox.Text = invoice.Basis;
                     SelectStoredComboValue(PaymentKindCombo, invoice.PaymentKind);
                     SelectStoredComboValue(DeliveryKindCombo, NormalizeLegacyDeliveryKind(invoice.DeliveryKind));
                     SelectStoredComboValue(SupplyKindCombo, NormalizeLegacySupplyKind(invoice.SupplyKind));
+                    if (invoice.CurrencyId.HasValue)
+                        SelectStoredComboValue(CurrencyCombo, invoice.CurrencyId.Value.ToString());
+                    ExchangeRateBox.Text = invoice.ExchangeRate > 0 ? invoice.ExchangeRate.ToString("0.####", CultureInfo.CurrentCulture) : string.Empty;
+                    AmountCurrencyBox.Text = invoice.AmountCurrency > 0 ? invoice.AmountCurrency.ToString("N2", CultureInfo.CurrentCulture) : string.Empty;
 
                     if (invoice.OrganizationId.HasValue)
                     {
@@ -168,6 +180,7 @@ namespace BIS.ERP.Views.Dialogs
                 {
                     DatePicker.SelectedDate = DateTime.Today;
                     NumberBox.Text = await _invoiceService.GenerateDocumentNumberAsync();
+                    ModuleCodeBox.Text = assignedModuleName;
                     SetHeaderAccount(GetDefaultHeaderAccountCode());
                     SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TRANSFER");
                     SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "GOODS");
@@ -177,6 +190,7 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 RecalculateTotals();
+                UpdateCurrencyPanelVisibility();
                 if (_isReadOnlyMode)
                     DisableReadOnlyMode();
             }
@@ -188,6 +202,26 @@ namespace BIS.ERP.Views.Dialogs
             {
                 Cursor = System.Windows.Input.Cursors.Arrow;
             }
+        }
+
+        private async Task<string> ResolveAssignedModuleNameAsync()
+        {
+            try
+            {
+                var assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(
+                    _document.Id,
+                    _document.ObjectType);
+                if (!string.IsNullOrWhiteSpace(assignedModuleName))
+                    return assignedModuleName.Trim();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля документа {_document.Name}: {ex.Message}");
+            }
+
+            return InvoiceDocumentTypes.IsSales(_document.Name) || InvoiceDocumentTypes.IsPurchase(_document.Name)
+                ? "Финансы"
+                : string.Empty;
         }
 
         private void DisableEditing()
@@ -205,6 +239,8 @@ namespace BIS.ERP.Views.Dialogs
             HeaderVatTaxCombo.IsEnabled = false;
             HeaderSalesTaxCombo.IsEnabled = false;
             SupplyKindCombo.IsEnabled = false;
+            CurrencyCombo.IsEnabled = false;
+            ExchangeRateBox.IsReadOnly = true;
             HeaderAccountButton.IsEnabled = false;
             LinesGrid.IsReadOnly = true;
             AddLineButton.IsEnabled = false;
@@ -266,6 +302,31 @@ namespace BIS.ERP.Views.Dialogs
                 .ToList();
         }
 
+        private async Task<List<ReferenceOption>> LoadCurrencyOptionsAsync(IEnumerable<MetadataObject> catalogs)
+        {
+            var catalog = catalogs.FirstOrDefault(item => item.Name.Equals("Справочник валют", StringComparison.OrdinalIgnoreCase));
+            if (catalog == null)
+                return new List<ReferenceOption>();
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            return rows
+                .Where(IsActiveRow)
+                .Where(row => Guid.TryParse(GetRowValue(row, "Id"), out _))
+                .Select(row =>
+                {
+                    var code = GetRowValue(row, "Код", "code");
+                    var name = GetRowValue(row, "Наименование", "name");
+                    return new ReferenceOption(
+                        GetRowValue(row, "Id"),
+                        BuildCodeName(code, name),
+                        Code: code,
+                        IsDefault: GetBool(row, "Базовая", "is_base"));
+                })
+                .OrderByDescending(item => item.IsDefault)
+                .ThenBy(item => item.Code)
+                .ToList();
+        }
+
         private async Task LoadTaxItemsAsync(IEnumerable<MetadataObject> catalogs)
         {
             VatTaxItems.Clear();
@@ -320,6 +381,9 @@ namespace BIS.ERP.Views.Dialogs
             {
                 RecalculateTotals();
             }
+
+            if (e.PropertyName == nameof(EditableInvoiceLine.AccountCode))
+                UpdateCurrencyPanelVisibility();
 
             if (LinesGrid.SelectedItem == line &&
                 e.PropertyName is nameof(EditableInvoiceLine.VatTaxCode)
@@ -549,6 +613,7 @@ namespace BIS.ERP.Views.Dialogs
                 }
                 line.AccountCode = accountCode;
                 line.AccountDisplayName = GetAccountDisplayName(accountCode);
+                UpdateCurrencyPanelVisibility();
             }
         }
 
@@ -590,6 +655,7 @@ namespace BIS.ERP.Views.Dialogs
             };
             AddLine(line);
             RecalculateTotals();
+            UpdateCurrencyPanelVisibility();
             FocusAmountCell(line);
         }
 
@@ -607,6 +673,7 @@ namespace BIS.ERP.Views.Dialogs
             foreach (var line in _lines)
                 line.LineNumber = lineNumber++;
             RecalculateTotals();
+            UpdateCurrencyPanelVisibility();
         }
 
         private void OnLineSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -713,6 +780,65 @@ namespace BIS.ERP.Views.Dialogs
             TotalVatText.Text = document.VatTotal.ToString("N2");
             TotalSalesTaxText.Text = document.SalesTaxTotal.ToString("N2");
             TotalAmountText.Text = document.TotalAmount.ToString("N2");
+            RecalculateCurrencyAmount(document.TotalAmount);
+        }
+
+        private async void OnCurrencySelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isApplyingCurrencyValues)
+                return;
+
+            await ApplyExchangeRateFromCatalogAsync();
+        }
+
+        private void OnCurrencyValueChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isApplyingCurrencyValues)
+                return;
+
+            RecalculateTotals();
+        }
+
+        private async Task ApplyExchangeRateFromCatalogAsync()
+        {
+            if (CurrencyPanel.Visibility != Visibility.Visible ||
+                CurrencyCombo.SelectedItem is not ReferenceOption currency ||
+                !Guid.TryParse(currency.Value, out var currencyId))
+            {
+                return;
+            }
+
+            var rate = currency.Code.Equals("KGS", StringComparison.OrdinalIgnoreCase)
+                ? new CurrencyRateLookupResult(1m, DatePicker.SelectedDate ?? DateTime.Today, "Базовая валюта")
+                : await _metadataService.GetCurrencyRateForDateAsync(currencyId, DatePicker.SelectedDate ?? DateTime.Today);
+            if (rate == null)
+                return;
+
+            try
+            {
+                _isApplyingCurrencyValues = true;
+                ExchangeRateBox.Text = rate.Rate.ToString("0.####", CultureInfo.CurrentCulture);
+            }
+            finally
+            {
+                _isApplyingCurrencyValues = false;
+            }
+
+            RecalculateTotals();
+        }
+
+        private void RecalculateCurrencyAmount(decimal totalAmount)
+        {
+            if (CurrencyPanel.Visibility != Visibility.Visible ||
+                !TryReadDecimal(ExchangeRateBox.Text, out var exchangeRate) ||
+                exchangeRate <= 0)
+            {
+                AmountCurrencyBox.Text = string.Empty;
+                return;
+            }
+
+            var amountCurrency = Math.Round(totalAmount / exchangeRate, 2, MidpointRounding.AwayFromZero);
+            AmountCurrencyBox.Text = amountCurrency.ToString("N2", CultureInfo.CurrentCulture);
         }
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -743,6 +869,21 @@ namespace BIS.ERP.Views.Dialogs
                     return;
                 }
 
+                if (CurrencyPanel.Visibility == Visibility.Visible)
+                {
+                    if (CurrencyCombo.SelectedItem is not ReferenceOption)
+                    {
+                        MessageBox.Show("Для валютных счетов выберите валюту.", "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    if (!TryReadDecimal(ExchangeRateBox.Text, out var exchangeRate) || exchangeRate <= 0)
+                    {
+                        MessageBox.Show("Для валютных счетов укажите курс больше нуля.", "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+                }
+
                 var document = BuildDocumentFromForm();
                 InvoiceService.RecalculateTotals(document);
                 await _invoiceService.SaveInvoiceAsync(document, _editId);
@@ -758,6 +899,22 @@ namespace BIS.ERP.Views.Dialogs
         private InvoiceDocument BuildDocumentFromForm()
         {
             var organizationId = (OrganizationCombo.SelectedItem as OrganizationItem)?.Id;
+            Guid? currencyId = null;
+            if (CurrencyPanel.Visibility == Visibility.Visible &&
+                CurrencyCombo.SelectedItem is ReferenceOption selectedCurrency &&
+                Guid.TryParse(selectedCurrency.Value, out var parsedCurrencyId))
+            {
+                currencyId = parsedCurrencyId;
+            }
+
+            var useCurrency = currencyId.HasValue;
+            var exchangeRate = useCurrency && TryReadDecimal(ExchangeRateBox.Text, out var parsedRate)
+                ? parsedRate
+                : 0m;
+            var amountCurrency = useCurrency && TryReadDecimal(AmountCurrencyBox.Text, out var parsedCurrencyAmount)
+                ? parsedCurrencyAmount
+                : 0m;
+
             return new InvoiceDocument
             {
                 DocNumber = MetadataService.NormalizeLegacyDocumentNumber(NumberBox.Text),
@@ -772,6 +929,9 @@ namespace BIS.ERP.Views.Dialogs
                 PaymentKind = GetSelectedReferenceValue(PaymentKindCombo),
                 DeliveryKind = GetSelectedReferenceValue(DeliveryKindCombo),
                 SupplyKind = GetSelectedReferenceValue(SupplyKindCombo),
+                CurrencyId = currencyId,
+                ExchangeRate = useCurrency ? exchangeRate : 0m,
+                AmountCurrency = useCurrency ? amountCurrency : 0m,
                 Basis = BasisBox.Text.Trim(),
                 Lines = _lines.Select(line => new InvoiceLineRow
                 {
@@ -820,7 +980,15 @@ namespace BIS.ERP.Views.Dialogs
 
         private static decimal GetDecimal(Dictionary<string, object> row, params string[] keys)
         {
-            return decimal.TryParse(GetRowValue(row, keys), out var value) ? value : 0;
+            return TryReadDecimal(GetRowValue(row, keys), out var value) ? value : 0;
+        }
+
+        private static bool TryReadDecimal(string? text, out decimal value)
+        {
+            if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value))
+                return true;
+
+            return decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value);
         }
 
         private static int? GetInt(Dictionary<string, object> row, params string[] keys)
@@ -883,6 +1051,51 @@ namespace BIS.ERP.Views.Dialogs
             _selectedHeaderAccountCode = accountCode?.Trim() ?? string.Empty;
             AccountBox.Text = GetAccountDisplayName(_selectedHeaderAccountCode);
             EnsureLineAccountsDoNotMatchHeader();
+            UpdateCurrencyPanelVisibility();
+        }
+
+        private void UpdateCurrencyPanelVisibility()
+        {
+            var shouldShow = IsCurrencyAccount(_selectedHeaderAccountCode) ||
+                             _lines.Any(line => IsCurrencyAccount(line.AccountCode));
+            var visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
+            if (CurrencyPanel.Visibility == visibility)
+                return;
+
+            CurrencyPanel.Visibility = visibility;
+            if (!shouldShow)
+            {
+                try
+                {
+                    _isApplyingCurrencyValues = true;
+                    CurrencyCombo.SelectedItem = null;
+                    ExchangeRateBox.Text = string.Empty;
+                    AmountCurrencyBox.Text = string.Empty;
+                }
+                finally
+                {
+                    _isApplyingCurrencyValues = false;
+                }
+                return;
+            }
+
+            _ = ApplyExchangeRateFromCatalogAsync();
+            RecalculateTotals();
+        }
+
+        private bool IsCurrencyAccount(string? accountCode)
+        {
+            if (string.IsNullOrWhiteSpace(accountCode))
+                return false;
+
+            var settings = _accountAnalytics.GetSettingsByCode(accountCode);
+            return AccountAnalyticsRules.ShouldShowField(
+                "Валюта",
+                new[] { settings },
+                _accountAnalytics.Definitions,
+                "Справочник валют",
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
         }
 
         private string GetAccountDisplayName(string accountCode)
@@ -935,7 +1148,8 @@ namespace BIS.ERP.Views.Dialogs
             int? SortOrder = null,
             bool IsDefault = false,
             bool IsDefaultVat = false,
-            bool IsDefaultSalesTax = false);
+            bool IsDefaultSalesTax = false,
+            string Code = "");
 
         private sealed class OrganizationItem
         {

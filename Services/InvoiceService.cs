@@ -17,7 +17,7 @@ namespace BIS.ERP.Services
         private const string DefaultSalesRevenueAccount = "61100000";
         private const string DefaultVatPayableAccount = "34300000";
         private const string DefaultVatRecoverableAccount = "15400000";
-        private const string DefaultSalesTaxAccount = "34900000";
+        private const string DefaultSalesTaxAccount = "34004000";
 
         private readonly AppDbContext _context;
         private readonly MetadataService _metadataService;
@@ -51,6 +51,9 @@ namespace BIS.ERP.Services
                     ""module_code"" varchar(50),
                     ""exchange_code"" varchar(100),
                     ""tax_status"" varchar(100),
+                    ""currency_id"" uuid,
+                    ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0,
+                    ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""exported_at"" timestamp,
                     ""tax_status_date"" timestamp,
                     ""organization_id"" uuid,
@@ -95,6 +98,9 @@ namespace BIS.ERP.Services
                     ""module_code"" varchar(50),
                     ""exchange_code"" varchar(100),
                     ""tax_status"" varchar(100),
+                    ""currency_id"" uuid,
+                    ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0,
+                    ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0,
                     ""exported_at"" timestamp,
                     ""tax_status_date"" timestamp,
                     ""organization_id"" uuid,
@@ -140,18 +146,32 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""currency_id"" uuid;
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0;
+                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0;
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
                 ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""currency_id"" uuid;
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0;
+                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0;
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
                 ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
                 ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
                 ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
                 ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
+                DO $$
+                BEGIN
+                    IF to_regclass('public.doc_postings') IS NOT NULL THEN
+                        ALTER TABLE ""doc_postings"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
+                        ALTER TABLE ""doc_postings"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2);
+                        ALTER TABLE ""doc_postings"" ADD COLUMN IF NOT EXISTS ""currency_id"" text;
+                    END IF;
+                END $$;
                 DO $$
                 BEGIN
                     IF EXISTS (
@@ -184,9 +204,11 @@ namespace BIS.ERP.Services
         public async Task<List<InvoiceListRow>> GetInvoicesAsync()
         {
             var organizationMap = await LoadOrganizationMapAsync();
+            var currencyMap = await LoadCurrencyMapAsync();
             var sql = $@"
                 SELECT ""Id"", ""doc_number"", ""doc_date"", ""organization_id"", ""amount"", ""esf_number"", ""basis"", ""is_posted"",
-                       ""tax_blank_number"", ""module_code"", ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date""
+                       ""tax_blank_number"", ""module_code"", ""exchange_code"", ""tax_status"", ""currency_id"", ""exchange_rate"",
+                       ""amount_currency"", ""exported_at"", ""tax_status_date""
                 FROM ""{HeaderTableName}""
                 ORDER BY ""doc_date"" DESC, ""doc_number"" DESC";
 
@@ -214,8 +236,14 @@ namespace BIS.ERP.Services
                     ModuleCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
                     ExchangeCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
                     TaxStatus = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
-                    ExportedAt = reader.IsDBNull(12) ? null : reader.GetDateTime(12),
-                    TaxStatusDate = reader.IsDBNull(13) ? null : reader.GetDateTime(13)
+                    CurrencyId = reader.IsDBNull(12) ? null : reader.GetGuid(12),
+                    CurrencyName = !reader.IsDBNull(12) && currencyMap.TryGetValue(reader.GetGuid(12), out var currencyName)
+                        ? currencyName
+                        : string.Empty,
+                    ExchangeRate = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
+                    AmountCurrency = reader.IsDBNull(14) ? 0m : reader.GetDecimal(14),
+                    ExportedAt = reader.IsDBNull(15) ? null : reader.GetDateTime(15),
+                    TaxStatusDate = reader.IsDBNull(16) ? null : reader.GetDateTime(16)
                 });
             }
             await _context.Database.CloseConnectionAsync();
@@ -268,11 +296,13 @@ namespace BIS.ERP.Services
         public async Task<InvoiceDocument?> GetInvoiceAsync(Guid invoiceId)
         {
             var organizationMap = await LoadOrganizationMapAsync();
+            var currencyMap = await LoadCurrencyMapAsync();
             var sql = $@"
                 SELECT ""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""module_code"",
                        ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date"", ""organization_id"",
                        ""counterparty_account"", ""payment_kind"", ""delivery_kind"", ""supply_kind"", ""basis"",
-                       ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted""
+                       ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted"",
+                       ""currency_id"", ""exchange_rate"", ""amount_currency""
                 FROM ""{HeaderTableName}""
                 WHERE ""Id"" = @invoiceId";
 
@@ -313,8 +343,13 @@ namespace BIS.ERP.Services
                 VatTotal = reader.GetDecimal(17),
                 SalesTaxTotal = reader.GetDecimal(18),
                 TotalAmount = reader.GetDecimal(19),
-                IsPosted = reader.GetBoolean(20)
+                IsPosted = reader.GetBoolean(20),
+                CurrencyId = reader.IsDBNull(21) ? null : reader.GetGuid(21),
+                ExchangeRate = reader.IsDBNull(22) ? 0m : reader.GetDecimal(22),
+                AmountCurrency = reader.IsDBNull(23) ? 0m : reader.GetDecimal(23)
             };
+            if (invoice.CurrencyId.HasValue && currencyMap.TryGetValue(invoice.CurrencyId.Value, out var currencyName))
+                invoice.CurrencyName = currencyName;
             await reader.CloseAsync();
             await _context.Database.CloseConnectionAsync();
             invoice.Lines = await GetLinesAsync(invoiceId);
@@ -362,6 +397,76 @@ namespace BIS.ERP.Services
             finally
             {
                 await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        public async Task<Guid?> FindInvoiceIdByPostingNumberAsync(string postingDocumentNumber, DateTime? documentDate = null)
+        {
+            var numbers = BuildInvoiceLookupNumbers(postingDocumentNumber);
+            if (numbers.Count == 0)
+                return null;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM ""{HeaderTableName}""
+                WHERE LOWER(COALESCE(""doc_number"", '')) = ANY(@numbers)
+                   OR LOWER(COALESCE(""tax_blank_number"", '')) = ANY(@numbers)
+                   OR LOWER(COALESCE(""esf_number"", '')) = ANY(@numbers)
+                   OR LOWER(COALESCE(""exchange_code"", '')) = ANY(@numbers)";
+
+            if (documentDate.HasValue)
+            {
+                sql += @"
+                ORDER BY CASE WHEN DATE(""doc_date"") = DATE(@date) THEN 0 ELSE 1 END,
+                         ""UpdatedAt"" DESC
+                LIMIT 1";
+            }
+            else
+            {
+                sql += @"
+                ORDER BY ""UpdatedAt"" DESC
+                LIMIT 1";
+            }
+
+            await using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+            command.Parameters.Add(new NpgsqlParameter("@numbers", numbers.Select(item => item.ToLowerInvariant()).ToArray()));
+            if (documentDate.HasValue)
+                command.Parameters.Add(new NpgsqlParameter("@date", documentDate.Value.Date));
+
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                var value = await command.ExecuteScalarAsync();
+                return value is Guid id ? id : null;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private static IReadOnlyCollection<string> BuildInvoiceLookupNumbers(string? documentNumber)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            AddCandidate(documentNumber);
+            AddCandidate(MetadataService.NormalizeLegacyDocumentNumber(documentNumber));
+
+            if (!string.IsNullOrWhiteSpace(documentNumber))
+            {
+                var digitsOnly = new string(documentNumber.Where(char.IsDigit).ToArray());
+                AddCandidate(digitsOnly);
+            }
+
+            return result.ToArray();
+
+            void AddCandidate(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                    return;
+
+                result.Add(value.Trim());
             }
         }
 
@@ -500,13 +605,12 @@ namespace BIS.ERP.Services
         public async Task<Guid> SaveInvoiceAsync(InvoiceDocument invoice, Guid? existingId = null)
         {
             RecalculateTotals(invoice);
+            NormalizeCurrencyAmounts(invoice);
+            invoice.DocNumber = MetadataService.NormalizeLegacyDocumentNumber(invoice.DocNumber);
+            invoice.ModuleCode = await ResolveInvoiceModuleNameAsync(invoice.ModuleCode);
             var id = existingId ?? Guid.NewGuid();
             var isNew = !existingId.HasValue;
             var existing = isNew ? null : await GetInvoiceAsync(id);
-            if (!isNew && existing == null)
-                throw new InvalidOperationException("Документ не найден.");
-
-            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate, existing?.DocDate);
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -518,9 +622,10 @@ namespace BIS.ERP.Services
                         (""Id"", ""doc_number"", ""doc_date"", ""esf_number"", ""tax_blank_number"", ""module_code"",
                          ""exchange_code"", ""tax_status"", ""exported_at"", ""tax_status_date"", ""organization_id"", ""counterparty_account"",
                          ""payment_kind"", ""delivery_kind"", ""supply_kind"", ""basis"",
-                         ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""is_posted"", ""CreatedAt"", ""UpdatedAt"")
+                         ""amount_without_tax"", ""vat_total"", ""sales_tax_total"", ""amount"", ""currency_id"", ""exchange_rate"",
+                         ""amount_currency"", ""is_posted"", ""CreatedAt"", ""UpdatedAt"")
                         VALUES (@id, @number, @date, @esf, @taxBlank, @moduleCode, @exchangeCode, @taxStatus, @exportedAt, @taxStatusDate, @org, @account, @payment, @delivery, @supply, @basis,
-                                @amountWithoutTax, @vatTotal, @salesTaxTotal, @amount, false, NOW(), NOW())",
+                                @amountWithoutTax, @vatTotal, @salesTaxTotal, @amount, @currencyId, @exchangeRate, @amountCurrency, false, NOW(), NOW())",
                         new NpgsqlParameter("@id", id),
                         new NpgsqlParameter("@number", invoice.DocNumber),
                         new NpgsqlParameter("@date", invoice.DocDate),
@@ -540,13 +645,13 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@amountWithoutTax", invoice.AmountWithoutTax),
                         new NpgsqlParameter("@vatTotal", invoice.VatTotal),
                         new NpgsqlParameter("@salesTaxTotal", invoice.SalesTaxTotal),
-                        new NpgsqlParameter("@amount", invoice.TotalAmount));
+                        new NpgsqlParameter("@amount", invoice.TotalAmount),
+                        new NpgsqlParameter("@currencyId", (object?)invoice.CurrencyId ?? DBNull.Value),
+                        new NpgsqlParameter("@exchangeRate", invoice.ExchangeRate),
+                        new NpgsqlParameter("@amountCurrency", invoice.AmountCurrency));
                 }
                 else
                 {
-                    if (existing != null)
-                        await DeletePostingsAsync(existing.DocNumber, existing.DocDate);
-
                     await _context.Database.ExecuteSqlRawAsync($@"
                         UPDATE ""{HeaderTableName}""
                         SET ""doc_number"" = @number, ""doc_date"" = @date, ""esf_number"" = @esf,
@@ -557,7 +662,8 @@ namespace BIS.ERP.Services
                             ""payment_kind"" = @payment, ""delivery_kind"" = @delivery, ""supply_kind"" = @supply,
                             ""basis"" = @basis, ""amount_without_tax"" = @amountWithoutTax,
                             ""vat_total"" = @vatTotal, ""sales_tax_total"" = @salesTaxTotal,
-                            ""amount"" = @amount, ""is_posted"" = false, ""UpdatedAt"" = NOW()
+                            ""amount"" = @amount, ""currency_id"" = @currencyId, ""exchange_rate"" = @exchangeRate,
+                            ""amount_currency"" = @amountCurrency, ""is_posted"" = false, ""UpdatedAt"" = NOW()
                         WHERE ""Id"" = @id",
                         new NpgsqlParameter("@id", id),
                         new NpgsqlParameter("@number", invoice.DocNumber),
@@ -578,7 +684,10 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@amountWithoutTax", invoice.AmountWithoutTax),
                         new NpgsqlParameter("@vatTotal", invoice.VatTotal),
                         new NpgsqlParameter("@salesTaxTotal", invoice.SalesTaxTotal),
-                        new NpgsqlParameter("@amount", invoice.TotalAmount));
+                        new NpgsqlParameter("@amount", invoice.TotalAmount),
+                        new NpgsqlParameter("@currencyId", (object?)invoice.CurrencyId ?? DBNull.Value),
+                        new NpgsqlParameter("@exchangeRate", invoice.ExchangeRate),
+                        new NpgsqlParameter("@amountCurrency", invoice.AmountCurrency));
 
                     await _context.Database.ExecuteSqlRawAsync(
                         $@"DELETE FROM ""{LinesTableName}"" WHERE ""invoice_id"" = @id;",
@@ -589,6 +698,8 @@ namespace BIS.ERP.Services
                 foreach (var line in invoice.Lines)
                 {
                     RecalculateLine(line);
+                    line.Id = line.Id == Guid.Empty ? Guid.NewGuid() : line.Id;
+                    line.LineNumber = lineNumber;
                     await _context.Database.ExecuteSqlRawAsync($@"
                         INSERT INTO ""{LinesTableName}""
                         (""Id"", ""invoice_id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"", ""vat_tax_code"",
@@ -597,7 +708,7 @@ namespace BIS.ERP.Services
                         VALUES (@lineId, @invoiceId, @lineNumber, @name, @unitName, @quantity, @account, @vatTaxCode,
                                 @amountWithoutTax, @vatRate, @vatAmount, @salesTaxCode, @salesTaxRate, @salesTaxAmount,
                                 @lineTotal, NOW(), NOW())",
-                        new NpgsqlParameter("@lineId", line.Id == Guid.Empty ? Guid.NewGuid() : line.Id),
+                        new NpgsqlParameter("@lineId", line.Id),
                         new NpgsqlParameter("@invoiceId", id),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
                         new NpgsqlParameter("@name", line.Name),
@@ -614,6 +725,7 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@lineTotal", line.LineTotal));
                 }
 
+                await PostInvoiceWithinCurrentTransactionAsync(invoice, id, existing?.DocNumber);
                 await transaction.CommitAsync();
             }
             catch
@@ -629,9 +741,13 @@ namespace BIS.ERP.Services
                 id,
                 new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
 
-            // По требованиям заказчика у счет-фактуры нет отдельной кнопки проведения:
-            // запись документа сразу должна сформировать бухгалтерские проводки.
-            await PostInvoiceAsync(id);
+            await new EventLogService(_context).LogAsync(
+                "Post",
+                "Document",
+                DocumentName,
+                id,
+                new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
+
             return id;
         }
 
@@ -639,7 +755,6 @@ namespace BIS.ERP.Services
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
-            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate);
 
             await _context.Database.ExecuteSqlRawAsync($@"
                 UPDATE ""{HeaderTableName}""
@@ -666,7 +781,6 @@ namespace BIS.ERP.Services
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
-            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate);
             if (invoice.IsPosted)
                 throw new InvalidOperationException("Проведённый документ нельзя удалить.");
 
@@ -685,75 +799,28 @@ namespace BIS.ERP.Services
         {
             var invoice = await GetInvoiceAsync(invoiceId)
                 ?? throw new InvalidOperationException("Документ не найден.");
-            await EnsureInvoiceDateCanBeModifiedAsync(invoice.DocDate);
             if (invoice.IsPosted)
                 throw new InvalidOperationException("Документ уже проведён.");
-            if (invoice.Lines.Count == 0)
-                throw new InvalidOperationException("Добавьте хотя бы одну строку счета-фактуры.");
-            if (invoice.TotalAmount <= 0)
-                throw new InvalidOperationException("Сумма документа должна быть больше нуля.");
-
-            var counterpartyAccount = string.IsNullOrWhiteSpace(invoice.CounterpartyAccountCode)
-                ? InvoiceDocumentTypes.IsSales(DocumentName) ? DefaultSalesAccount : DefaultPurchaseAccount
-                : invoice.CounterpartyAccountCode.Trim();
-            var taxPostingEntries = await LoadTaxPostingEntriesAsync();
+            ValidateInvoiceForPosting(invoice);
 
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                await DeletePostingsAsync(invoice.DocNumber, invoice.DocDate);
-
-                foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
-                {
-                    var lineAccount = string.IsNullOrWhiteSpace(line.AccountCode)
-                        ? GetDefaultLineAccount()
-                        : line.AccountCode.Trim();
-                    lineAccount = NormalizeLineAccountForPosting(counterpartyAccount, lineAccount);
-                    var lineDescription = BuildLineDescription(invoice, line);
-                    var taxPosting = ResolveTaxPostingEntry(line, taxPostingEntries);
-
-                    if (line.AmountWithoutTax > 0)
-                    {
-                        if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, lineAccount, line.AmountWithoutTax, lineDescription);
-                        else
-                            await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.AmountWithoutTax, lineDescription);
-                    }
-
-                    if (line.VatAmount > 0)
-                    {
-                        if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.VatPayableAccount, line.VatAmount, $"НДС: {lineDescription}");
-                        else
-                            await CreatePostingAsync(invoice, taxPosting.VatRecoverableAccount, counterpartyAccount, line.VatAmount, $"НДС: {lineDescription}");
-                    }
-
-                    if (line.SalesTaxAmount > 0)
-                    {
-                        if (InvoiceDocumentTypes.IsSales(DocumentName))
-                            await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.SalesTaxAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
-                        else
-                            await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}");
-                    }
-                }
-
-                await _context.Database.ExecuteSqlRawAsync(
-                    $@"UPDATE ""{HeaderTableName}"" SET ""is_posted"" = true, ""UpdatedAt"" = NOW() WHERE ""Id"" = @id;",
-                    new NpgsqlParameter("@id", invoiceId));
-
+                await PostInvoiceWithinCurrentTransactionAsync(invoice, invoiceId);
                 await transaction.CommitAsync();
-                await new EventLogService(_context).LogAsync(
-                    "Post",
-                    "Document",
-                    DocumentName,
-                    invoiceId,
-                    new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
             }
             catch
             {
                 await transaction.RollbackAsync();
                 throw;
             }
+
+            await new EventLogService(_context).LogAsync(
+                "Post",
+                "Document",
+                DocumentName,
+                invoiceId,
+                new { Number = invoice.DocNumber, Amount = invoice.TotalAmount });
         }
 
         public async Task<int> EnsureSavedInvoicesPostedAsync()
@@ -817,16 +884,99 @@ namespace BIS.ERP.Services
             invoice.TotalAmount = invoice.Lines.Sum(line => line.LineTotal);
         }
 
-        private async Task EnsureInvoiceDateCanBeModifiedAsync(DateTime invoiceDate, DateTime? existingDate = null)
+        private static void NormalizeCurrencyAmounts(InvoiceDocument invoice)
         {
-            var periodService = new AccountingPeriodService(_context);
-            await periodService.EnsureDateCanBeModifiedAsync(invoiceDate);
+            if (!invoice.CurrencyId.HasValue || invoice.ExchangeRate <= 0)
+            {
+                invoice.ExchangeRate = 0;
+                invoice.AmountCurrency = 0;
+                return;
+            }
 
-            if (existingDate.HasValue && existingDate.Value.Date != invoiceDate.Date)
-                await periodService.EnsureDateCanBeModifiedAsync(existingDate.Value);
+            invoice.AmountCurrency = invoice.TotalAmount > 0
+                ? Math.Round(invoice.TotalAmount / invoice.ExchangeRate, 2, MidpointRounding.AwayFromZero)
+                : 0;
         }
 
-        private async Task CreatePostingAsync(InvoiceDocument invoice, string debit, string credit, decimal amount, string description)
+        private static void ValidateInvoiceForPosting(InvoiceDocument invoice)
+        {
+            if (invoice.Lines.Count == 0)
+                throw new InvalidOperationException("Добавьте хотя бы одну строку счета-фактуры.");
+            if (invoice.TotalAmount <= 0)
+                throw new InvalidOperationException("Сумма документа должна быть больше нуля.");
+        }
+
+        private async Task PostInvoiceWithinCurrentTransactionAsync(
+            InvoiceDocument invoice,
+            Guid invoiceId,
+            string? previousDocumentNumber = null)
+        {
+            ValidateInvoiceForPosting(invoice);
+            NormalizeCurrencyAmounts(invoice);
+
+            var counterpartyAccount = string.IsNullOrWhiteSpace(invoice.CounterpartyAccountCode)
+                ? InvoiceDocumentTypes.IsSales(DocumentName) ? DefaultSalesAccount : DefaultPurchaseAccount
+                : invoice.CounterpartyAccountCode.Trim();
+            var taxPostingEntries = await LoadTaxPostingEntriesAsync();
+
+            if (!string.IsNullOrWhiteSpace(previousDocumentNumber) &&
+                !previousDocumentNumber.Trim().Equals(invoice.DocNumber, StringComparison.OrdinalIgnoreCase))
+            {
+                await DeletePostingsAsync(previousDocumentNumber);
+            }
+
+            await DeletePostingsAsync(invoice.DocNumber);
+
+            var createdPostings = 0;
+            foreach (var line in invoice.Lines.OrderBy(item => item.LineNumber))
+            {
+                var lineAccount = string.IsNullOrWhiteSpace(line.AccountCode)
+                    ? GetDefaultLineAccount()
+                    : line.AccountCode.Trim();
+                lineAccount = NormalizeLineAccountForPosting(counterpartyAccount, lineAccount);
+                var lineDescription = BuildLineDescription(invoice, line);
+                var taxPosting = ResolveTaxPostingEntry(line, taxPostingEntries);
+
+                if (line.AmountWithoutTax > 0)
+                {
+                    if (InvoiceDocumentTypes.IsSales(DocumentName))
+                        createdPostings += await CreatePostingAsync(invoice, counterpartyAccount, lineAccount, line.AmountWithoutTax, lineDescription) ? 1 : 0;
+                    else
+                        createdPostings += await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.AmountWithoutTax, lineDescription) ? 1 : 0;
+                }
+
+                if (line.VatAmount > 0)
+                {
+                    if (InvoiceDocumentTypes.IsSales(DocumentName))
+                        createdPostings += await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.VatPayableAccount, line.VatAmount, $"НДС: {lineDescription}") ? 1 : 0;
+                    else
+                        createdPostings += await CreatePostingAsync(invoice, taxPosting.VatRecoverableAccount, counterpartyAccount, line.VatAmount, $"НДС: {lineDescription}") ? 1 : 0;
+                }
+
+                if (line.SalesTaxAmount > 0)
+                {
+                    if (InvoiceDocumentTypes.IsSales(DocumentName))
+                        createdPostings += await CreatePostingAsync(invoice, counterpartyAccount, taxPosting.SalesTaxAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}") ? 1 : 0;
+                    else
+                        createdPostings += await CreatePostingAsync(invoice, lineAccount, counterpartyAccount, line.SalesTaxAmount, $"Налог с продаж: {lineDescription}") ? 1 : 0;
+                }
+            }
+
+            if (createdPostings == 0)
+            {
+                throw new InvalidOperationException(
+                    "Не удалось сформировать проводки по счет-фактуре. Проверьте счета документа и налоговые счета в справочнике налогов.");
+            }
+
+            await _context.Database.ExecuteSqlRawAsync(
+                $@"UPDATE ""{HeaderTableName}"" SET ""is_posted"" = true, ""UpdatedAt"" = NOW() WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", invoiceId));
+
+            invoice.Id = invoiceId;
+            invoice.IsPosted = true;
+        }
+
+        private async Task<bool> CreatePostingAsync(InvoiceDocument invoice, string debit, string credit, decimal amount, string description)
         {
             if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit))
                 throw new InvalidOperationException("Не удалось сформировать проводку: не указаны счета.");
@@ -834,25 +984,76 @@ namespace BIS.ERP.Services
             {
                 System.Diagnostics.Debug.WriteLine(
                     $"Пропущена проводка счет-фактуры {invoice.DocNumber}: одинаковые счета дебета и кредита {debit}. {description}");
-                return;
+                return false;
             }
+
+            var amountCurrency = invoice.CurrencyId.HasValue && invoice.ExchangeRate > 0
+                ? Math.Round(amount / invoice.ExchangeRate, 2, MidpointRounding.AwayFromZero)
+                : 0m;
 
             await _context.Database.ExecuteSqlRawAsync(@"
                 INSERT INTO ""doc_postings""
                 (""Id"", ""posting_date"", ""doc_number"", ""document_type"",
-                 ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
-                 ""description"", ""organization_id"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                 ""module_code"", ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"",
+                 ""currency_id"", ""description"", ""organization_id"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
                 VALUES
-                (@id, @date, @number, @type, @debit, @credit, @amount, 0, @description, @org, true, NOW(), NOW())",
+                (@id, @date, @number, @type, @moduleCode, @debit, @credit, @amount, @amountCurrency, @currencyId, @description, @org, true, NOW(), NOW())",
                 new NpgsqlParameter("@id", Guid.NewGuid()),
                 new NpgsqlParameter("@date", invoice.DocDate),
                 new NpgsqlParameter("@number", invoice.DocNumber),
                 new NpgsqlParameter("@type", DocumentName),
+                new NpgsqlParameter("@moduleCode", (object?)invoice.ModuleCode ?? DBNull.Value),
                 new NpgsqlParameter("@debit", debit),
                 new NpgsqlParameter("@credit", credit),
                 new NpgsqlParameter("@amount", amount),
+                new NpgsqlParameter("@amountCurrency", amountCurrency),
+                new NpgsqlParameter("@currencyId", invoice.CurrencyId.HasValue ? invoice.CurrencyId.Value.ToString() : (object)DBNull.Value),
                 new NpgsqlParameter("@description", description),
                 new NpgsqlParameter("@org", (object?)invoice.OrganizationId ?? DBNull.Value));
+            return true;
+        }
+
+        private async Task<string> ResolveInvoiceModuleNameAsync(string? currentModule)
+        {
+            if (!string.IsNullOrWhiteSpace(currentModule))
+                return NormalizeModuleName(currentModule);
+
+            try
+            {
+                var metadata = await _context.MetadataObjects.AsNoTracking()
+                    .FirstOrDefaultAsync(item =>
+                        item.ObjectType == "Document" &&
+                        item.Name == DocumentName);
+
+                if (metadata != null)
+                {
+                    var assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(
+                        metadata.Id,
+                        metadata.ObjectType);
+                    if (!string.IsNullOrWhiteSpace(assignedModuleName))
+                        return NormalizeModuleName(assignedModuleName);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля счет-фактуры: {ex.Message}");
+            }
+
+            return InvoiceDocumentTypes.IsSales(DocumentName) || InvoiceDocumentTypes.IsPurchase(DocumentName)
+                ? "Финансы"
+                : string.Empty;
+        }
+
+        private static string NormalizeModuleName(string moduleName)
+        {
+            var trimmed = moduleName.Trim();
+            return trimmed.ToUpperInvariant() switch
+            {
+                "ФИН" or "ФИНАНСЫ" or "FIN" or "FINANCE" => "Финансы",
+                "ОС" or "FIXEDASSETS" => "Основные средства",
+                "ТМЦ" or "МАТЕРИАЛЫ" or "INVENTORY" => "Учет материальных ценностей",
+                _ => trimmed
+            };
         }
 
         private string NormalizeLineAccountForPosting(string counterpartyAccount, string lineAccount)
@@ -879,26 +1080,13 @@ namespace BIS.ERP.Services
                 : DefaultPurchaseLineAccount;
         }
 
-        private async Task DeletePostingsAsync(string docNumber, DateTime? docDate = null)
+        private async Task DeletePostingsAsync(string docNumber)
         {
-            var sql = @"
+            await _context.Database.ExecuteSqlRawAsync(@"
                 DELETE FROM doc_postings
-                WHERE doc_number = @number AND document_type = @type";
-
-            var parameters = new List<NpgsqlParameter>
-            {
-                new("@number", docNumber),
-                new("@type", DocumentName)
-            };
-
-            if (docDate.HasValue)
-            {
-                sql += @" AND DATE(posting_date) = DATE(@date)";
-                parameters.Add(new NpgsqlParameter("@date", docDate.Value.Date));
-            }
-
-            sql += ";";
-            await _context.Database.ExecuteSqlRawAsync(sql, parameters.Cast<object>().ToArray());
+                WHERE doc_number = @number AND document_type = @type;",
+                new NpgsqlParameter("@number", docNumber),
+                new NpgsqlParameter("@type", DocumentName));
         }
 
         private static string BuildLineDescription(InvoiceDocument invoice, InvoiceLineRow line) =>
@@ -918,6 +1106,32 @@ namespace BIS.ERP.Services
                 .ToDictionary(
                     row => Guid.Parse(row["Id"].ToString()!),
                     row => ReferenceDisplayHelper.BuildDisplayValue(row, new MetadataField()));
+        }
+
+        private async Task<Dictionary<Guid, string>> LoadCurrencyMapAsync()
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Справочник валют");
+            if (catalog == null)
+                return new Dictionary<Guid, string>();
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            var result = new Dictionary<Guid, string>();
+            foreach (var row in rows)
+            {
+                if (!Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var id))
+                    continue;
+
+                var code = GetRowValue(row, "Код", "code");
+                var name = GetRowValue(row, "Наименование", "name");
+                result[id] = string.IsNullOrWhiteSpace(code)
+                    ? name
+                    : string.IsNullOrWhiteSpace(name)
+                        ? code
+                        : $"{code} - {name}";
+            }
+
+            return result;
         }
 
         private async Task<Dictionary<string, string>> LoadAccountMapAsync()

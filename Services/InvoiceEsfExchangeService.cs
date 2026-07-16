@@ -240,7 +240,9 @@ namespace BIS.ERP.Services
             EsfReferenceMaps referenceMaps)
         {
             var createdDate = exportedAt.Date;
-            var invoiceDate = new DateTimeOffset(invoice.DocDate.Date, KyrgyzstanOffset);
+            var invoiceDate = new DateTimeOffset(
+                DateTime.SpecifyKind(invoice.DocDate.Date, DateTimeKind.Unspecified),
+                KyrgyzstanOffset);
             var note = string.IsNullOrWhiteSpace(invoice.Basis)
                 ? invoice.Lines.FirstOrDefault()?.Name ?? string.Empty
                 : invoice.Basis.Trim();

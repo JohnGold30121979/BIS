@@ -80,9 +80,10 @@ namespace BIS.ERP.Services
         {
             var requestedModuleKey = NormalizeModuleKey(moduleCodeOrName);
             if (string.IsNullOrWhiteSpace(requestedModuleKey))
-                return rows.ToList();
+                return rows.Where(IsActiveAccountRow).ToList();
 
             return rows
+                .Where(IsActiveAccountRow)
                 .Where(row => IsAccountAllowedForModule(
                     row.GetValueOrDefault("Закрывает модуль")?.ToString() ??
                     row.GetValueOrDefault("closing_module_code")?.ToString(),
@@ -128,8 +129,38 @@ namespace BIS.ERP.Services
                 new ChartOfAccountsChoiceDefinition("3", "по таб.номерам", "по табельным номерам"),
                 new ChartOfAccountsChoiceDefinition("4", "по лиц.счетам", "по лицевым счетам"),
                 new ChartOfAccountsChoiceDefinition("5", "по материалам"),
-                new ChartOfAccountsChoiceDefinition("6", "по субсчетам")
+                new ChartOfAccountsChoiceDefinition("6", "по субсчетам"),
+                new ChartOfAccountsChoiceDefinition("7", "по дополнительной аналитике")
             ];
+        }
+
+        private static bool IsActiveAccountRow(Dictionary<string, object> row)
+        {
+            var value = row.GetValueOrDefault("Активен") ??
+                        row.GetValueOrDefault("is_active");
+
+            if (value == null)
+                return true;
+
+            return value switch
+            {
+                bool active => active,
+                int number => number != 0,
+                long number => number != 0,
+                decimal number => number != 0,
+                _ => IsActiveText(value.ToString())
+            };
+        }
+
+        private static bool IsActiveText(string? value)
+        {
+            var text = value?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+                return true;
+
+            return !string.Equals(text, "false", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(text, "нет", StringComparison.OrdinalIgnoreCase) &&
+                   !string.Equals(text, "0", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string NormalizeChoiceValue(
@@ -164,7 +195,7 @@ namespace BIS.ERP.Services
 
             return value switch
             {
-                "3" or "Finance" or "Финансы" => FinanceModuleKey,
+                "2" or "3" or "9" or "Finance" or "Финансы" => FinanceModuleKey,
                 "4" or "Сбыт" or "Продажи" or "Реализация" or "Регистратура" => SalesModuleKey,
                 "6" or "12" or "Inventory" or "Учет материальных ценностей" or "УМЦ" or "ТМЦ" or "Материалы" or "Сырье" => InventoryModuleKey,
                 "7" or "FixedAssets" or "Основные средства" or "ОС" => FixedAssetsModuleKey,

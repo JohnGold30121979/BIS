@@ -1,0 +1,83 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.InfoBaseModulesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Модули информационной базы"
+        Width="760"
+        Height="560"
+        MinWidth="680"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+    <Grid Background="#F4F7FB">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="White" Padding="18" BorderBrush="#D9E2EC" BorderThickness="0,0,0,1">
+            <StackPanel>
+                <TextBlock Text="Настройка модулей организации" FontSize="22" FontWeight="Bold" Foreground="#102A43"/>
+                <TextBlock x:Name="InfoBaseNameText" Margin="0,5,0,0" Foreground="#52606D" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Margin="16,14,16,10" Background="#EAF6FF" BorderBrush="#B6E0FE"
+                BorderThickness="1" CornerRadius="8" Padding="12">
+            <TextBlock Foreground="#0B5CAD" TextWrapping="Wrap">
+                Здесь администратор выбирает, какие модули доступны в этой информационной базе.
+                Для новой базы модуль «Финансы» включается по умолчанию, остальные можно включить вручную.
+                Баланс не выбирается здесь как модуль: это итоговый этап закрытия периода после рабочих модулей.
+            </TextBlock>
+        </Border>
+
+        <Grid Grid.Row="2" Margin="16,0,16,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                <Button Content="Только финансы" Width="130" Height="34" Click="OnFinanceOnlyClick"
+                        Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
+                <Button Content="Все рабочие" Width="120" Height="34" Margin="8,0,0,0" Click="OnEnableAllClick"
+                        Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
+                <ProgressBar x:Name="LoadingProgress" Width="170" Height="6" Margin="14,14,0,0"
+                             IsIndeterminate="True" Visibility="Collapsed"/>
+            </StackPanel>
+
+            <DataGrid x:Name="ModulesGrid" Grid.Row="1"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      SelectionMode="Single"
+                      Background="White"
+                      BorderBrush="#D9E2EC"
+                      BorderThickness="1">
+                <DataGrid.Columns>
+                    <DataGridCheckBoxColumn Header="Доступен"
+                                            Binding="{Binding IsActive, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="85"/>
+                    <DataGridTextColumn Header="" Binding="{Binding Icon}" Width="42" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Модуль" Binding="{Binding Name}" Width="170" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="*" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Закрытие" Binding="{Binding CloseOrder}" Width="80" IsReadOnly="True"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+
+        <Border Grid.Row="3" Background="White" Padding="16" BorderBrush="#D9E2EC" BorderThickness="0,1,0,0">
+            <Grid>
+                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#52606D"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="SaveButton" Content="Сохранить" Width="120" Height="36"
+                            Background="#27AE60" Foreground="White" Click="OnSaveClick"/>
+                    <Button Content="Отмена" Width="110" Height="36" Margin="8,0,0,0"
+                            Background="#95A5A6" Foreground="White" Click="OnCancelClick"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

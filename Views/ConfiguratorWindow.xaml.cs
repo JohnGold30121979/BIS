@@ -58,11 +58,31 @@ namespace BIS.ERP.Views
             try
             {
                 Mouse.OverrideCursor = Cursors.Wait;
+                if (!ServiceLocator.AuthService.IsAdmin)
+                {
+                    MessageBox.Show(
+                        "Доступ к конфигуратору разрешен только администратору.",
+                        "Доступ запрещен",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    _closeForModeSwitch = true;
+                    Close();
+                    return;
+                }
 
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
                 SystemIconText.Text = GetSystemIcon(systemConfiguration.Icon);
-                Title = $"{systemConfiguration.SystemName} - Конфигуратор";
+                var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+                InfoBaseNameText.Text = currentInfoBase == null
+                    ? "Инфобаза: не выбрана"
+                    : $"Инфобаза: {currentInfoBase.Name}";
+                InfoBaseNameText.ToolTip = currentInfoBase == null
+                    ? "Инфобаза не выбрана"
+                    : $"{currentInfoBase.Name}\nБаза: {currentInfoBase.DatabaseName}\nСервер: {currentInfoBase.Host}:{currentInfoBase.Port}";
+                Title = currentInfoBase == null
+                    ? $"{systemConfiguration.SystemName} - Конфигуратор"
+                    : $"{systemConfiguration.SystemName} - Конфигуратор - {currentInfoBase.Name}";
 
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 await new RuntimeSchemaFixService(_context).EnsureAsync();
@@ -84,6 +104,7 @@ namespace BIS.ERP.Views
                 await new InvoiceMetadataSeedService(_context).EnsureAsync();
                 await printFormService.SeedCashOrderFormsAsync();
                 await printFormService.SeedInvoiceFormsAsync();
+                await _metadataService.EnsureStandardReportsAsync();
 
                 var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Name).ToList();
@@ -215,6 +236,26 @@ namespace BIS.ERP.Views
                 ShowModulesEditor();
             };
             rootItem.Items.Add(modulesItem);
+            var accountingSetupItem = new TreeViewItem
+            {
+                Header = "⚙ Настройка бухгалтерского учета"
+            };
+            accountingSetupItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowAccountingSetupEditor();
+            };
+            rootItem.Items.Add(accountingSetupItem);
+            var usersItem = new TreeViewItem
+            {
+                Header = "🔐 Пользователи и права"
+            };
+            usersItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowUsersEditor();
+            };
+            rootItem.Items.Add(usersItem);
             rootItem.Items.Add(documentsItem);
             rootItem.Items.Add(reportsItem);
             var regulatedTemplatesItem = new TreeViewItem
@@ -252,6 +293,85 @@ namespace BIS.ERP.Views
                 new BIS.ERP.Views.Configurator.ModuleManagementView(_context)));
         }
 
+        private void ShowAccountingSetupEditor()
+        {
+            if (_context == null)
+                return;
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Настройка бухгалтерского учета";
+            EditorDescription.Text = "Служебные параметры учета: входящие остатки, строки отчетности и расчет курсовой разницы";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new AccountingSetupView(_context)));
+        }
+
+        private void ShowUsersEditor()
+        {
+            if (_context == null)
+                return;
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Пользователи и права";
+            EditorDescription.Text = "Пользователи текущей информационной базы и доступ к рабочему окну";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(
+                new UserAccessManagementView(_context, BuildUserAccessNavigationItems(), ServiceLocator.AuthService.CurrentUser)));
+        }
+
+        private IEnumerable<BIS.ERP.NavigationItem> BuildUserAccessNavigationItems()
+        {
+            var items = new List<BIS.ERP.NavigationItem>();
+            var catalogsSection = new BIS.ERP.NavigationItem
+            {
+                Id = "DirectoriesSection",
+                Name = "СПРАВОЧНИКИ",
+                Type = "Section"
+            };
+            foreach (var catalog in (_catalogs ?? new List<MetadataObject>()).OrderBy(item => item.Name))
+                catalogsSection.Children.Add(new BIS.ERP.NavigationItem
+                {
+                    Id = catalog.Id.ToString(),
+                    Name = catalog.Name,
+                    Type = "Catalog",
+                    Tag = catalog
+                });
+            items.Add(catalogsSection);
+
+            var documentsSection = new BIS.ERP.NavigationItem
+            {
+                Id = "DocumentsSection",
+                Name = "ДОКУМЕНТЫ",
+                Type = "Section"
+            };
+            foreach (var document in (_documents ?? new List<MetadataObject>()).OrderBy(item => item.Name))
+                documentsSection.Children.Add(new BIS.ERP.NavigationItem
+                {
+                    Id = document.Id.ToString(),
+                    Name = document.Name,
+                    Type = "Document",
+                    Tag = document
+                });
+            items.Add(documentsSection);
+
+            var reportsSection = new BIS.ERP.NavigationItem
+            {
+                Id = "ReportsSection",
+                Name = "ОТЧЕТЫ",
+                Type = "Section"
+            };
+            foreach (var report in (_reports ?? new List<Report>()).OrderBy(item => item.Name))
+                reportsSection.Children.Add(new BIS.ERP.NavigationItem
+                {
+                    Id = report.Id.ToString(),
+                    Name = report.Name,
+                    Type = "Report",
+                    Tag = report
+                });
+            reportsSection.Children.Add(new BIS.ERP.NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Type = "PostingsJournal" });
+            reportsSection.Children.Add(new BIS.ERP.NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Type = "AccountingReports" });
+            reportsSection.Children.Add(new BIS.ERP.NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Type = "MutualSettlements" });
+            items.Add(reportsSection);
+            return items;
+        }
+
         private FrameworkElement CreateFixedPropertiesHost(UIElement content)
         {
             var host = new Grid
@@ -282,6 +402,10 @@ namespace BIS.ERP.Views
         }
 
         private void OnModulesClick(object sender, RoutedEventArgs e) => ShowModulesEditor();
+
+        private void OnAccountingSetupClick(object sender, RoutedEventArgs e) => ShowAccountingSetupEditor();
+
+        private void OnUsersClick(object sender, RoutedEventArgs e) => ShowUsersEditor();
 
         private async void OnRegulatedTemplatesClick(object sender, RoutedEventArgs e) =>
             await ShowRegulatedTemplatesEditorAsync();
@@ -2031,7 +2155,16 @@ namespace BIS.ERP.Views
             var configuration = await new SystemConfigurationService().GetAsync();
             SystemNameText.Text = configuration.SystemName;
             SystemIconText.Text = GetSystemIcon(configuration.Icon);
-            Title = $"{configuration.SystemName} - Конфигуратор";
+            var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            InfoBaseNameText.Text = currentInfoBase == null
+                ? "Инфобаза: не выбрана"
+                : $"Инфобаза: {currentInfoBase.Name}";
+            InfoBaseNameText.ToolTip = currentInfoBase == null
+                ? "Инфобаза не выбрана"
+                : $"{currentInfoBase.Name}\nБаза: {currentInfoBase.DatabaseName}\nСервер: {currentInfoBase.Host}:{currentInfoBase.Port}";
+            Title = currentInfoBase == null
+                ? $"{configuration.SystemName} - Конфигуратор"
+                : $"{configuration.SystemName} - Конфигуратор - {currentInfoBase.Name}";
         }
 
         private static string GetSystemIcon(string? icon)

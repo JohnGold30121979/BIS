@@ -58,7 +58,7 @@
                         <TextBlock Text="Порядок" Margin="0,0,0,5"/>
                         <TextBox x:Name="OrderBox" Height="35" Padding="8,4"/>
                     </StackPanel>
-                    <CheckBox x:Name="IsActiveCheck" Grid.Column="2" Content="Модуль активен"
+                    <CheckBox x:Name="IsActiveCheck" Grid.Column="2" Content="Доступен в инфобазе"
                               VerticalAlignment="Center" Margin="15,15,0,0" IsChecked="True"/>
                 </Grid>
 

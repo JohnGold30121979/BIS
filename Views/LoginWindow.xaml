@@ -4,9 +4,11 @@
         xmlns:behaviors="clr-namespace:BIS.ERP.Behaviors"
         xmlns:converters="clr-namespace:BIS.ERP.Converters"
         Title="BIS ERP - Вход в систему" 
-        Height="450" Width="480"
+        Width="520"
+        MinWidth="480"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
-        ResizeMode="NoResize"
+        ResizeMode="CanResizeWithGrip"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent">
@@ -20,46 +22,56 @@
             <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.3"/>
         </Border.Effect>
 
-        <StackPanel Margin="30,35,35,11">
-            <TextBlock Text="BIS ERP" FontSize="28" FontWeight="Bold" 
-                       Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="30,22,30,26">
+                <TextBlock Text="BIS ERP" FontSize="28" FontWeight="Bold" 
+                           Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,8"/>
 
-            <TextBlock Text="Вход в систему" FontSize="14" 
-                       Foreground="#7F8C8D" HorizontalAlignment="Center" Margin="0,0,0,35"/>
+                <TextBlock Text="Вход в систему" FontSize="14" 
+                           Foreground="#7F8C8D" HorizontalAlignment="Center" Margin="0,0,0,5"/>
 
-            <TextBlock Text="Логин" Foreground="White" FontSize="14" Margin="0,0,0,5"/>
-            <TextBox x:Name="LoginBox" Height="40" Padding="10,8" 
-                     FontSize="16" Margin="0,0,0,20" Background="White" Foreground="#333"
-                     TabIndex="0" PreviewKeyDown="OnLoginPreviewKeyDown"
-                     Text="{Binding Login, UpdateSourceTrigger=PropertyChanged}"/>
+                <TextBlock Text="{Binding SelectedInfoBaseText}" FontSize="13"
+                           Foreground="#B6E0FE" HorizontalAlignment="Center"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           Visibility="{Binding HasSelectedInfoBase, Converter={StaticResource BoolToVisibilityConverter}}"
+                           Margin="0,0,0,22"/>
 
-            <TextBlock Text="Пароль" Foreground="White" FontSize="14" Margin="0,0,0,5"/>
-            <PasswordBox x:Name="PasswordBox" Height="40" Padding="10,8" 
-                         FontSize="16" Margin="0,0,0,25" Background="White" Foreground="#333"
-                         TabIndex="1" PreviewKeyDown="OnPasswordPreviewKeyDown"
-                         behaviors:PasswordBoxBindingBehavior.BindPassword="True"
-                         behaviors:PasswordBoxBindingBehavior.BoundPassword="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                <TextBlock Text="Логин" Foreground="White" FontSize="14" Margin="0,0,0,5"/>
+                <TextBox x:Name="LoginBox" Height="38" Padding="10,7" 
+                         FontSize="16" Margin="0,0,0,16" Background="White" Foreground="#333"
+                         TabIndex="0" PreviewKeyDown="OnLoginPreviewKeyDown"
+                         Text="{Binding Login, UpdateSourceTrigger=PropertyChanged}"/>
 
-            <TextBlock x:Name="ErrorText" Text="{Binding ErrorMessage}" Foreground="#E74C3C" 
-                       FontSize="12" TextAlignment="Center" 
-                       Visibility="{Binding HasError, Converter={StaticResource BoolToVisibilityConverter}}" Margin="0,0,0,15"/>
+                <TextBlock Text="Пароль" Foreground="White" FontSize="14" Margin="0,0,0,5"/>
+                <PasswordBox x:Name="PasswordBox" Height="38" Padding="10,7" 
+                             FontSize="16" Margin="0,0,0,18" Background="White" Foreground="#333"
+                             TabIndex="1" PreviewKeyDown="OnPasswordPreviewKeyDown"
+                             behaviors:PasswordBoxBindingBehavior.BindPassword="True"
+                             behaviors:PasswordBoxBindingBehavior.BoundPassword="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,15">
-                <Button x:Name="LoginButton" Content="Войти" Width="120" Height="40"
-                        Background="#3498DB" Foreground="White" FontSize="14" FontWeight="Bold"
-                        Command="{Binding LoginCommand}" Margin="0,0,15,0" Cursor="Hand" TabIndex="2"
-                        IsDefault="True"/>
+                <TextBlock x:Name="ErrorText" Text="{Binding ErrorMessage}" Foreground="#E74C3C" 
+                           FontSize="12" TextAlignment="Center" 
+                           Visibility="{Binding HasError, Converter={StaticResource BoolToVisibilityConverter}}" Margin="0,0,0,15"/>
 
-                <Button x:Name="RegisterButton" Content="Регистрация" Width="120" Height="40"
-                        Background="Transparent" Foreground="White" FontSize="14"
-                        BorderBrush="#3498DB" BorderThickness="1" Command="{Binding RegisterCommand}" Cursor="Hand" TabIndex="3"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                    <Button x:Name="LoginButton" Content="Войти" Width="120" Height="40"
+                            Background="#3498DB" Foreground="White" FontSize="14" FontWeight="Bold"
+                            Command="{Binding LoginCommand}" Cursor="Hand" TabIndex="2" Margin="0,0,10,0"
+                            IsDefault="True"/>
+                    <Button x:Name="BackButton" Content="← Назад" 
+                            Width="100" Height="35" Background="Transparent"
+                            Foreground="#95A5A6" FontSize="13"
+                            BorderBrush="#95A5A6" BorderThickness="1"
+                            Command="{Binding BackCommand}" Cursor="Hand" 
+                            Margin="0,0,10,0" TabIndex="3"/>
+
+                    <Button x:Name="ExitButton" Content="Выход" 
+                            Width="100" Height="35" Background="#E74C3C" 
+                            Foreground="White" FontSize="13" FontWeight="SemiBold"
+                            BorderThickness="0" Command="{Binding CloseCommand}" Cursor="Hand" 
+                            HorizontalAlignment="Center" TabIndex="4"/>
+                </StackPanel>
             </StackPanel>
-
-            <Button x:Name="ExitButton" Content="Выход" 
-                    Width="100" Height="35" Background="#E74C3C" 
-                    Foreground="White" FontSize="13" FontWeight="SemiBold"
-                    BorderThickness="0" Command="{Binding CloseCommand}" Cursor="Hand" 
-                    HorizontalAlignment="Center" Margin="0,10,0,0" TabIndex="4"/>
-        </StackPanel>
+        </ScrollViewer>
     </Border>
 </Window>

@@ -36,9 +36,9 @@
                     <Button x:Name="ExportButton" Content="📎 Экспорт" 
                             Width="90" Height="35" Margin="0,0,10,0"
                             Background="#9B59B6" Foreground="White" Click="OnExportClick"/>
-                    <Button x:Name="ImportChartDbfButton" Content="📥 Загрузить DBF"
+                    <Button x:Name="ImportDbfButton" Content="📥 Загрузить DBF"
                             Width="130" Height="35" Margin="0,0,10,0"
-                            Background="#16A085" Foreground="White" Click="OnImportChartDbfClick"
+                            Background="#16A085" Foreground="White" Click="OnImportDbfClick"
                             Visibility="Collapsed"/>
                     <Button x:Name="AddButton" Content="➕ Добавить" 
                             Width="100" Height="35" Margin="0,0,10,0"

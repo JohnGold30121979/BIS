@@ -103,6 +103,7 @@ namespace BIS.ERP.Services
             await new PrintFormService(_context).EnsureSchemaAsync();
             await new BisPatchService(_context).EnsureSchemaAsync();
             await new RegulatedReportTemplateService(_context).EnsureSchemaAsync();
+            await new MetadataService(_context).EnsureStandardReportsAsync();
 
             var metadata = await _context.MetadataObjects
                 .AsNoTracking()

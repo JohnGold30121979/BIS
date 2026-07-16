@@ -77,7 +77,15 @@ namespace BIS.ERP.Services
                     {
                         var metadataField = FindMetadataField(catalog, field.FieldName);
                         if (metadataField == null)
+                        {
+                            if (TryBuildCompatibleReportFieldSelect(report, catalog, field, out var compatibleSelect))
+                            {
+                                selectColumns.Add(compatibleSelect);
+                                continue;
+                            }
+
                             throw new Exception($"Поле '{field.FieldName}' отсутствует в источнике '{catalog.Name}'");
+                        }
 
                         var source = QuoteIdentifier(metadataField.DbColumnName);
                         if (metadataField.FieldType == "Reference")
@@ -94,6 +102,7 @@ namespace BIS.ERP.Services
 
                     using var command = _context.Database.GetDbConnection().CreateCommand();
                     var whereClauses = BuildFilterClauses(command, catalog, report.Filters);
+                    await AddDefaultFixedAssetSnapshotFilterAsync(command, catalog, whereClauses, parameters);
                     var whereSql = whereClauses.Count == 0
                         ? string.Empty
                         : $" WHERE {string.Join(" AND ", whereClauses)}";
@@ -136,11 +145,180 @@ namespace BIS.ERP.Services
             return dataTable;
         }
 
+        private async Task AddDefaultFixedAssetSnapshotFilterAsync(
+            System.Data.Common.DbCommand command,
+            MetadataObject source,
+            List<string> whereClauses,
+            Dictionary<string, object>? parameters)
+        {
+            if (!IsFixedAssetPeriodBalanceSource(source) || HasExplicitSnapshotPeriodFilter(whereClauses))
+                return;
+
+            await new AccountingPeriodService(_context).EnsureSchemaAsync();
+
+            if (TryGetGuidParameter(parameters, out var periodId, "PeriodId", "periodId", "Период"))
+            {
+                AddParameter(command, "@fixedAssetPeriodId", periodId);
+                whereClauses.Add($"{QuoteIdentifier("PeriodId")} = @fixedAssetPeriodId");
+                return;
+            }
+
+            if (TryGetDateParameter(parameters, out var periodEnd, "PeriodEnd", "periodEnd", "EndDate", "endDate", "Дата окончания"))
+            {
+                AddParameter(command, "@fixedAssetPeriodEnd", DateTime.SpecifyKind(periodEnd.Date, DateTimeKind.Utc));
+                whereClauses.Add($"{QuoteIdentifier("PeriodEnd")} = @fixedAssetPeriodEnd");
+                return;
+            }
+
+            var latestPeriodId = await _context.FixedAssetPeriodBalances.AsNoTracking()
+                .OrderByDescending(balance => balance.PeriodEnd)
+                .ThenByDescending(balance => balance.CreatedAt)
+                .Select(balance => (Guid?)balance.PeriodId)
+                .FirstOrDefaultAsync();
+
+            if (latestPeriodId.HasValue)
+            {
+                AddParameter(command, "@fixedAssetLatestPeriodId", latestPeriodId.Value);
+                whereClauses.Add($"{QuoteIdentifier("PeriodId")} = @fixedAssetLatestPeriodId");
+            }
+            else
+            {
+                whereClauses.Add("1 = 0");
+            }
+        }
+
+        private static bool IsFixedAssetPeriodBalanceSource(MetadataObject source) =>
+            source.TableName.Equals("FixedAssetPeriodBalances", StringComparison.OrdinalIgnoreCase);
+
+        private static bool HasExplicitSnapshotPeriodFilter(IEnumerable<string> whereClauses) =>
+            whereClauses.Any(clause =>
+                clause.Contains(QuoteIdentifier("PeriodId"), StringComparison.OrdinalIgnoreCase) ||
+                clause.Contains(QuoteIdentifier("PeriodEnd"), StringComparison.OrdinalIgnoreCase));
+
+        private static bool TryGetGuidParameter(
+            IReadOnlyDictionary<string, object>? parameters,
+            out Guid value,
+            params string[] keys)
+        {
+            value = Guid.Empty;
+            if (parameters == null)
+                return false;
+
+            foreach (var key in keys)
+            {
+                if (!parameters.TryGetValue(key, out var raw) || raw == null)
+                    continue;
+                if (raw is Guid guid && guid != Guid.Empty)
+                {
+                    value = guid;
+                    return true;
+                }
+                if (Guid.TryParse(raw.ToString(), out guid) && guid != Guid.Empty)
+                {
+                    value = guid;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryGetDateParameter(
+            IReadOnlyDictionary<string, object>? parameters,
+            out DateTime value,
+            params string[] keys)
+        {
+            value = default;
+            if (parameters == null)
+                return false;
+
+            foreach (var key in keys)
+            {
+                if (!parameters.TryGetValue(key, out var raw) || raw == null)
+                    continue;
+                if (raw is DateTime date)
+                {
+                    value = date;
+                    return true;
+                }
+                if (DateTime.TryParse(raw.ToString(), out date))
+                {
+                    value = date;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static MetadataField? FindMetadataField(MetadataObject source, string fieldName)
         {
             return source.Fields.FirstOrDefault(field =>
                 field.DbColumnName.Equals(fieldName, StringComparison.OrdinalIgnoreCase) ||
                 field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool TryBuildCompatibleReportFieldSelect(
+            Report report,
+            MetadataObject source,
+            ReportField field,
+            out string selectExpression)
+        {
+            selectExpression = string.Empty;
+
+            if (!IsFoxProLayoutReport(report) || !IsPostingsSource(source))
+                return false;
+
+            var fieldName = NormalizeLegacyReportFieldName(field.FieldName);
+            var expression = fieldName switch
+            {
+                "date" or "d_oper" or "d_doc" => QuoteIdentifier("posting_date"),
+                "dok" or "doc" or "nomdok" or "nom_doc" => QuoteIdentifier("doc_number"),
+                "schet" or "sch" or "debet" or "debit" => QuoteIdentifier("debit_account"),
+                "kor_sch" or "korschet" or "credit" or "kredit" => QuoteIdentifier("credit_account"),
+                "debsum" or "sumdt" or "sum_debit" => QuoteIdentifier("amount_kgs"),
+                "credsum" or "sumkt" or "sum_credit" => QuoteIdentifier("amount_kgs"),
+                "debsum_v" or "sumdt_v" or "sum_debit_currency" => QuoteIdentifier("amount_currency"),
+                "credsum_v" or "sumkt_v" or "sum_credit_currency" => QuoteIdentifier("amount_currency"),
+                "tex" or "text" or "txt" or "sod" or "note" => QuoteIdentifier("description"),
+                "prs" or "module" or "module_code" => QuoteIdentifier("module_code"),
+                "name_kod" or "name_sch" or "account_name" => BuildPostingAccountDisplayExpression(),
+                _ => "NULL::text"
+            };
+
+            var displayName = string.IsNullOrWhiteSpace(field.DisplayName)
+                ? field.FieldName
+                : field.DisplayName;
+            selectExpression = $"{expression} AS {QuoteIdentifier(displayName)}";
+            return true;
+        }
+
+        private static bool IsFoxProLayoutReport(Report report) =>
+            string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsPostingsSource(MetadataObject source) =>
+            string.Equals(source.Name, "Проводки", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source.TableName, "doc_postings", StringComparison.OrdinalIgnoreCase);
+
+        private static string NormalizeLegacyReportFieldName(string fieldName)
+        {
+            var normalized = (fieldName ?? string.Empty)
+                .Trim()
+                .Trim('"', '\'', ' ', '=', '{', '}')
+                .ToLowerInvariant();
+
+            var separatorIndex = normalized.LastIndexOfAny(new[] { '.', '!' });
+            return separatorIndex >= 0 && separatorIndex < normalized.Length - 1
+                ? normalized[(separatorIndex + 1)..]
+                : normalized;
+        }
+
+        private static string BuildPostingAccountDisplayExpression()
+        {
+            var debit = QuoteIdentifier("debit_account");
+            var credit = QuoteIdentifier("credit_account");
+            return $"NULLIF(CONCAT_WS(' / ', NULLIF(CAST({debit} AS text), ''), NULLIF(CAST({credit} AS text), '')), '')";
         }
 
         private static string QuoteIdentifier(string identifier)

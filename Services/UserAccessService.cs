@@ -6,6 +6,12 @@ namespace BIS.ERP.Services
 {
     public class UserAccessService
     {
+        private const string RoleChecksumPatchId = "system-user-role-checksum-v2";
+        private static readonly HashSet<string> ProtectedLogins = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "admin",
+            "user"
+        };
         private readonly AppDbContext _context;
 
         public UserAccessService(AppDbContext context)
@@ -23,6 +29,7 @@ namespace BIS.ERP.Services
                     ""PasswordHash"" text NOT NULL,
                     ""FullName"" varchar(200) NOT NULL DEFAULT '',
                     ""Role"" integer NOT NULL DEFAULT 0,
+                    ""RoleChecksum"" text NOT NULL DEFAULT '',
                     ""CreatedAt"" timestamp with time zone NOT NULL,
                     ""IsActive"" boolean NOT NULL DEFAULT true,
                     ""LastLoginDate"" timestamp with time zone NULL,
@@ -40,18 +47,110 @@ namespace BIS.ERP.Services
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserAccessPermissions_User_Key""
                     ON ""UserAccessPermissions"" (""UserId"", ""NavigationKey"");
             ");
+            await _context.Database.ExecuteSqlRawAsync(@"
+                ALTER TABLE ""Users""
+                ADD COLUMN IF NOT EXISTS ""RoleChecksum"" text NOT NULL DEFAULT '';
+            ");
 
             await SeedUserAsync("admin", "admin", "Администратор", "admin@local", UserRole.Admin);
+            await SeedUserAsync("accountant", "accountant", "Бухгалтер", "accountant@local", UserRole.Accountant);
             await SeedUserAsync("user", "user", "Пользователь", "user@local", UserRole.User);
+            await EnsureSeededUserRoleAsync("admin", UserRole.Admin);
+            await EnsureSeededUserRoleAsync("accountant", UserRole.Accountant);
+            await EnsureSeededUserRoleAsync("user", UserRole.User);
+            await EnsureRoleChecksumsAsync();
         }
 
         public async Task<List<User>> GetUsersAsync()
         {
             await EnsureSchemaAsync();
             return await _context.Users.AsNoTracking()
-                .OrderByDescending(user => user.Role)
+                .OrderByDescending(user => user.Role == UserRole.Admin)
+                .ThenByDescending(user => user.Role == UserRole.Accountant)
                 .ThenBy(user => user.Login)
                 .ToListAsync();
+        }
+
+        public async Task<User> CreateUserAsync(
+            User? actor,
+            string login,
+            string password,
+            string fullName,
+            string email,
+            UserRole role,
+            bool isActive)
+        {
+            await EnsureSchemaAsync();
+            EnsureCanManageUsers(actor);
+            if (!CanCreateRole(actor!.Role, role))
+                throw new InvalidOperationException("Недостаточно прав для создания пользователя с выбранной ролью.");
+
+            var normalizedLogin = NormalizeLogin(login);
+            if (string.IsNullOrWhiteSpace(normalizedLogin) || normalizedLogin.Length < 3)
+                throw new InvalidOperationException("Логин должен быть не менее 3 символов.");
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 6)
+                throw new InvalidOperationException("Пароль должен быть не менее 6 символов.");
+            if (await _context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
+                throw new InvalidOperationException("Пользователь с таким логином уже существует.");
+
+            var user = new User
+            {
+                Login = normalizedLogin,
+                FullName = fullName.Trim(),
+                Email = email.Trim(),
+                PasswordHash = global::BCrypt.Net.BCrypt.HashPassword(password),
+                Role = role,
+                IsActive = role == UserRole.Admin || isActive,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.Users.AddAsync(user);
+            await _context.SaveChangesAsync();
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+            return user;
+        }
+
+        public async Task DeleteUserAsync(User? actor, int userId)
+        {
+            await EnsureSchemaAsync();
+            EnsureCanManageUsers(actor);
+
+            var user = await _context.Users.FindAsync(userId)
+                ?? throw new InvalidOperationException("Пользователь не найден.");
+
+            if (actor!.Id == user.Id)
+                throw new InvalidOperationException("Нельзя удалить текущего пользователя.");
+            if (user.Role == UserRole.Admin || ProtectedLogins.Contains(user.Login))
+                throw new InvalidOperationException("Нельзя удалить администратора или системного гостя.");
+            if (!CanManageTargetRole(actor.Role, user.Role))
+                throw new InvalidOperationException("Недостаточно прав для удаления пользователя с этой ролью.");
+
+            var permissions = await _context.UserAccessPermissions
+                .Where(permission => permission.UserId == user.Id)
+                .ToListAsync();
+            _context.UserAccessPermissions.RemoveRange(permissions);
+            _context.Users.Remove(user);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task SetUserActiveAsync(User? actor, int userId, bool isActive)
+        {
+            await EnsureSchemaAsync();
+            EnsureCanManageUsers(actor);
+
+            var user = await _context.Users.FindAsync(userId)
+                ?? throw new InvalidOperationException("Пользователь не найден.");
+
+            if (user.Role == UserRole.Admin)
+                throw new InvalidOperationException("Администратор не имеет признака активности и всегда может входить.");
+            if (actor!.Id == user.Id && !isActive)
+                throw new InvalidOperationException("Нельзя отключить текущего пользователя.");
+            if (!CanManageTargetRole(actor.Role, user.Role))
+                throw new InvalidOperationException("Недостаточно прав для изменения активности пользователя с этой ролью.");
+
+            user.IsActive = isActive;
+            await _context.SaveChangesAsync();
         }
 
         public async Task<HashSet<string>> GetAllowedKeysAsync(int userId)
@@ -91,22 +190,185 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        public static bool CanManageUsers(User? user) =>
+            user?.Role is UserRole.Admin or UserRole.Accountant;
+
+        public static bool CanCreateRole(UserRole actorRole, UserRole newRole) =>
+            actorRole == UserRole.Admin ||
+            actorRole == UserRole.Accountant && (newRole is UserRole.Cashier or UserRole.User);
+
+        public static bool CanManageTargetRole(UserRole actorRole, UserRole targetRole) =>
+            actorRole == UserRole.Admin ||
+            actorRole == UserRole.Accountant && (targetRole is UserRole.Cashier or UserRole.User);
+
+        public static IReadOnlyList<UserRole> GetCreatableRoles(User? actor)
+        {
+            if (actor?.Role == UserRole.Admin)
+                return new[] { UserRole.Admin, UserRole.Accountant, UserRole.Cashier, UserRole.User };
+            if (actor?.Role == UserRole.Accountant)
+                return new[] { UserRole.Cashier, UserRole.User };
+            return Array.Empty<UserRole>();
+        }
+
+        public static string GetRoleDisplayName(UserRole role) => role switch
+        {
+            UserRole.Admin => "Администратор",
+            UserRole.Accountant => "Бухгалтер",
+            UserRole.Cashier => "Кассир",
+            _ => "Гость"
+        };
+
+        private static void EnsureCanManageUsers(User? actor)
+        {
+            if (!CanManageUsers(actor))
+                throw new InvalidOperationException("Недостаточно прав для управления пользователями.");
+        }
+
+        public async Task UpdateUserRoleAsync(int userId, UserRole role)
+        {
+            await EnsureSchemaAsync();
+            var user = await _context.Users.FindAsync(userId)
+                ?? throw new InvalidOperationException("Пользователь не найден.");
+
+            user.Role = role;
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+        }
+
         private async Task SeedUserAsync(string login, string password, string fullName, string email, UserRole role)
         {
-            if (await _context.Users.AnyAsync(user => user.Login == login))
+            var normalizedLogin = NormalizeLogin(login);
+            if (await _context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
                 return;
 
-            await _context.Users.AddAsync(new User
+            var user = new User
             {
-                Login = login,
+                Login = normalizedLogin,
                 FullName = fullName,
                 Email = email,
                 PasswordHash = global::BCrypt.Net.BCrypt.HashPassword(password),
                 Role = role,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
-            });
+            };
+
+            await _context.Users.AddAsync(user);
             await _context.SaveChangesAsync();
+
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureSeededUserRoleAsync(string login, UserRole expectedRole)
+        {
+            var normalizedLogin = NormalizeLogin(login);
+            var user = await _context.Users.FirstOrDefaultAsync(item => item.Login.ToLower() == normalizedLogin);
+            if (user == null)
+                return;
+
+            if (user.Role == expectedRole && UserRoleIntegrityService.HasValidChecksum(user))
+                return;
+
+            user.Role = expectedRole;
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsureRoleChecksumsAsync()
+        {
+            await new BisPatchService(_context).EnsureSchemaAsync();
+            if (await IsSystemPatchAppliedAsync(RoleChecksumPatchId))
+                return;
+
+            var users = await _context.Users.ToListAsync();
+
+            if (users.Count > 0)
+            {
+                foreach (var user in users)
+                    UserRoleIntegrityService.RefreshChecksum(user);
+
+                await _context.SaveChangesAsync();
+            }
+
+            await MarkSystemPatchAppliedAsync(RoleChecksumPatchId);
+        }
+
+        private static string NormalizeLogin(string login) =>
+            (login ?? string.Empty).Trim().ToLowerInvariant();
+
+        private async Task<bool> IsSystemPatchAppliedAsync(string patchId)
+        {
+            var connection = _context.Database.GetDbConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM system_patches
+                    WHERE patch_id = @patch_id AND status = 'Applied'
+                );";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@patch_id";
+            parameter.Value = patchId;
+            command.Parameters.Add(parameter);
+
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                var result = await command.ExecuteScalarAsync();
+                return result is bool isApplied && isApplied;
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
+        }
+
+        private async Task MarkSystemPatchAppliedAsync(string patchId)
+        {
+            var connection = _context.Database.GetDbConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+                INSERT INTO system_patches
+                    (patch_id, version, name, description, checksum, applied_at, applied_by, app_version, status, error, created_at)
+                VALUES
+                    (@patch_id, '2.0.0', 'User role checksum initialization',
+                     'Initializes checksums for existing user roles.',
+                     '', @applied_at, 'system', '2.0.0', 'Applied', '', @created_at)
+                ON CONFLICT (patch_id) DO NOTHING;";
+
+            var patchParameter = command.CreateParameter();
+            patchParameter.ParameterName = "@patch_id";
+            patchParameter.Value = patchId;
+            command.Parameters.Add(patchParameter);
+
+            var now = DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Unspecified);
+            var appliedAtParameter = command.CreateParameter();
+            appliedAtParameter.ParameterName = "@applied_at";
+            appliedAtParameter.Value = now;
+            command.Parameters.Add(appliedAtParameter);
+
+            var createdAtParameter = command.CreateParameter();
+            createdAtParameter.ParameterName = "@created_at";
+            createdAtParameter.Value = now;
+            command.Parameters.Add(createdAtParameter);
+
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
         }
     }
 }

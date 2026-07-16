@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 
 namespace BIS.ERP.Views
 {
@@ -102,6 +103,30 @@ namespace BIS.ERP.Views
                 {
                     LoadingProgress.Visibility = Visibility.Collapsed;
                 }
+            }
+        }
+
+        private async void OnModulesClick(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            var infoBase = button?.Tag as InfoBase;
+
+            if (infoBase == null)
+                return;
+
+            var dialog = new InfoBaseModulesDialog(infoBase)
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                await LoadInfoBasesAsync();
+                MessageBox.Show(
+                    $"Настройка модулей для базы «{infoBase.Name}» сохранена.",
+                    "Модули",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
             }
         }
 

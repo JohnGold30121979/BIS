@@ -6,9 +6,15 @@ namespace BIS.ERP.Services
 {
     public class ModuleMetadataService
     {
+        public const string BalanceCode = "Balance";
         public const string FinanceCode = "Finance";
         public const string FixedAssetsCode = "FixedAssets";
         public const string InventoryCode = "Inventory";
+        public const string PayrollCode = "Payroll";
+        public const string SalesCode = "Sales";
+        public const string RawMaterialsCode = "RawMaterials";
+        public const string CostAccountingCode = "CostAccounting";
+        public const int FinalBalanceCloseOrder = 10000;
 
         private readonly AppDbContext _context;
 
@@ -53,18 +59,56 @@ namespace BIS.ERP.Services
         public async Task EnsureDefaultModulesAsync()
         {
             await EnsureSchemaAsync();
-            await EnsureModuleAsync(FinanceCode, "Финансы", "Кассовые, банковские операции и финансовая отчетность", "💰", 10, 900, true, true);
-            await EnsureModuleAsync(FixedAssetsCode, "Основные средства", "Учет движения, состояния и амортизации основных средств", "🏗", 20, 200);
-            await EnsureModuleAsync(InventoryCode, "Учет материальных ценностей", "Поступление, движение, списание и остатки ТМЦ", "📦", 30, 300);
+            await EnsureModuleAsync(
+                FinanceCode, "Финансы", "Кассовые, банковские операции и финансовый учет",
+                "💰", 10, 900,
+                requirePreviousModulesClosed: true,
+                participatesInPeriodClose: true,
+                isActiveByDefault: true);
+            await EnsureModuleAsync(
+                BalanceCode, "Баланс", "Итоговый этап закрытия периода, баланс и финансовые результаты",
+                "📊", 20, FinalBalanceCloseOrder,
+                requirePreviousModulesClosed: true,
+                participatesInPeriodClose: false,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                FixedAssetsCode, "Основные средства", "Учет движения, состояния и амортизации основных средств",
+                "🏗", 30, 200,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                InventoryCode, "Материалы", "Поступление, движение, списание и остатки материалов",
+                "📦", 40, 300,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                PayrollCode, "Зарплата", "Расчет зарплаты и связанных удержаний",
+                "👥", 50, 400,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                SalesCode, "Сбыт", "Продажи, отгрузки и расчеты по реализации",
+                "🚚", 60, 500,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                RawMaterialsCode, "Сырье", "Учет сырья и производственных запасов",
+                "🌾", 70, 600,
+                isActiveByDefault: false);
+            await EnsureModuleAsync(
+                CostAccountingCode, "Себестоимость", "Расчет и анализ производственной себестоимости",
+                "🧮", 80, 800,
+                requirePreviousModulesClosed: true,
+                isActiveByDefault: false);
             await SynchronizeDefaultAssignmentsAsync();
         }
 
-        public async Task<List<MetadataModule>> GetModulesAsync(bool includeInactive = false)
+        public async Task<List<MetadataModule>> GetModulesAsync(
+            bool includeInactive = false,
+            bool includeFinalBalanceStage = false)
         {
             await EnsureSchemaAsync();
             var query = _context.MetadataModules.AsNoTracking();
             if (!includeInactive)
                 query = query.Where(module => module.IsActive);
+            if (!includeFinalBalanceStage)
+                query = query.Where(module => module.Code != BalanceCode);
             return await query.OrderBy(module => module.Order).ThenBy(module => module.Name).ToListAsync();
         }
 
@@ -84,6 +128,7 @@ namespace BIS.ERP.Services
             module.CloseOrder = module.CloseOrder <= 0 ? module.Order : module.CloseOrder;
             module.Icon = string.IsNullOrWhiteSpace(module.Icon) ? "📁" : module.Icon.Trim();
             module.Description = module.Description?.Trim() ?? string.Empty;
+            ApplyFinalBalanceStageRules(module);
             if (module.Id == Guid.Empty)
                 module.Id = Guid.NewGuid();
 
@@ -101,6 +146,7 @@ namespace BIS.ERP.Services
                 existing.IsActive = module.IsActive;
                 existing.ParticipatesInPeriodClose = module.ParticipatesInPeriodClose;
                 existing.RequirePreviousModulesClosed = module.RequirePreviousModulesClosed;
+                ApplyFinalBalanceStageRules(existing);
             }
             await _context.SaveChangesAsync();
             return existing ?? module;
@@ -154,7 +200,8 @@ namespace BIS.ERP.Services
             int order,
             int closeOrder,
             bool requirePreviousModulesClosed = false,
-            bool participatesInPeriodClose = true)
+            bool participatesInPeriodClose = true,
+            bool isActiveByDefault = false)
         {
             var existing = await _context.MetadataModules.FirstOrDefaultAsync(module => module.Code == code);
             if (existing != null)
@@ -167,11 +214,12 @@ namespace BIS.ERP.Services
                 existing.ParticipatesInPeriodClose = participatesInPeriodClose;
                 existing.RequirePreviousModulesClosed = requirePreviousModulesClosed;
                 existing.IsSystem = true;
+                ApplyFinalBalanceStageRules(existing);
                 await _context.SaveChangesAsync();
                 return;
             }
 
-            await _context.MetadataModules.AddAsync(new MetadataModule
+            var module = new MetadataModule
             {
                 Code = code,
                 Name = name,
@@ -179,12 +227,35 @@ namespace BIS.ERP.Services
                 Icon = icon,
                 Order = order,
                 CloseOrder = closeOrder,
-                IsActive = true,
+                IsActive = isActiveByDefault,
                 ParticipatesInPeriodClose = participatesInPeriodClose,
                 RequirePreviousModulesClosed = requirePreviousModulesClosed,
                 IsSystem = true
-            });
+            };
+            ApplyFinalBalanceStageRules(module);
+            await _context.MetadataModules.AddAsync(module);
             await _context.SaveChangesAsync();
+        }
+
+        public static bool IsFinalBalanceStageModule(MetadataModule module) =>
+            module.Code.Equals(BalanceCode, StringComparison.OrdinalIgnoreCase);
+
+        public static bool IsFinalBalanceStageCode(string? moduleCode) =>
+            !string.IsNullOrWhiteSpace(moduleCode) &&
+            moduleCode.Equals(BalanceCode, StringComparison.OrdinalIgnoreCase);
+
+        public static void ApplyFinalBalanceStageRules(MetadataModule module)
+        {
+            if (!IsFinalBalanceStageModule(module))
+                return;
+
+            module.Name = "Баланс";
+            module.Description = "Итоговый этап закрытия периода, баланс и финансовые результаты";
+            module.CloseOrder = FinalBalanceCloseOrder;
+            module.IsActive = false;
+            module.ParticipatesInPeriodClose = false;
+            module.RequirePreviousModulesClosed = true;
+            module.IsSystem = true;
         }
 
         private async Task SynchronizeDefaultAssignmentsAsync()
@@ -211,8 +282,6 @@ namespace BIS.ERP.Services
                 "Ведомость амортизации", "Приход ОС за период", "Расшифровка баланса по ОС",
                 "Контроль состояния карточек ОС", "Журнал начисления амортизации ОС",
                 "Журнал переоценки ОС", "Журнал реализации ОС", "Журнал ликвидации ОС");
-            await AssignMissingByNameAsync(modules[FinanceCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
-                "Реестр платежных поручений", "Выписка банка", "Акт сверки по подотчетному лицу");
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Ведомость наличия материалов");
         }

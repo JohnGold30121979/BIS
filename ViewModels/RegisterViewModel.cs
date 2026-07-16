@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 
 namespace BIS.ERP.ViewModels
@@ -27,24 +29,43 @@ namespace BIS.ERP.ViewModels
         private string confirmPassword = string.Empty;
 
         [ObservableProperty]
+        private UserRole selectedRole = UserRole.User;
+
+        [ObservableProperty]
         private string errorMessage = string.Empty;
+
+        [ObservableProperty]
+        private string selectedInfoBaseText = string.Empty;
 
         [ObservableProperty]
         private bool isBusy;
 
         public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
+        public bool HasSelectedInfoBase => !string.IsNullOrWhiteSpace(SelectedInfoBaseText);
+        public IReadOnlyList<RegistrationRoleOption> AvailableRoles { get; } =
+        [
+            new("Гость", UserRole.User),
+            new("Кассир", UserRole.Cashier),
+            new("Бухгалтер", UserRole.Accountant)
+        ];
 
         public event EventHandler? RegisterSucceeded;
         public event EventHandler? CloseRequested;
 
-        public RegisterViewModel(IAuthService authService)
+        public RegisterViewModel(IAuthService authService, string selectedInfoBaseText = "")
         {
             _authService = authService;
+            SelectedInfoBaseText = selectedInfoBaseText;
         }
 
         partial void OnErrorMessageChanged(string value)
         {
             OnPropertyChanged(nameof(HasError));
+        }
+
+        partial void OnSelectedInfoBaseTextChanged(string value)
+        {
+            OnPropertyChanged(nameof(HasSelectedInfoBase));
         }
 
         [RelayCommand]
@@ -61,7 +82,12 @@ namespace BIS.ERP.ViewModels
             try
             {
                 IsBusy = true;
-                var success = await _authService.RegisterAsync(Login.Trim(), Password, FullName.Trim(), Email.Trim());
+                var success = await _authService.RegisterAsync(
+                    Login.Trim(),
+                    Password,
+                    FullName.Trim(),
+                    Email.Trim(),
+                    SelectedRole);
 
                 if (success)
                 {
@@ -119,6 +145,12 @@ namespace BIS.ERP.ViewModels
                 return false;
             }
 
+            if (SelectedRole == UserRole.Admin)
+            {
+                ErrorMessage = "Администратора нельзя создать через регистрацию";
+                return false;
+            }
+
             return true;
         }
 
@@ -127,4 +159,6 @@ namespace BIS.ERP.ViewModels
             return Regex.IsMatch(value, @"^[\w\.-]+@([\w-]+\.)+[\w-]{2,4}$");
         }
     }
+
+    public sealed record RegistrationRoleOption(string Name, UserRole Role);
 }

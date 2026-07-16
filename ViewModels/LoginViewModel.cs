@@ -9,7 +9,6 @@ namespace BIS.ERP.ViewModels
     public partial class LoginViewModel : ViewModelBase
     {
         private readonly IAuthService _authService;
-        private readonly IDialogService _dialogService;
 
         [ObservableProperty]
         private string login = string.Empty;
@@ -21,22 +20,32 @@ namespace BIS.ERP.ViewModels
         private string errorMessage = string.Empty;
 
         [ObservableProperty]
+        private string selectedInfoBaseText = string.Empty;
+
+        [ObservableProperty]
         private bool isBusy;
 
         public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
+        public bool HasSelectedInfoBase => !string.IsNullOrWhiteSpace(SelectedInfoBaseText);
 
         public event EventHandler? LoginSucceeded;
         public event EventHandler? CloseRequested;
+        public event EventHandler? BackRequested;
 
-        public LoginViewModel(IAuthService authService, IDialogService dialogService)
+        public LoginViewModel(IAuthService authService, string selectedInfoBaseText = "")
         {
             _authService = authService;
-            _dialogService = dialogService;
+            SelectedInfoBaseText = selectedInfoBaseText;
         }
 
         partial void OnErrorMessageChanged(string value)
         {
             OnPropertyChanged(nameof(HasError));
+        }
+
+        partial void OnSelectedInfoBaseTextChanged(string value)
+        {
+            OnPropertyChanged(nameof(HasSelectedInfoBase));
         }
 
         [RelayCommand]
@@ -83,15 +92,15 @@ namespace BIS.ERP.ViewModels
         }
 
         [RelayCommand]
-        private void Register()
-        {
-            _dialogService.ShowRegister();
-        }
-
-        [RelayCommand]
         private void Close()
         {
             CloseRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        [RelayCommand]
+        private void Back()
+        {
+            BackRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 }

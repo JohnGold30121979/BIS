@@ -82,9 +82,14 @@ namespace BIS.ERP.Services
             await EnsureSchemaAsync();
 
             var accounts = await LoadAccountsAsync();
-            var pairs = await LoadAdvancePaymentPairsAsync(accounts);
+            var result = new OrganizationBalanceCalculationResult
+            {
+                PeriodStart = periodStart,
+                PeriodEnd = periodEnd
+            };
+            var pairs = await LoadAdvancePaymentPairsAsync(accounts, result.Warnings);
             if (pairs.Count == 0)
-                return new OrganizationBalanceCalculationResult { PeriodStart = periodStart, PeriodEnd = periodEnd };
+                return result;
 
             var duplicateAccounts = pairs
                 .SelectMany(pair => new[] { pair.DebitAccount, pair.CreditAccount }.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -93,11 +98,6 @@ namespace BIS.ERP.Services
                 .Select(group => group.Key)
                 .ToList();
 
-            var result = new OrganizationBalanceCalculationResult
-            {
-                PeriodStart = periodStart,
-                PeriodEnd = periodEnd
-            };
             if (duplicateAccounts.Count > 0)
             {
                 result.Warnings.Add(
@@ -167,14 +167,14 @@ namespace BIS.ERP.Services
         }
 
         private async Task<List<AdvancePaymentPair>> LoadAdvancePaymentPairsAsync(
-            IReadOnlyDictionary<string, AccountInfo> accounts)
+            IReadOnlyDictionary<string, AccountInfo> accounts,
+            ICollection<string> warnings)
         {
             var accountCodesById = accounts.Values
                 .Where(account => account.Id.HasValue)
                 .ToDictionary(account => account.Id!.Value, account => account.Code);
             var rows = await new MetadataService(_context).GetAdvancePaymentPairsAsync();
             var pairs = new List<AdvancePaymentPair>();
-            var missingAccounts = new List<string>();
 
             foreach (var row in rows)
             {
@@ -183,37 +183,37 @@ namespace BIS.ERP.Services
                 if (!isActive || !useSettlements)
                     continue;
 
-                var debit = NormalizeAccountCode(GetString(row, "debit_account", "Дебет"), accountCodesById);
-                var credit = NormalizeAccountCode(GetString(row, "credit_account", "Кредит"), accountCodesById);
+                var code = GetString(row, "code", "Код");
+                var name = GetString(row, "name", "Вид расчета");
+                var debit = ResolveAccountCode(GetString(row, "debit_account", "Дебет"), accountCodesById, accounts);
+                var credit = ResolveAccountCode(GetString(row, "credit_account", "Кредит"), accountCodesById, accounts);
                 if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit))
                     continue;
 
+                var missingAccounts = new List<string>();
                 if (!accounts.ContainsKey(debit))
                     missingAccounts.Add(debit);
                 if (!accounts.ContainsKey(credit))
                     missingAccounts.Add(credit);
+                if (missingAccounts.Count > 0)
+                {
+                    warnings.Add(
+                        $"Пара счетов \"{(string.IsNullOrWhiteSpace(name) ? code : name)}\" пропущена: " +
+                        "в плане счетов нет " + string.Join(", ", missingAccounts.Distinct(StringComparer.OrdinalIgnoreCase)) + ".");
+                    continue;
+                }
 
                 pairs.Add(new AdvancePaymentPair
                 {
                     Id = TryGetGuid(row, out var id, "Id") ? id : Guid.NewGuid(),
-                    Code = GetString(row, "code", "Код"),
-                    Name = GetString(row, "name", "Вид расчета"),
+                    Code = code,
+                    Name = name,
                     DebitAccount = debit,
                     CreditAccount = credit,
-                    ModuleCode = GetString(row, "module_code", "arm_code"),
+                    ModuleCode = NormalizeModuleName(GetString(row, "module_code", "arm_code")),
                     UseOrganizations = GetBool(row, true, "use_organizations", "Орг"),
                     UseCurrency = GetBool(row, false, "use_currency", "Валюта")
                 });
-            }
-
-            if (missingAccounts.Count > 0)
-            {
-                var uniqueMissing = missingAccounts
-                    .Where(account => !string.IsNullOrWhiteSpace(account))
-                    .Distinct(StringComparer.OrdinalIgnoreCase);
-                throw new InvalidOperationException(
-                    "В плане счетов нет счетов, указанных в справочнике авансовых платежей: " +
-                    string.Join(", ", uniqueMissing));
             }
 
             return pairs;
@@ -242,10 +242,14 @@ namespace BIS.ERP.Services
                 SELECT p.posting_date, p.debit_account, p.credit_account,
                        COALESCE(p.amount_kgs, 0) AS amount_kgs,
                        COALESCE(p.amount_currency, 0) AS amount_currency,
-                       p.organization_id,
+                       CASE
+                           WHEN COALESCE(p.organization_id::text, '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                           THEN p.organization_id::text
+                           ELSE NULL
+                       END AS organization_id_text,
                        COALESCE(NULLIF(o.""name"", ''), 'Без организации') AS organization_name
                 FROM doc_postings p
-                LEFT JOIN catalog_organizations o ON p.organization_id = o.""Id""
+                LEFT JOIN catalog_organizations o ON p.organization_id::text = o.""Id""::text
                 WHERE p.is_active = true
                   AND p.posting_date < @periodEndExclusive
                 ORDER BY p.posting_date, p.doc_number";
@@ -264,9 +268,9 @@ namespace BIS.ERP.Services
                         CreditAccount = reader["credit_account"]?.ToString() ?? string.Empty,
                         Amount = GetDecimal(reader["amount_kgs"]),
                         AmountCurrency = GetDecimal(reader["amount_currency"]),
-                        OrganizationId = reader["organization_id"] == DBNull.Value
-                            ? null
-                            : (Guid?)reader.GetGuid(reader.GetOrdinal("organization_id")),
+                        OrganizationId = Guid.TryParse(reader["organization_id_text"]?.ToString(), out var organizationId)
+                            ? organizationId
+                            : null,
                         OrganizationName = reader["organization_name"]?.ToString() ?? "Без организации"
                     });
                 }
@@ -532,7 +536,20 @@ namespace BIS.ERP.Services
             row.ClosingCreditCurrency = Math.Max(-closingCurrency, 0);
         }
 
-        private static string NormalizeAccountCode(string rawValue, IReadOnlyDictionary<Guid, string> accountCodesById)
+        private static string ResolveAccountCode(
+            string rawValue,
+            IReadOnlyDictionary<Guid, string> accountCodesById,
+            IReadOnlyDictionary<string, AccountInfo> accounts)
+        {
+            var value = ExtractAccountCode(rawValue, accountCodesById);
+            if (string.IsNullOrWhiteSpace(value) || accounts.ContainsKey(value))
+                return value;
+
+            var expanded = ResolveCompactAccountCode(value, accounts.Keys);
+            return string.IsNullOrWhiteSpace(expanded) ? value : expanded;
+        }
+
+        private static string ExtractAccountCode(string rawValue, IReadOnlyDictionary<Guid, string> accountCodesById)
         {
             var value = rawValue.Trim();
             if (Guid.TryParse(value, out var id) && accountCodesById.TryGetValue(id, out var accountCode))
@@ -540,6 +557,41 @@ namespace BIS.ERP.Services
 
             var separatorIndex = value.IndexOf(" - ", StringComparison.Ordinal);
             return separatorIndex > 0 ? value[..separatorIndex].Trim() : value;
+        }
+
+        private static string ResolveCompactAccountCode(string value, IEnumerable<string> accountCodes)
+        {
+            if (string.IsNullOrWhiteSpace(value) || !value.All(char.IsDigit))
+                return string.Empty;
+
+            var paddedCode = value.PadRight(8, '0');
+            var accounts = accountCodes.ToList();
+            if (accounts.Contains(paddedCode, StringComparer.OrdinalIgnoreCase))
+                return paddedCode;
+
+            var matches = accounts
+                .Where(code =>
+                    code.StartsWith(value, StringComparison.OrdinalIgnoreCase) &&
+                    code.Length > value.Length &&
+                    code[value.Length..].All(character => character == '0'))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return matches.Count == 1 ? matches[0] : string.Empty;
+        }
+
+        private static string NormalizeModuleName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "Финансы";
+
+            return value.Trim().ToUpperInvariant() switch
+            {
+                "ФИН" or "ФИНАНСЫ" or "FIN" or "FINANCE" => "Финансы",
+                "ОС" or "FIXEDASSETS" => "Основные средства",
+                "ТМЦ" or "INVENTORY" => "Учет материальных ценностей",
+                _ => value.Trim()
+            };
         }
 
         private static bool TryGetGuid(IReadOnlyDictionary<string, object> row, out Guid id, params string[] names)

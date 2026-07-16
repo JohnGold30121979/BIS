@@ -11,18 +11,28 @@
         </StackPanel>
 
         <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="360"/><ColumnDefinition Width="14"/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="520"/><ColumnDefinition Width="14"/><ColumnDefinition/></Grid.ColumnDefinitions>
             <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1" CornerRadius="7" Padding="12">
                 <Grid>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <TextBlock Text="Пользователи информационной базы" FontWeight="SemiBold" Margin="3,0,0,10"/>
-                    <DataGrid x:Name="UsersGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button x:Name="AddUserButton" Content="+ Добавить" Width="105" Height="32"
+                                Background="#27AE60" Foreground="White" Click="OnAddUserClick"/>
+                        <Button x:Name="DeleteUserButton" Content="Удалить" Width="95" Height="32" Margin="8,0,0,0"
+                                Background="#E74C3C" Foreground="White" Click="OnDeleteUserClick" IsEnabled="False"/>
+                        <Button x:Name="ToggleActiveButton" Content="Активность" Width="115" Height="32" Margin="8,0,0,0"
+                                Background="#D68910" Foreground="White" Click="OnToggleActiveClick" IsEnabled="False"/>
+                    </StackPanel>
+                    <DataGrid x:Name="UsersGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
                               SelectionMode="Single" SelectionChanged="OnUserSelected">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Логин" Binding="{Binding Login}" Width="110"/>
-                            <DataGridTextColumn Header="Пользователь" Binding="{Binding FullName}" Width="*"/>
-                            <DataGridTextColumn Header="Роль" Binding="{Binding RoleDisplay}" Width="110"/>
+                            <DataGridTextColumn Header="Логин" Binding="{Binding Login}" Width="95"/>
+                            <DataGridTextColumn Header="Пользователь" Binding="{Binding FullName}" Width="135"/>
+                            <DataGridTextColumn Header="Роль" Binding="{Binding RoleDisplay}" Width="100"/>
+                            <DataGridTextColumn Header="Активен" Binding="{Binding ActiveDisplay}" Width="85"/>
+                            <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginDisplay}" Width="120"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>

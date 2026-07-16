@@ -136,13 +136,27 @@ namespace BIS.ERP.Services
         {
             // Линейная амортизация
             var initialCost = GetDecimalValue(data, "initial_cost", "InitialCost", "Первоначальная стоимость");
+            var salvageValue = GetDecimalValue(data, "salvage_value", "SalvageValue", "Ликвидационная стоимость");
             var usefulLife = GetIntValue(data, "useful_life_months", "UsefulLife", "useful_life", "Срок полезного использования, мес.");
             var depreciationRate = GetDecimalValue(data, "depreciation_rate", "DepreciationRate", "Норма амортизации, %");
+            var useMileageDepreciation = GetBoolValue(data, "use_mileage_depreciation", "Амортизация по пробегу");
+            var assetClass = GetIntValue(data, "asset_class", "Класс ОС");
+            var monthlyMileage = GetDecimalValue(data, "monthly_mileage", "Месячный пробег");
+            var mileageResource = GetDecimalValue(data, "mileage_resource", "Ресурс пробега");
+            var protectedResidualValue = initialCost > 0
+                ? Math.Min(Math.Max(0m, salvageValue), initialCost)
+                : 0m;
+            var depreciableAmount = Math.Max(0m, initialCost - protectedResidualValue);
 
-            if (usefulLife > 0)
-                return initialCost / usefulLife;
+            if (depreciableAmount <= 0)
+                return 0;
+
+            if ((useMileageDepreciation || assetClass == 2) && monthlyMileage > 0 && mileageResource > 0)
+                return Math.Round(depreciableAmount * monthlyMileage / mileageResource, 2);
             if (depreciationRate > 0)
-                return initialCost * depreciationRate / 100;
+                return Math.Round(depreciableAmount * depreciationRate / 100 / 12, 2);
+            if (usefulLife > 0)
+                return Math.Round(depreciableAmount / usefulLife, 2);
 
             return 0;
         }
@@ -161,6 +175,39 @@ namespace BIS.ERP.Services
             }
 
             return 0m;
+        }
+
+        private static bool GetBoolValue(Dictionary<string, object> data, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!data.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is bool boolValue)
+                    return boolValue;
+
+                var text = value.ToString();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                if (bool.TryParse(text, out var parsed))
+                    return parsed;
+                if (text.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("Да", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("Yes", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (text.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("Нет", StringComparison.OrdinalIgnoreCase) ||
+                    text.Equals("No", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return false;
         }
 
         private static int GetIntValue(Dictionary<string, object> data, params string[] keys)

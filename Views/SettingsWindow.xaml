@@ -59,7 +59,7 @@
                 </Border>
 
                 <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
-                        BorderThickness="1" CornerRadius="7" Padding="18">
+                        BorderThickness="1" CornerRadius="7" Padding="18" Margin="0,0,0,14">
                     <StackPanel>
                         <TextBlock Text="Интерфейс" FontSize="16" FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,14"/>
@@ -77,6 +77,30 @@
                             <ComboBoxItem Content="Русский" Tag="ru-RU"/>
                             <ComboBoxItem Content="English" Tag="en-US"/>
                         </ComboBox>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="1" CornerRadius="7" Padding="18">
+                    <StackPanel>
+                        <TextBlock Text="Обслуживание справочников" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,10"/>
+                        <TextBlock Text="Загрузка официальных курсов валют из XML-сервисов Национального банка Кыргызской Республики."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}" TextWrapping="Wrap"
+                                   Margin="0,0,0,12"/>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="LoadNationalBankRatesButton"
+                                    Content="Загрузить курсы НБКР"
+                                    Width="175" Height="36"
+                                    Background="{DynamicResource AppAccentBrush}"
+                                    Foreground="White"
+                                    FontWeight="SemiBold"
+                                    Click="OnLoadNationalBankRatesClick"/>
+                            <TextBlock x:Name="NationalBankRatesStatusText"
+                                       VerticalAlignment="Center"
+                                       Margin="12,0,0,0"
+                                       Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>

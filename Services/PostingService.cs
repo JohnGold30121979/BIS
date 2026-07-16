@@ -48,15 +48,18 @@ namespace BIS.ERP.Services
             var organizationMap = await LoadReferenceMapAsync("Организации");
             var employeeMap = await LoadReferenceMapAsync("Сотрудники (Списочный состав)");
             var accountMap = await LoadAccountMapAsync();
+            var moduleLookup = await LoadModuleLookupAsync();
 
             // 1. Проводки из doc_postings
             try
             {
+                await EnsurePostingModuleColumnAsync();
                 var sql = @"
             SELECT 
                 posting_date as Date,
                 doc_number as DocumentNumber,
                 COALESCE(document_type, 'Проводка') as DocumentType, 
+                COALESCE(module_code, '') as ModuleCode,
                 debit_account as DebitAccount,
                 credit_account as CreditAccount,
                 amount_kgs as Amount,
@@ -86,6 +89,8 @@ namespace BIS.ERP.Services
                         Date = row.Date,
                         DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(row.DocumentNumber),
                         DocumentType = row.DocumentType,
+                        ModuleCode = row.ModuleCode,
+                        ModuleName = ResolveModuleName(row.ModuleCode, row.DocumentType, moduleLookup),
                         DebitAccount = row.DebitAccount,
                         DebitAccountName = ResolveAccount(row.DebitAccount, accountMap),
                         CreditAccount = row.CreditAccount,
@@ -166,6 +171,7 @@ namespace BIS.ERP.Services
                                 Date = doc.Date,
                                 DocumentNumber = doc.Number,
                                 DocumentType = doc.DocumentType,
+                                ModuleName = ResolveModuleName(null, doc.DocumentType, moduleLookup),
                                 DebitAccount = debet ?? "",
                                 DebitAccountName = ResolveAccount(debet, accountMap),
                                 CreditAccount = credit ?? "",
@@ -234,6 +240,137 @@ namespace BIS.ERP.Services
                 return "Расход из кассы";
 
             return defaultDirection;
+        }
+
+        private async Task EnsurePostingModuleColumnAsync()
+        {
+            await _context.Database.ExecuteSqlRawAsync(@"
+                DO $$
+                BEGIN
+                    IF to_regclass('public.doc_postings') IS NOT NULL THEN
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
+                    END IF;
+                END $$;");
+        }
+
+        private async Task<ModuleLookup> LoadModuleLookupAsync()
+        {
+            var lookup = new ModuleLookup();
+
+            try
+            {
+                var moduleService = new ModuleMetadataService(_context);
+                await moduleService.EnsureSchemaAsync();
+
+                var modules = await _context.MetadataModules.AsNoTracking()
+                    .Where(module => module.IsActive)
+                    .ToListAsync();
+
+                foreach (var module in modules)
+                {
+                    if (!string.IsNullOrWhiteSpace(module.Code))
+                        lookup.NameByCode[module.Code.Trim()] = module.Name;
+                    if (!string.IsNullOrWhiteSpace(module.Name))
+                        lookup.Names.Add(module.Name.Trim());
+                }
+
+                var assignments = await (from document in _context.MetadataObjects.AsNoTracking()
+                                         join item in _context.MetadataModuleItems.AsNoTracking()
+                                             on document.Id equals item.ObjectId
+                                         join module in _context.MetadataModules.AsNoTracking()
+                                             on item.ModuleId equals module.Id
+                                         where document.ObjectType == "Document" &&
+                                               item.ObjectType == "Document" &&
+                                               module.IsActive
+                                         select new
+                                         {
+                                             DocumentName = document.Name,
+                                             ModuleName = module.Name
+                                         })
+                    .ToListAsync();
+
+                foreach (var assignment in assignments)
+                {
+                    if (!string.IsNullOrWhiteSpace(assignment.DocumentName) &&
+                        !string.IsNullOrWhiteSpace(assignment.ModuleName))
+                    {
+                        lookup.NameByDocumentType[assignment.DocumentName.Trim()] = assignment.ModuleName.Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки модулей для журнала проводок: {ex.Message}");
+            }
+
+            return lookup;
+        }
+
+        private static string ResolveModuleName(string? moduleValue, string? documentType, ModuleLookup lookup)
+        {
+            var value = NormalizeModuleValue(moduleValue);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                if (lookup.NameByCode.TryGetValue(value, out var moduleName))
+                    return moduleName;
+                if (lookup.Names.Contains(value))
+                    return value;
+                return value;
+            }
+
+            if (!string.IsNullOrWhiteSpace(documentType) &&
+                lookup.NameByDocumentType.TryGetValue(documentType.Trim(), out var assignedModuleName))
+            {
+                return assignedModuleName;
+            }
+
+            return InferModuleName(documentType);
+        }
+
+        private static string NormalizeModuleValue(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var trimmed = value.Trim();
+            return trimmed.ToUpperInvariant() switch
+            {
+                "ФИН" or "ФИНАНСЫ" or "FIN" => "Финансы",
+                "ОС" or "FIXEDASSETS" => "Основные средства",
+                "ТМЦ" or "МАТЕРИАЛЫ" or "INVENTORY" => "Учет материальных ценностей",
+                _ => trimmed
+            };
+        }
+
+        private static string InferModuleName(string? documentType)
+        {
+            if (string.IsNullOrWhiteSpace(documentType))
+                return string.Empty;
+
+            if (InvoiceDocumentTypes.IsSales(documentType) ||
+                InvoiceDocumentTypes.IsPurchase(documentType) ||
+                documentType.Contains("кассов", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("платеж", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("провод", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("курсов", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Финансы";
+            }
+
+            if (documentType.Contains("ОС", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("амортиз", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Основные средства";
+            }
+
+            if (documentType.Contains("ТМЦ", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("товар", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Contains("материал", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Учет материальных ценностей";
+            }
+
+            return string.Empty;
         }
 
         private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(string catalogName)
@@ -307,6 +444,7 @@ namespace BIS.ERP.Services
             public DateTime Date { get; set; }
             public string DocumentNumber { get; set; }
             public string DocumentType { get; set; }
+            public string ModuleCode { get; set; }
             public string DebitAccount { get; set; }
             public string CreditAccount { get; set; }
             public decimal Amount { get; set; }
@@ -318,6 +456,13 @@ namespace BIS.ERP.Services
             public Guid Id { get; set; }
             public DateTime CreatedAt { get; set; }
             public bool IsActive { get; set; }
+        }
+
+        private sealed class ModuleLookup
+        {
+            public Dictionary<string, string> NameByCode { get; } = new(StringComparer.OrdinalIgnoreCase);
+            public Dictionary<string, string> NameByDocumentType { get; } = new(StringComparer.OrdinalIgnoreCase);
+            public HashSet<string> Names { get; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
         // Получение оборотов по счету

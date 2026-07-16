@@ -19,7 +19,6 @@ namespace BIS.ERP.Services
         void ShowError(string message, string title = "Ошибка");
         bool Confirm(string message, string title = "Подтверждение");
         Task<bool> ShowLoginAsync();
-        bool ShowRegister();
         bool ShowCreateInfoBase(out string? infoBaseName);
         bool ShowEditInfoBase(InfoBase infoBase, out string? infoBaseName);
         void ShowSetup();

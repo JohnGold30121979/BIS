@@ -73,6 +73,58 @@ namespace BIS.ERP.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 
+    public class FixedAssetPeriodBalance
+    {
+        [Key] public Guid Id { get; set; } = Guid.NewGuid();
+        public Guid PeriodId { get; set; }
+        public DateTime PeriodStart { get; set; }
+        public DateTime PeriodEnd { get; set; }
+        public Guid AssetId { get; set; }
+        [MaxLength(50)] public string InventoryNumber { get; set; } = string.Empty;
+        [MaxLength(300)] public string AssetName { get; set; } = string.Empty;
+        public Guid? OrganizationId { get; set; }
+        [MaxLength(300)] public string OrganizationName { get; set; } = string.Empty;
+        public Guid? ResponsiblePersonId { get; set; }
+        [MaxLength(300)] public string ResponsiblePersonName { get; set; } = string.Empty;
+        public Guid? SiteId { get; set; }
+        [MaxLength(300)] public string SiteName { get; set; } = string.Empty;
+        [MaxLength(100)] public string AssetAccount { get; set; } = string.Empty;
+        [MaxLength(100)] public string DepreciationAccount { get; set; } = string.Empty;
+        [MaxLength(100)] public string ExpenseAccount { get; set; } = string.Empty;
+        public DateTime? AcquisitionDate { get; set; }
+        public DateTime? CommissioningDate { get; set; }
+        public DateTime? DepreciationStartDate { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal InitialCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal SalvageValue { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal AccumulatedDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal CarryingAmount { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal MonthlyDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal OpeningCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal OpeningDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal OpeningCarryingAmount { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal AcquisitionCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal DisposalCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal TransferInCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal TransferOutCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal RevaluationCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal AutomaticDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal ManualDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal DepreciationAdjustment { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal DepreciationWriteOff { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal DisposalDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal TransferInDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal TransferOutDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal ClosingCost { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal ClosingDepreciation { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal ClosingCarryingAmount { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal OpeningMileage { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal PeriodMileage { get; set; }
+        [Column(TypeName = "numeric(18,2)")] public decimal ClosingMileage { get; set; }
+        public bool IsActive { get; set; }
+        [MaxLength(100)] public string LifecycleStatus { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
     public class FinancialReportLine
     {
         [Key] public Guid Id { get; set; } = Guid.NewGuid();
@@ -82,6 +134,8 @@ namespace BIS.ERP.Models
         [MaxLength(300)] public string Name { get; set; } = string.Empty;
         public int SortOrder { get; set; }
         public int Sign { get; set; } = 1;
+        [MaxLength(500)] public string Formula { get; set; } = string.Empty;
+        [Column(TypeName = "numeric(18,2)")] public decimal FixedAmount { get; set; }
         public bool IsTotal { get; set; }
         public bool IsActive { get; set; } = true;
     }

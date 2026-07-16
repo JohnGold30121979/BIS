@@ -43,11 +43,15 @@
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Тип" Binding="{Binding OrderType}" Width="120"/>
                 <DataGridTextColumn x:Name="OrganizationColumn" Header="Организация" Binding="{Binding OrganizationName}" Width="180" Visibility="Collapsed"/>
+                <DataGridTextColumn Header="Наш счет" Binding="{Binding OurAccountName}" Width="160"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="100"/>
                 <DataGridTextColumn x:Name="CurrencyColumn" Header="Валюта" Binding="{Binding CurrencyName}" Width="110" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="AmountCurrencyColumn" Header="Сумма в валюте" Binding="{Binding AmountCurrency}" Width="120" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="ExchangeRateColumn" Header="Курс" Binding="{Binding ExchangeRate}" Width="90" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding EmployeeName}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="MaterialColumn" Header="Материал" Binding="{Binding MaterialName}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn Header="Корр. счет" Binding="{Binding CorrespondentAccountName}" Width="120"/>
+                <DataGridTextColumn Header="Классификация платежа" Binding="{Binding PaymentClassificationName}" Width="220"/>
                 <DataGridTextColumn Header="Назначение" Binding="{Binding Purpose}" Width="200"/>
                 <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150"/>

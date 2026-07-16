@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 
 namespace BIS.ERP.Services
 {
+    public sealed record CurrencyRateLookupResult(decimal Rate, DateTime RateDate, string Source);
+
     public partial class MetadataService
     {
         #region catalogs
@@ -73,6 +75,38 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Курсы валют': {ex.Message}");
             }
         }
+
+        private async Task EnsureCurrencyCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Справочник валют");
+
+            if (catalog == null)
+                return;
+
+            var existingColumns = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .Select(field => field.DbColumnName)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetCurrencyFields(catalog.Id))
+            {
+                if (existingColumns.Contains(field.DbColumnName))
+                    continue;
+
+                field.Id = Guid.NewGuid();
+                field.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(field);
+                await AddColumnToTableAsync(catalog.TableName, field);
+                catalog.Fields.Add(field);
+                existingColumns.Add(field.DbColumnName);
+            }
+
+            await _context.SaveChangesAsync();
+            await AddCurrencyDataToTable(catalog);
+        }
+
         private async Task CreateMaterialTypesCatalog(MetadataConfiguration config)
         {
             try
@@ -380,6 +414,118 @@ namespace BIS.ERP.Services
             }
 
             await _context.SaveChangesAsync();
+        }
+
+        private async Task EnsurePaymentOrderDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        {
+            var document = documents.FirstOrDefault(item =>
+                item.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase));
+            if (document == null)
+                return;
+
+            await RemoveDuplicateMetadataFieldsAsync(document);
+
+            var existingByColumn = document.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(field => field.Order).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetPaymentOrderFields(document.Id))
+            {
+                if (existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    existing.Name = desired.Name;
+                    existing.FieldType = desired.FieldType;
+                    existing.ReferenceCatalog = desired.ReferenceCatalog;
+                    existing.DisplayPattern = desired.DisplayPattern;
+                    existing.DisplayFields = desired.DisplayFields;
+                    existing.Order = desired.Order;
+                    existing.IsRequired = desired.IsRequired;
+                    existing.IsUnique = desired.IsUnique;
+                    existing.Length = desired.Length;
+                    existing.Precision = desired.Precision;
+                    existing.Scale = desired.Scale;
+                    continue;
+                }
+
+                desired.Id = Guid.NewGuid();
+                desired.MetadataObjectId = document.Id;
+                await _context.MetadataFields.AddAsync(desired);
+                await AddColumnToTableAsync(document.TableName, desired);
+                document.Fields.Add(desired);
+                existingByColumn[desired.DbColumnName] = desired;
+            }
+
+            document.UsePostings = true;
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task<CurrencyRateLookupResult?> GetCurrencyRateForDateAsync(Guid currencyId, DateTime documentDate)
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    item.Name == "Справочник курсов валют");
+            if (catalog == null)
+                return null;
+
+            var sql = $@"
+                SELECT rate_date,
+                       COALESCE(NULLIF(rate_nb, 0), NULLIF(rate_commercial, 0), 0) AS rate,
+                       CASE
+                           WHEN COALESCE(rate_nb, 0) <> 0 THEN 'НБКР'
+                           WHEN COALESCE(rate_commercial, 0) <> 0 THEN 'Коммерческий'
+                           ELSE ''
+                       END AS source
+                FROM {QuoteIdentifier(catalog.TableName)}
+                WHERE currency_id::text = @currencyId
+                  AND rate_date::date <= @documentDate
+                  AND COALESCE(is_active, true) = true
+                ORDER BY rate_date DESC
+                LIMIT 1;";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            var currencyParameter = command.CreateParameter();
+            currencyParameter.ParameterName = "@currencyId";
+            currencyParameter.Value = currencyId.ToString();
+            command.Parameters.Add(currencyParameter);
+
+            var dateParameter = command.CreateParameter();
+            dateParameter.ParameterName = "@documentDate";
+            dateParameter.Value = documentDate.Date;
+            command.Parameters.Add(dateParameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return null;
+
+                var rate = reader["rate"] == DBNull.Value ? 0m : Convert.ToDecimal(reader["rate"], CultureInfo.InvariantCulture);
+                if (rate <= 0)
+                    return null;
+
+                var rateDate = reader["rate_date"] is DateTime date ? date : documentDate.Date;
+                var source = reader["source"]?.ToString() ?? "Справочник курсов валют";
+                return new CurrencyRateLookupResult(rate, rateDate, source);
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
         }
 
         // Сотрудники
@@ -1028,6 +1174,41 @@ namespace BIS.ERP.Services
         private async Task EnsurePaymentKindCatalogStructureAsync() =>
             await EnsureCatalogStructureAsync("Виды оплаты", GetPaymentKindFields);
 
+        // Справочник "Классификация платежей"
+        private async Task CreatePaymentClassificationCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalogId = Guid.NewGuid();
+                var catalog = new MetadataObject
+                {
+                    Id = catalogId,
+                    Name = "Классификация платежей",
+                    TableName = "catalog_payment_classifications",
+                    ObjectType = "Catalog",
+                    Description = "Классификация платежей из файла FoxPro.",
+                    Icon = "🏷",
+                    Order = 20,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetPaymentClassificationFields(catalogId)
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Классификация платежей' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Классификация платежей': {ex.Message}");
+            }
+        }
+
+        private async Task EnsurePaymentClassificationCatalogStructureAsync() =>
+            await EnsureCatalogStructureAsync("Классификация платежей", GetPaymentClassificationFields);
+
         // Справочник "Типы поставки"
         private async Task CreateDeliveryTypeCatalog(MetadataConfiguration config)
         {
@@ -1226,16 +1407,61 @@ namespace BIS.ERP.Services
             var accounts = InitialDataProvider.GetChartOfAccounts();
             var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
             var modules = await GetAvailableModulesAsync();
+            var sourceCodes = accounts
+                .Select(account => account.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             foreach (var account in accounts)
             {
-                if (existingCodes.Contains(account.Code))
-                    continue;
-
                 var values = BuildChartOfAccountsCatalogValues(account, modules);
                 await UpsertCatalogSeedRowAsync(catalog.TableName, account.Code, values);
                 existingCodes.Add(account.Code);
             }
+
+            await DeactivateLegacyFallbackChartAccountsAsync(catalog, sourceCodes);
+        }
+
+        private async Task<int> DeactivateLegacyFallbackChartAccountsAsync(
+            MetadataObject catalog,
+            ISet<string> sourceCodes)
+        {
+            var fallbackOnlyCodes = InitialDataProvider.GetFallbackChartOfAccounts()
+                .Select(account => account.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code) && !sourceCodes.Contains(code))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return await DeactivateChartAccountsByCodeAsync(catalog.TableName, fallbackOnlyCodes);
+        }
+
+        private async Task<int> DeactivateChartAccountsByCodeAsync(string tableName, IReadOnlyCollection<string> codes)
+        {
+            if (codes.Count == 0)
+                return 0;
+
+            var codeSql = string.Join(", ", codes.Select(ToSqlLiteral));
+            return await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE COALESCE(""code"", '') IN ({codeSql})
+                  AND COALESCE(""is_active"", true) = true;");
+        }
+
+        private async Task<int> DeactivateChartAccountsOutsideSourceAsync(string tableName, ISet<string> sourceCodes)
+        {
+            if (sourceCodes.Count == 0)
+                return 0;
+
+            var codeSql = string.Join(", ", sourceCodes.Select(ToSqlLiteral));
+            return await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE COALESCE(""code"", '') <> ''
+                  AND ""code"" NOT IN ({codeSql})
+                  AND COALESCE(""is_active"", true) = true;");
         }
 
         public async Task<ChartOfAccountsDbfImportResult> ImportChartOfAccountsFromDbfAsync(string filePath)
@@ -1259,6 +1485,10 @@ namespace BIS.ERP.Services
             var analysis = importService.Analyze(filePath);
             var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
             var modules = await GetAvailableModulesAsync();
+            var sourceCodes = analysis.Accounts
+                .Select(account => account.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var insertedCount = 0;
             var updatedCount = 0;
@@ -1281,6 +1511,7 @@ namespace BIS.ERP.Services
                     BuildChartOfAccountsCatalogValues(account, modules));
             }
 
+            var deactivatedCount = await DeactivateChartAccountsOutsideSourceAsync(catalog.TableName, sourceCodes);
             await NormalizeChartOfAccountsMetadataAsync(catalog);
 
             return new ChartOfAccountsDbfImportResult
@@ -1290,6 +1521,69 @@ namespace BIS.ERP.Services
                 LoadedAccountsCount = analysis.LoadedAccountsCount,
                 InsertedCount = insertedCount,
                 UpdatedCount = updatedCount,
+                DeactivatedCount = deactivatedCount,
+                DuplicateSourceCodesCount = analysis.DuplicateSourceCodesCount,
+                FieldMappings = analysis.FieldMappings,
+                IgnoredSourceFields = analysis.IgnoredSourceFields
+            };
+        }
+
+        public async Task<PaymentClassificationDbfImportResult> ImportPaymentClassificationsFromDbfAsync(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("Не указан путь к файлу классификации платежей.", nameof(filePath));
+
+            if (!File.Exists(filePath))
+                throw new FileNotFoundException("Файл классификации платежей не найден.", filePath);
+
+            await EnsureCatalogStructureAsync("Классификация платежей", GetPaymentClassificationFields);
+
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Классификация платежей");
+
+            if (catalog == null)
+                throw new InvalidOperationException("Справочник 'Классификация платежей' не найден.");
+
+            var importService = new PaymentClassificationDbfImportService();
+            var analysis = importService.Analyze(filePath);
+            var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
+            var sourceCodes = analysis.Items
+                .Select(item => item.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var insertedCount = 0;
+            var updatedCount = 0;
+
+            foreach (var item in analysis.Items)
+            {
+                if (existingCodes.Contains(item.Code))
+                {
+                    updatedCount++;
+                }
+                else
+                {
+                    insertedCount++;
+                    existingCodes.Add(item.Code);
+                }
+
+                await UpsertCatalogSeedRowAsync(
+                    catalog.TableName,
+                    item.Code,
+                    BuildPaymentClassificationCatalogValues(item));
+            }
+
+            var deactivatedCount = await DeactivatePaymentClassificationsOutsideSourceAsync(catalog.TableName, sourceCodes);
+
+            return new PaymentClassificationDbfImportResult
+            {
+                SourcePath = analysis.SourcePath,
+                SourceRecordCount = analysis.SourceRecordCount,
+                LoadedItemsCount = analysis.LoadedItemsCount,
+                InsertedCount = insertedCount,
+                UpdatedCount = updatedCount,
+                DeactivatedCount = deactivatedCount,
                 DuplicateSourceCodesCount = analysis.DuplicateSourceCodesCount,
                 FieldMappings = analysis.FieldMappings,
                 IgnoredSourceFields = analysis.IgnoredSourceFields
@@ -1327,6 +1621,36 @@ namespace BIS.ERP.Services
                 ["CreatedAt"] = DateTime.UtcNow,
                 ["UpdatedAt"] = DateTime.UtcNow
             };
+        }
+
+        private static Dictionary<string, object?> BuildPaymentClassificationCatalogValues(PaymentClassificationRecord item)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["Id"] = Guid.NewGuid(),
+                ["code"] = item.Code,
+                ["name"] = item.Name,
+                ["external_code"] = string.IsNullOrWhiteSpace(item.ExternalCode) ? null : item.ExternalCode,
+                ["is_active"] = item.IsActive,
+                ["description"] = null,
+                ["CreatedAt"] = DateTime.UtcNow,
+                ["UpdatedAt"] = DateTime.UtcNow
+            };
+        }
+
+        private async Task<int> DeactivatePaymentClassificationsOutsideSourceAsync(string tableName, ISet<string> sourceCodes)
+        {
+            if (sourceCodes.Count == 0)
+                return 0;
+
+            var codeSql = string.Join(", ", sourceCodes.Select(ToSqlLiteral));
+            return await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE COALESCE(""code"", '') <> ''
+                  AND ""code"" NOT IN ({codeSql})
+                  AND COALESCE(""is_active"", true) = true;");
         }
 
         private async Task<List<MetadataModule>> GetAvailableModulesAsync()
@@ -1606,11 +1930,13 @@ namespace BIS.ERP.Services
         private static readonly IReadOnlyDictionary<int, FoxClosingModuleMapping> FoxClosingModuleMappings =
             new Dictionary<int, FoxClosingModuleMapping>
             {
+                [2] = new(ModuleMetadataService.FinanceCode, "Финансы", "Финансы"),
                 [3] = new(ModuleMetadataService.FinanceCode, "Финансы", "Финансы"),
                 [4] = new(null, "Сбыт", "Сбыт", "Продажи", "Реализация", "Регистратура"),
                 [6] = new(ModuleMetadataService.InventoryCode, "Учет материальных ценностей", "УМЦ", "ТМЦ", "Материалы"),
                 [7] = new(ModuleMetadataService.FixedAssetsCode, "Основные средства", "Основные средства", "ОС"),
                 [8] = new(null, "Вспомогательное производство", "Вспомогательное производство"),
+                [9] = new(ModuleMetadataService.FinanceCode, "Финансы", "Финансы"),
                 [12] = new(ModuleMetadataService.InventoryCode, "Сырье", "Сырье", "Учет материальных ценностей", "Материалы"),
                 [66] = new(null, "Меню", "Меню")
             };

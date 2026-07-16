@@ -115,7 +115,8 @@ namespace BIS.ERP.Views
                                 ourAccountDict[accId] = string.IsNullOrEmpty(bankName) ? accountNumber : $"{accountNumber} - {bankName}";
                             }
                         }
-                        referenceCache["Наш счет"] = ourAccountDict;
+                        if (!referenceCache.ContainsKey("Наш счет"))
+                            referenceCache["Наш счет"] = ourAccountDict;
                         System.Diagnostics.Debug.WriteLine($"Загружено {ourAccountDict.Count} расчетных счетов");
                     }
                 }
@@ -134,7 +135,9 @@ namespace BIS.ERP.Views
                         DocNumber = row.ContainsKey("Номер") ? row["Номер"]?.ToString() : "",
                         DocDate = row.ContainsKey("Дата") && row["Дата"] != null ? (DateTime)row["Дата"] : DateTime.Now,
                         OrderType = row.ContainsKey("Тип") ? row["Тип"]?.ToString() : "",
-                        Amount = row.ContainsKey("Сумма") && row["Сумма"] != null ? Convert.ToDecimal(row["Сумма"]) : 0,
+                        Amount = ReadDecimal(row, "Сумма", "amount"),
+                        AmountCurrency = ReadDecimal(row, "Сумма в валюте", "amount_currency"),
+                        ExchangeRate = ReadDecimal(row, "Курс", "exchange_rate"),
                         Purpose = row.ContainsKey("Назначение платежа") ? row["Назначение платежа"]?.ToString() : "",
                         Description = row.ContainsKey("Примечание") ? row["Примечание"]?.ToString() : "",
                         IsPosted = row.ContainsKey("Проведён") && row["Проведён"] != null ? (bool)row["Проведён"] : false,
@@ -163,6 +166,16 @@ namespace BIS.ERP.Views
 
                     if (row.ContainsKey("Материал") && row["Материал"] != null && referenceCache.TryGetValue("Материал", out var materialDict) && Guid.TryParse(row["Материал"].ToString(), out var materialId))
                         newRow.MaterialName = materialDict.ContainsKey(materialId) ? materialDict[materialId] : row["Материал"].ToString();
+
+                    if (row.ContainsKey("Классификация платежа") &&
+                        row["Классификация платежа"] != null &&
+                        referenceCache.TryGetValue("Классификация платежа", out var paymentClassificationDict) &&
+                        Guid.TryParse(row["Классификация платежа"].ToString(), out var paymentClassificationId))
+                    {
+                        newRow.PaymentClassificationName = paymentClassificationDict.TryGetValue(paymentClassificationId, out var displayName)
+                            ? displayName
+                            : row["Классификация платежа"].ToString();
+                    }
 
                     // Корр. счет
                     string corrValue = null;
@@ -212,8 +225,11 @@ namespace BIS.ERP.Views
 
             OrganizationColumn.Visibility = GetAnalyticColumnVisibility(
                 "Организация", "Организации", rows, accountFields, accountAnalytics);
-            CurrencyColumn.Visibility = GetAnalyticColumnVisibility(
+            var currencyVisibility = GetAnalyticColumnVisibility(
                 "Валюта", "Справочник валют", rows, accountFields, accountAnalytics);
+            CurrencyColumn.Visibility = currencyVisibility;
+            AmountCurrencyColumn.Visibility = currencyVisibility;
+            ExchangeRateColumn.Visibility = currencyVisibility;
             EmployeeColumn.Visibility = GetAnalyticColumnVisibility(
                 "Сотрудник", "Сотрудники (Списочный состав)", rows, accountFields, accountAnalytics);
             MaterialColumn.Visibility = GetAnalyticColumnVisibility(
@@ -231,6 +247,23 @@ namespace BIS.ERP.Views
                     fieldName, rows, accountFields, registry, referenceCatalog)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+        }
+
+        private static decimal ReadDecimal(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is decimal decimalValue)
+                    return decimalValue;
+
+                if (decimal.TryParse(value.ToString(), out var parsed))
+                    return parsed;
+            }
+
+            return 0m;
         }
 
         private async void OnAddClick(object sender, RoutedEventArgs e)
@@ -297,10 +330,13 @@ namespace BIS.ERP.Views
         public string BankName { get; set; } = string.Empty;
         public string OurAccountName { get; set; } = string.Empty;
         public decimal Amount { get; set; }
+        public decimal AmountCurrency { get; set; }
+        public decimal ExchangeRate { get; set; }
         public string CurrencyName { get; set; } = string.Empty;
         public string EmployeeName { get; set; } = string.Empty;
         public string MaterialName { get; set; } = string.Empty;
         public string CorrespondentAccountName { get; set; } = string.Empty;
+        public string PaymentClassificationName { get; set; } = string.Empty;
         public string Purpose { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public bool IsPosted { get; set; }

@@ -235,6 +235,7 @@ namespace BIS.ERP.Services
         public int LoadedAccountsCount { get; init; }
         public int InsertedCount { get; init; }
         public int UpdatedCount { get; init; }
+        public int DeactivatedCount { get; init; }
         public int DuplicateSourceCodesCount { get; init; }
         public IReadOnlyList<ChartOfAccountsDbfFieldMap> FieldMappings { get; init; } = Array.Empty<ChartOfAccountsDbfFieldMap>();
         public IReadOnlyList<string> IgnoredSourceFields { get; init; } = Array.Empty<string>();

@@ -86,6 +86,17 @@ namespace BIS.ERP.Services
                         ALTER TABLE ""MetadataObjects"" ALTER COLUMN ""Name"" TYPE varchar(160);
                     END IF;
 
+                    IF to_regclass('public.""MetadataFields""') IS NOT NULL THEN
+                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""ReferenceCatalog"" varchar(50);
+                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""Formula"" text;
+                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""DisplayPattern"" text;
+                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""DisplayFields"" text;
+                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""Name"" TYPE varchar(100);
+                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""DbColumnName"" TYPE varchar(100);
+                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""FieldType"" TYPE varchar(40);
+                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""ReferenceCatalog"" TYPE varchar(50);
+                    END IF;
+
                     IF to_regclass('public.""MetadataModuleItems""') IS NOT NULL THEN
                         ALTER TABLE ""MetadataModuleItems"" ALTER COLUMN ""ObjectType"" TYPE varchar(80);
                     END IF;

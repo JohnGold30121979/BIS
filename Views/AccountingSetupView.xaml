@@ -9,8 +9,18 @@
         </Grid.RowDefinitions>
         <StackPanel Margin="0,0,0,12">
             <TextBlock Text="Настройка бухгалтерского учета" FontSize="24" FontWeight="Bold"/>
-            <TextBlock Text="Здесь задаются входящие остатки по счетам и правила формирования Баланса и Отчета о финансовых результатах"
+            <TextBlock Text="Служебное окно конфигуратора: здесь задаются входящие остатки, правила отчетности и расчет валютных разниц."
                        Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+            <Border Background="{DynamicResource AppSurfaceBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="10"
+                    Margin="0,10,0,0">
+                <TextBlock Text="Эти настройки меняют расчет ОСВ, главной книги, баланса, финансовых результатов и закрытия периода. Обычно их заполняют один раз при запуске базы или меняют только при изменении учетной политики."
+                           Foreground="{DynamicResource AppSecondaryTextBrush}"
+                           TextWrapping="Wrap"/>
+            </Border>
         </StackPanel>
 
         <TabControl Grid.Row="1">
@@ -18,22 +28,34 @@
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
+                    <Border Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10"
+                            Margin="0,0,0,8">
+                        <TextBlock Text="Для чего: остатки на дату начала работы в BIS ERP. Эти суммы становятся входящим сальдо по счетам и участвуют в ОСВ, главной книге, балансе и акте сверки. По одному счету заполняется либо дебет, либо кредит."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="Добавить счет" Width="115" Height="32" Click="OnAddOpeningClick"/>
-                        <Button Content="Удалить" Width="90" Height="32" Margin="8,0,0,0" Click="OnDeleteOpeningClick"/>
+                        <Button Content="Добавить счет" Width="115" Height="32" Click="OnAddOpeningClick"
+                                ToolTip="Выберите счет из плана счетов и задайте входящий остаток на дату старта учета."/>
+                        <Button Content="Удалить" Width="90" Height="32" Margin="8,0,0,0" Click="OnDeleteOpeningClick"
+                                ToolTip="Удаляет выбранную строку входящего остатка."/>
                         <Button Content="Сохранить" Width="100" Height="32" Margin="8,0,0,0"
-                                Background="#27AE60" Foreground="White" Click="OnSaveOpeningsClick"/>
+                                Background="#27AE60" Foreground="White" Click="OnSaveOpeningsClick"
+                                ToolTip="Сохраняет входящие остатки для дальнейших бухгалтерских отчетов."/>
                     </StackPanel>
-                    <DataGrid x:Name="OpeningGrid" Grid.Row="1" AutoGenerateColumns="False"
-                              CanUserAddRows="False" SelectionMode="Single"
-                              BeginningEdit="OnOpeningGridBeginningEdit">
+                    <DataGrid x:Name="OpeningGrid" Grid.Row="2" AutoGenerateColumns="False"
+                              CanUserAddRows="False" SelectionMode="Single">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Дата остатка" Binding="{Binding BalanceDate, StringFormat=dd.MM.yyyy}" Width="120"/>
                             <DataGridTextColumn Header="Счет" Binding="{Binding AccountCode}" IsReadOnly="True" Width="120"/>
                             <DataGridTextColumn Header="Наименование" Binding="{Binding AccountName}" IsReadOnly="True" Width="*"/>
-                            <DataGridTextColumn Header="Источник" Binding="{Binding SourceDescription}" IsReadOnly="True" Width="200"/>
                             <DataGridTextColumn Header="Дебет" Binding="{Binding Debit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
                             <DataGridTextColumn Header="Кредит" Binding="{Binding Credit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
                         </DataGrid.Columns>
@@ -44,31 +66,92 @@
                 <Grid Margin="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    <WrapPanel Margin="0,0,0,8">
+                    <Border Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10"
+                            Margin="0,0,0,8">
+                        <TextBlock Text="Для чего: здесь задается, какие счета попадают в строки баланса и отчета о финансовых результатах. Можно задавать формулы строк по кодам строк, например 110+120-130 или n110:n190. Это нужно для совместимости с Fox-отчетами, где итоговые строки считались формулами."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,8">
                         <TextBlock Text="Форма:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox x:Name="ReportCodeCombo" Width="230" Height="32" SelectedIndex="0"
-                                  SelectionChanged="OnReportCodeChanged">
+                                  SelectionChanged="OnReportCodeChanged"
+                                  ToolTip="Выберите форму, для которой настраиваются строки и привязанные счета.">
                             <ComboBoxItem Content="Баланс предприятия" Tag="Balance"/>
                             <ComboBoxItem Content="Финансовые результаты" Tag="ProfitLoss"/>
                         </ComboBox>
-                        <Button Content="Добавить строку" Width="120" Height="32" Margin="12,0,0,0" Click="OnAddLineClick"/>
-                        <Button Content="Удалить" Width="90" Height="32" Margin="8,0,0,0" Click="OnDeleteLineClick"/>
+                        <Button Content="Добавить строку" Width="120" Height="32" Margin="12,0,0,0" Click="OnAddLineClick"
+                                ToolTip="Добавляет новую строку отчетности для выбранной формы."/>
+                        <Button Content="Удалить" Width="90" Height="32" Margin="8,0,0,0" Click="OnDeleteLineClick"
+                                ToolTip="Удаляет выбранную строку отчетности и ее привязки к счетам."/>
                         <Button Content="Сохранить" Width="100" Height="32" Margin="8,0,0,0"
-                                Background="#27AE60" Foreground="White" Click="OnSaveLinesClick"/>
+                                Background="#27AE60" Foreground="White" Click="OnSaveLinesClick"
+                                ToolTip="Сохраняет структуру строк и список счетов для выбранной формы."/>
                     </WrapPanel>
-                    <DataGrid x:Name="ReportLinesGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False">
+                    <DataGrid x:Name="ReportLinesGrid" Grid.Row="2" AutoGenerateColumns="False" CanUserAddRows="False"
+                              ToolTip="В поле 'Счета' указывайте 8-значные коды через запятую, например 14100000, 32100000. Формула считает строки по их кодам. Знак -1 разворачивает сумму в противоположную сторону.">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Код" Binding="{Binding LineCode}" Width="90"/>
                             <DataGridTextColumn Header="Раздел" Binding="{Binding SectionCode}" Width="130"/>
                             <DataGridTextColumn Header="Наименование строки" Binding="{Binding Name}" Width="*"/>
                             <DataGridTextColumn Header="Порядок" Binding="{Binding SortOrder}" Width="80"/>
                             <DataGridTextColumn Header="Знак" Binding="{Binding Sign}" Width="60"/>
+                            <DataGridTextColumn Header="Формула" Binding="{Binding Formula}" Width="180"/>
+                            <DataGridTextColumn Header="Фикс. сумма" Binding="{Binding FixedAmount}" Width="100"/>
                             <DataGridCheckBoxColumn Header="Итог" Binding="{Binding IsTotal}" Width="60"/>
                             <DataGridTextColumn Header="Счета (через запятую)" Binding="{Binding AccountCodes}" Width="240"/>
                         </DataGrid.Columns>
                     </DataGrid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Курсовая разница">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10"
+                            Margin="0,0,0,12">
+                        <TextBlock Text="Для чего: расчет переоценивает валютные остатки по счетам, где в плане счетов включена связь с валютами. Используются курсы из справочника курсов валют, обычно загруженные из НБКР. Повторный расчет за ту же дату перезапишет ранее созданные расчетные проводки после подтверждения."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,12">
+                        <TextBlock Text="Дата расчета:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <DatePicker x:Name="ExchangeDifferenceDatePicker" Width="145" Height="32"
+                                    ToolTip="Дата, на которую берется курс валют и формируются расчетные проводки."/>
+                        <Button x:Name="CalculateExchangeDifferenceButton"
+                                Content="Рассчитать"
+                                Width="120" Height="32"
+                                Margin="12,0,0,0"
+                                Background="#27AE60"
+                                Foreground="White"
+                                Click="OnCalculateExchangeDifferenceClick"
+                                ToolTip="Запускает расчет курсовой разницы по валютным остаткам."/>
+                    </WrapPanel>
+                    <Border Grid.Row="2"
+                            Background="{DynamicResource AppSurfaceBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12">
+                        <TextBlock x:Name="ExchangeDifferenceStatusText"
+                                   Text="Выберите дату и запустите расчет. Ранее созданный расчет за эту дату будет перезаписан после подтверждения."
+                                   Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
                 </Grid>
             </TabItem>
         </TabControl>

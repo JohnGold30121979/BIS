@@ -103,6 +103,7 @@
                 <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocumentNumber}" Width="120"/>
                 <DataGridTextColumn Header="Тип" Binding="{Binding DocumentType}" Width="180"/>
+                <DataGridTextColumn Header="Модуль" Binding="{Binding ModuleName}" Width="140"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="100">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">

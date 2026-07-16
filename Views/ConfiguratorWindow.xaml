@@ -86,7 +86,12 @@
                                                TextTrimming="CharacterEllipsis"/>
                                     <TextBlock Text="Режим конфигуратора" FontSize="11"
                                                Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"
-                                               Margin="0,2,0,8"/>
+                                               Margin="0,2,0,2"/>
+                                    <TextBlock x:Name="InfoBaseNameText" FontSize="11"
+                                               Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"
+                                               Text="Инфобаза: -"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,0,0,8"/>
                                     <Border Background="{DynamicResource ConfiguratorPatchBadgeBackgroundBrush}"
                                             CornerRadius="10" Padding="8,3" HorizontalAlignment="Left">
                                         <TextBlock x:Name="PatchVersionText" FontSize="11" FontWeight="SemiBold"
@@ -197,6 +202,12 @@
                                         Click="OnCreateCatalogClick"/>
                                 <Button Content="Модули и разделы" Background="#2980B9" Foreground="White"
                                         Height="35" Margin="0,5,0,0" Click="OnModulesClick"/>
+                                <Button x:Name="AccountingSetupButton" Content="⚙ Настройка учета"
+                                        Background="#1F618D" Foreground="White" Height="35" Margin="0,5,0,0"
+                                        Click="OnAccountingSetupClick"/>
+                                <Button x:Name="UsersButton" Content="🔐 Пользователи и права"
+                                        Background="#2E86C1" Foreground="White" Height="35" Margin="0,5,0,0"
+                                        Click="OnUsersClick"/>
                                 <Button x:Name="AddReportButton" Content="📊 Отчет"
                                         Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnCreateReportClick"/>
