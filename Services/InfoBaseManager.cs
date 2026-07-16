@@ -59,6 +59,11 @@ public class InfoBaseManager
             ALTER TABLE ""InfoBases"" ALTER COLUMN ""Version"" TYPE varchar(50);
             ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""Icon"" varchar(20);
             ALTER TABLE ""InfoBases"" ALTER COLUMN ""Icon"" TYPE varchar(20);
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""LogoImage"" bytea;
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""LogoContentType"" varchar(50);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""LogoContentType"" TYPE varchar(50);
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""LogoFileName"" varchar(260);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""LogoFileName"" TYPE varchar(260);
             UPDATE ""InfoBases"" SET ""Version"" = @version WHERE ""Version"" IS NULL OR ""Version"" = '';
             UPDATE ""InfoBases"" SET ""Icon"" = @icon WHERE ""Icon"" IS NULL OR ""Icon"" = '';",
             new NpgsqlParameter("@version", DefaultPatchVersion),
@@ -96,7 +101,10 @@ public class InfoBaseManager
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
     string host, int port, string username, string password, string? databaseName = null,
     string? patchVersion = null,
-    string? icon = null)
+    string? icon = null,
+    byte[]? logoImage = null,
+    string? logoContentType = null,
+    string? logoFileName = null)
     {
         var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
         var normalizedPatchVersion = NormalizePatchVersion(patchVersion);
@@ -131,7 +139,10 @@ public class InfoBaseManager
                 CreatedAt = DateTime.UtcNow,
                 IsActive = false,
                 Version = normalizedPatchVersion,
-                Icon = NormalizeIcon(icon)
+                Icon = NormalizeIcon(icon),
+                LogoImage = logoImage,
+                LogoContentType = NormalizeLogoText(logoContentType, 50),
+                LogoFileName = NormalizeLogoText(logoFileName, 260)
             };
 
             // В InfoBaseManager.CreateInfoBaseAsync
@@ -237,7 +248,10 @@ public class InfoBaseManager
     public async Task<InfoBase> AttachInfoBaseAsync(
         string name, string host, int port, string databaseName, string username, string password,
         string? patchVersion = null,
-        string? icon = null)
+        string? icon = null,
+        byte[]? logoImage = null,
+        string? logoContentType = null,
+        string? logoFileName = null)
     {
         if (!await TestConnectionAsync(host, port, databaseName, username, password))
             throw new InvalidOperationException("Не удалось подключиться к указанной базе данных.");
@@ -278,7 +292,10 @@ public class InfoBaseManager
             Host = host.Trim(), Port = port, DatabaseName = databaseName.Trim(),
             Username = username.Trim(), Password = password, IsActive = false,
             Version = normalizedPatchVersion, CreatedAt = DateTime.UtcNow,
-            Icon = NormalizeIcon(icon)
+            Icon = NormalizeIcon(icon),
+            LogoImage = logoImage,
+            LogoContentType = NormalizeLogoText(logoContentType, 50),
+            LogoFileName = NormalizeLogoText(logoFileName, 260)
         };
         await _masterContext.InfoBases.AddAsync(infoBase);
         await _masterContext.SaveChangesAsync();
@@ -292,6 +309,18 @@ public class InfoBaseManager
 
     public async Task UpdateInfoBaseAsync(Guid id, string name, string? icon)
     {
+        await UpdateInfoBaseAsync(id, name, icon, null, null, null, updateLogo: false);
+    }
+
+    public async Task UpdateInfoBaseAsync(
+        Guid id,
+        string name,
+        string? icon,
+        byte[]? logoImage,
+        string? logoContentType,
+        string? logoFileName,
+        bool updateLogo = true)
+    {
         var normalizedName = name?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedName))
             throw new ArgumentException("Наименование информационной базы не может быть пустым.");
@@ -304,6 +333,12 @@ public class InfoBaseManager
         infoBase.Description = normalizedName;
         if (icon != null)
             infoBase.Icon = NormalizeIcon(icon);
+        if (updateLogo)
+        {
+            infoBase.LogoImage = logoImage;
+            infoBase.LogoContentType = NormalizeLogoText(logoContentType, 50);
+            infoBase.LogoFileName = NormalizeLogoText(logoFileName, 260);
+        }
         await _masterContext.SaveChangesAsync();
         if (_currentInfoBase?.Id == id)
             _currentInfoBase = infoBase;
@@ -425,6 +460,14 @@ public class InfoBaseManager
     {
         var normalized = string.IsNullOrWhiteSpace(icon) ? InfoBase.DefaultIcon : icon.Trim();
         return normalized.Length > 20 ? normalized[..20] : normalized;
+    }
+
+    private static string? NormalizeLogoText(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = value.Trim();
+        return normalized.Length > maxLength ? normalized[..maxLength] : normalized;
     }
 
     public async Task<AppDbContext> GetCurrentDbContextAsync()

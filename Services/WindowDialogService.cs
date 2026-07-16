@@ -59,12 +59,27 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        public bool ShowEditInfoBase(InfoBase infoBase, out string? infoBaseName, out string? infoBaseIcon)
+        public bool ShowEditInfoBase(
+            InfoBase infoBase,
+            out string? infoBaseName,
+            out string? infoBaseIcon,
+            out byte[]? logoImage,
+            out string? logoContentType,
+            out string? logoFileName)
         {
-            var dialog = new EditInfoBaseDialog(infoBase.Name, infoBase.Icon) { Owner = _owner };
+            var dialog = new EditInfoBaseDialog(
+                infoBase.Name,
+                infoBase.Icon,
+                infoBase.LogoImage,
+                infoBase.LogoContentType,
+                infoBase.LogoFileName)
+            { Owner = _owner };
             var result = dialog.ShowDialog() == true;
             infoBaseName = result ? dialog.InfoBaseName : null;
             infoBaseIcon = result ? dialog.InfoBaseIcon : null;
+            logoImage = result ? dialog.LogoImageBytes : null;
+            logoContentType = result ? dialog.LogoContentType : null;
+            logoFileName = result ? dialog.LogoFileName : null;
             return result;
         }
 

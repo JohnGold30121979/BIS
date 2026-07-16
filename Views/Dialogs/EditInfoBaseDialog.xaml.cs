@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using BIS.ERP.Models;
+using BIS.ERP.Services;
 
 namespace BIS.ERP.Views.Dialogs
 {
@@ -10,13 +11,29 @@ namespace BIS.ERP.Views.Dialogs
         public string InfoBaseIcon => string.IsNullOrWhiteSpace(IconBox.Text)
             ? InfoBase.DefaultIcon
             : IconBox.Text.Trim();
+        public byte[]? LogoImageBytes => logoImageBytes;
+        public string? LogoContentType => logoContentType;
+        public string? LogoFileName => logoFileName;
 
-        public EditInfoBaseDialog(string currentName, string? currentIcon)
+        private byte[]? logoImageBytes;
+        private string? logoContentType;
+        private string? logoFileName;
+
+        public EditInfoBaseDialog(
+            string currentName,
+            string? currentIcon,
+            byte[]? currentLogoImage,
+            string? currentLogoContentType,
+            string? currentLogoFileName)
         {
             InitializeComponent();
             NameBox.Text = currentName;
             IconBox.Text = string.IsNullOrWhiteSpace(currentIcon) ? InfoBase.DefaultIcon : currentIcon.Trim();
+            logoImageBytes = currentLogoImage;
+            logoContentType = currentLogoContentType;
+            logoFileName = currentLogoFileName;
             SelectIconComboItem(IconBox.Text);
+            UpdateLogoPreview();
             Loaded += (_, _) =>
             {
                 NameBox.Focus();
@@ -47,6 +64,44 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             IconCombo.SelectedIndex = -1;
+        }
+
+        private void OnLoadLogoClick(object sender, RoutedEventArgs e)
+        {
+            if (!InfoBaseLogoFileService.TryPickLogo(this, out var logo, out var error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    ErrorText.Text = error;
+                    ErrorText.Visibility = Visibility.Visible;
+                }
+                return;
+            }
+
+            logoImageBytes = logo!.ImageBytes;
+            logoContentType = logo.ContentType;
+            logoFileName = logo.FileName;
+            ErrorText.Visibility = Visibility.Collapsed;
+            UpdateLogoPreview();
+        }
+
+        private void OnClearLogoClick(object sender, RoutedEventArgs e)
+        {
+            logoImageBytes = null;
+            logoContentType = null;
+            logoFileName = null;
+            UpdateLogoPreview();
+        }
+
+        private void UpdateLogoPreview()
+        {
+            var imageSource = InfoBaseLogoFileService.CreateImageSource(logoImageBytes);
+            LogoPreviewImage.Source = imageSource;
+            LogoPreviewImage.Visibility = imageSource == null ? Visibility.Collapsed : Visibility.Visible;
+            LogoPlaceholderText.Visibility = imageSource == null ? Visibility.Visible : Visibility.Collapsed;
+            LogoNameText.Text = string.IsNullOrWhiteSpace(logoFileName)
+                ? "Логотип не загружен"
+                : $"Загружен: {logoFileName}";
         }
 
         private void OnSaveClick(object sender, RoutedEventArgs e)

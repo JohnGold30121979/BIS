@@ -99,11 +99,24 @@ namespace BIS.ERP.ViewModels
         [RelayCommand(CanExecute = nameof(HasSelectedInfoBase))]
         private async Task EditAsync()
         {
-            if (SelectedInfoBase == null || !_dialogService.ShowEditInfoBase(SelectedInfoBase, out var newName, out var newIcon))
+            if (SelectedInfoBase == null ||
+                !_dialogService.ShowEditInfoBase(
+                    SelectedInfoBase,
+                    out var newName,
+                    out var newIcon,
+                    out var logoImage,
+                    out var logoContentType,
+                    out var logoFileName))
                 return;
             try
             {
-                await _infoBaseManager.UpdateInfoBaseAsync(SelectedInfoBase.Id, newName!, newIcon);
+                await _infoBaseManager.UpdateInfoBaseAsync(
+                    SelectedInfoBase.Id,
+                    newName!,
+                    newIcon,
+                    logoImage,
+                    logoContentType,
+                    logoFileName);
                 await LoadAsync();
             }
             catch (Exception ex)

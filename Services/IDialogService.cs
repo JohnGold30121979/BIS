@@ -20,7 +20,13 @@ namespace BIS.ERP.Services
         bool Confirm(string message, string title = "Подтверждение");
         Task<bool> ShowLoginAsync();
         bool ShowCreateInfoBase(out string? infoBaseName);
-        bool ShowEditInfoBase(InfoBase infoBase, out string? infoBaseName, out string? infoBaseIcon);
+        bool ShowEditInfoBase(
+            InfoBase infoBase,
+            out string? infoBaseName,
+            out string? infoBaseIcon,
+            out byte[]? logoImage,
+            out string? logoContentType,
+            out string? logoFileName);
         void ShowSetup();
     }
 }

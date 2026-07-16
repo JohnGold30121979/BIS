@@ -17,12 +17,19 @@ namespace BIS.ERP.Views
         public string InfoBaseIcon => string.IsNullOrWhiteSpace(IconBox.Text)
             ? BIS.ERP.Models.InfoBase.DefaultIcon
             : IconBox.Text.Trim();
+        public byte[]? LogoImageBytes => logoImageBytes;
+        public string? LogoContentType => logoContentType;
+        public string? LogoFileName => logoFileName;
         public string InitialPatchVersion => string.IsNullOrWhiteSpace(PatchVersionBox.Text)
             ? InfoBaseManager.DefaultPatchVersion
             : PatchVersionBox.Text.Trim();
         public bool AttachExisting => (ModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "Attach";
 
         public bool IsSuccess { get; private set; } = false;
+
+        private byte[]? logoImageBytes;
+        private string? logoContentType;
+        private string? logoFileName;
 
         public CreateInfoBaseDialog()
         {
@@ -37,6 +44,7 @@ namespace BIS.ERP.Views
             PatchVersionBox.Text = InfoBaseManager.DefaultPatchVersion;
 
             GenerateDatabaseName();
+            UpdateLogoPreview();
         }
 
         private void OnIconSelected(object sender, SelectionChangedEventArgs e)
@@ -47,6 +55,41 @@ namespace BIS.ERP.Views
             var selectedIcon = (IconCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             if (!string.IsNullOrWhiteSpace(selectedIcon))
                 IconBox.Text = selectedIcon;
+        }
+
+        private void OnLoadLogoClick(object sender, RoutedEventArgs e)
+        {
+            if (!InfoBaseLogoFileService.TryPickLogo(this, out var logo, out var error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                    ShowError(error);
+                return;
+            }
+
+            logoImageBytes = logo!.ImageBytes;
+            logoContentType = logo.ContentType;
+            logoFileName = logo.FileName;
+            ErrorText.Visibility = Visibility.Collapsed;
+            UpdateLogoPreview();
+        }
+
+        private void OnClearLogoClick(object sender, RoutedEventArgs e)
+        {
+            logoImageBytes = null;
+            logoContentType = null;
+            logoFileName = null;
+            UpdateLogoPreview();
+        }
+
+        private void UpdateLogoPreview()
+        {
+            var imageSource = InfoBaseLogoFileService.CreateImageSource(logoImageBytes);
+            LogoPreviewImage.Source = imageSource;
+            LogoPreviewImage.Visibility = imageSource == null ? Visibility.Collapsed : Visibility.Visible;
+            LogoPlaceholderText.Visibility = imageSource == null ? Visibility.Visible : Visibility.Collapsed;
+            LogoNameText.Text = string.IsNullOrWhiteSpace(logoFileName)
+                ? "Логотип не загружен"
+                : $"Загружен: {logoFileName}";
         }
 
         private void GenerateDatabaseName()
@@ -200,8 +243,8 @@ namespace BIS.ERP.Views
 
                 // Создаем базу с описанием
                 var newBase = AttachExisting
-                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion, InfoBaseIcon)
-                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, InitialPatchVersion, InfoBaseIcon);
+                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion, InfoBaseIcon, LogoImageBytes, LogoContentType, LogoFileName)
+                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, InitialPatchVersion, InfoBaseIcon, LogoImageBytes, LogoContentType, LogoFileName);
 
                 // Обновляем описание для отображения
                 if (newBase != null)
@@ -225,13 +268,13 @@ namespace BIS.ERP.Views
         private void OnExpanderExpanded(object sender, RoutedEventArgs e)
         {
             // Увеличиваем высоту окна при раскрытии
-            this.Height = 600;
+            this.Height = 760;
         }
 
         private void OnExpanderCollapsed(object sender, RoutedEventArgs e)
         {
             // Возвращаем высоту при сворачивании
-            this.Height = 420;
+            this.Height = 560;
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e)

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Создание информационной базы"
         Width="500" 
-        Height="700"
+        Height="760"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -67,6 +67,35 @@
                             <TextBox x:Name="IconBox" Grid.Column="2" Height="35" Padding="8,5"
                                      Text="🏢" FontSize="16" TextAlignment="Center"
                                      ToolTip="Можно ввести любую emoji-иконку вручную"/>
+                        </Grid>
+
+                        <TextBlock Text="Логотип организации" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                        <Grid Margin="0,0,0,15">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="64"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Width="56" Height="56" CornerRadius="8"
+                                    Background="#F0F4F8" BorderBrush="#D7DEE5" BorderThickness="1">
+                                <Grid>
+                                    <Image x:Name="LogoPreviewImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="LogoPlaceholderText" Text="🏢" FontSize="24"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                <TextBlock x:Name="LogoNameText" Text="Логотип не загружен"
+                                           Foreground="#555" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Загрузить PNG/ICO" Width="145" Height="32"
+                                            Background="#3498DB" Foreground="White"
+                                            Click="OnLoadLogoClick" Cursor="Hand"/>
+                                    <Button Content="Убрать" Width="80" Height="32" Margin="8,0,0,0"
+                                            Background="#95A5A6" Foreground="White"
+                                            Click="OnClearLogoClick" Cursor="Hand"/>
+                                </StackPanel>
+                            </StackPanel>
                         </Grid>
 
                         <TextBlock Text="Начальная версия патча" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>

@@ -47,6 +47,14 @@ namespace BIS.ERP.Models
         [MaxLength(20)]
         public string Icon { get; set; } = DefaultIcon;
 
+        public byte[]? LogoImage { get; set; }
+
+        [MaxLength(50)]
+        public string? LogoContentType { get; set; }
+
+        [MaxLength(260)]
+        public string? LogoFileName { get; set; }
+
         public const string DefaultIcon = "🏢";
 
         // Строка подключения
@@ -56,6 +64,12 @@ namespace BIS.ERP.Models
 
         [NotMapped]
         public string DisplayIcon => string.IsNullOrWhiteSpace(Icon) ? DefaultIcon : Icon;
+
+        [NotMapped]
+        public bool HasLogoImage => LogoImage is { Length: > 0 };
+
+        [NotMapped]
+        public bool UsesTextIcon => !HasLogoImage;
 
         public void NormalizeIcon()
         {
