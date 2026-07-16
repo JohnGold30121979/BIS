@@ -68,6 +68,7 @@
                                   SelectionChanged="OnThemeChanged" Margin="0,0,0,5">
                             <ComboBoxItem Content="Светлая" Tag="Default"/>
                             <ComboBoxItem Content="Темная" Tag="Dark"/>
+                            <ComboBoxItem Content="Dracula" Tag="Dracula"/>
                         </ComboBox>
                         <TextBlock x:Name="CurrentThemeText" Foreground="{DynamicResource AppSecondaryTextBrush}"
                                    FontSize="11" Margin="0,0,0,12"/>

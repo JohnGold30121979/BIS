@@ -80,6 +80,7 @@
                       SelectedValue="{Binding Theme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
                 <ComboBoxItem Content="По умолчанию" Tag="Default"/>
                 <ComboBoxItem Content="Темный" Tag="Dark"/>
+                <ComboBoxItem Content="Dracula" Tag="Dracula"/>
             </ComboBox>
 
             <!-- Кнопки -->

@@ -103,8 +103,8 @@ namespace BIS.ERP
                     var settings = AppSettings.Instance;
                     if (ThemeToggleButton != null)
                     {
-                        ThemeToggleButton.Content = settings.Theme == "Dark" ? "🌞" : "🌙";
-                        ThemeToggleButton.ToolTip = settings.Theme == "Dark" ? "Светлая тема" : "Темная тема";
+                        ThemeToggleButton.Content = ThemeService.GetThemeToggleIcon(settings.Theme);
+                        ThemeToggleButton.ToolTip = ThemeService.GetThemeToggleToolTip(settings.Theme);
                     }
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
@@ -1037,8 +1037,7 @@ namespace BIS.ERP
             {
                 var settings = AppSettings.Instance;
 
-                // Переключаем тему
-                var newTheme = settings.Theme == "Dark" ? "Default" : "Dark";
+                var newTheme = ThemeService.GetNextTheme(settings.Theme);
 
                 // Сохраняем в настройках
                 settings.Theme = newTheme;
@@ -1050,8 +1049,8 @@ namespace BIS.ERP
                 // Обновляем иконку кнопки
                 if (ThemeToggleButton != null)
                 {
-                    ThemeToggleButton.Content = newTheme == "Dark" ? "🌞" : "🌙";
-                    ThemeToggleButton.ToolTip = newTheme == "Dark" ? "Светлая тема" : "Темная тема";
+                    ThemeToggleButton.Content = ThemeService.GetThemeToggleIcon(newTheme);
+                    ThemeToggleButton.ToolTip = ThemeService.GetThemeToggleToolTip(newTheme);
                 }
 
                 // Показываем уведомление (опционально)

@@ -14,6 +14,9 @@ namespace BIS.ERP.Views
         public string Username => UsernameBox.Text;
         public string Password => PasswordBox.Password;
         public string DatabaseName => DatabaseBox.Text.Trim();
+        public string InfoBaseIcon => string.IsNullOrWhiteSpace(IconBox.Text)
+            ? BIS.ERP.Models.InfoBase.DefaultIcon
+            : IconBox.Text.Trim();
         public string InitialPatchVersion => string.IsNullOrWhiteSpace(PatchVersionBox.Text)
             ? InfoBaseManager.DefaultPatchVersion
             : PatchVersionBox.Text.Trim();
@@ -34,6 +37,16 @@ namespace BIS.ERP.Views
             PatchVersionBox.Text = InfoBaseManager.DefaultPatchVersion;
 
             GenerateDatabaseName();
+        }
+
+        private void OnIconSelected(object sender, SelectionChangedEventArgs e)
+        {
+            if (IconBox == null)
+                return;
+
+            var selectedIcon = (IconCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            if (!string.IsNullOrWhiteSpace(selectedIcon))
+                IconBox.Text = selectedIcon;
         }
 
         private void GenerateDatabaseName()
@@ -187,8 +200,8 @@ namespace BIS.ERP.Views
 
                 // Создаем базу с описанием
                 var newBase = AttachExisting
-                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion)
-                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, InitialPatchVersion);
+                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion, InfoBaseIcon)
+                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, InitialPatchVersion, InfoBaseIcon);
 
                 // Обновляем описание для отображения
                 if (newBase != null)

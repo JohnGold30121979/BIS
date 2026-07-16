@@ -18,14 +18,10 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _settings = AppSettings.Instance;
 
-            if (_settings.Theme == "Dark")
-            {
-                ThemeComboBox.SelectedIndex = 1;
-            }
-            else
-            {
-                ThemeComboBox.SelectedIndex = 0;
-            }
+            ThemeComboBox.SelectedItem = ThemeComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => item.Tag?.ToString() == _settings.Theme)
+                ?? ThemeComboBox.Items[0];
 
             LanguageComboBox.SelectedValue = _settings.Language;
 
@@ -80,7 +76,7 @@ namespace BIS.ERP.Views
 
         private void UpdateCurrentThemeText()
         {
-            var themeName = _settings.Theme == "Dark" ? "Темная" : "Светлая";
+            var themeName = ThemeService.GetDisplayName(_settings.Theme);
             CurrentThemeText.Text = $"Текущая тема: {themeName}";
         }
 

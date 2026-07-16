@@ -24,7 +24,7 @@
         <Border Grid.Column="0" Background="{DynamicResource AppSidebarBackgroundBrush}">
             <DockPanel>
                 <!-- Шапка -->
-                <Border DockPanel.Dock="Top" Background="{DynamicResource AppHeaderBackgroundBrush}" Padding="15">
+                <Border DockPanel.Dock="Top" Background="{DynamicResource AppBrandHeaderBackgroundBrush}" Padding="15">
                     <StackPanel>
                         <!-- Верхняя часть с заголовком и кнопкой -->
                         <Grid>
@@ -34,23 +34,24 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock x:Name="SystemIconText" FontSize="22" Margin="0,0,8,0"/>
+                                <TextBlock x:Name="SystemIconText" FontSize="22" Margin="0,0,8,0"
+                                           Foreground="{DynamicResource AppBrandIconForegroundBrush}"/>
                                 <TextBlock x:Name="SystemNameText" FontSize="22" FontWeight="Bold"
-                                           Foreground="{DynamicResource AppPrimaryTextBrush}"/>
+                                           Foreground="{DynamicResource AppBrandTitleForegroundBrush}"/>
                             </StackPanel>
 
                             <!-- Кнопка смены темы -->
                             <Button Grid.Column="1" x:Name="ThemeToggleButton" 
                                     Content="🌙" FontSize="20" 
                                     Background="Transparent" BorderThickness="0"
-                                    Foreground="{DynamicResource AppPrimaryTextBrush}" Cursor="Hand"
+                                    Foreground="{DynamicResource AppBrandTitleForegroundBrush}" Cursor="Hand"
                                     Click="OnThemeToggleClick"
                                     ToolTip="Сменить тему"/>
                         </Grid>
 
                         <!-- Информация об информационной базе -->
                         <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
-                                   FontSize="11" Foreground="{DynamicResource AppSecondaryTextBrush}" 
+                                   FontSize="11" Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}" 
                                    HorizontalAlignment="Center" Margin="0,5,0,0"/>
                     </StackPanel>
                 </Border>
@@ -72,7 +73,7 @@
 
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="TreeViewItem">
-                                <Setter Property="Foreground" Value="{DynamicResource AppPrimaryTextBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AppNavigationForegroundBrush}"/>
                                 <Setter Property="FontSize" Value="13"/>
                                 <Setter Property="Padding" Value="5,8"/>
                                 <Setter Property="Cursor" Value="Hand"/>
@@ -94,7 +95,7 @@
                                     <TextBlock Text="{Binding Icon}" FontSize="16" Margin="0,0,10,0"/>
                                     <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
                                     <TextBlock Text="{Binding Badge}" FontSize="11" 
-                                               Foreground="{DynamicResource AppSecondaryTextBrush}" 
+                                               Foreground="{DynamicResource AppNavigationMutedForegroundBrush}" 
                                                Margin="10,0,0,0" 
                                                Visibility="{Binding HasBadge, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                 </StackPanel>

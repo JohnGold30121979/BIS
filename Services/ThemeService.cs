@@ -10,11 +10,13 @@ namespace BIS.ERP.Services
     {
         public const string DefaultTheme = "Default";
         public const string DarkTheme = "Dark";
+        public const string DraculaTheme = "Dracula";
 
         private static readonly Dictionary<string, Uri> ThemeUris = new()
         {
             { DefaultTheme, new Uri("/Themes/Default.xaml", UriKind.Relative) },
-            { DarkTheme, new Uri("/Themes/Dark.xaml", UriKind.Relative) }
+            { DarkTheme, new Uri("/Themes/Dark.xaml", UriKind.Relative) },
+            { DraculaTheme, new Uri("/Themes/Dracula.xaml", UriKind.Relative) }
         };
 
         private static string _currentTheme = DefaultTheme;
@@ -33,6 +35,16 @@ namespace BIS.ERP.Services
                 true);
             EventManager.RegisterClassHandler(
                 typeof(UserControl),
+                FrameworkElement.LoadedEvent,
+                new RoutedEventHandler(OnThemedElementLoaded),
+                true);
+            EventManager.RegisterClassHandler(
+                typeof(DataGrid),
+                FrameworkElement.LoadedEvent,
+                new RoutedEventHandler(OnThemedElementLoaded),
+                true);
+            EventManager.RegisterClassHandler(
+                typeof(System.Windows.Controls.Primitives.DataGridColumnHeader),
                 FrameworkElement.LoadedEvent,
                 new RoutedEventHandler(OnThemedElementLoaded),
                 true);
@@ -87,6 +99,43 @@ namespace BIS.ERP.Services
 
         public static string GetCurrentTheme() => _currentTheme;
 
+        public static string GetDisplayName(string themeName)
+        {
+            return themeName switch
+            {
+                DarkTheme => "Темная",
+                DraculaTheme => "Dracula",
+                _ => "Светлая"
+            };
+        }
+
+        public static string GetNextTheme(string themeName)
+        {
+            return themeName switch
+            {
+                DefaultTheme => DarkTheme,
+                DarkTheme => DraculaTheme,
+                DraculaTheme => DefaultTheme,
+                _ => DefaultTheme
+            };
+        }
+
+        public static string GetThemeToggleIcon(string themeName)
+        {
+            return themeName switch
+            {
+                DarkTheme => "🧛",
+                DraculaTheme => "☀",
+                _ => "🌙"
+            };
+        }
+
+        public static string GetThemeToggleToolTip(string themeName)
+        {
+            var nextTheme = GetNextTheme(themeName);
+            return $"Переключить тему: {GetDisplayName(nextTheme)}";
+        }
+
         private static void OnThemedElementLoaded(object sender, RoutedEventArgs e)
         {
             if (sender is DependencyObject root)
@@ -95,12 +144,20 @@ namespace BIS.ERP.Services
 
         private static void ApplyToVisualTree(DependencyObject root)
         {
+            ApplyToVisualTree(root, new HashSet<DependencyObject>());
+        }
+
+        private static void ApplyToVisualTree(DependencyObject root, HashSet<DependencyObject> visited)
+        {
+            if (!visited.Add(root))
+                return;
+
             ApplyThemeResources(root);
 
             foreach (var child in LogicalTreeHelper.GetChildren(root))
             {
                 if (child is DependencyObject dependencyObject)
-                    ApplyToVisualTree(dependencyObject);
+                    ApplyToVisualTree(dependencyObject, visited);
             }
         }
 
@@ -125,6 +182,14 @@ namespace BIS.ERP.Services
                 return;
             }
 
+            if (element is PasswordBox passwordBox)
+            {
+                passwordBox.SetResourceReference(Control.BackgroundProperty, "AppInputBackgroundBrush");
+                passwordBox.SetResourceReference(Control.ForegroundProperty, "AppInputForegroundBrush");
+                passwordBox.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
+                return;
+            }
+
             if (element is ComboBox or DatePicker or ListBox)
             {
                 ((FrameworkElement)element).SetResourceReference(Control.BackgroundProperty, "AppInputBackgroundBrush");
@@ -137,11 +202,23 @@ namespace BIS.ERP.Services
             {
                 dataGrid.SetResourceReference(Control.BackgroundProperty, "AppSurfaceBrush");
                 dataGrid.SetResourceReference(Control.ForegroundProperty, "AppBodyTextBrush");
+                if (dataGrid.ReadLocalValue(DataGrid.ColumnHeaderStyleProperty) == DependencyProperty.UnsetValue)
+                {
+                    dataGrid.SetResourceReference(DataGrid.ColumnHeaderStyleProperty, "AppDataGridColumnHeaderStyle");
+                }
                 dataGrid.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
                 dataGrid.SetResourceReference(DataGrid.RowBackgroundProperty, "AppSurfaceBrush");
                 dataGrid.SetResourceReference(DataGrid.AlternatingRowBackgroundProperty, "AppAlternateRowBrush");
                 dataGrid.SetResourceReference(DataGrid.HorizontalGridLinesBrushProperty, "AppBorderBrush");
                 dataGrid.SetResourceReference(DataGrid.VerticalGridLinesBrushProperty, "AppBorderBrush");
+                return;
+            }
+
+            if (element is System.Windows.Controls.Primitives.DataGridColumnHeader columnHeader)
+            {
+                columnHeader.SetResourceReference(Control.BackgroundProperty, "AppTableHeaderBackgroundBrush");
+                columnHeader.SetResourceReference(Control.ForegroundProperty, "AppTableHeaderForegroundBrush");
+                columnHeader.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
                 return;
             }
 

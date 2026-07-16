@@ -93,7 +93,7 @@
                 <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3498DB" Opacity="0.3"/>
             </DataGrid.Resources>
             <DataGrid.ColumnHeaderStyle>
-                <Style TargetType="DataGridColumnHeader">
+                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource AppDataGridColumnHeaderStyle}">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                     <Setter Property="VerticalContentAlignment" Value="Center"/>
                     <Setter Property="Padding" Value="4,6"/>

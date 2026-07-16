@@ -79,10 +79,9 @@
                                           VerticalAlignment="Stretch"
                                           HorizontalContentAlignment="Stretch">
                                     <DataGrid.Resources>
-                                        <Style TargetType="DataGridColumnHeader">
+                                        <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource AppDataGridColumnHeaderStyle}">
                                             <Setter Property="Height" Value="40"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
-                                            <Setter Property="Background" Value="#F5F5F5"/>
                                             <Setter Property="HorizontalContentAlignment" Value="Center"/>
                                         </Style>
                                         <Style TargetType="DataGridCell">

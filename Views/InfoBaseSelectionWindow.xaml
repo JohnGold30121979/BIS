@@ -16,7 +16,7 @@
         <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
     </Window.Resources>
 
-    <Border Background="#2C3E50" CornerRadius="10" Margin="10">
+    <Border Background="{DynamicResource AppBrandShellBackgroundBrush}" CornerRadius="10" Margin="10">
         <Border.Effect>
             <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.3"/>
         </Border.Effect>
@@ -29,13 +29,16 @@
             </Grid.RowDefinitions>
 
             <!-- Заголовок -->
-            <Border Grid.Row="0" Background="#1A252F" CornerRadius="10,10,0,0" Padding="20,15">
+            <Border Grid.Row="0" Background="{DynamicResource AppBrandHeaderBackgroundBrush}" CornerRadius="10,10,0,0" Padding="20,15">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock x:Name="SystemIconText" FontSize="22" Margin="0,0,8,0"/>
-                        <TextBlock x:Name="SystemNameText" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                        <TextBlock x:Name="SystemIconText" FontSize="22" Margin="0,0,8,0"
+                                   Foreground="{DynamicResource AppBrandIconForegroundBrush}"/>
+                        <TextBlock x:Name="SystemNameText" FontSize="22" FontWeight="Bold"
+                                   Foreground="{DynamicResource AppBrandTitleForegroundBrush}"/>
                     </StackPanel>
-                    <TextBlock Text="Выбор информационной базы" FontSize="12" Foreground="#7F8C8D" 
+                    <TextBlock Text="Выбор информационной базы" FontSize="12"
+                               Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}" 
                                HorizontalAlignment="Center" Margin="0,5,0,0"/>
                 </StackPanel>
             </Border>
@@ -43,29 +46,75 @@
             <!-- Основное содержимое -->
             <Grid Grid.Row="1" Margin="20">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="280"/>
+                    <ColumnDefinition Width="280" MinWidth="240"/>
+                    <ColumnDefinition Width="12"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Левая панель - список инфобаз -->
-                <!-- Левая панель - список инфобаз -->
-                <Border Grid.Column="0" Background="#FFFFFF" CornerRadius="8" Padding="10">
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Text="📊 Информационные базы" 
-                   FontWeight="Bold" Margin="5,0,5,10" FontSize="13" Foreground="#2C3E50"/>
+                <Border Grid.Column="0" Background="{DynamicResource AppSurfaceBrush}"
+                        BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                        CornerRadius="8" Padding="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Text="📊 Информационные базы"
+                                   FontWeight="Bold" Margin="5,0,5,10" FontSize="13"
+                                   Foreground="{DynamicResource AppBodyTextBrush}"/>
 
                         <!-- Прогресс-бар -->
-                        <ProgressBar x:Name="LoadingProgress" DockPanel.Dock="Top" 
-                     Height="3" IsIndeterminate="True" 
-                     Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibilityConverter}}" Margin="0,0,0,5"/>
+                        <ProgressBar x:Name="LoadingProgress" Grid.Row="1"
+                                     Height="3" IsIndeterminate="True"
+                                     Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibilityConverter}}"
+                                     Margin="0,0,0,5"/>
 
-                        <ListBox x:Name="InfoBasesList" BorderThickness="0"
-                 ItemsSource="{Binding InfoBases}"
-                 SelectedItem="{Binding SelectedInfoBase, Mode=TwoWay}">
+                        <Grid Grid.Row="2">
+                            <ListBox x:Name="InfoBasesList"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource AppInputBackgroundBrush}"
+                                 HorizontalContentAlignment="Stretch"
+                                 ItemsSource="{Binding InfoBases}"
+                                 SelectedItem="{Binding SelectedInfoBase, Mode=TwoWay}">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Setter Property="Margin" Value="0,3"/>
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="ItemBorder"
+                                                        Background="{DynamicResource AppReadOnlyBackgroundBrush}"
+                                                        BorderBrush="{DynamicResource AppBorderBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="8"
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="Stretch"
+                                                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
+                                                        <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Padding="10" Margin="0,3" Background="#F8F9FA" CornerRadius="8"
-                            BorderBrush="#E0E0E0" BorderThickness="1">
+                                    <Grid Margin="10" HorizontalAlignment="Stretch">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
@@ -74,38 +123,63 @@
 
                                             <!-- Круглая иконка -->
                                             <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20" 
-                                    Background="#3498DB" Margin="0,0,12,0">
-                                                <TextBlock Text="📊" FontSize="20" 
+                                    Background="{DynamicResource AppAccentBrush}" Margin="0,0,12,0">
+                                                <TextBlock Text="{Binding DisplayIcon}" FontSize="20" 
                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                             </Border>
 
                                             <!-- Информация о базе -->
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" 
-                                           Foreground="#2C3E50"/>
+                                           Foreground="{DynamicResource AppBodyTextBrush}"/>
                                                 <TextBlock Text="Информационная база" FontSize="11" 
-                                           Foreground="#7F8C8D" Margin="0,2,0,0"/>
+                                           Foreground="{DynamicResource AppSecondaryTextBrush}" Margin="0,2,0,0"/>
                                                 <TextBlock Text="{Binding PatchVersionDisplay}" FontSize="11"
-                                           Foreground="#2980B9" Margin="0,2,0,0"/>
+                                           Foreground="{DynamicResource AppAccentBrush}" Margin="0,2,0,0"/>
                                             </StackPanel>
                                         </Grid>
-                                    </Border>
+                                    </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>
 
-                        <!-- Пустое сообщение -->
-                        <TextBlock x:Name="EmptyTextBlock" Text="Нет информационных баз" 
-                   Foreground="#95A5A6" HorizontalAlignment="Center" 
-                   Margin="0,50,0,0" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                    </DockPanel>
+                            <!-- Пустое сообщение -->
+                            <TextBlock x:Name="EmptyTextBlock" Text="Нет информационных баз"
+                                       Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Top"
+                                       Margin="0,50,0,0"
+                                       Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        </Grid>
+                    </Grid>
                 </Border>
 
+                <GridSplitter Grid.Column="1"
+                              Width="12"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Background="Transparent"
+                              ShowsPreview="True"
+                              ResizeBehavior="PreviousAndNext"
+                              ResizeDirection="Columns">
+                    <GridSplitter.Template>
+                        <ControlTemplate TargetType="GridSplitter">
+                            <Grid Background="Transparent">
+                                <Border Width="2"
+                                        HorizontalAlignment="Center"
+                                        Background="{DynamicResource AppBorderBrush}"
+                                        CornerRadius="1"/>
+                            </Grid>
+                        </ControlTemplate>
+                    </GridSplitter.Template>
+                </GridSplitter>
+
                 <!-- Правая панель - настройки -->
-                <Border Grid.Column="1" Background="#FFFFFF" CornerRadius="8" Margin="10,0,0,0">
+                <Border Grid.Column="2" Background="{DynamicResource AppSurfaceBrush}"
+                        BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                        CornerRadius="8">
                     <StackPanel Margin="15">
                         <TextBlock Text="⚙️ Режим работы" FontSize="16" FontWeight="Bold" 
-                                   Foreground="#2C3E50" Margin="0,0,0,15"/>
+                                   Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,15"/>
 
                         <Button x:Name="WorkModeButton" Content="💼 Рабочий режим" 
                                 Height="40" Margin="0,5" Command="{Binding StartWorkModeCommand}"
@@ -117,10 +191,10 @@
                                 Background="#3498DB" Foreground="White" FontWeight="Bold"
                                 Cursor="Hand"/>
 
-                        <Separator Margin="0,15" Background="#E0E0E0" Height="1"/>
+                        <Separator Margin="0,15" Background="{DynamicResource AppBorderBrush}" Height="1"/>
 
                         <TextBlock Text="📁 Управление базами" FontSize="13" FontWeight="SemiBold" 
-                                   Foreground="#2C3E50" Margin="0,0,0,10"/>
+                                   Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,10"/>
 
                         <Button x:Name="AddButton" Content="➕ Добавить..." 
                                 Height="35" Margin="0,5" Command="{Binding AddCommand}"
@@ -146,10 +220,10 @@
             </Grid>
 
             <!-- Нижняя панель -->
-            <Border Grid.Row="2" Background="#1A252F" CornerRadius="0,0,10,10" Padding="10,8">
+            <Border Grid.Row="2" Background="{DynamicResource AppBrandHeaderBackgroundBrush}" CornerRadius="0,0,10,10" Padding="10,8">
                 <Grid>
                     <TextBlock x:Name="ConnectionPathText" Text="{Binding ConnectionPath}" 
-                               Foreground="#7F8C8D" FontSize="11" VerticalAlignment="Center"/>
+                               Foreground="{DynamicResource AppBrandStatusForegroundBrush}" FontSize="11" VerticalAlignment="Center"/>
                     <Button x:Name="ExitButton" Content="🚪 Выход" Width="80" Height="30" 
                             HorizontalAlignment="Right" Command="{Binding ExitCommand}"
                             Background="#E74C3C" Foreground="White" Cursor="Hand"/>

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Создание информационной базы"
         Width="500" 
-        Height="640"
+        Height="700"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -46,6 +46,28 @@
                                  Margin="0,0,0,15" TextChanged="OnNameChanged"
                                  Background="White" BorderBrush="#E0E0E0" BorderThickness="1"
                                  Foreground="#2C3E50" FontWeight="Normal"/>
+
+                        <TextBlock Text="Иконка информационной базы" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                        <Grid Margin="0,0,0,15">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="90"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="IconCombo" Height="35" SelectedIndex="0"
+                                      SelectionChanged="OnIconSelected">
+                                <ComboBoxItem Content="🏢 Системная" Tag="🏢"/>
+                                <ComboBoxItem Content="📊 Финансы" Tag="📊"/>
+                                <ComboBoxItem Content="🏭 Организация" Tag="🏭"/>
+                                <ComboBoxItem Content="🏦 Банк" Tag="🏦"/>
+                                <ComboBoxItem Content="📦 Склад" Tag="📦"/>
+                                <ComboBoxItem Content="🏗 Основные средства" Tag="🏗"/>
+                                <ComboBoxItem Content="👥 Персонал" Tag="👥"/>
+                            </ComboBox>
+                            <TextBox x:Name="IconBox" Grid.Column="2" Height="35" Padding="8,5"
+                                     Text="🏢" FontSize="16" TextAlignment="Center"
+                                     ToolTip="Можно ввести любую emoji-иконку вручную"/>
+                        </Grid>
 
                         <TextBlock Text="Начальная версия патча" Foreground="#333" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5"/>
                         <TextBox x:Name="PatchVersionBox" Height="35" Padding="10" FontSize="13"

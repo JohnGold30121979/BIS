@@ -57,8 +57,12 @@ public class InfoBaseManager
         _masterContext.Database.ExecuteSqlRaw(@"
             ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""Version"" varchar(50);
             ALTER TABLE ""InfoBases"" ALTER COLUMN ""Version"" TYPE varchar(50);
-            UPDATE ""InfoBases"" SET ""Version"" = @version WHERE ""Version"" IS NULL OR ""Version"" = '';",
-            new NpgsqlParameter("@version", DefaultPatchVersion));
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""Icon"" varchar(20);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""Icon"" TYPE varchar(20);
+            UPDATE ""InfoBases"" SET ""Version"" = @version WHERE ""Version"" IS NULL OR ""Version"" = '';
+            UPDATE ""InfoBases"" SET ""Icon"" = @icon WHERE ""Icon"" IS NULL OR ""Icon"" = '';",
+            new NpgsqlParameter("@version", DefaultPatchVersion),
+            new NpgsqlParameter("@icon", InfoBase.DefaultIcon));
     }
 
     public async Task<List<InfoBase>> GetInfoBasesAsync()
@@ -91,7 +95,8 @@ public class InfoBaseManager
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
     string host, int port, string username, string password, string? databaseName = null,
-    string? patchVersion = null)
+    string? patchVersion = null,
+    string? icon = null)
     {
         var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
         var normalizedPatchVersion = NormalizePatchVersion(patchVersion);
@@ -125,7 +130,8 @@ public class InfoBaseManager
                 Password = password,
                 CreatedAt = DateTime.UtcNow,
                 IsActive = false,
-                Version = normalizedPatchVersion
+                Version = normalizedPatchVersion,
+                Icon = NormalizeIcon(icon)
             };
 
             // В InfoBaseManager.CreateInfoBaseAsync
@@ -230,7 +236,8 @@ public class InfoBaseManager
 
     public async Task<InfoBase> AttachInfoBaseAsync(
         string name, string host, int port, string databaseName, string username, string password,
-        string? patchVersion = null)
+        string? patchVersion = null,
+        string? icon = null)
     {
         if (!await TestConnectionAsync(host, port, databaseName, username, password))
             throw new InvalidOperationException("Не удалось подключиться к указанной базе данных.");
@@ -270,7 +277,8 @@ public class InfoBaseManager
             Name = name.Trim(), Description = name.Trim(), Type = "Universal",
             Host = host.Trim(), Port = port, DatabaseName = databaseName.Trim(),
             Username = username.Trim(), Password = password, IsActive = false,
-            Version = normalizedPatchVersion, CreatedAt = DateTime.UtcNow
+            Version = normalizedPatchVersion, CreatedAt = DateTime.UtcNow,
+            Icon = NormalizeIcon(icon)
         };
         await _masterContext.InfoBases.AddAsync(infoBase);
         await _masterContext.SaveChangesAsync();
@@ -278,6 +286,11 @@ public class InfoBaseManager
     }
 
     public async Task UpdateInfoBaseNameAsync(Guid id, string name)
+    {
+        await UpdateInfoBaseAsync(id, name, null);
+    }
+
+    public async Task UpdateInfoBaseAsync(Guid id, string name, string? icon)
     {
         var normalizedName = name?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedName))
@@ -289,6 +302,8 @@ public class InfoBaseManager
             ?? throw new InvalidOperationException("Информационная база не найдена.");
         infoBase.Name = normalizedName;
         infoBase.Description = normalizedName;
+        if (icon != null)
+            infoBase.Icon = NormalizeIcon(icon);
         await _masterContext.SaveChangesAsync();
         if (_currentInfoBase?.Id == id)
             _currentInfoBase = infoBase;
@@ -404,6 +419,12 @@ public class InfoBaseManager
     {
         var normalized = string.IsNullOrWhiteSpace(version) ? DefaultPatchVersion : version.Trim();
         return normalized.Length > 50 ? normalized[..50] : normalized;
+    }
+
+    private static string NormalizeIcon(string? icon)
+    {
+        var normalized = string.IsNullOrWhiteSpace(icon) ? InfoBase.DefaultIcon : icon.Trim();
+        return normalized.Length > 20 ? normalized[..20] : normalized;
     }
 
     public async Task<AppDbContext> GetCurrentDbContextAsync()
