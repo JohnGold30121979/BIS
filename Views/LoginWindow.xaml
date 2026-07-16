@@ -4,9 +4,9 @@
         xmlns:behaviors="clr-namespace:BIS.ERP.Behaviors"
         xmlns:converters="clr-namespace:BIS.ERP.Converters"
         Title="BIS ERP - Вход в систему" 
-        Height="500" Width="520"
-        MinHeight="450"
+        Width="520"
         MinWidth="480"
+        SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
         WindowStyle="None"
@@ -23,7 +23,7 @@
         </Border.Effect>
 
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="30,18,30,18">
+            <StackPanel Margin="30,22,30,26">
                 <TextBlock Text="BIS ERP" FontSize="28" FontWeight="Bold" 
                            Foreground="White" HorizontalAlignment="Center" Margin="0,0,0,8"/>
 
@@ -53,30 +53,23 @@
                            FontSize="12" TextAlignment="Center" 
                            Visibility="{Binding HasError, Converter={StaticResource BoolToVisibilityConverter}}" Margin="0,0,0,15"/>
 
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,12">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
                     <Button x:Name="LoginButton" Content="Войти" Width="120" Height="40"
                             Background="#3498DB" Foreground="White" FontSize="14" FontWeight="Bold"
-                            Command="{Binding LoginCommand}" Margin="0,0,15,0" Cursor="Hand" TabIndex="2"
+                            Command="{Binding LoginCommand}" Cursor="Hand" TabIndex="2" Margin="0,0,10,0"
                             IsDefault="True"/>
-
-                    <Button x:Name="RegisterButton" Content="Регистрация" Width="120" Height="40"
-                            Background="Transparent" Foreground="White" FontSize="14"
-                            BorderBrush="#3498DB" BorderThickness="1" Command="{Binding RegisterCommand}" Cursor="Hand" TabIndex="3"/>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,0">
                     <Button x:Name="BackButton" Content="← Назад" 
                             Width="100" Height="35" Background="Transparent"
                             Foreground="#95A5A6" FontSize="13"
                             BorderBrush="#95A5A6" BorderThickness="1"
                             Command="{Binding BackCommand}" Cursor="Hand" 
-                            Margin="0,0,10,0" TabIndex="4"/>
+                            Margin="0,0,10,0" TabIndex="3"/>
 
                     <Button x:Name="ExitButton" Content="Выход" 
                             Width="100" Height="35" Background="#E74C3C" 
                             Foreground="White" FontSize="13" FontWeight="SemiBold"
                             BorderThickness="0" Command="{Binding CloseCommand}" Cursor="Hand" 
-                            HorizontalAlignment="Center" TabIndex="5"/>
+                            HorizontalAlignment="Center" TabIndex="4"/>
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>

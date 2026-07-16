@@ -11,10 +11,7 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
 
-            var viewModel = new LoginViewModel(
-                ServiceLocator.AuthService,
-                new WindowDialogService(this),
-                selectedInfoBaseText);
+            var viewModel = new LoginViewModel(ServiceLocator.AuthService, selectedInfoBaseText);
             viewModel.LoginSucceeded += (_, _) =>
             {
                 DialogResult = true;

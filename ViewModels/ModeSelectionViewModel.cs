@@ -14,6 +14,7 @@ namespace BIS.ERP.ViewModels
         {
             UserRole.Admin => "Администратор",
             UserRole.Accountant => "Бухгалтер",
+            UserRole.Cashier => "Кассир",
             _ => "Пользователь"
         };
         public bool IsAdminVisible => CurrentUser.Role == UserRole.Admin;

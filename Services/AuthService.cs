@@ -55,7 +55,7 @@ namespace BIS.ERP.Services
                 return new AuthResult { Success = false, ErrorMessage = "Неверный логин или пароль" };
             }
 
-            if (!user.IsActive)
+            if (user.Role != UserRole.Admin && !user.IsActive)
                 return new AuthResult { Success = false, ErrorMessage = "Пользователь заблокирован" };
 
             if (!hasRoleChecksum)
@@ -72,7 +72,7 @@ namespace BIS.ERP.Services
         public async Task<bool> RegisterAsync(string login, string password, string fullName, string email, UserRole role)
         {
             var normalizedLogin = NormalizeLogin(login);
-            var safeRole = role == UserRole.Accountant ? UserRole.Accountant : UserRole.User;
+            var safeRole = role is UserRole.Accountant or UserRole.Cashier ? role : UserRole.User;
             await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             await new UserAccessService(context).EnsureSchemaAsync();
             if (await context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))

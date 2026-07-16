@@ -9,7 +9,6 @@ namespace BIS.ERP.ViewModels
     public partial class LoginViewModel : ViewModelBase
     {
         private readonly IAuthService _authService;
-        private readonly IDialogService _dialogService;
 
         [ObservableProperty]
         private string login = string.Empty;
@@ -33,10 +32,9 @@ namespace BIS.ERP.ViewModels
         public event EventHandler? CloseRequested;
         public event EventHandler? BackRequested;
 
-        public LoginViewModel(IAuthService authService, IDialogService dialogService, string selectedInfoBaseText = "")
+        public LoginViewModel(IAuthService authService, string selectedInfoBaseText = "")
         {
             _authService = authService;
-            _dialogService = dialogService;
             SelectedInfoBaseText = selectedInfoBaseText;
         }
 
@@ -91,12 +89,6 @@ namespace BIS.ERP.ViewModels
             {
                 IsBusy = false;
             }
-        }
-
-        [RelayCommand]
-        private void Register()
-        {
-            _dialogService.ShowRegister();
         }
 
         [RelayCommand]

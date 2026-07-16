@@ -4,7 +4,8 @@
     {
         User = 0,
         Admin = 1,
-        Accountant = 2
+        Accountant = 2,
+        Cashier = 3
     }
 
     public class User

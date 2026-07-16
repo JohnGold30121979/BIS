@@ -51,24 +51,6 @@ namespace BIS.ERP.Services
             return loginWindow.ShowDialog() == true;
         }
 
-        public bool ShowRegister()
-        {
-            var currentInfoBase = ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync()
-                .GetAwaiter()
-                .GetResult();
-            var infoBaseText = currentInfoBase == null
-                ? string.Empty
-                : $"Инфобаза: {currentInfoBase.Name} ({currentInfoBase.DatabaseName})";
-
-            var registerWindow = new RegisterWindow(infoBaseText)
-            {
-                Owner = _owner,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner
-            };
-
-            return registerWindow.ShowDialog() == true;
-        }
-
         public bool ShowCreateInfoBase(out string? infoBaseName)
         {
             var dialog = new CreateInfoBaseDialog { Owner = _owner };

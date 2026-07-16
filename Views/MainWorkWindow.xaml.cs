@@ -314,6 +314,9 @@ namespace BIS.ERP
             if (_authService.IsAdmin)
             {
                 adminSection.Children.Add(new NavigationItem { Id = "Settings", Name = "Настройки системы", Icon = "⚙", Type = "Settings" });
+            }
+            if (UserAccessService.CanManageUsers(_authService.CurrentUser))
+            {
                 adminSection.Children.Add(new NavigationItem { Id = "UserAccessManagement", Name = "Пользователи и права", Icon = "🔐", Type = "UserAccessManagement" });
             }
             adminSection.Children.Add(new NavigationItem { Id = "SwitchMode", Name = "Сменить пользователя или базу", Icon = "🔄", Type = "SwitchMode" });
@@ -572,6 +575,9 @@ namespace BIS.ERP
                     Icon = "⚙️",
                     Type = "Settings"
                 });
+            }
+            if (UserAccessService.CanManageUsers(_authService.CurrentUser))
+            {
                 adminSection.Children.Add(new NavigationItem
                 {
                     Id = "UserAccessManagement",
@@ -750,7 +756,7 @@ namespace BIS.ERP
 
                     case "UserAccessManagement":
                         var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems));
+                        _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser));
                         break;
 
                     case "AboutSystem":
@@ -794,6 +800,8 @@ namespace BIS.ERP
             if (hadChildren)
                 return item.Children.Count > 0;
             if (item.Id is "UserProfile" or "SwitchMode" or "Logout" or "AboutSystem")
+                return true;
+            if (item.Id is "UserAccessManagement")
                 return true;
             return allowedKeys.Contains(item.Id);
         }

@@ -7,6 +7,11 @@ namespace BIS.ERP.Services
     public class UserAccessService
     {
         private const string RoleChecksumPatchId = "system-user-role-checksum-v2";
+        private static readonly HashSet<string> ProtectedLogins = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "admin",
+            "user"
+        };
         private readonly AppDbContext _context;
 
         public UserAccessService(AppDbContext context)
@@ -66,6 +71,88 @@ namespace BIS.ERP.Services
                 .ToListAsync();
         }
 
+        public async Task<User> CreateUserAsync(
+            User? actor,
+            string login,
+            string password,
+            string fullName,
+            string email,
+            UserRole role,
+            bool isActive)
+        {
+            await EnsureSchemaAsync();
+            EnsureCanManageUsers(actor);
+            if (!CanCreateRole(actor!.Role, role))
+                throw new InvalidOperationException("Недостаточно прав для создания пользователя с выбранной ролью.");
+
+            var normalizedLogin = NormalizeLogin(login);
+            if (string.IsNullOrWhiteSpace(normalizedLogin) || normalizedLogin.Length < 3)
+                throw new InvalidOperationException("Логин должен быть не менее 3 символов.");
+            if (string.IsNullOrWhiteSpace(password) || password.Length < 6)
+                throw new InvalidOperationException("Пароль должен быть не менее 6 символов.");
+            if (await _context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
+                throw new InvalidOperationException("Пользователь с таким логином уже существует.");
+
+            var user = new User
+            {
+                Login = normalizedLogin,
+                FullName = fullName.Trim(),
+                Email = email.Trim(),
+                PasswordHash = global::BCrypt.Net.BCrypt.HashPassword(password),
+                Role = role,
+                IsActive = role == UserRole.Admin || isActive,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.Users.AddAsync(user);
+            await _context.SaveChangesAsync();
+            UserRoleIntegrityService.RefreshChecksum(user);
+            await _context.SaveChangesAsync();
+            return user;
+        }
+
+        public async Task DeleteUserAsync(User? actor, int userId)
+        {
+            await EnsureSchemaAsync();
+            EnsureCanManageUsers(actor);
+
+            var user = await _context.Users.FindAsync(userId)
+                ?? throw new InvalidOperationException("Пользователь не найден.");
+
+            if (actor!.Id == user.Id)
+                throw new InvalidOperationException("Нельзя удалить текущего пользователя.");
+            if (user.Role == UserRole.Admin || ProtectedLogins.Contains(user.Login))
+                throw new InvalidOperationException("Нельзя удалить администратора или системного гостя.");
+            if (!CanManageTargetRole(actor.Role, user.Role))
+                throw new InvalidOperationException("Недостаточно прав для удаления пользователя с этой ролью.");
+
+            var permissions = await _context.UserAccessPermissions
+                .Where(permission => permission.UserId == user.Id)
+                .ToListAsync();
+            _context.UserAccessPermissions.RemoveRange(permissions);
+            _context.Users.Remove(user);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task SetUserActiveAsync(User? actor, int userId, bool isActive)
+        {
+            await EnsureSchemaAsync();
+            EnsureCanManageUsers(actor);
+
+            var user = await _context.Users.FindAsync(userId)
+                ?? throw new InvalidOperationException("Пользователь не найден.");
+
+            if (user.Role == UserRole.Admin)
+                throw new InvalidOperationException("Администратор не имеет признака активности и всегда может входить.");
+            if (actor!.Id == user.Id && !isActive)
+                throw new InvalidOperationException("Нельзя отключить текущего пользователя.");
+            if (!CanManageTargetRole(actor.Role, user.Role))
+                throw new InvalidOperationException("Недостаточно прав для изменения активности пользователя с этой ролью.");
+
+            user.IsActive = isActive;
+            await _context.SaveChangesAsync();
+        }
+
         public async Task<HashSet<string>> GetAllowedKeysAsync(int userId)
         {
             await EnsureSchemaAsync();
@@ -101,6 +188,40 @@ namespace BIS.ERP.Services
                 });
             await _context.UserAccessPermissions.AddRangeAsync(permissions);
             await _context.SaveChangesAsync();
+        }
+
+        public static bool CanManageUsers(User? user) =>
+            user?.Role is UserRole.Admin or UserRole.Accountant;
+
+        public static bool CanCreateRole(UserRole actorRole, UserRole newRole) =>
+            actorRole == UserRole.Admin ||
+            actorRole == UserRole.Accountant && (newRole is UserRole.Cashier or UserRole.User);
+
+        public static bool CanManageTargetRole(UserRole actorRole, UserRole targetRole) =>
+            actorRole == UserRole.Admin ||
+            actorRole == UserRole.Accountant && (targetRole is UserRole.Cashier or UserRole.User);
+
+        public static IReadOnlyList<UserRole> GetCreatableRoles(User? actor)
+        {
+            if (actor?.Role == UserRole.Admin)
+                return new[] { UserRole.Admin, UserRole.Accountant, UserRole.Cashier, UserRole.User };
+            if (actor?.Role == UserRole.Accountant)
+                return new[] { UserRole.Cashier, UserRole.User };
+            return Array.Empty<UserRole>();
+        }
+
+        public static string GetRoleDisplayName(UserRole role) => role switch
+        {
+            UserRole.Admin => "Администратор",
+            UserRole.Accountant => "Бухгалтер",
+            UserRole.Cashier => "Кассир",
+            _ => "Гость"
+        };
+
+        private static void EnsureCanManageUsers(User? actor)
+        {
+            if (!CanManageUsers(actor))
+                throw new InvalidOperationException("Недостаточно прав для управления пользователями.");
         }
 
         public async Task UpdateUserRoleAsync(int userId, UserRole role)

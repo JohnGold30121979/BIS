@@ -35,6 +35,7 @@ namespace BIS.ERP.Views.Dialogs
             {
                 UserRole.Admin => "Администратор",
                 UserRole.Accountant => "Бухгалтер",
+                UserRole.Cashier => "Кассир",
                 _ => "Пользователь"
             };
             CurrentPasswordBox.Focus();

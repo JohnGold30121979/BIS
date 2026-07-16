@@ -205,6 +205,9 @@
                                 <Button x:Name="AccountingSetupButton" Content="⚙ Настройка учета"
                                         Background="#1F618D" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnAccountingSetupClick"/>
+                                <Button x:Name="UsersButton" Content="🔐 Пользователи и права"
+                                        Background="#2E86C1" Foreground="White" Height="35" Margin="0,5,0,0"
+                                        Click="OnUsersClick"/>
                                 <Button x:Name="AddReportButton" Content="📊 Отчет"
                                         Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnCreateReportClick"/>

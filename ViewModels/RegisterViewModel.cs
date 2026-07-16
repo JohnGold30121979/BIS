@@ -45,6 +45,7 @@ namespace BIS.ERP.ViewModels
         public IReadOnlyList<RegistrationRoleOption> AvailableRoles { get; } =
         [
             new("Гость", UserRole.User),
+            new("Кассир", UserRole.Cashier),
             new("Бухгалтер", UserRole.Accountant)
         ];
 
