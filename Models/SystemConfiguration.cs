@@ -8,6 +8,9 @@ namespace BIS.ERP.Models
         [Key] public Guid Id { get; set; } = Guid.NewGuid();
         [MaxLength(120)] public string SystemName { get; set; } = "BIS ERP";
         [MaxLength(20)] public string Icon { get; set; } = "🏢";
+        public byte[]? LogoImage { get; set; }
+        [MaxLength(50)] public string? LogoContentType { get; set; }
+        [MaxLength(260)] public string? LogoFileName { get; set; }
         [MaxLength(1000)] public string Description { get; set; } = "Корпоративная информационная система";
         [MaxLength(2000)] public string CompanyDetails { get; set; } = string.Empty;
         [MaxLength(160)] public string Email { get; set; } = string.Empty;

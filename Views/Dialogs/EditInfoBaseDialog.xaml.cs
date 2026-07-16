@@ -68,7 +68,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnLoadLogoClick(object sender, RoutedEventArgs e)
         {
-            if (!InfoBaseLogoFileService.TryPickLogo(this, out var logo, out var error))
+            if (!LogoFileService.TryPickLogo(this, out var logo, out var error))
             {
                 if (!string.IsNullOrWhiteSpace(error))
                 {
@@ -95,7 +95,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void UpdateLogoPreview()
         {
-            var imageSource = InfoBaseLogoFileService.CreateImageSource(logoImageBytes);
+            var imageSource = LogoFileService.CreateImageSource(logoImageBytes);
             LogoPreviewImage.Source = imageSource;
             LogoPreviewImage.Visibility = imageSource == null ? Visibility.Collapsed : Visibility.Visible;
             LogoPlaceholderText.Visibility = imageSource == null ? Visibility.Visible : Visibility.Collapsed;

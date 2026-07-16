@@ -34,8 +34,16 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Center">
-                                <TextBlock x:Name="SystemIconText" FontSize="22" Margin="0,0,8,0"
-                                           Foreground="{DynamicResource AppBrandIconForegroundBrush}"/>
+                                <Border Width="28" Height="28" CornerRadius="7"
+                                        Background="{DynamicResource AppAccentBrush}"
+                                        Margin="0,0,8,0">
+                                    <Grid>
+                                        <Image x:Name="SystemLogoImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                                        <TextBlock x:Name="SystemIconText" FontSize="18"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource AppBrandIconForegroundBrush}"/>
+                                    </Grid>
+                                </Border>
                                 <TextBlock x:Name="SystemNameText" FontSize="22" FontWeight="Bold"
                                            Foreground="{DynamicResource AppBrandTitleForegroundBrush}"/>
                             </StackPanel>
@@ -50,9 +58,20 @@
                         </Grid>
 
                         <!-- Информация об информационной базе -->
-                        <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
-                                   FontSize="11" Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}" 
-                                   HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                            <Border Width="22" Height="22" CornerRadius="6"
+                                    Background="{DynamicResource AppAccentBrush}" Margin="0,0,7,0">
+                                <Grid>
+                                    <Image x:Name="InfoBaseLogoImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="InfoBaseIconText" FontSize="13"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Foreground="White"/>
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
+                                       FontSize="11" Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}" 
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

@@ -37,9 +37,26 @@ namespace BIS.ERP.Views
             };
 
             DataContext = viewModel;
-            Loaded += (_, _) => LoginBox.Focus();
+            Loaded += async (_, _) =>
+            {
+                await ApplyInfoBaseLogoAsync();
+                LoginBox.Focus();
+            };
             AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(OnWindowPreviewKeyDown), true);
             AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(OnWindowPreviewKeyDown), true);
+        }
+
+        private async System.Threading.Tasks.Task ApplyInfoBaseLogoAsync()
+        {
+            var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            if (currentInfoBase == null)
+                return;
+
+            LogoDisplayHelper.Apply(
+                InfoBaseLogoImage,
+                InfoBaseIconText,
+                currentInfoBase.LogoImage,
+                currentInfoBase.DisplayIcon);
         }
 
         private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)

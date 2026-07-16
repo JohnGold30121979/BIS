@@ -6,25 +6,25 @@ using Microsoft.Win32;
 
 namespace BIS.ERP.Services
 {
-    public sealed class InfoBaseLogoFile
+    public sealed class LogoFile
     {
         public required byte[] ImageBytes { get; init; }
         public required string ContentType { get; init; }
         public required string FileName { get; init; }
     }
 
-    public static class InfoBaseLogoFileService
+    public static class LogoFileService
     {
         private const int MaxLogoBytes = 2 * 1024 * 1024;
 
-        public static bool TryPickLogo(Window owner, out InfoBaseLogoFile? logo, out string? error)
+        public static bool TryPickLogo(Window owner, out LogoFile? logo, out string? error)
         {
             logo = null;
             error = null;
 
             var dialog = new OpenFileDialog
             {
-                Title = "Выбор логотипа информационной базы",
+                Title = "Выбор логотипа",
                 Filter = "Логотип (*.png;*.ico)|*.png;*.ico",
                 CheckFileExists = true,
                 Multiselect = false
@@ -54,7 +54,7 @@ namespace BIS.ERP.Services
                 return false;
             }
 
-            logo = new InfoBaseLogoFile
+            logo = new LogoFile
             {
                 ImageBytes = File.ReadAllBytes(dialog.FileName),
                 ContentType = contentType,

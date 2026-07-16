@@ -33,8 +33,16 @@
             <Border Grid.Row="0" Background="{DynamicResource AppBrandHeaderBackgroundBrush}" CornerRadius="10,10,0,0" Padding="20,15">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <TextBlock x:Name="SystemIconText" FontSize="22" Margin="0,0,8,0"
-                                   Foreground="{DynamicResource AppBrandIconForegroundBrush}"/>
+                        <Border Width="28" Height="28" CornerRadius="7"
+                                Background="{DynamicResource AppAccentBrush}"
+                                Margin="0,0,8,0">
+                            <Grid>
+                                <Image x:Name="SystemLogoImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                                <TextBlock x:Name="SystemIconText" FontSize="18"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AppBrandIconForegroundBrush}"/>
+                            </Grid>
+                        </Border>
                         <TextBlock x:Name="SystemNameText" FontSize="22" FontWeight="Bold"
                                    Foreground="{DynamicResource AppBrandTitleForegroundBrush}"/>
                     </StackPanel>

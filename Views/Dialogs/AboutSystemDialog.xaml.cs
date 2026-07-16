@@ -21,7 +21,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             _configuration = await new SystemConfigurationService().GetAsync();
             Title = $"О системе {_configuration.SystemName}";
-            IconText.Text = _configuration.Icon;
+            LogoDisplayHelper.Apply(LogoImage, IconText, _configuration.LogoImage, _configuration.Icon);
             SystemNameText.Text = _configuration.SystemName;
             DescriptionText.Text = EmptyFallback(_configuration.Description);
             CompanyDetailsText.Text = EmptyFallback(_configuration.CompanyDetails);
