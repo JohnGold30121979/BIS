@@ -15,6 +15,7 @@ namespace BIS.ERP.Views
         private readonly Dictionary<string, object> _itemData;
         private readonly Dictionary<string, Control> _controls;
         private readonly MetadataService _metadataService;
+        private readonly bool _isNewRecord;
         private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
         private AccountAnalyticsRegistry? _accountAnalytics;
         private string? _assignedModuleName;
@@ -29,6 +30,7 @@ namespace BIS.ERP.Views
             _itemData = new Dictionary<string, object>();
             _controls = new Dictionary<string, Control>();
             _referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
+            _isNewRecord = existingData == null;
 
             DialogTitle.Text = existingData == null
                 ? $"Добавление в справочник: {catalog.Name}"
@@ -80,6 +82,8 @@ namespace BIS.ERP.Views
                     {
                         inputControl = CreateRegularControl(field, existingData);
                     }
+
+                    await ApplyGeneratedCodeAsync(field, inputControl);
 
                     panel.Children.Add(inputControl);
                     FieldsPanel.Children.Add(panel);
@@ -158,7 +162,7 @@ namespace BIS.ERP.Views
                 items.Add(item);
             }
 
-            comboBox.ItemsSource = items;
+            ReferenceComboBoxSearchHelper.Attach(comboBox, items);
 
             // Выбираем существующее значение: поддерживаем и Id, и уже отображенное значение.
             var existingValue = GetExistingValue(field, existingData)?.ToString();
@@ -195,6 +199,7 @@ namespace BIS.ERP.Views
             foreach (var keyName in new[]
                      {
                          "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Код организации", "organization_code",
                          "Наименование", "name", "ФИО", "full_name"
                      })
             {
@@ -212,6 +217,13 @@ namespace BIS.ERP.Views
             var displayKey = NormalizeReferenceLookupKey(displayName);
             if (!string.IsNullOrWhiteSpace(displayKey))
                 yield return displayKey;
+
+            foreach (var value in row.Values)
+            {
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
         }
 
         private static string NormalizeReferenceLookupKey(string? value)
@@ -506,6 +518,92 @@ namespace BIS.ERP.Views
                     return textBox;
             }
         }
+
+        private async Task ApplyGeneratedCodeAsync(MetadataField field, Control inputControl)
+        {
+            if (!_isNewRecord || !IsCatalogCodeField(field) || inputControl is not TextBox textBox)
+                return;
+
+            textBox.Text = await GenerateNextCatalogCodeAsync(field);
+            textBox.IsReadOnly = true;
+            textBox.ToolTip = "Код формируется автоматически при добавлении записи.";
+            textBox.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
+        }
+
+        private async Task<string> GenerateNextCatalogCodeAsync(MetadataField codeField)
+        {
+            var rows = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+            var existingCodes = rows
+                .Select(row => GetCodeValue(row, codeField))
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var numericCodes = existingCodes
+                .Select(value => new
+                {
+                    Text = value,
+                    IsNumeric = long.TryParse(value, out var number),
+                    Number = long.TryParse(value, out var numberValue) ? numberValue : 0
+                })
+                .Where(item => item.IsNumeric)
+                .ToList();
+
+            var nextNumber = numericCodes.Count == 0
+                ? 1
+                : numericCodes.Max(item => item.Number) + 1;
+
+            var width = numericCodes
+                .Where(item => item.Text.Length > item.Number.ToString().Length || item.Text.StartsWith("0", StringComparison.Ordinal))
+                .Select(item => item.Text.Length)
+                .DefaultIfEmpty(0)
+                .Max();
+
+            string BuildCode(long number) => width > 0
+                ? number.ToString().PadLeft(width, '0')
+                : number.ToString();
+
+            var code = BuildCode(nextNumber);
+            var usedCodes = existingCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            while (usedCodes.Contains(code))
+            {
+                nextNumber++;
+                code = BuildCode(nextNumber);
+            }
+
+            return code;
+        }
+
+        private static string GetCodeValue(IReadOnlyDictionary<string, object> row, MetadataField codeField)
+        {
+            foreach (var key in GetCodeLookupKeys(codeField))
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value.ToString() ?? string.Empty;
+            }
+
+            var pair = row.FirstOrDefault(item => IsCodeKey(item.Key));
+            return pair.Value?.ToString() ?? string.Empty;
+        }
+
+        private static IEnumerable<string> GetCodeLookupKeys(MetadataField codeField)
+        {
+            yield return codeField.Name;
+            yield return codeField.DbColumnName;
+            yield return "Код";
+            yield return "code";
+            yield return "Code";
+        }
+
+        private static bool IsCatalogCodeField(MetadataField field) =>
+            IsCodeKey(field.Name) || IsCodeKey(field.DbColumnName);
+
+        private static bool IsCodeKey(string? value) =>
+            value?.Trim().Equals("Код", StringComparison.OrdinalIgnoreCase) == true ||
+            value?.Trim().Equals("code", StringComparison.OrdinalIgnoreCase) == true ||
+            value?.Trim().Equals("Код организации", StringComparison.OrdinalIgnoreCase) == true ||
+            value?.Trim().Equals("organization_code", StringComparison.OrdinalIgnoreCase) == true;
         private async Task AutoFillFromEmployee(Guid employeeId)
         {
             try

@@ -37,7 +37,10 @@ namespace BIS.ERP.Views
 
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
-            SearchPanel.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
+            SearchPanel.Visibility = Visibility.Visible;
+            SearchBox.ToolTip = IsChartOfAccountsCatalog
+                ? "Поиск по коду и наименованию счета"
+                : "Поиск по всем видимым колонкам справочника";
             ImportDbfButton.Visibility = CanImportDbf ? Visibility.Visible : Visibility.Collapsed;
             ImportDbfButton.Content = IsPaymentClassificationCatalog
                 ? "📥 Загрузить классификацию"
@@ -603,7 +606,7 @@ namespace BIS.ERP.Views
 
         private void ApplySearchFilter()
         {
-            if (!IsChartOfAccountsCatalog || _dataTable?.DefaultView == null)
+            if (_dataTable?.DefaultView == null)
                 return;
 
             var searchText = SearchBox.Text?.Trim();
@@ -615,11 +618,21 @@ namespace BIS.ERP.Views
             }
 
             var escapedValue = EscapeRowFilterValue(searchText);
-            _dataTable.DefaultView.RowFilter =
-                $"[Код] LIKE '%{escapedValue}%' OR [Наименование] LIKE '%{escapedValue}%'";
+            var filterParts = _dataTable.Columns
+                .Cast<DataColumn>()
+                .Where(column => !column.ColumnName.Equals("Id", StringComparison.OrdinalIgnoreCase))
+                .Select(column => $"CONVERT([{EscapeColumnName(column.ColumnName)}], 'System.String') LIKE '%{escapedValue}%'")
+                .ToList();
 
-            StatusText.Text = $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}";
+            _dataTable.DefaultView.RowFilter = string.Join(" OR ", filterParts);
+
+            StatusText.Text = IsChartOfAccountsCatalog
+                ? $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}"
+                : $"🔍 Найдено записей: {_dataTable.DefaultView.Count}";
         }
+
+        private static string EscapeColumnName(string value) =>
+            value.Replace("]", "]]");
 
         private static string EscapeRowFilterValue(string value)
         {

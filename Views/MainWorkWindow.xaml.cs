@@ -881,7 +881,7 @@ namespace BIS.ERP
             {
                 groups.Insert(0, new NavigationOverviewGroup
                 {
-                    Title = rootItem.Type == "Group" ? rootItem.Name : ToTitleCase(rootItem.Name),
+                    Title = rootItem.Type == "Group" ? rootItem.Name : "Объекты раздела",
                     Icon = rootItem.Icon,
                     Items = directItems
                 });

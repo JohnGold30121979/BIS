@@ -196,7 +196,7 @@ namespace BIS.ERP.Views.Dialogs
                     item.LookupKeys.Add(key);
             }
 
-            comboBox.ItemsSource = items;
+            ReferenceComboBoxSearchHelper.Attach(comboBox, items);
 
             var currentText = currentValue?.ToString();
             if (currentValue != null && Guid.TryParse(currentText, out var currentGuid))
@@ -225,6 +225,7 @@ namespace BIS.ERP.Views.Dialogs
             foreach (var keyName in new[]
                      {
                          "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Код организации", "organization_code",
                          "Наименование", "name", "ФИО", "full_name"
                      })
             {
@@ -242,6 +243,13 @@ namespace BIS.ERP.Views.Dialogs
             var displayKey = NormalizeReferenceLookupKey(displayName);
             if (!string.IsNullOrWhiteSpace(displayKey))
                 yield return displayKey;
+
+            foreach (var value in row.Values)
+            {
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
         }
 
         private static string NormalizeReferenceLookupKey(string? value)

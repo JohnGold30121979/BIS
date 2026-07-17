@@ -4176,10 +4176,10 @@ END $$;");
 
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = @"
-                UPDATE doc_numbering
-                SET current_number = current_number + 1, UpdatedAt = NOW()
+                SELECT current_number
+                FROM doc_numbering
                 WHERE document_type = @documentType
-                RETURNING current_number - 1";
+                LIMIT 1";
 
                 var documentTypeParameter = command.CreateParameter();
                 documentTypeParameter.ParameterName = "@documentType";
@@ -4234,9 +4234,9 @@ END $$;");
 
             const string updateSql = @"
                 UPDATE doc_numbering
-                SET prefix = '', current_number = GREATEST(current_number, @currentNumber), UpdatedAt = NOW()
+                SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
-                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
+                  AND (COALESCE(prefix, '') <> '' OR current_number <> @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
@@ -4267,7 +4267,7 @@ END $$;");
             if (document == null)
                 return;
 
-            var nextNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document }, documentName);
+            var nextNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4281,9 +4281,9 @@ END $$;");
 
             const string updateSql = @"
                 UPDATE doc_numbering
-                SET prefix = '', current_number = GREATEST(current_number, @currentNumber), UpdatedAt = NOW()
+                SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
-                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
+                  AND (COALESCE(prefix, '') <> '' OR current_number <> @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
@@ -4294,16 +4294,13 @@ END $$;");
         private Task<int> GetSuggestedNextGlobalDocumentNumberAsync(IEnumerable<MetadataObject> documents)
         {
             return GetSuggestedNextDocumentNumberAsync(
-                documents.Where(document => !UsesIndependentDocumentNumbering(document.Name)),
-                GlobalDocumentNumberingKey);
+                documents.Where(document => !UsesIndependentDocumentNumbering(document.Name)));
         }
 
         private async Task<int> GetSuggestedNextDocumentNumberAsync(
-            IEnumerable<MetadataObject> documents,
-            string counterKey)
+            IEnumerable<MetadataObject> documents)
         {
             long maxDocumentNumber = 0;
-            long maxCounterNumber = 1;
             var connectionOpened = false;
             var connection = _context.Database.GetDbConnection();
 
@@ -4354,20 +4351,6 @@ END $$;");
                     }
                 }
 
-                using var counterCommand = connection.CreateCommand();
-                counterCommand.CommandText = @"
-                    SELECT COALESCE(MAX(current_number), 1)
-                    FROM doc_numbering
-                    WHERE document_type = @documentType";
-                var counterDocumentTypeParameter = counterCommand.CreateParameter();
-                counterDocumentTypeParameter.ParameterName = "@documentType";
-                counterDocumentTypeParameter.Value = counterKey;
-                counterCommand.Parameters.Add(counterDocumentTypeParameter);
-                var counterValue = await counterCommand.ExecuteScalarAsync();
-                if (counterValue != null && counterValue != DBNull.Value)
-                {
-                    maxCounterNumber = Convert.ToInt64(counterValue);
-                }
             }
             finally
             {
@@ -4377,7 +4360,7 @@ END $$;");
                 }
             }
 
-            var nextNumber = Math.Max(maxCounterNumber, maxDocumentNumber + 1);
+            var nextNumber = maxDocumentNumber + 1;
             return nextNumber > int.MaxValue ? int.MaxValue : (int)nextNumber;
         }
 

@@ -90,11 +90,12 @@ namespace BIS.ERP.Views.Dialogs
                 if (organizationsCatalog != null)
                 {
                     var organizations = await _metadataService.GetCatalogDataAsync(organizationsCatalog.Id);
-                    OrganizationCombo.ItemsSource = organizations.Select(item => new OrganizationItem
-                    {
-                        Id = Guid.Parse(item["Id"].ToString()!),
-                        DisplayName = ReferenceDisplayHelper.BuildDisplayValue(item, new MetadataField())
-                    }).OrderBy(item => item.DisplayName).ToList();
+                    var organizationItems = organizations
+                        .Where(item => item.ContainsKey("Id") && Guid.TryParse(item["Id"]?.ToString(), out _))
+                        .Select(CreateOrganizationItem)
+                        .OrderBy(item => item.DisplayName)
+                        .ToList();
+                    ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, organizationItems);
                 }
 
                 var accountsCatalog = catalogs.FirstOrDefault(item => item.Name.StartsWith("План счетов"));
@@ -106,10 +107,10 @@ namespace BIS.ERP.Views.Dialogs
                     FillAccountItems(_accounts);
                 }
 
-                PaymentKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Виды оплаты");
-                DeliveryKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Виды поставки");
-                SupplyKindCombo.ItemsSource = await LoadReferenceOptionsAsync(catalogs, "Типы поставки");
-                CurrencyCombo.ItemsSource = await LoadCurrencyOptionsAsync(catalogs);
+                ReferenceComboBoxSearchHelper.Attach(PaymentKindCombo, await LoadReferenceOptionsAsync(catalogs, "Виды оплаты"));
+                ReferenceComboBoxSearchHelper.Attach(DeliveryKindCombo, await LoadReferenceOptionsAsync(catalogs, "Виды поставки"));
+                ReferenceComboBoxSearchHelper.Attach(SupplyKindCombo, await LoadReferenceOptionsAsync(catalogs, "Типы поставки"));
+                ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, await LoadCurrencyOptionsAsync(catalogs));
                 await LoadTaxItemsAsync(catalogs);
 
                 if (_editId.HasValue)
@@ -1046,6 +1047,39 @@ namespace BIS.ERP.Views.Dialogs
             return name;
         }
 
+        private static OrganizationItem CreateOrganizationItem(Dictionary<string, object> row)
+        {
+            var item = new OrganizationItem
+            {
+                Id = Guid.Parse(row["Id"].ToString()!),
+                DisplayName = BuildCodeName(
+                    GetRowValue(row, "Код", "code", "Код организации", "organization_code"),
+                    ReferenceDisplayHelper.BuildDisplayValue(row, new MetadataField()))
+            };
+
+            foreach (var value in row.Values)
+            {
+                var text = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(text))
+                    item.LookupKeys.Add(text);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.DisplayName))
+                item.LookupKeys.Add(item.DisplayName);
+
+            return item;
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? normalized[..separatorIndex].Trim() : normalized;
+        }
+
         private void SetHeaderAccount(string accountCode)
         {
             _selectedHeaderAccountCode = accountCode?.Trim() ?? string.Empty;
@@ -1155,6 +1189,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             public Guid Id { get; init; }
             public string DisplayName { get; init; } = string.Empty;
+            public HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class EditableInvoiceLine : InvoiceLineRow, INotifyPropertyChanged

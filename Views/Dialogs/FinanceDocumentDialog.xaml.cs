@@ -100,20 +100,16 @@ namespace BIS.ERP.Views
             _advancePaymentRows = await _metadataService.GetAdvancePaymentPairsAsync();
             _advancePayments = _advancePaymentRows
                 .Where(row => TryGetGuid(row.GetValueOrDefault("Id"), out _))
-                .Select(row => new ReferenceItem
-                {
-                    Id = Guid.Parse(row["Id"].ToString()!),
-                    DisplayName = BuildDisplayName(row, "code", "name")
-                })
+                .Select(row => CreateReferenceItem(row, "code", "name"))
                 .ToList();
 
-            OrganizationCombo.ItemsSource = _organizations;
-            AdvanceEmployeeCombo.ItemsSource = _employees;
-            PayrollEmployeeCombo.ItemsSource = _employees;
-            RepresentativeCombo.ItemsSource = _employees;
-            CounterpartyCombo.ItemsSource = _organizations;
-            CurrencyCombo.ItemsSource = _currencies;
-            AdvancePaymentCombo.ItemsSource = _advancePayments;
+            ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
+            ReferenceComboBoxSearchHelper.Attach(AdvanceEmployeeCombo, _employees);
+            ReferenceComboBoxSearchHelper.Attach(PayrollEmployeeCombo, _employees);
+            ReferenceComboBoxSearchHelper.Attach(RepresentativeCombo, _employees);
+            ReferenceComboBoxSearchHelper.Attach(CounterpartyCombo, _organizations);
+            ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, _currencies);
+            ReferenceComboBoxSearchHelper.Attach(AdvancePaymentCombo, _advancePayments);
         }
 
         private async Task LoadRecordAsync(Guid recordId)
@@ -642,12 +638,32 @@ namespace BIS.ERP.Views
             var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
             return rows
                 .Where(row => TryGetGuid(row.GetValueOrDefault("Id"), out _))
-                .Select(row => new ReferenceItem
-                {
-                    Id = Guid.Parse(row["Id"].ToString()!),
-                    DisplayName = BuildDisplayName(row, firstDisplayField, secondDisplayField)
-                })
+                .Select(row => CreateReferenceItem(row, firstDisplayField, secondDisplayField))
                 .ToList();
+        }
+
+        private static ReferenceItem CreateReferenceItem(
+            Dictionary<string, object> row,
+            string firstDisplayField,
+            string secondDisplayField)
+        {
+            var item = new ReferenceItem
+            {
+                Id = Guid.Parse(row["Id"].ToString()!),
+                DisplayName = BuildDisplayName(row, firstDisplayField, secondDisplayField)
+            };
+
+            foreach (var value in row.Values)
+            {
+                var text = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(text))
+                    item.LookupKeys.Add(text);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.DisplayName))
+                item.LookupKeys.Add(item.DisplayName);
+
+            return item;
         }
 
         private static string BuildDisplayName(Dictionary<string, object> row, string firstField, string secondField)
@@ -663,6 +679,16 @@ namespace BIS.ERP.Views
                 : !string.IsNullOrWhiteSpace(second)
                     ? second
                     : GetString(row, "Наименование", "name", "ФИО", "Код", "code", "Id");
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? normalized[..separatorIndex].Trim() : normalized;
         }
 
         private static object? GetFirstValue(IReadOnlyDictionary<string, object> row, params string[] keys)

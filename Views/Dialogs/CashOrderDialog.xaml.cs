@@ -66,13 +66,13 @@ namespace BIS.ERP.Views
                 {
                     // Заполняем ComboBox (кроме сотрудника)
                     if (data.CashDesks != null)
-                        CashDeskCombo.ItemsSource = data.CashDesks;
+                        ReferenceComboBoxSearchHelper.Attach(CashDeskCombo, data.CashDesks);
                     if (data.Organizations != null)
-                        OrganizationCombo.ItemsSource = data.Organizations;
+                        ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, data.Organizations);
                     if (data.Currencies != null)
-                        CurrencyCombo.ItemsSource = data.Currencies;
+                        ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, data.Currencies);
                     if (data.Materials != null)
-                        MaterialCombo.ItemsSource = data.Materials;
+                        ReferenceComboBoxSearchHelper.Attach(MaterialCombo, data.Materials);
 
                     _accountAnalytics = data.AccountAnalytics;
 
@@ -192,11 +192,10 @@ namespace BIS.ERP.Views
             if (orgs != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(orgs.Id);
-                result.Organizations = data.Select(d => new ReferenceItem
-                {
-                    Id = Guid.Parse(d["Id"].ToString()),
-                    DisplayName = d["Наименование"].ToString()
-                }).ToList();
+                result.Organizations = data
+                    .Where(row => row.ContainsKey("Id") && Guid.TryParse(row["Id"]?.ToString(), out _))
+                    .Select(row => CreateReferenceItem(row, "Код", "Наименование"))
+                    .ToList();
             }
 
             // Валюты
@@ -578,12 +577,32 @@ namespace BIS.ERP.Views
             var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
             return rows
                 .Where(row => row.ContainsKey("Id") && Guid.TryParse(row["Id"]?.ToString(), out _))
-                .Select(row => new ReferenceItem
-                {
-                    Id = Guid.Parse(row["Id"].ToString()),
-                    DisplayName = BuildDisplayName(row, firstDisplayField, secondDisplayField)
-                })
+                .Select(row => CreateReferenceItem(row, firstDisplayField, secondDisplayField))
                 .ToList();
+        }
+
+        private static ReferenceItem CreateReferenceItem(
+            Dictionary<string, object> row,
+            string firstDisplayField,
+            string secondDisplayField)
+        {
+            var item = new ReferenceItem
+            {
+                Id = Guid.Parse(row["Id"].ToString()!),
+                DisplayName = BuildDisplayName(row, firstDisplayField, secondDisplayField)
+            };
+
+            foreach (var value in row.Values)
+            {
+                var text = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(text))
+                    item.LookupKeys.Add(text);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.DisplayName))
+                item.LookupKeys.Add(item.DisplayName);
+
+            return item;
         }
 
         private static string BuildDisplayName(Dictionary<string, object> row, string firstField, string secondField)
@@ -606,6 +625,16 @@ namespace BIS.ERP.Views
                       row.GetValueOrDefault("name")?.ToString() ??
                       row.GetValueOrDefault("Id")?.ToString() ??
                       string.Empty;
+        }
+
+        private static string NormalizeReferenceLookupKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim();
+            var separatorIndex = normalized.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? normalized[..separatorIndex].Trim() : normalized;
         }
 
         private static string? GetRowString(Dictionary<string, object> row, params string[] keys)
