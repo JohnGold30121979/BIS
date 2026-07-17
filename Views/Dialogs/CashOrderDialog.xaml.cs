@@ -1,6 +1,7 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
+using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,6 +24,11 @@ namespace BIS.ERP.Views
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
         private List<CashDeskItem> _cashDesks = new();
+        private const string ReceiptDocumentName = "Приходный кассовый ордер";
+        private const string PaymentDocumentName = "Расходный кассовый ордер";
+        private readonly ObservableCollection<CashPostingPreviewRow> _postingPreviewRows = new();
+        private bool _isReceiptOrder = true;
+        private bool _isChangingOrderType;
 
         // Для сотрудника
         private Guid _selectedEmployeeId = Guid.Empty;
@@ -31,6 +37,8 @@ namespace BIS.ERP.Views
         public CashOrderDialog(MetadataObject document, MetadataService metadataService)
         {
             InitializeComponent();
+            _isReceiptOrder = IsReceiptDocument(document.Name);
+            PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
             _metadataService = metadataService;
             _editId = null;
@@ -43,6 +51,8 @@ namespace BIS.ERP.Views
         public CashOrderDialog(MetadataObject document, MetadataService metadataService, Guid editId)
         {
             InitializeComponent();
+            _isReceiptOrder = IsReceiptDocument(document.Name);
+            PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
             _metadataService = metadataService;
             _editId = editId;
@@ -115,6 +125,12 @@ namespace BIS.ERP.Views
 
                     _accountAnalytics = data.AccountAnalytics;
 
+                    _isChangingOrderType = true;
+                    ReceiptRadio.IsChecked = _isReceiptOrder;
+                    PaymentRadio.IsChecked = !_isReceiptOrder;
+                    _isChangingOrderType = false;
+                    UpdateOrderTypeUi();
+
                     // Генерируем номер
                     if (!editId.HasValue)
                     {
@@ -126,6 +142,7 @@ namespace BIS.ERP.Views
                             _selectedCashDeskId = data.CashDesks.First().Id;
                             _selectedCashDeskCode = data.CashDesks.First().AccountCode;
                             CashDeskAccountBox.Text = _selectedCashDeskCode;
+                            RefreshPostingPreview();
                         }
                     }
                     else if (data.Record != null)
@@ -251,7 +268,7 @@ namespace BIS.ERP.Views
             // Генерируем номер
             try
             {
-                result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document.Name);
+                result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(GetSelectedDocumentName());
             }
             catch
             {
@@ -290,9 +307,10 @@ namespace BIS.ERP.Views
             {
                 this.Cursor = Cursors.Wait;
 
+                var selectedDocument = await ResolveSelectedCashOrderDocumentAsync();
                 var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
-                    _document.Id,
-                    _document.ObjectType);
+                    selectedDocument.Id,
+                    selectedDocument.ObjectType);
 
                 if (accountsData == null || accountsData.Count == 0)
                 {
@@ -318,6 +336,7 @@ namespace BIS.ERP.Views
                     _selectedCorrAccountCode = accountCode;
 
                     UpdateAccountControlledFieldsVisibility();
+                    RefreshPostingPreview();
                 }
             }
             catch (Exception ex)
@@ -349,6 +368,13 @@ namespace BIS.ERP.Views
                 NumberBox.Text = documentNumber;
 
                 var amount = decimal.TryParse(AmountBox.Text, out var parsedAmount) ? parsedAmount : 0;
+                if (amount <= 0)
+                {
+                    MessageBox.Show("Сумма кассового ордера должна быть больше нуля.", "Проверка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AmountBox.Focus();
+                    return;
+                }
 
                 // ПРОВЕРКА ЗАПОЛНЕНИЯ ВСЕХ АКТИВНЫХ ПОЛЕЙ
                 if (OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem == null)
@@ -418,12 +444,12 @@ namespace BIS.ERP.Views
 
                 // Определяем дебет и кредит
                 string debitAccount, creditAccount;
-                if (_document.Name == "Приходный кассовый ордер")
+                if (_isReceiptOrder)
                 {
                     debitAccount = cashDeskCode;
                     creditAccount = corrAccountCode;
                 }
-                else if (_document.Name == "Расходный кассовый ордер")
+                else if (!_isReceiptOrder)
                 {
                     debitAccount = corrAccountCode;
                     creditAccount = cashDeskCode;
@@ -439,6 +465,8 @@ namespace BIS.ERP.Views
                     MessageBox.Show("Дебет и кредит не могут быть одинаковыми!", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
+
+                var targetDocument = await ResolveSelectedCashOrderDocumentAsync();
 
                 // Валюта
                 bool isCurrencyEnabled = IsCurrencyEnabledForAccount(corrAccountCode);
@@ -460,33 +488,42 @@ namespace BIS.ERP.Views
                 };
 
                 // Заполняем остальные поля (только если они видимы, иначе не сохраняем)
-                SetFieldValueIfExists(itemData, "Организация",
+                SetFieldValueIfExists(targetDocument, itemData, "Организация",
                     OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem org
                         ? org.Id.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(itemData, "Валюта",
+                SetFieldValueIfExists(targetDocument, itemData, "Валюта",
                     CurrencyPanel.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem is ReferenceItem currency
                         ? currency.Id.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(itemData, "Сотрудник",
+                SetFieldValueIfExists(targetDocument, itemData, "Сотрудник",
                     EmployeePanel.Visibility == Visibility.Visible && _selectedEmployeeId != Guid.Empty
                         ? _selectedEmployeeId.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(itemData, "Материал",
+                SetFieldValueIfExists(targetDocument, itemData, "Материал",
                     MaterialPanel.Visibility == Visibility.Visible && MaterialCombo.SelectedItem is ReferenceItem material
                         ? material.Id.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
+                SetFieldValueIfExists(targetDocument, itemData, "Контрагент", string.Empty);
 
-                // Сохраняем документ
-                if (_editId.HasValue)
-                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
+                // Сохраняем документ в выбранный вид ордера.
+                if (_editId.HasValue && targetDocument.Id == _document.Id)
+                {
+                    await _metadataService.UpdateDynamicRecordAsync(targetDocument.Id, _editId.Value, itemData);
+                }
+                else if (_editId.HasValue)
+                {
+                    await _metadataService.CreateDynamicRecordAsync(targetDocument.Id, itemData);
+                    await _metadataService.DeleteDynamicRecordAsync(_document.Id, _editId.Value);
+                }
                 else
-                    await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
+                {
+                    await _metadataService.CreateDynamicRecordAsync(targetDocument.Id, itemData);
+                }
 
                 DialogResult = true;
                 Close();
@@ -606,8 +643,11 @@ namespace BIS.ERP.Views
         }
 
         private void SetFieldValueIfExists(Dictionary<string, object> itemData, string fieldName, object value)
+            => SetFieldValueIfExists(_document, itemData, fieldName, value);
+
+        private static void SetFieldValueIfExists(MetadataObject document, Dictionary<string, object> itemData, string fieldName, object value)
         {
-            if (_document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
+            if (document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
                 itemData[fieldName] = value;
         }
 
@@ -940,10 +980,105 @@ namespace BIS.ERP.Views
                 _selectedCashDeskId = selected.Id;
                 _selectedCashDeskCode = selected.AccountCode;
                 CashDeskAccountBox.Text = _selectedCashDeskCode;
+                RefreshPostingPreview();
             }
+        }
+        private static bool IsReceiptDocument(string documentName)
+            => documentName.Equals(ReceiptDocumentName, StringComparison.OrdinalIgnoreCase);
+
+        private string GetSelectedDocumentName()
+            => _isReceiptOrder ? ReceiptDocumentName : PaymentDocumentName;
+
+        private (string DebitAccount, string CreditAccount) BuildPostingAccounts(string cashDeskCode, string corrAccountCode)
+            => _isReceiptOrder
+                ? (cashDeskCode, corrAccountCode)
+                : (corrAccountCode, cashDeskCode);
+
+        private decimal TryReadAmount()
+            => decimal.TryParse(AmountBox?.Text, out var parsedAmount) ? parsedAmount : 0m;
+
+        private async Task<MetadataObject> ResolveSelectedCashOrderDocumentAsync()
+        {
+            var selectedDocumentName = GetSelectedDocumentName();
+            if (_document.Name.Equals(selectedDocumentName, StringComparison.OrdinalIgnoreCase))
+                return _document;
+
+            var documents = await _metadataService.GetDocumentsAsync();
+            return documents.FirstOrDefault(item => item.Name.Equals(selectedDocumentName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Документ '{selectedDocumentName}' не найден в метаданных.");
+        }
+
+        private void OrderType_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_isChangingOrderType)
+                return;
+
+            _isReceiptOrder = ReceiptRadio.IsChecked == true;
+            UpdateOrderTypeUi();
+            RefreshPostingPreview();
+
+            if (!_isLoading && !_editId.HasValue && AllowNumberEditCheckBox.IsChecked != true)
+                _ = RefreshDocumentNumberAsync();
+        }
+
+        private void OnPostingPreviewChanged(object sender, EventArgs e)
+        {
+            RefreshPostingPreview();
+        }
+
+        private async Task RefreshDocumentNumberAsync()
+        {
+            try
+            {
+                NumberBox.Text = await _metadataService.GetNextDocumentNumberAsync(GetSelectedDocumentName());
+            }
+            catch
+            {
+                NumberBox.Text = MetadataService.GenerateFallbackDocumentNumber();
+            }
+        }
+
+        private void UpdateOrderTypeUi()
+        {
+            var documentName = GetSelectedDocumentName();
+            Title = documentName;
+            DialogTitle.Text = _editId.HasValue
+                ? $"Редактирование: {documentName}"
+                : $"Добавление: {documentName}";
+        }
+
+        private void RefreshPostingPreview()
+        {
+            if (PostingsPreviewGrid == null || PostingPreviewHint == null)
+                return;
+
+            _postingPreviewRows.Clear();
+            var amount = TryReadAmount();
+            var (debitAccount, creditAccount) = BuildPostingAccounts(_selectedCashDeskCode, _selectedCorrAccountCode);
+
+            _postingPreviewRows.Add(new CashPostingPreviewRow
+            {
+                Mark = _isReceiptOrder ? "Приход" : "Расход",
+                Debit = string.IsNullOrWhiteSpace(debitAccount) ? "не выбран" : debitAccount,
+                Credit = string.IsNullOrWhiteSpace(creditAccount) ? "не выбран" : creditAccount,
+                Amount = amount.ToString("N2"),
+                Note = string.IsNullOrWhiteSpace(BasisBox?.Text) ? DescriptionBox?.Text ?? string.Empty : BasisBox.Text
+            });
+
+            PostingPreviewHint.Text = _isReceiptOrder
+                ? "Приходный ордер: дебетуется счет кассы, кредитуется корреспондирующий счет."
+                : "Расходный ордер: дебетуется корреспондирующий счет, кредитуется счет кассы.";
         }
     }
 
+    public class CashPostingPreviewRow
+    {
+        public string Mark { get; set; } = string.Empty;
+        public string Debit { get; set; } = string.Empty;
+        public string Credit { get; set; } = string.Empty;
+        public string Amount { get; set; } = string.Empty;
+        public string Note { get; set; } = string.Empty;
+    }
     public class CashDeskItem : ReferenceItem
     {
         public string AccountCode { get; set; } = string.Empty;
@@ -955,4 +1090,3 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
-

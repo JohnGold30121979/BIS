@@ -793,60 +793,6 @@ DO $$
 DECLARE
     marker text := 'Тестовая проводка при создании инфобазы';
 BEGIN
-    IF to_regclass('public.catalog_cash_desks') IS NOT NULL
-       AND to_regclass('public.doc_cash_receipt') IS NOT NULL
-       AND EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'catalog_cash_desks' AND column_name = 'current_balance')
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('description'), ('cash_desk_id'), ('amount'), ('is_posted')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_cash_receipt'
-                 AND column_name = required.column_name)) THEN
-        UPDATE catalog_cash_desks cd
-        SET current_balance = COALESCE(cd.current_balance, 0) - src.amount
-        FROM (
-            SELECT cash_desk_id::text::uuid AS cash_desk_id, SUM(amount) AS amount
-            FROM doc_cash_receipt
-            WHERE description = marker
-              AND COALESCE(is_posted, false) = true
-              AND cash_desk_id IS NOT NULL
-              AND cash_desk_id::text ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-            GROUP BY cash_desk_id::text
-        ) src
-        WHERE cd.""Id"" = src.cash_desk_id;
-    END IF;
-
-    IF to_regclass('public.catalog_cash_desks') IS NOT NULL
-       AND to_regclass('public.doc_cash_payment') IS NOT NULL
-       AND EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'catalog_cash_desks' AND column_name = 'current_balance')
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('description'), ('cash_desk_id'), ('amount'), ('is_posted')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_cash_payment'
-                 AND column_name = required.column_name)) THEN
-        UPDATE catalog_cash_desks cd
-        SET current_balance = COALESCE(cd.current_balance, 0) + src.amount
-        FROM (
-            SELECT cash_desk_id::text::uuid AS cash_desk_id, SUM(amount) AS amount
-            FROM doc_cash_payment
-            WHERE description = marker
-              AND COALESCE(is_posted, false) = true
-              AND cash_desk_id IS NOT NULL
-              AND cash_desk_id::text ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-            GROUP BY cash_desk_id::text
-        ) src
-        WHERE cd.""Id"" = src.cash_desk_id;
-    END IF;
-
     IF to_regclass('public.doc_postings') IS NOT NULL
        AND to_regclass('public.doc_cash_receipt') IS NOT NULL
        AND NOT EXISTS (
@@ -2271,12 +2217,7 @@ END $$;");
 
                 var amount = Convert.ToDecimal(record.GetValueOrDefault("amount") ?? 0m);
                 var documentNumber = NormalizeLegacyDocumentNumber(record.GetValueOrDefault("doc_number")?.ToString());
-                if (isCashOrder && TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk"))
-                {
-                    var wasReceipt = document.Name == "Приходный кассовый ордер";
-                    await UpdateCashDeskBalance(cashDeskId, amount, !wasReceipt);
-                }
-                else if (isFixedAssetDocument)
+                if (isFixedAssetDocument)
                 {
                     await ReverseFixedAssetDocumentAsync(document, record, recordId);
                 }
@@ -3265,13 +3206,7 @@ END $$;");
             if (string.IsNullOrWhiteSpace(cashAccountCode))
                 throw new Exception("У выбранной кассы не указан счет. Откройте справочник касс и заполните поле \"Счет\".");
 
-            // Старые записи могут содержать конкретную кассу. Новые документы работают по счету,
-            // поэтому остаток справочника касс обновляем только когда касса явно указана.
-            if (cashDeskId != Guid.Empty)
-            {
-                await UpdateCashDeskBalance(cashDeskId, amount, isReceipt);
-                System.Diagnostics.Debug.WriteLine("Cash desk balance updated");
-            }
+            // Остаток кассы не пересчитывается в справочнике. Движение кассы считается по проводкам и отчетам.
 
             // Получаем данные документа
             string? docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");
@@ -3663,67 +3598,14 @@ END $$;");
             await _context.Database.ExecuteSqlRawAsync(updateSql, new NpgsqlParameter("@recordId", recordId));
         }
 
-        private async Task UpdateCashDeskBalance(Guid cashDeskId, decimal amount, bool isIncrease)
-        {
-            var sql = $@"
-            UPDATE ""catalog_cash_desks"" 
-            SET ""current_balance"" = COALESCE(""current_balance"", 0) {(isIncrease ? "+" : "-")} @amount,
-                ""UpdatedAt"" = NOW()
-            WHERE ""Id"" = @cashDeskId";
-
-            await _context.Database.ExecuteSqlRawAsync(
-                sql,
-                new NpgsqlParameter("@amount", amount),
-                new NpgsqlParameter("@cashDeskId", cashDeskId));
-        }
-
-        private async Task SyncManualPostingCashBalanceAsync(
+        private Task SyncManualPostingCashBalanceAsync(
             MetadataObject metadata,
             Dictionary<string, object>? previousRecord,
             Dictionary<string, object>? currentRecord)
         {
-            if (!IsPostingsDocument(metadata))
-                return;
-
-            if (previousRecord != null)
-                await ApplyManualPostingCashBalanceDeltaAsync(previousRecord, reverse: true);
-
-            if (currentRecord != null)
-                await ApplyManualPostingCashBalanceDeltaAsync(currentRecord, reverse: false);
+            // Остаток кассы не хранится расчетным полем справочника. Ручные проводки влияют только на журнал проводок.
+            return Task.CompletedTask;
         }
-
-        private async Task ApplyManualPostingCashBalanceDeltaAsync(
-            Dictionary<string, object> record,
-            bool reverse)
-        {
-            if (!IsRecordActive(record))
-                return;
-
-            if (!TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса"))
-                return;
-
-            var amount = GetDecimalValue(record, "amount_kgs", "Сумма в сом", "amount", "Сумма");
-            if (amount == 0)
-                return;
-
-            var cashAccountCode = await GetCashDeskAccountCodeAsync(cashDeskId);
-            if (string.IsNullOrWhiteSpace(cashAccountCode))
-                return;
-
-            var debitAccount = GetStringValue(record, "debit_account", "Дебет");
-            var creditAccount = GetStringValue(record, "credit_account", "Кредит");
-            var accountType = await GetAccountTypeByCodeAsync(cashAccountCode);
-            var delta = CalculateAccountBalanceDelta(cashAccountCode, accountType, debitAccount, creditAccount, amount);
-
-            if (delta == 0)
-                return;
-
-            if (reverse)
-                delta = -delta;
-
-            await UpdateCashDeskBalanceDeltaAsync(cashDeskId, delta);
-        }
-
         private async Task<string> GetCashDeskAccountCodeAsync(Guid cashDeskId)
         {
             const string sql = @"
@@ -3843,46 +3725,6 @@ END $$;");
                 if (connectionOpened)
                     await _context.Database.CloseConnectionAsync();
             }
-        }
-
-        private async Task UpdateCashDeskBalanceDeltaAsync(Guid cashDeskId, decimal delta)
-        {
-            const string sql = @"
-                UPDATE ""catalog_cash_desks""
-                SET ""current_balance"" = COALESCE(""current_balance"", 0) + @delta,
-                    ""UpdatedAt"" = NOW()
-                WHERE ""Id"" = @cashDeskId;";
-
-            await _context.Database.ExecuteSqlRawAsync(
-                sql,
-                new NpgsqlParameter("@delta", delta),
-                new NpgsqlParameter("@cashDeskId", cashDeskId));
-        }
-
-        private static decimal CalculateAccountBalanceDelta(
-            string cashAccountCode,
-            string accountType,
-            string debitAccount,
-            string creditAccount,
-            decimal amount)
-        {
-            var isDebit = debitAccount.Equals(cashAccountCode, StringComparison.OrdinalIgnoreCase);
-            var isCredit = creditAccount.Equals(cashAccountCode, StringComparison.OrdinalIgnoreCase);
-
-            if (isDebit == isCredit)
-                return 0m;
-
-            var passive = IsPassiveAccountType(accountType);
-            if (passive)
-                return isCredit ? amount : -amount;
-
-            return isDebit ? amount : -amount;
-        }
-
-        private static bool IsPassiveAccountType(string accountType)
-        {
-            return accountType.Equals("Passive", StringComparison.OrdinalIgnoreCase) ||
-                   accountType.Equals("Пассивный", StringComparison.OrdinalIgnoreCase);
         }
 
         private static decimal ResolveDocumentAmount(Dictionary<string, object> data)

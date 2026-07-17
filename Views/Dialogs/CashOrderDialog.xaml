@@ -1,12 +1,12 @@
 ﻿<Window x:Class="BIS.ERP.Views.CashOrderDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Кассовый ордер" Height="620" Width="540"
-        MinHeight="480" MinWidth="450" ResizeMode="CanResize"
+        Title="Кассовый ордер" Height="760" Width="760"
+        MinHeight="620" MinWidth="620" ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="10">
+        <Grid Margin="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -20,20 +20,29 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="130"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <TextBlock Grid.Row="0" Grid.ColumnSpan="3" x:Name="DialogTitle" FontSize="16" FontWeight="Bold" Margin="0,0,0,15"/>
+            <TextBlock Grid.Row="0" Grid.ColumnSpan="3" x:Name="DialogTitle" FontSize="18" FontWeight="Bold" Margin="0,0,0,12"/>
 
-            <!-- Row 1: Номер -->
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="Номер:" VerticalAlignment="Center"/>
-            <Grid Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2">
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Вид ордера:" VerticalAlignment="Center"/>
+            <Border Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Padding="10,6" Margin="0,0,0,8"
+                    BorderBrush="#D5DEE8" BorderThickness="1" CornerRadius="6">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="ReceiptRadio" Content="Приходный" GroupName="CashOrderKind"
+                                 Margin="0,0,24,0" VerticalAlignment="Center" Checked="OrderType_Checked"/>
+                    <RadioButton x:Name="PaymentRadio" Content="Расходный" GroupName="CashOrderKind"
+                                 VerticalAlignment="Center" Checked="OrderType_Checked"/>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Номер:" VerticalAlignment="Center"/>
+            <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -48,43 +57,38 @@
                           Unchecked="AllowNumberEditCheckBox_Changed"/>
             </Grid>
 
-            <!-- Row 2: Дата -->
-            <TextBlock Grid.Row="2" Grid.Column="0" Text="Дата:" VerticalAlignment="Center"/>
-            <DatePicker x:Name="DatePicker" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Height="30"/>
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Дата:" VerticalAlignment="Center"/>
+            <DatePicker x:Name="DatePicker" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"/>
 
-            <!-- Row 3: Касса + Счет кассы -->
-            <TextBlock Grid.Row="3" Grid.Column="0" Text="Касса:" VerticalAlignment="Center"/>
-            <ComboBox x:Name="CashDeskCombo" Grid.Row="3" Grid.Column="1" Height="30"
-                  DisplayMemberPath="DisplayNameWithAccount" SelectedValuePath="Id"
-                  SelectionChanged="CashDeskCombo_SelectionChanged"/>
-            <TextBox x:Name="CashDeskAccountBox" Grid.Row="3" Grid.Column="2" 
-                 Width="80" Height="30" Margin="5,0,0,0"
-                 IsReadOnly="True" Background="LightGray" 
-                 TextAlignment="Center"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Касса:" VerticalAlignment="Center"/>
+            <ComboBox x:Name="CashDeskCombo" Grid.Row="4" Grid.Column="1" Height="30" Margin="0,0,0,8"
+                      DisplayMemberPath="DisplayNameWithAccount" SelectedValuePath="Id"
+                      SelectionChanged="CashDeskCombo_SelectionChanged"/>
+            <TextBox x:Name="CashDeskAccountBox" Grid.Row="4" Grid.Column="2"
+                     Width="100" Height="30" Margin="6,0,0,8"
+                     IsReadOnly="True" Background="LightGray"
+                     TextAlignment="Center"/>
 
-            <!-- Row 4: Организация -->
-            <TextBlock x:Name="OrganizationLabel" Grid.Row="4" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"
-                   Visibility="Collapsed"/>
-            <ComboBox x:Name="OrganizationCombo" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="30"
-                  DisplayMemberPath="DisplayName" SelectedValuePath="Id"
-                  Visibility="Collapsed"/>
+            <TextBlock x:Name="OrganizationLabel" Grid.Row="5" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"
+                       Visibility="Collapsed"/>
+            <ComboBox x:Name="OrganizationCombo" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"
+                      DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                      Visibility="Collapsed"/>
 
-            <!-- Row 5: Валюта, Сотрудник, Материал -->
-            <StackPanel Grid.Row="5" Grid.ColumnSpan="3">
-                <Grid x:Name="CurrencyPanel" Visibility="Collapsed" Margin="0,0,0,6">
+            <StackPanel Grid.Row="6" Grid.ColumnSpan="3">
+                <Grid x:Name="CurrencyPanel" Visibility="Collapsed" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="130"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="Валюта:" VerticalAlignment="Center"/>
                     <ComboBox x:Name="CurrencyCombo" Grid.Column="1" Height="30"
-                          DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
                 </Grid>
 
-                <!-- Сотрудник (как у плана счетов) -->
-                <Grid x:Name="EmployeePanel" Visibility="Collapsed" Margin="0,0,0,6">
+                <Grid x:Name="EmployeePanel" Visibility="Collapsed" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="130"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
@@ -97,28 +101,27 @@
                     <Button Grid.Column="4" Content="Изм." Width="46" Height="30" Margin="5,0,0,0" Click="EditEmployee_Click"/>
                 </Grid>
 
-                <Grid x:Name="MaterialPanel" Visibility="Collapsed" Margin="0,0,0,6">
+                <Grid x:Name="MaterialPanel" Visibility="Collapsed" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="130"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="Материал:" VerticalAlignment="Center"/>
                     <ComboBox x:Name="MaterialCombo" Grid.Column="1" Height="30"
-                          DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"/>
                 </Grid>
             </StackPanel>
 
-            <!-- Row 6: Сумма -->
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="Сумма:" VerticalAlignment="Center"/>
-            <TextBox x:Name="AmountBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Text="0"/>
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Сумма:" VerticalAlignment="Center"/>
+            <TextBox x:Name="AmountBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8" Text="0"
+                     TextChanged="OnPostingPreviewChanged"/>
 
-            <!-- Row 7: Основание -->
-            <TextBlock Grid.Row="7" Grid.Column="0" Text="Основание:" VerticalAlignment="Center"/>
-            <TextBox x:Name="BasisBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Height="30"/>
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="Основание:" VerticalAlignment="Center"/>
+            <TextBox x:Name="BasisBox" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"
+                     TextChanged="OnPostingPreviewChanged"/>
 
-            <!-- Row 8: Корр. счет -->
-            <TextBlock Grid.Row="8" Grid.Column="0" Text="Корр. счет:" VerticalAlignment="Center"/>
-            <Grid Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2">
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="Корр. счет:" VerticalAlignment="Center"/>
+            <Grid Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -127,16 +130,36 @@
                 <Button Grid.Column="1" Content="?" Width="34" Height="30" Margin="5,0,0,0" Click="SelectAccount_Click"/>
             </Grid>
 
-            <!-- Row 9: Примечание -->
-            <TextBlock Grid.Row="9" Grid.Column="0" Text="Примечание:" VerticalAlignment="Top"/>
-            <TextBox x:Name="DescriptionBox" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Height="60" TextWrapping="Wrap"/>
+            <TextBlock Grid.Row="10" Grid.Column="0" Text="Примечание:" VerticalAlignment="Top"/>
+            <TextBox x:Name="DescriptionBox" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Height="56" Margin="0,0,0,10"
+                     TextWrapping="Wrap" TextChanged="OnPostingPreviewChanged"/>
 
-            <!-- Row 10: Кнопки -->
-            <StackPanel Grid.Row="10" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <GroupBox Grid.Row="11" Grid.ColumnSpan="3" Header="Проводки документа" Margin="0,0,0,12">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="PostingPreviewHint" Grid.Row="0" Margin="0,0,0,6"
+                               Text="Проводка формируется при проведении документа."/>
+                    <DataGrid x:Name="PostingsPreviewGrid" Grid.Row="1" Height="120"
+                              AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Пометка" Binding="{Binding Mark}" Width="120"/>
+                            <DataGridTextColumn Header="Дебет" Binding="{Binding Debit}" Width="120"/>
+                            <DataGridTextColumn Header="Кредит" Binding="{Binding Credit}" Width="120"/>
+                            <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="120"/>
+                            <DataGridTextColumn Header="Основание" Binding="{Binding Note}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </GroupBox>
+
+            <StackPanel Grid.Row="12" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Сохранить" Width="110" Height="36" Margin="0,0,10,0" Click="OnSaveClick"
-                    Background="#27AE60" Foreground="White"/>
+                        Background="#27AE60" Foreground="White"/>
                 <Button Content="Отмена" Width="110" Height="36" Click="OnCancelClick"
-                    Background="#95A5A6" Foreground="White"/>
+                        Background="#95A5A6" Foreground="White"/>
             </StackPanel>
         </Grid>
     </ScrollViewer>
