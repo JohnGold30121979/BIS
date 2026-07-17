@@ -122,23 +122,23 @@ namespace BIS.ERP.Views
         }
 
         // Универсальное создание ComboBox для любого Reference поля       
-        private async Task<ComboBox> CreateReferenceControl(
+        private async Task<Control> CreateReferenceControl(
        MetadataField field,
        Dictionary<string, MetadataObject> catalogsDict,
        Dictionary<string, object> existingData)
         {
-            var comboBox = new ComboBox
-            {
-                Height = 35,
-                Name = field.Name.Replace(" ", "_").Replace("-", "_"),
-                DisplayMemberPath = "DisplayName",
-                SelectedValuePath = "Id",
-                MinWidth = 200,
-                Tag = field
-            };
-
             if (!catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
             {
+                var comboBox = new ComboBox
+                {
+                    Height = 35,
+                    Name = field.Name.Replace(" ", "_").Replace("-", "_"),
+                    DisplayMemberPath = "DisplayName",
+                    SelectedValuePath = "Id",
+                    MinWidth = 200,
+                    Tag = field
+                };
+
                 comboBox.ItemsSource = new List<ReferenceItem>
         {
             new ReferenceItem { Id = Guid.Empty, DisplayName = $"Справочник '{field.ReferenceCatalog}' не найден" }
@@ -146,42 +146,20 @@ namespace BIS.ERP.Views
                 return comboBox;
             }
 
-            var data = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
-            var items = new List<ReferenceItem>();
-
-            foreach (var row in data)
-            {
-                var item = new ReferenceItem();
-
-                if (row.ContainsKey("Id"))
-                    item.Id = Guid.Parse(row["Id"].ToString());
-
-                item.DisplayName = GetDisplayValue(row, field, refCatalog.Name);
-                foreach (var key in GetReferenceLookupKeys(row, item.DisplayName))
-                    item.LookupKeys.Add(key);
-                items.Add(item);
-            }
-
-            ReferenceComboBoxSearchHelper.Attach(comboBox, items);
-
-            // Выбираем существующее значение: поддерживаем и Id, и уже отображенное значение.
-            var existingValue = GetExistingValue(field, existingData)?.ToString();
-            if (!string.IsNullOrWhiteSpace(existingValue))
-            {
-                var selectedItem = items.FirstOrDefault(i =>
-                    string.Equals(i.Id.ToString(), existingValue, StringComparison.OrdinalIgnoreCase) ||
-                    i.LookupKeys.Contains(NormalizeReferenceLookupKey(existingValue)));
-                if (selectedItem != null)
-                    comboBox.SelectedItem = selectedItem;
-            }
+            var picker = await ReferencePickerControlFactory.CreateAsync(
+                _metadataService,
+                field,
+                refCatalog,
+                GetExistingValue(field, existingData),
+                this);
 
             // ========== ДОБАВИТЬ ЭТОТ БЛОК ==========
             // Автоподстановка для поля "Табельный номер"
             if (field.Name == "Табельный номер")
             {
-                comboBox.SelectionChanged += async (s, args) =>
+                picker.ComboBox.SelectionChanged += async (s, args) =>
                 {
-                    if (comboBox.SelectedItem is ReferenceItem selectedEmployee)
+                    if (picker.ComboBox.SelectedItem is ReferenceItem selectedEmployee)
                     {
                         await AutoFillFromEmployee(selectedEmployee.Id);
                     }
@@ -189,7 +167,7 @@ namespace BIS.ERP.Views
             }
             // =======================================
 
-            return comboBox;
+            return picker;
         }
 
         private static IEnumerable<string> GetReferenceLookupKeys(
@@ -644,13 +622,23 @@ namespace BIS.ERP.Views
                 }
 
                 // Если есть поле "Участок" (Reference) - его тоже можно заполнить
-                if (_controls.ContainsKey("Участок") && _controls["Участок"] is ComboBox siteBox && employee.ContainsKey("Участок"))
+                if (_controls.ContainsKey("Участок") && employee.ContainsKey("Участок"))
                 {
                     var siteId = employee["Участок"].ToString();
-                    var items = siteBox.ItemsSource as List<ReferenceItem>;
-                    if (items != null)
+
+                    if (_controls["Участок"] is ReferencePickerControl sitePicker)
                     {
-                        var selectedSite = items.FirstOrDefault(i => i.Id.ToString() == siteId);
+                        var selectedSite = sitePicker.ComboBox.Items
+                            .OfType<ReferenceItem>()
+                            .FirstOrDefault(i => i.Id.ToString() == siteId);
+                        if (selectedSite != null)
+                            sitePicker.SelectedReferenceItem = selectedSite;
+                    }
+                    else if (_controls["Участок"] is ComboBox siteBox)
+                    {
+                        var selectedSite = siteBox.Items
+                            .OfType<ReferenceItem>()
+                            .FirstOrDefault(i => i.Id.ToString() == siteId);
                         if (selectedSite != null)
                             siteBox.SelectedItem = selectedSite;
                     }
@@ -675,6 +663,10 @@ namespace BIS.ERP.Views
                     if (control is UserControl && AccountPickerControlFactory.GetSelectedAccount(control) != null)
                     {
                         value = AccountPickerControlFactory.GetSelectedAccountValue(field, control);
+                    }
+                    else if (control is ReferencePickerControl referencePicker)
+                    {
+                        value = referencePicker.SelectedReferenceItem?.Id.ToString() ?? string.Empty;
                     }
                     else if (control is ComboBox comboBox)
                     {
@@ -851,10 +843,4 @@ namespace BIS.ERP.Views
         }
     }
 
-    public class ReferenceItem
-    {
-        public Guid Id { get; set; }
-        public string DisplayName { get; set; } = string.Empty;
-        public HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
-    }
 }

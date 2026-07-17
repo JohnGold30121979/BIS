@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -68,11 +68,50 @@ namespace BIS.ERP.Views
                     if (data.CashDesks != null)
                         ReferenceComboBoxSearchHelper.Attach(CashDeskCombo, data.CashDesks);
                     if (data.Organizations != null)
+                    {
                         ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, data.Organizations);
+                        if (data.OrganizationCatalog != null)
+                        {
+                            ReferencePickerControlFactory.AttachEditor(
+                                OrganizationCombo,
+                                _metadataService,
+                                data.OrganizationCatalog,
+                                this,
+                                items => data.Organizations = items,
+                                "Код организации",
+                                "Наименование");
+                        }
+                    }
                     if (data.Currencies != null)
+                    {
                         ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, data.Currencies);
+                        if (data.CurrencyCatalog != null)
+                        {
+                            ReferencePickerControlFactory.AttachEditor(
+                                CurrencyCombo,
+                                _metadataService,
+                                data.CurrencyCatalog,
+                                this,
+                                items => data.Currencies = items,
+                                "Код",
+                                "Наименование");
+                        }
+                    }
                     if (data.Materials != null)
+                    {
                         ReferenceComboBoxSearchHelper.Attach(MaterialCombo, data.Materials);
+                        if (data.MaterialCatalog != null)
+                        {
+                            ReferencePickerControlFactory.AttachEditor(
+                                MaterialCombo,
+                                _metadataService,
+                                data.MaterialCatalog,
+                                this,
+                                items => data.Materials = items,
+                                "Код",
+                                "Наименование материала");
+                        }
+                    }
 
                     _accountAnalytics = data.AccountAnalytics;
 
@@ -189,6 +228,7 @@ namespace BIS.ERP.Views
 
             // Организации
             var orgs = allCatalogs.FirstOrDefault(c => c.Name == "Организации");
+            result.OrganizationCatalog = orgs;
             if (orgs != null)
             {
                 var data = await _metadataService.GetCatalogDataAsync(orgs.Id);
@@ -199,10 +239,13 @@ namespace BIS.ERP.Views
             }
 
             // Валюты
+            result.CurrencyCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Справочник валют");
             result.Currencies = await LoadReferenceItemsAsync(allCatalogs, "Справочник валют", "Код", "Наименование");
             // Сотрудники (для диалога выбора)
+            result.EmployeeCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Сотрудники (Списочный состав)");
             result.Employees = await LoadReferenceItemsAsync(allCatalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
             // Материалы
+            result.MaterialCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Справочник материалов");
             result.Materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
 
             // Генерируем номер
@@ -232,6 +275,10 @@ namespace BIS.ERP.Views
             public List<ReferenceItem> Currencies { get; set; } = new();
             public List<ReferenceItem> Employees { get; set; } = new();
             public List<ReferenceItem> Materials { get; set; } = new();
+            public MetadataObject? OrganizationCatalog { get; set; }
+            public MetadataObject? CurrencyCatalog { get; set; }
+            public MetadataObject? EmployeeCatalog { get; set; }
+            public MetadataObject? MaterialCatalog { get; set; }
             public AccountAnalyticsRegistry AccountAnalytics { get; set; } = new();
             public string DocumentNumber { get; set; } = string.Empty;
             public Dictionary<string, object>? Record { get; set; }
@@ -751,6 +798,141 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void AddEmployee_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                this.Cursor = Cursors.Wait;
+
+                var employeeCatalog = await GetEmployeeCatalogAsync();
+                if (employeeCatalog == null)
+                    return;
+
+                var dialog = new CatalogItemDialog(employeeCatalog, _metadataService)
+                {
+                    Owner = this
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                var createdId = await _metadataService.CreateDynamicRecordAsync(employeeCatalog.Id, dialog.ItemData);
+                await ApplyEmployeeByIdAsync(employeeCatalog, createdId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при добавлении сотрудника: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                this.Cursor = null;
+            }
+        }
+
+        private async void EditEmployee_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_selectedEmployeeId == Guid.Empty)
+                {
+                    MessageBox.Show("Сначала выберите сотрудника.", "Сотрудники",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                this.Cursor = Cursors.Wait;
+
+                var employeeCatalog = await GetEmployeeCatalogAsync();
+                if (employeeCatalog == null)
+                    return;
+
+                var employeesData = await _metadataService.GetCatalogDataAsync(employeeCatalog.Id);
+                var employee = employeesData.FirstOrDefault(row =>
+                    row.TryGetValue("Id", out var value) &&
+                    Guid.TryParse(value?.ToString(), out var id) &&
+                    id == _selectedEmployeeId);
+
+                if (employee == null)
+                {
+                    MessageBox.Show("Выбранный сотрудник не найден в справочнике.", "Сотрудники",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new CatalogItemDialog(employeeCatalog, _metadataService, employee)
+                {
+                    Owner = this
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                await _metadataService.UpdateDynamicRecordAsync(employeeCatalog.Id, _selectedEmployeeId, dialog.ItemData);
+                await ApplyEmployeeByIdAsync(employeeCatalog, _selectedEmployeeId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при редактировании сотрудника: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                this.Cursor = null;
+            }
+        }
+
+        private async Task<MetadataObject?> GetEmployeeCatalogAsync()
+        {
+            var allCatalogs = await _metadataService.GetCatalogsAsync();
+            var employeeCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Сотрудники (Списочный состав)");
+
+            if (employeeCatalog == null)
+            {
+                MessageBox.Show("Справочник сотрудников не найден!", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
+            return employeeCatalog;
+        }
+
+        private async Task ApplyEmployeeByIdAsync(MetadataObject employeeCatalog, Guid employeeId)
+        {
+            var employeesData = await _metadataService.GetCatalogDataAsync(employeeCatalog.Id);
+            var employee = employeesData.FirstOrDefault(row =>
+                row.TryGetValue("Id", out var value) &&
+                Guid.TryParse(value?.ToString(), out var id) &&
+                id == employeeId);
+
+            if (employee == null)
+                return;
+
+            var displayName = BuildEmployeeDisplayName(employee);
+            EmployeeNameBox.Text = displayName;
+            _selectedEmployeeId = employeeId;
+            _selectedEmployeeName = employee.GetValueOrDefault("ФИО")?.ToString()
+                                    ?? employee.GetValueOrDefault("full_name")?.ToString()
+                                    ?? displayName;
+        }
+
+        private static string BuildEmployeeDisplayName(Dictionary<string, object> employee)
+        {
+            var personnelNumber = employee.GetValueOrDefault("Табельный номер")?.ToString()
+                                  ?? employee.GetValueOrDefault("personnel_number")?.ToString()
+                                  ?? string.Empty;
+            var fullName = employee.GetValueOrDefault("ФИО")?.ToString()
+                           ?? employee.GetValueOrDefault("full_name")?.ToString()
+                           ?? employee.GetValueOrDefault("Наименование")?.ToString()
+                           ?? employee.GetValueOrDefault("name")?.ToString()
+                           ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(personnelNumber) && !string.IsNullOrWhiteSpace(fullName))
+                return $"{personnelNumber} - {fullName}";
+
+            return !string.IsNullOrWhiteSpace(fullName)
+                ? fullName
+                : personnelNumber;
+        }
         private void CashDeskCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (CashDeskCombo.SelectedItem is CashDeskItem selected)
@@ -773,3 +955,4 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
+

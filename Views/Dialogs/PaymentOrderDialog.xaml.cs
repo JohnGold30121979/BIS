@@ -125,7 +125,18 @@ namespace BIS.ERP.Views
                 }).ToList();
 
                 // Обновляем UI в UI потоке
-                Dispatcher.Invoke(() => OrganizationCombo.ItemsSource = _organizations);
+                Dispatcher.Invoke(() =>
+                {
+                    ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
+                    ReferencePickerControlFactory.AttachEditor(
+                        OrganizationCombo,
+                        _metadataService,
+                        orgCatalog,
+                        this,
+                        items => _organizations = items,
+                        "Код организации",
+                        "Наименование");
+                });
             }
 
             // Загружаем банки
@@ -138,7 +149,18 @@ namespace BIS.ERP.Views
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = d.ContainsKey("Наименование банка") ? d["Наименование банка"].ToString() : d["name"].ToString()
                 }).ToList();
-                Dispatcher.Invoke(() => BankCombo.ItemsSource = _banks);
+                Dispatcher.Invoke(() =>
+                {
+                    ReferenceComboBoxSearchHelper.Attach(BankCombo, _banks);
+                    ReferencePickerControlFactory.AttachEditor(
+                        BankCombo,
+                        _metadataService,
+                        bankCatalog,
+                        this,
+                        items => _banks = items,
+                        "Код",
+                        "Наименование банка");
+                });
             }
 
             // Загружаем наши расчетные счета
@@ -186,14 +208,55 @@ namespace BIS.ERP.Views
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = $"{d["Код"]} - {d["Наименование"]}"
                 }).ToList();
-                Dispatcher.Invoke(() => CurrencyCombo.ItemsSource = _currencies);
+                Dispatcher.Invoke(() =>
+                {
+                    ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, _currencies);
+                    ReferencePickerControlFactory.AttachEditor(
+                        CurrencyCombo,
+                        _metadataService,
+                        currencyCatalog,
+                        this,
+                        items => _currencies = items,
+                        "Код",
+                        "Наименование");
+                });
             }
 
             _employees = await LoadReferenceItemsAsync(allCatalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
-            Dispatcher.Invoke(() => EmployeeCombo.ItemsSource = _employees);
+            var employeeCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Сотрудники (Списочный состав)");
+            Dispatcher.Invoke(() =>
+            {
+                ReferenceComboBoxSearchHelper.Attach(EmployeeCombo, _employees);
+                if (employeeCatalog != null)
+                {
+                    ReferencePickerControlFactory.AttachEditor(
+                        EmployeeCombo,
+                        _metadataService,
+                        employeeCatalog,
+                        this,
+                        items => _employees = items,
+                        "Табельный номер",
+                        "ФИО");
+                }
+            });
 
             _materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
-            Dispatcher.Invoke(() => MaterialCombo.ItemsSource = _materials);
+            var materialCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Справочник материалов");
+            Dispatcher.Invoke(() =>
+            {
+                ReferenceComboBoxSearchHelper.Attach(MaterialCombo, _materials);
+                if (materialCatalog != null)
+                {
+                    ReferencePickerControlFactory.AttachEditor(
+                        MaterialCombo,
+                        _metadataService,
+                        materialCatalog,
+                        this,
+                        items => _materials = items,
+                        "Код",
+                        "Наименование материала");
+                }
+            });
 
             var paymentClassificationCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Классификация платежей");
             _paymentClassificationRows = paymentClassificationCatalog == null

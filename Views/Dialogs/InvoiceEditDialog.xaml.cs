@@ -96,6 +96,14 @@ namespace BIS.ERP.Views.Dialogs
                         .OrderBy(item => item.DisplayName)
                         .ToList();
                     ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, organizationItems);
+                    ReferencePickerControlFactory.AttachEditor(
+                        OrganizationCombo,
+                        _metadataService,
+                        organizationsCatalog,
+                        this,
+                        items => { },
+                        "Код организации",
+                        "Наименование");
                 }
 
                 var accountsCatalog = catalogs.FirstOrDefault(item => item.Name.StartsWith("План счетов"));
@@ -143,9 +151,9 @@ namespace BIS.ERP.Views.Dialogs
 
                     if (invoice.OrganizationId.HasValue)
                     {
-                        foreach (OrganizationItem item in OrganizationCombo.Items)
+                        foreach (var item in OrganizationCombo.Items)
                         {
-                            if (item.Id == invoice.OrganizationId.Value)
+                            if (GetOrganizationItemId(item) == invoice.OrganizationId.Value)
                             {
                                 OrganizationCombo.SelectedItem = item;
                                 break;
@@ -899,7 +907,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private InvoiceDocument BuildDocumentFromForm()
         {
-            var organizationId = (OrganizationCombo.SelectedItem as OrganizationItem)?.Id;
+            var organizationId = GetOrganizationItemId(OrganizationCombo.SelectedItem);
             Guid? currencyId = null;
             if (CurrencyPanel.Visibility == Visibility.Visible &&
                 CurrencyCombo.SelectedItem is ReferenceOption selectedCurrency &&
@@ -967,6 +975,15 @@ namespace BIS.ERP.Views.Dialogs
                    ?? string.Empty;
         }
 
+        private static Guid? GetOrganizationItemId(object? item)
+        {
+            return item switch
+            {
+                OrganizationItem organization => organization.Id,
+                ReferenceItem reference => reference.Id == Guid.Empty ? null : reference.Id,
+                _ => null
+            };
+        }
         private static string GetRowValue(Dictionary<string, object> row, params string[] keys)
         {
             foreach (var key in keys)
@@ -1272,3 +1289,5 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
+

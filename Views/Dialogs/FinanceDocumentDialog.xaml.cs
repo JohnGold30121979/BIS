@@ -110,6 +110,82 @@ namespace BIS.ERP.Views
             ReferenceComboBoxSearchHelper.Attach(CounterpartyCombo, _organizations);
             ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, _currencies);
             ReferenceComboBoxSearchHelper.Attach(AdvancePaymentCombo, _advancePayments);
+
+            var organizationCatalog = catalogs.FirstOrDefault(catalog => catalog.Name == "Организации");
+            if (organizationCatalog != null)
+            {
+                ReferencePickerControlFactory.AttachEditor(
+                    OrganizationCombo,
+                    _metadataService,
+                    organizationCatalog,
+                    this,
+                    items => _organizations = items,
+                    "Код организации",
+                    "Наименование");
+                ReferencePickerControlFactory.AttachEditor(
+                    CounterpartyCombo,
+                    _metadataService,
+                    organizationCatalog,
+                    this,
+                    items => _organizations = items,
+                    "Код организации",
+                    "Наименование");
+            }
+
+            var employeeCatalog = catalogs.FirstOrDefault(catalog => catalog.Name == "Сотрудники (Списочный состав)");
+            if (employeeCatalog != null)
+            {
+                ReferencePickerControlFactory.AttachEditor(
+                    AdvanceEmployeeCombo,
+                    _metadataService,
+                    employeeCatalog,
+                    this,
+                    items => _employees = items,
+                    "Табельный номер",
+                    "ФИО");
+                ReferencePickerControlFactory.AttachEditor(
+                    PayrollEmployeeCombo,
+                    _metadataService,
+                    employeeCatalog,
+                    this,
+                    items => _employees = items,
+                    "Табельный номер",
+                    "ФИО");
+                ReferencePickerControlFactory.AttachEditor(
+                    RepresentativeCombo,
+                    _metadataService,
+                    employeeCatalog,
+                    this,
+                    items => _employees = items,
+                    "Табельный номер",
+                    "ФИО");
+            }
+
+            var currencyCatalog = catalogs.FirstOrDefault(catalog => catalog.Name == "Справочник валют");
+            if (currencyCatalog != null)
+            {
+                ReferencePickerControlFactory.AttachEditor(
+                    CurrencyCombo,
+                    _metadataService,
+                    currencyCatalog,
+                    this,
+                    items => _currencies = items,
+                    "Код",
+                    "Наименование");
+            }
+
+            var advancePaymentCatalog = catalogs.FirstOrDefault(catalog => catalog.Name == "Авансовые платежи");
+            if (advancePaymentCatalog != null)
+            {
+                ReferencePickerControlFactory.AttachEditor(
+                    AdvancePaymentCombo,
+                    _metadataService,
+                    advancePaymentCatalog,
+                    this,
+                    items => _advancePayments = items,
+                    "code",
+                    "name");
+            }
         }
 
         private async Task LoadRecordAsync(Guid recordId)
