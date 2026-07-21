@@ -31,6 +31,8 @@ namespace BIS.ERP.Views
         private AccountingPeriod? _currentPeriod;
         private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
         private bool _reconciliationVariantsLoaded;
+        private Guid? _selectedOrganizationId;
+        private string? _selectedOrganizationName;
 
         public AccountingReportsView(AppDbContext context)
         {
@@ -44,8 +46,151 @@ namespace BIS.ERP.Views
             _metadataService = new MetadataService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
-            Loaded += async (_, _) => await LoadReconciliationReportVariantsAsync();
+            Loaded += async (_, _) =>
+            {
+                await LoadReconciliationReportVariantsAsync();
+                await LoadOrganizationsAsync();
+            };
             UpdateReconciliationVariantVisibility();
+        }
+
+        private async void OnOrganizationSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (OrganizationCombo.SelectedItem is Organization org)
+            {
+                _selectedOrganizationId = org.Id;
+                _selectedOrganizationName = $"{org.Code} - {org.Name}";
+            }
+            else
+            {
+                _selectedOrganizationId = null;
+                _selectedOrganizationName = null;
+            }
+        }
+
+        private void OnClearOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            OrganizationCombo.SelectedIndex = -1;
+            _selectedOrganizationId = null;
+            _selectedOrganizationName = null;
+        }
+
+        private async void OnSelectOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Загрузка организаций...";
+
+                // Load organizations directly from DB
+                List<Organization> allOrgs;
+                try
+                {
+                    allOrgs = await _context.Organizations.AsNoTracking()
+                        .OrderBy(o => o.Code)
+                        .ToListAsync();
+                }
+                catch (Exception dbEx)
+                {
+                    MessageBox.Show($"Ошибка доступа к справочнику организаций: {dbEx.Message}\n\nПроверьте подключение к БД.",
+                        "Ошибка БД", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // TEMPORARY: Show ALL organizations regardless of IsActive to diagnose the issue
+                // TODO: Remove this and restore IsActive filtering once we confirm the issue is fixed
+                var displayOrgs = allOrgs
+                    .OrderBy(o => o.Code)
+                    .ToList();
+
+                System.Diagnostics.Debug.WriteLine($"Loaded {allOrgs.Count} total organizations, showing {displayOrgs.Count}");
+
+                if (displayOrgs.Count == 0)
+                {
+                    MessageBox.Show("В справочнике нет организаций.\n\nПроверьте таблицу Organizations в БД.",
+                        "Организации", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                
+                if (displayOrgs.Count == 0)
+                {
+                    MessageBox.Show("Нет организаций для выбора.", "Организации",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var rows = new List<Dictionary<string, object>>();
+                foreach (var org in displayOrgs)
+                {
+                    rows.Add(new Dictionary<string, object>
+                    {
+                        ["Id"] = org.Id,
+                        ["Код"] = org.Code,
+                        ["Наименование"] = org.Name
+                    });
+                }
+
+                var dialog = new ReferenceSelectionDialog(rows, "Код", "Наименование")
+                {
+                    Owner = Window.GetWindow(this),
+                    Title = $"Выбор: Организации ({displayOrgs.Count})"
+                };
+
+                if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
+                {
+                    var selectedId = dialog.SelectedItem.ContainsKey("Id") &&
+                                      Guid.TryParse(dialog.SelectedItem["Id"]?.ToString(), out var id)
+                        ? id : Guid.Empty;
+
+                    if (selectedId != Guid.Empty)
+                    {
+                        var selectedOrg = displayOrgs.FirstOrDefault(o => o.Id == selectedId);
+                        if (selectedOrg != null)
+                        {
+                            // Set the selected item in the ComboBox
+                            OrganizationCombo.SelectedItem = selectedOrg;
+                            _selectedOrganizationId = selectedOrg.Id;
+                            _selectedOrganizationName = $"{selectedOrg.Code} - {selectedOrg.Name}";
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при выборе организации: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+                StatusText.Text = "Выберите отчет и период";
+            }
+        }
+
+        private async Task LoadOrganizationsAsync()
+        {
+            try
+            {
+                var organizations = await _context.Organizations.AsNoTracking()
+                    .Where(o => o.IsActive)
+                    .OrderBy(o => o.Code)
+                    .ToListAsync();
+
+                organizations.Insert(0, new Organization
+                {
+                    Id = Guid.Empty,
+                    Code = string.Empty,
+                    Name = "Все организации"
+                });
+
+                OrganizationCombo.ItemsSource = organizations;
+                OrganizationCombo.SelectedIndex = 0;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки организаций: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         public void SelectReportType(string reportType)
@@ -84,9 +229,7 @@ namespace BIS.ERP.Views
                     "PurchaseSalesJournal" => await BuildPurchaseSalesJournalAsync(start, end),
                     "OrganizationBalances" => await BuildOrganizationBalancesAsync(start, end),
                     "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
-                    "CashBook" => await BuildCashBookAsync(start, end),
                     "PaymentOrderRegister" => await BuildPaymentOrderRegisterAsync(start, end),
-                    "BankStatement" => await BuildBankStatementAsync(start, end),
                     "OrganizationReconciliation" => await BuildOrganizationReconciliationAsync(start, end),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
@@ -116,7 +259,7 @@ namespace BIS.ERP.Views
                 var (start, end) = GetPeriod();
                 _currentPeriod = await _periodService.CollectAsync(start, end);
                 await UpdatePeriodStateAsync(start, end);
-                StatusText.Text = "Информация за период собрана и контрольные остатки сохранены";
+                StatusText.Text = "Информация за периода собрана и контрольные остатки сохранены";
             }
             catch (Exception ex)
             {
@@ -313,46 +456,6 @@ namespace BIS.ERP.Views
             return (table, CreateReport(table, $"Оборотно-сальдовая ведомость за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
         }
 
-        private async Task<(DataTable, Report)> BuildCashBookAsync(DateTime start, DateTime end)
-        {
-            var receiptType = "Приходный кассовый ордер";
-            var paymentType = "Расходный кассовый ордер";
-            var allPostings = await _postingService.GetAllPostingsAsync(null, end);
-            var cashPostings = allPostings
-                .Where(posting => posting.DocumentType == receiptType || posting.DocumentType == paymentType)
-                .ToList();
-            var openingRows = cashPostings.Where(posting => posting.Date < start).ToList();
-            var balance = openingRows.Sum(posting => posting.DocumentType == receiptType ? posting.Amount : -posting.Amount);
-            var rows = cashPostings.Where(posting => posting.Date >= start && posting.Date <= end.Date.AddDays(1).AddTicks(-1))
-                .OrderBy(posting => posting.Date).ThenBy(posting => posting.DocumentNumber).ToList();
-
-            var table = new DataTable("Кассовая книга");
-            table.Columns.Add("Дата", typeof(DateTime));
-            table.Columns.Add("Номер", typeof(string));
-            table.Columns.Add("Документ", typeof(string));
-            table.Columns.Add("Содержание", typeof(string));
-            table.Columns.Add("Приход", typeof(decimal));
-            table.Columns.Add("Расход", typeof(decimal));
-            table.Columns.Add("Остаток", typeof(decimal));
-            table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, 0m, 0m, balance);
-
-            decimal totalReceipt = 0;
-            decimal totalPayment = 0;
-            foreach (var posting in rows)
-            {
-                var receipt = posting.DocumentType == receiptType ? posting.Amount : 0m;
-                var payment = posting.DocumentType == paymentType ? posting.Amount : 0m;
-                totalReceipt += receipt;
-                totalPayment += payment;
-                balance += receipt - payment;
-                table.Rows.Add(posting.Date, posting.DocumentNumber, posting.DocumentType, posting.Note,
-                    receipt, payment, balance);
-            }
-            table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty,
-                totalReceipt, totalPayment, balance);
-            return (table, CreateReport(table, $"Кассовая книга за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
-        }
-
         private async Task<(DataTable, Report)> BuildPaymentOrderRegisterAsync(DateTime start, DateTime end)
         {
             var rows = await LoadPaymentOrderReportRowsAsync(start, end);
@@ -390,61 +493,6 @@ namespace BIS.ERP.Views
             return (table, report);
         }
 
-        private async Task<(DataTable, Report)> BuildBankStatementAsync(DateTime start, DateTime end)
-        {
-            var allRows = await LoadPaymentOrderReportRowsAsync(null, end);
-            var openingRows = allRows.Where(row => row.Date.Date < start.Date).ToList();
-            var balance = openingRows.Sum(GetBankStatementSignedAmount);
-            var rows = allRows
-                .Where(row => row.Date.Date >= start.Date && row.Date.Date <= end.Date)
-                .OrderBy(row => row.Date)
-                .ThenBy(row => row.Number, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-
-            var table = new DataTable("Выписка банка");
-            table.Columns.Add("Дата", typeof(DateTime));
-            table.Columns.Add("Номер", typeof(string));
-            table.Columns.Add("Операция", typeof(string));
-            table.Columns.Add("Наш счет", typeof(string));
-            table.Columns.Add("Корр. счет", typeof(string));
-            table.Columns.Add("Организация", typeof(string));
-            table.Columns.Add("Приход", typeof(decimal));
-            table.Columns.Add("Расход", typeof(decimal));
-            table.Columns.Add("Остаток", typeof(decimal));
-            table.Columns.Add("Сумма в валюте", typeof(decimal));
-            table.Columns.Add("Валюта", typeof(string));
-            table.Columns.Add("Классификация платежа", typeof(string));
-            table.Columns.Add("Назначение платежа", typeof(string));
-
-            table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, string.Empty,
-                string.Empty, 0m, 0m, balance, 0m, string.Empty, string.Empty, string.Empty);
-
-            decimal totalIncome = 0m;
-            decimal totalExpense = 0m;
-            foreach (var row in rows)
-            {
-                var income = row.IsIncoming ? row.Amount : 0m;
-                var expense = row.IsOutgoing || !row.IsIncoming ? row.Amount : 0m;
-                totalIncome += income;
-                totalExpense += expense;
-                balance += income - expense;
-
-                table.Rows.Add(row.Date, row.Number, row.OrderType, row.OurAccount, row.CorrespondentAccount,
-                    row.Organization, income, expense, balance, row.AmountCurrency, row.Currency,
-                    row.PaymentClassification, row.Purpose);
-            }
-
-            table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty, string.Empty,
-                string.Empty, totalIncome, totalExpense, balance, rows.Sum(row => row.AmountCurrency),
-                string.Empty, string.Empty, string.Empty);
-
-            var report = CreateReport(table,
-                $"Выписка банка за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
-            report.ShowGrandTotal = true;
-            report.SummaryText = "Остаток рассчитывается по платежным поручениям: входящие увеличивают остаток, исходящие уменьшают.";
-            return (table, report);
-        }
-
         private async Task<(DataTable, Report)> BuildOrganizationReconciliationAsync(DateTime start, DateTime end)
         {
             var calculation = await _organizationBalanceService.CalculateAsync(start, end);
@@ -463,7 +511,13 @@ namespace BIS.ERP.Views
             table.Columns.Add("Сальдо", typeof(decimal));
             table.Columns.Add("Модуль", typeof(string));
 
-            foreach (var row in calculation.Rows)
+            var rowsToAdd = calculation.Rows.AsEnumerable();
+            if (_selectedOrganizationId.HasValue)
+            {
+                rowsToAdd = rowsToAdd.Where(r => r.OrganizationId == _selectedOrganizationId.Value);
+            }
+
+            foreach (var row in rowsToAdd)
             {
                 table.Rows.Add(row.OrganizationName, row.IsOrganizationTotal ? "ИТОГО" : row.AccountPairName,
                     row.AccountCode, row.CounterAccountCode, row.OpeningDebit, row.OpeningCredit,
@@ -474,8 +528,11 @@ namespace BIS.ERP.Views
             var titlePrefix = selectedVariant?.IsStandard == false
                 ? selectedVariant.DisplayName
                 : "Акт сверки";
+            var titleSuffix = _selectedOrganizationId.HasValue
+                ? $", фильтр: {_selectedOrganizationName}"
+                : string.Empty;
             var report = CreateReport(table,
-                $"{titlePrefix} за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+                $"{titlePrefix} за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{titleSuffix}", true);
             report.ReportType = "ReconciliationAct";
             report.SummaryText = calculation.Warnings.Count == 0
                 ? "Акт сверки построен по активным настройкам взаиморасчетов с организациями."
@@ -631,13 +688,6 @@ namespace BIS.ERP.Views
                 .ToList();
         }
 
-        private static decimal GetBankStatementSignedAmount(PaymentOrderReportRow row)
-        {
-            if (row.IsIncoming)
-                return row.Amount;
-            return -row.Amount;
-        }
-
         private static string ResolveReportReference(
             Dictionary<string, object> row,
             IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps,
@@ -704,7 +754,7 @@ namespace BIS.ERP.Views
                 if (value is double doubleValue)
                     return Convert.ToDecimal(doubleValue);
                 if (value is int intValue)
-                    return intValue;
+                    return Convert.ToDecimal(intValue);
                 if (decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.CurrentCulture, out var parsed) ||
                     decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out parsed))
                 {
@@ -945,7 +995,14 @@ namespace BIS.ERP.Views
             table.Columns.Add("Сальдо", typeof(decimal));
             table.Columns.Add("Модуль", typeof(string));
 
-            foreach (var row in calculation.Rows)
+            var rowsToAdd = calculation.Rows.AsEnumerable();
+            if (_selectedOrganizationId.HasValue)
+            {
+                var orgName = _selectedOrganizationName?.Split(" - ").LastOrDefault() ?? string.Empty;
+                rowsToAdd = rowsToAdd.Where(r => r.OrganizationName == orgName || r.OrganizationId == _selectedOrganizationId.Value);
+            }
+
+            foreach (var row in rowsToAdd)
             {
                 table.Rows.Add(
                     row.OrganizationName,
@@ -962,8 +1019,11 @@ namespace BIS.ERP.Views
                     row.ModuleCode);
             }
 
+            var titleSuffix = _selectedOrganizationId.HasValue
+                ? $", фильтр: {_selectedOrganizationName}"
+                : string.Empty;
             var report = CreateReport(table,
-                $"Сальдо по организациям за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+                $"Сальдо по организациям за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{titleSuffix}", true);
             report.SummaryText = calculation.Warnings.Count == 0
                 ? "Расчет выполнен по активным парам счетов справочника авансовых платежей."
                 : string.Join(Environment.NewLine, calculation.Warnings);
@@ -974,7 +1034,7 @@ namespace BIS.ERP.Views
         {
             var collection = await _balanceService.CollectPeriodInformationAsync(start, end);
             var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
-            var table = new DataTable("Сбор информации за период");
+            var table = new DataTable("Сбор информации за периода");
             table.Columns.Add("Показатель", typeof(string));
             table.Columns.Add("Всего", typeof(int));
             table.Columns.Add("Проведено", typeof(int));
@@ -1001,7 +1061,7 @@ namespace BIS.ERP.Views
                 closingDebit, closingCredit, closingDebit - closingCredit);
 
             var report = CreateReport(table,
-                $"Сбор информации за период {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
+                $"Сбор информации за периода {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
             var isBalanced = collection.IsBalanced && Math.Abs(openingDebit - openingCredit) < 0.01m &&
                              Math.Abs(closingDebit - closingCredit) < 0.01m;
             report.SummaryText = isBalanced

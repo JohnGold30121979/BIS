@@ -27,9 +27,7 @@
                         <ComboBoxItem Tag="PurchaseSalesJournal">Журнал закупок и продаж</ComboBoxItem>
                         <ComboBoxItem Tag="OrganizationBalances">Сальдо по организациям</ComboBoxItem>
                         <ComboBoxItem Tag="PeriodCollection">Сбор информации за период</ComboBoxItem>
-                        <ComboBoxItem Tag="CashBook">Кассовая книга</ComboBoxItem>
                         <ComboBoxItem Tag="PaymentOrderRegister">Реестр платежных поручений</ComboBoxItem>
-                        <ComboBoxItem Tag="BankStatement">Выписка банка</ComboBoxItem>
                         <ComboBoxItem Tag="OrganizationReconciliation">Акт сверки</ComboBoxItem>
                     </ComboBox>
                     <TextBlock Text="С:" VerticalAlignment="Center" Margin="16,0,6,0"/>
@@ -51,6 +49,21 @@
                     <TextBlock x:Name="ReconciliationVariantHint" Text="Варианты из метаданных Reports"
                                VerticalAlignment="Center" Margin="12,0,0,0"
                                Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                </WrapPanel>
+                <WrapPanel Margin="0,10,0,0">
+                    <TextBlock Text="Организация:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="OrganizationCombo" Width="360" Height="32"
+                              DisplayMemberPath="DisplayName"
+                              SelectedValuePath="Id"
+                              SelectionChanged="OnOrganizationSelectionChanged"
+                              ToolTip="Выберите организацию для фильтрации отчета"/>
+                    <Button Content="?" Width="34" Height="32" Margin="6,0,0,0"
+                            Click="OnSelectOrganizationClick"
+                            ToolTip="Выбрать организацию из справочника"/>
+                    <Button x:Name="ClearOrganizationButton" Content="✕" Width="24" Height="24"
+                            Margin="6,0,0,0" Click="OnClearOrganizationClick"
+                            Background="Transparent" BorderThickness="0" Foreground="#E74C3C"
+                            ToolTip="Сбросить фильтр по организации" Cursor="Hand"/>
                 </WrapPanel>
                 <WrapPanel Margin="0,10,0,0">
                     <TextBlock Text="Поиск:" VerticalAlignment="Center" Margin="0,0,6,0"/>
