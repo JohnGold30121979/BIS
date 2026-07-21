@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Linq;
 using System.Reflection;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 
@@ -9,8 +10,18 @@ namespace BIS.ERP.Services;
 
 public static class ReferenceComboBoxSearchHelper
 {
+    private static readonly DependencyProperty SearchHandlerProperty =
+        DependencyProperty.RegisterAttached(
+            "SearchHandler",
+            typeof(TextChangedEventHandler),
+            typeof(ReferenceComboBoxSearchHelper),
+            new PropertyMetadata(null));
+
     public static void Attach(ComboBox comboBox, IEnumerable items)
     {
+        if (comboBox.GetValue(SearchHandlerProperty) is TextChangedEventHandler previousHandler)
+            comboBox.RemoveHandler(TextBox.TextChangedEvent, previousHandler);
+
         var sourceItems = items.Cast<object>().ToList();
         var view = CollectionViewSource.GetDefaultView(sourceItems);
 
@@ -21,12 +32,15 @@ public static class ReferenceComboBoxSearchHelper
 
         view.Filter = item => Matches(item, comboBox.Text);
 
-        comboBox.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler((_, _) =>
+        TextChangedEventHandler handler = (_, _) =>
         {
             view.Refresh();
             if (comboBox.IsKeyboardFocusWithin && !string.IsNullOrWhiteSpace(comboBox.Text))
                 comboBox.IsDropDownOpen = comboBox.Items.Count > 0;
-        }));
+        };
+
+        comboBox.SetValue(SearchHandlerProperty, handler);
+        comboBox.AddHandler(TextBox.TextChangedEvent, handler);
     }
 
     private static bool Matches(object? item, string? searchText)
@@ -67,3 +81,5 @@ public static class ReferenceComboBoxSearchHelper
             .GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase)
             ?.GetValue(item);
 }
+
+

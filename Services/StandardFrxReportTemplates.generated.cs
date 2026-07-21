@@ -12,7 +12,7 @@ internal static class StandardFrxReportTemplates
             Name: "Приходный кассовый ордер (FRX FoxPro)",
             Description: "Оригинальный FRX-макет приходного кассового ордера из FoxPro.",
             ModuleCode: "Finance",
-            SourceName: "Приходный кассовый ордер",
+            SourceName: "Расходный/Приходный КО",
             SourceObjectType: "Document",
             ReportType: "FoxProLayout",
             Icon: "🖨",
@@ -26,7 +26,7 @@ internal static class StandardFrxReportTemplates
             Name: "Расходный кассовый ордер (FRX FoxPro)",
             Description: "Оригинальный FRX-макет расходного кассового ордера из FoxPro.",
             ModuleCode: "Finance",
-            SourceName: "Расходный кассовый ордер",
+            SourceName: "Расходный/Приходный КО",
             SourceObjectType: "Document",
             ReportType: "FoxProLayout",
             Icon: "🖨",
@@ -206,3 +206,4 @@ internal sealed record StandardFrxReportTemplateDefinition(
     bool IsPrintForm,
     bool IsDefault,
     string TemplateCompressedBase64);
+

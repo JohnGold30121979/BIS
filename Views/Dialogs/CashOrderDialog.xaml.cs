@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.ObjectModel;
@@ -13,6 +13,11 @@ namespace BIS.ERP.Views
 {
     public partial class CashOrderDialog : Window
     {
+        private const string CashOrderReceiptKind = "Receipt";
+        private const string CashOrderPaymentKind = "Payment";
+        private const string CashOrderReceiptDocumentType = "Приходный кассовый ордер";
+        private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
+
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
@@ -24,41 +29,43 @@ namespace BIS.ERP.Views
         private bool _isDataLoaded = false;
         private bool _isLoading = false;
         private List<CashDeskItem> _cashDesks = new();
-        private const string ReceiptDocumentName = "Приходный кассовый ордер";
-        private const string PaymentDocumentName = "Расходный кассовый ордер";
+        private MetadataObject? _cashDeskCatalog;
         private readonly ObservableCollection<CashPostingPreviewRow> _postingPreviewRows = new();
-        private bool _isReceiptOrder = true;
-        private bool _isChangingOrderType;
+        private string _orderKind = CashOrderPaymentKind;
 
         // Для сотрудника
         private Guid _selectedEmployeeId = Guid.Empty;
         private string _selectedEmployeeName = string.Empty;
 
         public CashOrderDialog(MetadataObject document, MetadataService metadataService)
+            : this(document, metadataService, CashOrderPaymentKind)
+        {
+        }
+
+        public CashOrderDialog(MetadataObject document, MetadataService metadataService, string orderKind)
         {
             InitializeComponent();
-            _isReceiptOrder = IsReceiptDocument(document.Name);
             PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
             _metadataService = metadataService;
             _editId = null;
-            DialogTitle.Text = $"Добавление: {document.Name}";
+            _orderKind = NormalizeOrderKind(orderKind, document.Name);
+            DialogTitle.Text = $"Добавление: {GetOrderKindDisplay(_orderKind)} КО";
             DatePicker.SelectedDate = DateTime.Today;
 
-            this.ContentRendered += async (s, e) => await InitializeAsync();
+            ContentRendered += async (s, e) => await InitializeAsync();
         }
 
         public CashOrderDialog(MetadataObject document, MetadataService metadataService, Guid editId)
         {
             InitializeComponent();
-            _isReceiptOrder = IsReceiptDocument(document.Name);
             PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
             _metadataService = metadataService;
             _editId = editId;
-            DialogTitle.Text = $"Редактирование: {document.Name}";
+            DialogTitle.Text = "Редактирование: кассовый ордер";
 
-            this.ContentRendered += async (s, e) => await InitializeAsync(editId);
+            ContentRendered += async (s, e) => await InitializeAsync(editId);
         }
 
         private async Task InitializeAsync(Guid? editId = null)
@@ -75,8 +82,12 @@ namespace BIS.ERP.Views
                 await Dispatcher.InvokeAsync(() =>
                 {
                     // Заполняем ComboBox (кроме сотрудника)
+                    _cashDeskCatalog = data.CashDeskCatalog;
                     if (data.CashDesks != null)
-                        ReferenceComboBoxSearchHelper.Attach(CashDeskCombo, data.CashDesks);
+                    {
+                        _cashDesks = data.CashDesks;
+                        ReferenceComboBoxSearchHelper.Attach(CashDeskCombo, _cashDesks);
+                    }
                     if (data.Organizations != null)
                     {
                         ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, data.Organizations);
@@ -125,11 +136,6 @@ namespace BIS.ERP.Views
 
                     _accountAnalytics = data.AccountAnalytics;
 
-                    _isChangingOrderType = true;
-                    ReceiptRadio.IsChecked = _isReceiptOrder;
-                    PaymentRadio.IsChecked = !_isReceiptOrder;
-                    _isChangingOrderType = false;
-                    UpdateOrderTypeUi();
 
                     // Генерируем номер
                     if (!editId.HasValue)
@@ -147,6 +153,8 @@ namespace BIS.ERP.Views
                     }
                     else if (data.Record != null)
                     {
+                        _orderKind = ResolveOrderKind(data.Record, _document.Name);
+                        DialogTitle.Text = $"Редактирование: {GetOrderKindDisplay(_orderKind)} КО";
                         // Заполняем данные для редактирования
                         var rawNumber = data.Record.ContainsKey("Номер") ? data.Record["Номер"]?.ToString() :
                                        (data.Record.ContainsKey("doc_number") ? data.Record["doc_number"]?.ToString() : "");
@@ -215,33 +223,9 @@ namespace BIS.ERP.Views
 
             // Кассы
             var cashDesks = allCatalogs.FirstOrDefault(c => c.Name == "Кассы");
+            result.CashDeskCatalog = cashDesks;
             if (cashDesks != null)
-            {
-                var data = await _metadataService.GetCatalogDataAsync(cashDesks.Id);
-                result.CashDesks = data
-                    .Where(d => d.TryGetValue("Id", out var id) && Guid.TryParse(id?.ToString(), out _))
-                    .Select(d =>
-                    {
-                        var accountCode = ResolveCashDeskAccountCode(
-                            GetRowString(d, "Счет", "Счет кассы", "Код", "code"),
-                            result.AccountAnalytics);
-
-                        return new CashDeskItem
-                        {
-                            Id = Guid.Parse(d["Id"].ToString()),
-                            DisplayName = GetRowString(
-                                d,
-                                "Наименование кассы",
-                                "Наименование",
-                                "name",
-                                "Код") ?? "Касса",
-                            AccountCode = accountCode,
-                            CashNumber = GetRowString(d, "Номер кассы", "cash_number") ?? string.Empty,
-                            CurrencyName = GetRowString(d, "Валюта", "currency_id") ?? string.Empty
-                        };
-                    })
-                    .ToList();
-            }
+                result.CashDesks = await LoadCashDeskItemsAsync(cashDesks, result.AccountAnalytics);
 
             // Организации
             var orgs = allCatalogs.FirstOrDefault(c => c.Name == "Организации");
@@ -265,14 +249,17 @@ namespace BIS.ERP.Views
             result.MaterialCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Справочник материалов");
             result.Materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
 
-            // Генерируем номер
-            try
+            // Для ПКО и РКО номера считаются раздельно, хотя записи хранятся в общей таблице.
+            if (!_editId.HasValue)
             {
-                result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(GetSelectedDocumentName());
-            }
-            catch
-            {
-                result.DocumentNumber = MetadataService.GenerateFallbackDocumentNumber();
+                try
+                {
+                    result.DocumentNumber = await _metadataService.GetNextCashOrderDocumentNumberAsync(_orderKind);
+                }
+                catch
+                {
+                    result.DocumentNumber = MetadataService.GenerateFallbackDocumentNumber();
+                }
             }
 
             // Если редактирование, загружаем запись
@@ -292,6 +279,7 @@ namespace BIS.ERP.Views
             public List<ReferenceItem> Currencies { get; set; } = new();
             public List<ReferenceItem> Employees { get; set; } = new();
             public List<ReferenceItem> Materials { get; set; } = new();
+            public MetadataObject? CashDeskCatalog { get; set; }
             public MetadataObject? OrganizationCatalog { get; set; }
             public MetadataObject? CurrencyCatalog { get; set; }
             public MetadataObject? EmployeeCatalog { get; set; }
@@ -301,16 +289,239 @@ namespace BIS.ERP.Views
             public Dictionary<string, object>? Record { get; set; }
         }
 
+        private async Task<List<CashDeskItem>> LoadCashDeskItemsAsync(
+            MetadataObject cashDeskCatalog,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            var rows = await _metadataService.GetCatalogDataAsync(cashDeskCatalog.Id);
+            return rows
+                .Where(row => row.TryGetValue("Id", out var id) && Guid.TryParse(id?.ToString(), out _))
+                .Select(row => CreateCashDeskItem(row, accountAnalytics))
+                .ToList();
+        }
+
+        private static CashDeskItem CreateCashDeskItem(
+            Dictionary<string, object> row,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            var accountCode = ResolveCashDeskAccountCode(
+                GetRowString(row, "Счет", "Счет кассы", "Код", "code"),
+                accountAnalytics);
+
+            var item = new CashDeskItem
+            {
+                Id = Guid.Parse(row["Id"].ToString()!),
+                DisplayName = GetRowString(
+                    row,
+                    "Наименование кассы",
+                    "Наименование",
+                    "name",
+                    "Код") ?? "Касса",
+                AccountCode = accountCode,
+                CashNumber = GetRowString(row, "Номер кассы", "cash_number") ?? string.Empty,
+                CurrencyName = GetRowString(row, "Валюта", "currency_id") ?? string.Empty
+            };
+
+            foreach (var value in row.Values)
+            {
+                var text = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(text))
+                    item.LookupKeys.Add(text);
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.DisplayNameWithAccount))
+                item.LookupKeys.Add(item.DisplayNameWithAccount);
+
+            return item;
+        }
+
+        private async Task<MetadataObject?> GetCashDeskCatalogAsync()
+        {
+            if (_cashDeskCatalog != null)
+                return _cashDeskCatalog;
+
+            var allCatalogs = await _metadataService.GetCatalogsAsync();
+            _cashDeskCatalog = allCatalogs.FirstOrDefault(catalog => catalog.Name == "Кассы");
+
+            if (_cashDeskCatalog == null)
+            {
+                MessageBox.Show("Справочник касс не найден.", "Кассы",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
+            return _cashDeskCatalog;
+        }
+
+        private async Task ReloadCashDesksAsync(Guid? selectedId = null)
+        {
+            var cashDeskCatalog = await GetCashDeskCatalogAsync();
+            if (cashDeskCatalog == null)
+                return;
+
+            _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+            _cashDesks = await LoadCashDeskItemsAsync(cashDeskCatalog, _accountAnalytics);
+            ReferenceComboBoxSearchHelper.Attach(CashDeskCombo, _cashDesks);
+
+            if (selectedId.HasValue)
+            {
+                CashDeskCombo.SelectedItem = _cashDesks.FirstOrDefault(item => item.Id == selectedId.Value);
+            }
+            else if (_selectedCashDeskId != Guid.Empty)
+            {
+                CashDeskCombo.SelectedItem = _cashDesks.FirstOrDefault(item => item.Id == _selectedCashDeskId);
+            }
+
+            if (CashDeskCombo.SelectedItem is not CashDeskItem)
+            {
+                _selectedCashDeskId = Guid.Empty;
+                _selectedCashDeskCode = string.Empty;
+                CashDeskAccountBox.Text = string.Empty;
+                RefreshPostingPreview();
+            }
+        }
+
+        private async Task ApplyCashDeskByIdAsync(Guid cashDeskId)
+        {
+            await ReloadCashDesksAsync(cashDeskId);
+            if (CashDeskCombo.SelectedItem is not CashDeskItem)
+            {
+                MessageBox.Show("Касса сохранена, но не найдена после обновления списка.", "Кассы",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private async void SelectCashDesk_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Cursor = Cursors.Wait;
+                var cashDeskCatalog = await GetCashDeskCatalogAsync();
+                if (cashDeskCatalog == null)
+                    return;
+
+                var rows = await _metadataService.GetCatalogDataAsync(cashDeskCatalog.Id);
+                if (rows.Count == 0)
+                {
+                    MessageBox.Show("В справочнике касс нет данных. Добавьте кассу кнопкой '+'.", "Кассы",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var dialog = new ReferenceSelectionDialog(rows, "Наименование кассы", "Счет")
+                {
+                    Owner = this,
+                    Title = "Выбор: Кассы"
+                };
+
+                if (dialog.ShowDialog() == true &&
+                    dialog.SelectedItem != null &&
+                    dialog.SelectedItem.TryGetValue("Id", out var idValue) &&
+                    Guid.TryParse(idValue?.ToString(), out var selectedId))
+                {
+                    await ApplyCashDeskByIdAsync(selectedId);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при выборе кассы: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
+
+        private async void AddCashDesk_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Cursor = Cursors.Wait;
+                var cashDeskCatalog = await GetCashDeskCatalogAsync();
+                if (cashDeskCatalog == null)
+                    return;
+
+                var dialog = new CatalogItemDialog(cashDeskCatalog, _metadataService)
+                {
+                    Owner = this
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                var createdId = await _metadataService.CreateDynamicRecordAsync(cashDeskCatalog.Id, dialog.ItemData);
+                await ApplyCashDeskByIdAsync(createdId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при добавлении кассы: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
+
+        private async void EditCashDesk_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (CashDeskCombo.SelectedItem is not CashDeskItem selected)
+                {
+                    MessageBox.Show("Сначала выберите кассу.", "Кассы",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                Cursor = Cursors.Wait;
+                var cashDeskCatalog = await GetCashDeskCatalogAsync();
+                if (cashDeskCatalog == null)
+                    return;
+
+                var rows = await _metadataService.GetCatalogDataAsync(cashDeskCatalog.Id);
+                var cashDesk = rows.FirstOrDefault(row =>
+                    row.TryGetValue("Id", out var idValue) &&
+                    Guid.TryParse(idValue?.ToString(), out var id) &&
+                    id == selected.Id);
+
+                if (cashDesk == null)
+                {
+                    MessageBox.Show("Выбранная касса не найдена в справочнике.", "Кассы",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new CatalogItemDialog(cashDeskCatalog, _metadataService, cashDesk)
+                {
+                    Owner = this
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                await _metadataService.UpdateDynamicRecordAsync(cashDeskCatalog.Id, selected.Id, dialog.ItemData);
+                await ApplyCashDeskByIdAsync(selected.Id);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при редактировании кассы: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
         private async void SelectAccount_Click(object sender, RoutedEventArgs e)
         {
             try
             {
                 this.Cursor = Cursors.Wait;
 
-                var selectedDocument = await ResolveSelectedCashOrderDocumentAsync();
                 var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
-                    selectedDocument.Id,
-                    selectedDocument.ObjectType);
+                    _document.Id,
+                    _document.ObjectType);
 
                 if (accountsData == null || accountsData.Count == 0)
                 {
@@ -443,22 +654,7 @@ namespace BIS.ERP.Views
                 }
 
                 // Определяем дебет и кредит
-                string debitAccount, creditAccount;
-                if (_isReceiptOrder)
-                {
-                    debitAccount = cashDeskCode;
-                    creditAccount = corrAccountCode;
-                }
-                else if (!_isReceiptOrder)
-                {
-                    debitAccount = corrAccountCode;
-                    creditAccount = cashDeskCode;
-                }
-                else
-                {
-                    debitAccount = cashDeskCode;
-                    creditAccount = corrAccountCode;
-                }
+                var (debitAccount, creditAccount) = BuildPostingAccounts(cashDeskCode, corrAccountCode);
 
                 if (debitAccount == creditAccount)
                 {
@@ -466,7 +662,6 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var targetDocument = await ResolveSelectedCashOrderDocumentAsync();
 
                 // Валюта
                 bool isCurrencyEnabled = IsCurrencyEnabledForAccount(corrAccountCode);
@@ -476,6 +671,7 @@ namespace BIS.ERP.Views
                 {
                     ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
+                    ["Тип КО"] = _orderKind,
                     ["Сумма"] = amount,
                     ["Основание"] = BasisBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
@@ -488,42 +684,33 @@ namespace BIS.ERP.Views
                 };
 
                 // Заполняем остальные поля (только если они видимы, иначе не сохраняем)
-                SetFieldValueIfExists(targetDocument, itemData, "Организация",
+                SetFieldValueIfExists(itemData, "Организация",
                     OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem org
                         ? org.Id.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(targetDocument, itemData, "Валюта",
+                SetFieldValueIfExists(itemData, "Валюта",
                     CurrencyPanel.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem is ReferenceItem currency
                         ? currency.Id.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(targetDocument, itemData, "Сотрудник",
+                SetFieldValueIfExists(itemData, "Сотрудник",
                     EmployeePanel.Visibility == Visibility.Visible && _selectedEmployeeId != Guid.Empty
                         ? _selectedEmployeeId.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(targetDocument, itemData, "Материал",
+                SetFieldValueIfExists(itemData, "Материал",
                     MaterialPanel.Visibility == Visibility.Visible && MaterialCombo.SelectedItem is ReferenceItem material
                         ? material.Id.ToString()
                         : string.Empty);
 
-                SetFieldValueIfExists(targetDocument, itemData, "Контрагент", string.Empty);
+                SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
 
-                // Сохраняем документ в выбранный вид ордера.
-                if (_editId.HasValue && targetDocument.Id == _document.Id)
-                {
-                    await _metadataService.UpdateDynamicRecordAsync(targetDocument.Id, _editId.Value, itemData);
-                }
-                else if (_editId.HasValue)
-                {
-                    await _metadataService.CreateDynamicRecordAsync(targetDocument.Id, itemData);
-                    await _metadataService.DeleteDynamicRecordAsync(_document.Id, _editId.Value);
-                }
+                // Сохраняем документ.
+                if (_editId.HasValue)
+                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
                 else
-                {
-                    await _metadataService.CreateDynamicRecordAsync(targetDocument.Id, itemData);
-                }
+                    await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
 
                 DialogResult = true;
                 Close();
@@ -643,11 +830,8 @@ namespace BIS.ERP.Views
         }
 
         private void SetFieldValueIfExists(Dictionary<string, object> itemData, string fieldName, object value)
-            => SetFieldValueIfExists(_document, itemData, fieldName, value);
-
-        private static void SetFieldValueIfExists(MetadataObject document, Dictionary<string, object> itemData, string fieldName, object value)
         {
-            if (document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
+            if (_document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
                 itemData[fieldName] = value;
         }
 
@@ -983,68 +1167,50 @@ namespace BIS.ERP.Views
                 RefreshPostingPreview();
             }
         }
-        private static bool IsReceiptDocument(string documentName)
-            => documentName.Equals(ReceiptDocumentName, StringComparison.OrdinalIgnoreCase);
+        private static bool IsReceiptOrder(string orderKind)
+            => orderKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase);
 
-        private string GetSelectedDocumentName()
-            => _isReceiptOrder ? ReceiptDocumentName : PaymentDocumentName;
+        private static string NormalizeOrderKind(string? value, string documentName)
+        {
+            var rawKind = value ?? string.Empty;
+            if (rawKind.Contains("приход", StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase) ||
+                documentName.Equals(CashOrderReceiptDocumentType, StringComparison.OrdinalIgnoreCase))
+            {
+                return CashOrderReceiptKind;
+            }
+
+            if (rawKind.Contains("расход", StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderPaymentKind, StringComparison.OrdinalIgnoreCase) ||
+                documentName.Equals(CashOrderPaymentDocumentType, StringComparison.OrdinalIgnoreCase))
+            {
+                return CashOrderPaymentKind;
+            }
+
+            return CashOrderPaymentKind;
+        }
+
+        private static string ResolveOrderKind(Dictionary<string, object> record, string documentName)
+        {
+            return NormalizeOrderKind(
+                GetRowString(record, "Тип КО", "order_kind", "cash_order_kind", "Тип", "document_type"),
+                documentName);
+        }
+
+        private static string GetOrderKindDisplay(string orderKind)
+            => IsReceiptOrder(orderKind) ? "Приходный" : "Расходный";
 
         private (string DebitAccount, string CreditAccount) BuildPostingAccounts(string cashDeskCode, string corrAccountCode)
-            => _isReceiptOrder
+            => IsReceiptOrder(_orderKind)
                 ? (cashDeskCode, corrAccountCode)
                 : (corrAccountCode, cashDeskCode);
 
         private decimal TryReadAmount()
             => decimal.TryParse(AmountBox?.Text, out var parsedAmount) ? parsedAmount : 0m;
 
-        private async Task<MetadataObject> ResolveSelectedCashOrderDocumentAsync()
-        {
-            var selectedDocumentName = GetSelectedDocumentName();
-            if (_document.Name.Equals(selectedDocumentName, StringComparison.OrdinalIgnoreCase))
-                return _document;
-
-            var documents = await _metadataService.GetDocumentsAsync();
-            return documents.FirstOrDefault(item => item.Name.Equals(selectedDocumentName, StringComparison.OrdinalIgnoreCase))
-                ?? throw new InvalidOperationException($"Документ '{selectedDocumentName}' не найден в метаданных.");
-        }
-
-        private void OrderType_Checked(object sender, RoutedEventArgs e)
-        {
-            if (_isChangingOrderType)
-                return;
-
-            _isReceiptOrder = ReceiptRadio.IsChecked == true;
-            UpdateOrderTypeUi();
-            RefreshPostingPreview();
-
-            if (!_isLoading && !_editId.HasValue && AllowNumberEditCheckBox.IsChecked != true)
-                _ = RefreshDocumentNumberAsync();
-        }
-
         private void OnPostingPreviewChanged(object sender, EventArgs e)
         {
             RefreshPostingPreview();
-        }
-
-        private async Task RefreshDocumentNumberAsync()
-        {
-            try
-            {
-                NumberBox.Text = await _metadataService.GetNextDocumentNumberAsync(GetSelectedDocumentName());
-            }
-            catch
-            {
-                NumberBox.Text = MetadataService.GenerateFallbackDocumentNumber();
-            }
-        }
-
-        private void UpdateOrderTypeUi()
-        {
-            var documentName = GetSelectedDocumentName();
-            Title = documentName;
-            DialogTitle.Text = _editId.HasValue
-                ? $"Редактирование: {documentName}"
-                : $"Добавление: {documentName}";
         }
 
         private void RefreshPostingPreview()
@@ -1055,17 +1221,18 @@ namespace BIS.ERP.Views
             _postingPreviewRows.Clear();
             var amount = TryReadAmount();
             var (debitAccount, creditAccount) = BuildPostingAccounts(_selectedCashDeskCode, _selectedCorrAccountCode);
+            var isReceipt = IsReceiptOrder(_orderKind);
 
             _postingPreviewRows.Add(new CashPostingPreviewRow
             {
-                Mark = _isReceiptOrder ? "Приход" : "Расход",
+                Mark = isReceipt ? "Приход" : "Расход",
                 Debit = string.IsNullOrWhiteSpace(debitAccount) ? "не выбран" : debitAccount,
                 Credit = string.IsNullOrWhiteSpace(creditAccount) ? "не выбран" : creditAccount,
                 Amount = amount.ToString("N2"),
                 Note = string.IsNullOrWhiteSpace(BasisBox?.Text) ? DescriptionBox?.Text ?? string.Empty : BasisBox.Text
             });
 
-            PostingPreviewHint.Text = _isReceiptOrder
+            PostingPreviewHint.Text = isReceipt
                 ? "Приходный ордер: дебетуется счет кассы, кредитуется корреспондирующий счет."
                 : "Расходный ордер: дебетуется корреспондирующий счет, кредитуется счет кассы.";
         }
@@ -1090,3 +1257,8 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
+
+
+
+
+

@@ -1,11 +1,8 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
-using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
-using System.Data;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -17,21 +14,53 @@ namespace BIS.ERP.Views
 {
     public partial class CashOrderWorkView : UserControl
     {
+        private const string CashOrderDocumentName = "Расходный/Приходный КО";
+        private const string CashOrderReceiptKind = "Receipt";
+        private const string CashOrderPaymentKind = "Payment";
+        private const string CashOrderReceiptDocumentType = "Приходный кассовый ордер";
+        private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
+
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
-        private bool _isLoading = false;
+        private bool _isLoading;
 
         public CashOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
             InitializeComponent();
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
+            InitializeHeader(documentMetadata.Icon, CashOrderDocumentName, documentMetadata.Description);
+        }
 
-            TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";
-            DescriptionText.Text = documentMetadata.Description;
+        public CashOrderWorkView(MetadataObject receiptDocumentMetadata, MetadataObject paymentDocumentMetadata, MetadataService metadataService)
+            : this(ResolveUnifiedDocument(receiptDocumentMetadata, paymentDocumentMetadata), metadataService)
+        {
+        }
 
-            // Подписываемся на событие загрузки
-            this.Loaded += async (s, e) => await LoadData();
+        private static MetadataObject ResolveUnifiedDocument(MetadataObject firstDocument, MetadataObject secondDocument)
+        {
+            if (firstDocument.Name.Equals(CashOrderDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                firstDocument.TableName.Equals("doc_cash_orders", StringComparison.OrdinalIgnoreCase))
+            {
+                return firstDocument;
+            }
+
+            if (secondDocument.Name.Equals(CashOrderDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                secondDocument.TableName.Equals("doc_cash_orders", StringComparison.OrdinalIgnoreCase))
+            {
+                return secondDocument;
+            }
+
+            return firstDocument;
+        }
+
+        private void InitializeHeader(string icon, string title, string description)
+        {
+            TitleText.Text = $"{icon} {title}";
+            DescriptionText.Text = string.IsNullOrWhiteSpace(description)
+                ? "Список приходных и расходных кассовых ордеров"
+                : description;
+            Loaded += async (_, _) => await LoadData();
         }
 
         private void UpdateButtonsState()
@@ -50,297 +79,40 @@ namespace BIS.ERP.Views
         {
             UpdateButtonsState();
             if (DataGrid.SelectedItem is CashOrderRow selected)
+            {
                 StatusText.Text = selected.IsPosted
-                    ? $"Проведен: Дт {selected.DebitAccount} / Кт {selected.CreditAccount}, {selected.Amount:N2} сом. Двойной щелчок откроет проводку."
-                    : $"Не проведен: {selected.DocNumber}, {selected.Amount:N2} сом.";
+                    ? $"Проведен: {selected.OrderTypeDisplay}; Дт {selected.DebitAccount} / Кт {selected.CreditAccount}, {selected.Amount:N2} сом. Двойной щелчок откроет проводку."
+                    : $"Не проведен: {selected.OrderTypeDisplay} {selected.DocNumber}, {selected.Amount:N2} сом.";
+            }
         }
 
         private async Task LoadData()
         {
-            if (_isLoading) return;
-            _isLoading = true;
+            if (_isLoading)
+                return;
 
+            _isLoading = true;
             try
             {
                 StatusText.Text = "Загрузка данных...";
 
-                var data = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
-                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
-
-                // ---- Создаём кэш для Reference полей ----
-                var referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
-
-                // 1. Собрать все Reference поля документа (из метаданных)
-                var refFields = _documentMetadata.Fields
-                    .Where(f => f.FieldType == "Reference" && !string.IsNullOrEmpty(f.ReferenceCatalog))
+                var documentRows = (await _metadataService.GetCatalogDataAsync(_documentMetadata.Id))
+                    .Select(row => (Document: _documentMetadata, Row: row))
                     .ToList();
 
-                System.Diagnostics.Debug.WriteLine($"🔍 Найдено Reference полей: {refFields.Count}");
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var catalogsByName = allCatalogs.ToDictionary(catalog => catalog.Name, catalog => catalog);
+                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                var referenceCache = await BuildReferenceCacheAsync(documentRows, catalogsByName, accountAnalytics);
 
-                // 2. Для каждого поля собрать уникальные ID из данных
-                foreach (var field in refFields)
-                {
-                    var ids = new HashSet<Guid>();
-                    foreach (var row in data)
-                    {
-                        if (row.TryGetValue(field.Name, out var value) && value != null)
-                        {
-                            if (Guid.TryParse(value.ToString(), out var id))
-                                ids.Add(id);
-                        }
-                    }
-
-                    if (ids.Count == 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"⏭️ Поле '{field.Name}' — нет данных, пропускаем");
-                        continue;
-                    }
-
-                    // 3. Найти справочник по ReferenceCatalog
-                    if (!catalogsDict.TryGetValue(field.ReferenceCatalog, out var catalog))
-                    {
-                        System.Diagnostics.Debug.WriteLine($"❌ Справочник '{field.ReferenceCatalog}' не найден");
-                        continue;
-                    }
-
-                    // 4. Загрузить данные справочника
-                    var refData = await _metadataService.GetCatalogDataAsync(catalog.Id);
-                    var dict = new Dictionary<Guid, string>();
-
-                    foreach (var item in refData)
-                    {
-                        if (!item.TryGetValue("Id", out var refId) || refId == null)
-                            continue;
-                        if (!Guid.TryParse(refId.ToString(), out var id))
-                            continue;
-
-                        // Построить отображаемое имя
-                        var display = ReferenceDisplayHelper.BuildDisplayValue(item, field);
-                        if (string.IsNullOrEmpty(display))
-                        {
-                            var fallback = item.FirstOrDefault(kv => kv.Key != "Id").Value?.ToString();
-                            display = !string.IsNullOrEmpty(fallback) ? fallback : id.ToString();
-                        }
-                        dict[id] = display;
-                    }
-
-                    referenceCache[field.Name] = dict;
-                    System.Diagnostics.Debug.WriteLine($"✅ Загружено {dict.Count} записей для '{field.Name}' (справочник: {field.ReferenceCatalog})");
-                }
-
-                // 5. Специальная загрузка для корреспондирующего счета (план счетов)
-                try
-                {
-                    var chartCatalog = catalogsDict.FirstOrDefault(c => c.Key.StartsWith("План счетов")).Value;
-                    if (chartCatalog != null)
-                    {
-                        var accountsData = await _metadataService.GetCatalogDataAsync(chartCatalog.Id);
-                        var accountDict = new Dictionary<Guid, string>();
-                        foreach (var acc in accountsData)
-                        {
-                            if (acc.TryGetValue("Id", out var accIdObj) && accIdObj != null && Guid.TryParse(accIdObj.ToString(), out var accId))
-                            {
-                                var code = acc.ContainsKey("Код") ? acc["Код"].ToString() : "";
-                                var name = acc.ContainsKey("Наименование") ? acc["Наименование"].ToString() : "";
-                                accountDict[accId] = $"{code} - {name}";
-                            }
-                        }
-                        referenceCache["correspondent_account"] = accountDict;
-                        System.Diagnostics.Debug.WriteLine($"✅ Загружено счетов: {accountDict.Count}");
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine("❌ План счетов не найден!");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки счетов: {ex.Message}");
-                }
-
-                // 6. Специальная загрузка касс, чтобы в списках не показывался GUID.
-                try
-                {
-                    if (catalogsDict.TryGetValue("Кассы", out var cashCatalog))
-                    {
-                        var cashData = await _metadataService.GetCatalogDataAsync(cashCatalog.Id);
-                        var cashDict = new Dictionary<Guid, string>();
-                        foreach (var cash in cashData)
-                        {
-                            if (cash.TryGetValue("Id", out var cashIdObj) &&
-                                cashIdObj != null &&
-                                Guid.TryParse(cashIdObj.ToString(), out var cashId))
-                            {
-                                var name = GetRowString(cash, "Наименование кассы", "Наименование", "name", "Код", "code");
-                                var account = CashOrderDialog.ResolveCashDeskAccountCode(
-                                    GetRowString(cash, "Счет", "Счет кассы", "code", "Код"),
-                                    accountAnalytics);
-                                cashDict[cashId] = string.IsNullOrWhiteSpace(account)
-                                    ? name
-                                    : $"{name} (счет {account})";
-                            }
-                        }
-
-                        referenceCache["Касса"] = cashDict;
-                        referenceCache["cash_desk_id"] = cashDict;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка загрузки касс: {ex.Message}");
-                }
-
-                // ---- Создание списка строк ----
-                var rows = new List<CashOrderRow>();
-
-                foreach (var row in data)
-                {
-                    var newRow = new CashOrderRow
-                    {
-                        Id = row.TryGetValue("Id", out var idObj) && idObj != DBNull.Value && idObj != null
-                            ? Guid.Parse(idObj.ToString())
-                            : Guid.NewGuid(),
-                        DocNumber = row.TryGetValue("Номер", out var numObj) && numObj != DBNull.Value
-                            ? numObj?.ToString()
-                            : (row.TryGetValue("Номер документа", out var numObj2) && numObj2 != DBNull.Value
-                                ? numObj2?.ToString()
-                                : ""),
-                        DocDate = row.TryGetValue("Дата", out var dateObj) && dateObj != DBNull.Value && dateObj != null
-                            ? (DateTime)dateObj
-                            : DateTime.Now,
-                        Amount = row.TryGetValue("Сумма", out var amtObj) && amtObj != DBNull.Value && amtObj != null
-                            ? Convert.ToDecimal(amtObj)
-                            : 0,
-                        Basis = row.TryGetValue("Основание", out var basisObj) && basisObj != DBNull.Value
-                            ? basisObj?.ToString()
-                            : "",
-                        Description = row.TryGetValue("Примечание", out var descObj) && descObj != DBNull.Value
-                            ? descObj?.ToString()
-                            : "",
-                        IsPosted = row.TryGetValue("Проведён", out var postedObj) && postedObj != DBNull.Value && postedObj != null
-                            ? (bool)postedObj
-                            : false,
-                        CreatedAt = row.TryGetValue("CreatedAt", out var createdObj) && createdObj != DBNull.Value && createdObj != null
-                            ? (DateTime)createdObj
-                            : DateTime.Now,
-                        UpdatedAt = row.TryGetValue("UpdatedAt", out var updatedObj) && updatedObj != DBNull.Value && updatedObj != null
-                            ? (DateTime)updatedObj
-                            : DateTime.Now,
-
-                        // Новые поля
-                        DebitAccount = row.TryGetValue("Дебет", out var debObj) && debObj != DBNull.Value
-                            ? debObj?.ToString()
-                            : "",
-                        CreditAccount = row.TryGetValue("Кредит", out var credObj) && credObj != DBNull.Value
-                            ? credObj?.ToString()
-                            : "",
-                        AmountInCurrency = row.TryGetValue("Сумма в валюте", out var curObj) && curObj != DBNull.Value && curObj != null
-                            ? Convert.ToDecimal(curObj)
-                            : 0,
-                        CashDeskId = TryGetValue(row, out var cashIdObj, "Касса", "cash_desk_id") && cashIdObj != DBNull.Value ? cashIdObj?.ToString() : ""
-                    };
-
-                    // ---- Загрузка Reference полей через кэш ----
-                    // Организация
-                    if (row.TryGetValue("Организация", out var orgObj) && orgObj != DBNull.Value && orgObj != null)
-                    {
-                        if (Guid.TryParse(orgObj.ToString(), out var orgId) &&
-                            referenceCache.TryGetValue("Организация", out var orgDict) &&
-                            orgDict.TryGetValue(orgId, out var orgName))
-                        {
-                            newRow.OrganizationName = orgName;
-                        }
-                        else
-                        {
-                            newRow.OrganizationName = orgObj.ToString();
-                        }
-                    }
-
-                    // Валюта
-                    if (row.TryGetValue("Валюта", out var curObj2) && curObj2 != DBNull.Value && curObj2 != null)
-                    {
-                        if (Guid.TryParse(curObj2.ToString(), out var curId) &&
-                            referenceCache.TryGetValue("Валюта", out var curDict) &&
-                            curDict.TryGetValue(curId, out var curName))
-                        {
-                            newRow.CurrencyName = curName;
-                        }
-                        else
-                        {
-                            newRow.CurrencyName = curObj2.ToString();
-                        }
-                    }
-
-                    // Касса
-                    if (TryGetValue(row, out var cashObj, "Касса", "cash_desk_id") && cashObj != DBNull.Value && cashObj != null)
-                    {
-                        if (Guid.TryParse(cashObj.ToString(), out var cashId) &&
-                            (referenceCache.TryGetValue("Касса", out var cashDict) ||
-                             referenceCache.TryGetValue("cash_desk_id", out cashDict)) &&
-                            cashDict.TryGetValue(cashId, out var cashName))
-                        {
-                            newRow.CashDeskName = cashName;
-                        }
-                        else
-                        {
-                            newRow.CashDeskName = cashObj.ToString();
-                        }
-                    }
-
-                    // Сотрудник
-                    if (row.TryGetValue("Сотрудник", out var empObj) && empObj != DBNull.Value && empObj != null)
-                    {
-                        if (Guid.TryParse(empObj.ToString(), out var empId) &&
-                            referenceCache.TryGetValue("Сотрудник", out var empDict) &&
-                            empDict.TryGetValue(empId, out var empName))
-                        {
-                            newRow.EmployeeName = empName;
-                        }
-                        else
-                        {
-                            newRow.EmployeeName = empObj.ToString();
-                        }
-                    }
-
-                    // Материал
-                    if (row.TryGetValue("Материал", out var matObj) && matObj != DBNull.Value && matObj != null)
-                    {
-                        if (Guid.TryParse(matObj.ToString(), out var matId) &&
-                            referenceCache.TryGetValue("Материал", out var matDict) &&
-                            matDict.TryGetValue(matId, out var matName))
-                        {
-                            newRow.MaterialName = matName;
-                        }
-                        else
-                        {
-                            newRow.MaterialName = matObj.ToString();
-                        }
-                    }
-
-                    // Корреспондирующий счет
-                    if (row.TryGetValue("Корр. счет", out var corrObj) && corrObj != DBNull.Value && corrObj != null)
-                    {
-                        if (Guid.TryParse(corrObj.ToString(), out var corrId) &&
-                            referenceCache.TryGetValue("correspondent_account", out var accDict) &&
-                            accDict.TryGetValue(corrId, out var accName))
-                        {
-                            newRow.CorrespondentAccountName = accName;
-                        }
-                        else
-                        {
-                            newRow.CorrespondentAccountName = corrObj.ToString();
-                        }
-                    }
-
-                    rows.Add(newRow);
-                }
+                var rows = documentRows
+                    .Select(item => CreateCashOrderRow(item.Document, item.Row, referenceCache))
+                    .OrderByDescending(row => row.DocDate)
+                    .ThenByDescending(row => row.CreatedAt)
+                    .ToList();
 
                 DataGrid.ItemsSource = rows;
                 DataGrid.Items.Refresh();
-                // UpdateAnalyticColumns(data, accountAnalytics);
-
                 StatusText.Text = $"📊 Загружено записей: {rows.Count}";
                 UpdateButtonsState();
             }
@@ -357,29 +129,224 @@ namespace BIS.ERP.Views
             }
         }
 
-
-        private static Visibility GetAnalyticColumnVisibility(
-            string fieldName,
-            string referenceCatalog,
-            List<Dictionary<string, object>> rows,
-            IEnumerable<string> accountFields,
-            AccountAnalyticsRegistry registry)
+        private async Task<Dictionary<string, Dictionary<Guid, string>>> BuildReferenceCacheAsync(
+            IReadOnlyCollection<(MetadataObject Document, Dictionary<string, object> Row)> documentRows,
+            Dictionary<string, MetadataObject> catalogsByName,
+            AccountAnalyticsRegistry accountAnalytics)
         {
-            return AccountAnalyticsRules.ShouldShowFieldForRows(
-                    fieldName, rows, accountFields, registry, referenceCatalog)
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            var referenceCache = new Dictionary<string, Dictionary<Guid, string>>(StringComparer.OrdinalIgnoreCase);
+            var referenceFields = _documentMetadata.Fields
+                .Where(field => field.FieldType == "Reference" && !string.IsNullOrWhiteSpace(field.ReferenceCatalog))
+                .GroupBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+            foreach (var field in referenceFields)
+            {
+                var ids = new HashSet<Guid>();
+                foreach (var item in documentRows)
+                {
+                    if (item.Row.TryGetValue(field.Name, out var value) && Guid.TryParse(value?.ToString(), out var id))
+                        ids.Add(id);
+                }
+
+                if (ids.Count == 0 || !catalogsByName.TryGetValue(field.ReferenceCatalog!, out var catalog))
+                    continue;
+
+                var referenceRows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                var values = new Dictionary<Guid, string>();
+                foreach (var row in referenceRows)
+                {
+                    if (!row.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var id) || !ids.Contains(id))
+                        continue;
+
+                    values[id] = BuildReferenceDisplay(row, field);
+                }
+
+                referenceCache[field.Name] = values;
+            }
+
+            await AddAccountReferenceCacheAsync(referenceCache, catalogsByName);
+            await AddCashDeskReferenceCacheAsync(referenceCache, catalogsByName, accountAnalytics);
+            return referenceCache;
         }
 
-        private static bool TryGetValue(Dictionary<string, object> row, out object? value, params string[] keys)
+        private async Task AddAccountReferenceCacheAsync(
+            Dictionary<string, Dictionary<Guid, string>> referenceCache,
+            Dictionary<string, MetadataObject> catalogsByName)
+        {
+            var chartCatalog = catalogsByName.FirstOrDefault(item => item.Key.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase)).Value;
+            if (chartCatalog == null)
+                return;
+
+            var accounts = await _metadataService.GetCatalogDataAsync(chartCatalog.Id);
+            var values = new Dictionary<Guid, string>();
+            foreach (var account in accounts)
+            {
+                if (!account.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var id))
+                    continue;
+
+                var code = GetRowString(account, "Код", "code");
+                var name = GetRowString(account, "Наименование", "name");
+                values[id] = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}";
+            }
+
+            referenceCache["correspondent_account"] = values;
+            referenceCache["Корр. счет"] = values;
+        }
+
+        private async Task AddCashDeskReferenceCacheAsync(
+            Dictionary<string, Dictionary<Guid, string>> referenceCache,
+            Dictionary<string, MetadataObject> catalogsByName,
+            AccountAnalyticsRegistry accountAnalytics)
+        {
+            if (!catalogsByName.TryGetValue("Кассы", out var cashCatalog))
+                return;
+
+            var cashRows = await _metadataService.GetCatalogDataAsync(cashCatalog.Id);
+            var values = new Dictionary<Guid, string>();
+            foreach (var cash in cashRows)
+            {
+                if (!cash.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var id))
+                    continue;
+
+                var name = GetRowString(cash, "Наименование кассы", "Наименование", "name", "Код", "code");
+                var account = CashOrderDialog.ResolveCashDeskAccountCode(
+                    GetRowString(cash, "Счет", "Счет кассы", "code", "Код"),
+                    accountAnalytics);
+                values[id] = string.IsNullOrWhiteSpace(account) ? name : $"{name} (счет {account})";
+            }
+
+            referenceCache["Касса"] = values;
+            referenceCache["cash_desk_id"] = values;
+        }
+
+        private CashOrderRow CreateCashOrderRow(
+            MetadataObject document,
+            Dictionary<string, object> row,
+            Dictionary<string, Dictionary<Guid, string>> referenceCache)
+        {
+            var orderKind = ResolveOrderKind(row, document.Name);
+            var result = new CashOrderRow
+            {
+                DocumentMetadata = document,
+                DocumentMetadataId = document.Id,
+                DocumentType = document.Name,
+                OrderKind = orderKind,
+                Id = ReadGuid(row, "Id") ?? Guid.NewGuid(),
+                DocNumber = GetRowString(row, "Номер", "doc_number", "Номер документа"),
+                DocDate = ReadDate(row, "Дата", "doc_date") ?? DateTime.Now,
+                Amount = ReadDecimal(row, "Сумма", "amount"),
+                Basis = GetRowString(row, "Основание", "basis"),
+                Description = GetRowString(row, "Примечание", "description"),
+                IsPosted = ReadBool(row, "Проведён", "is_posted"),
+                CreatedAt = ReadDate(row, "CreatedAt") ?? DateTime.Now,
+                UpdatedAt = ReadDate(row, "UpdatedAt") ?? DateTime.Now,
+                DebitAccount = GetRowString(row, "Дебет", "debit_account"),
+                CreditAccount = GetRowString(row, "Кредит", "credit_account"),
+                AmountInCurrency = ReadDecimal(row, "Сумма в валюте", "amount_currency"),
+                CashDeskId = GetRowString(row, "Касса", "cash_desk_id")
+            };
+
+            result.OrganizationName = ResolveReference(row, referenceCache, "Организация", "organization_id");
+            result.CurrencyName = ResolveReference(row, referenceCache, "Валюта", "currency_id");
+            result.EmployeeName = ResolveReference(row, referenceCache, "Сотрудник", "employee_id");
+            result.MaterialName = ResolveReference(row, referenceCache, "Материал", "material_id");
+            result.CashDeskName = ResolveReference(row, referenceCache, "Касса", "cash_desk_id");
+            result.CorrespondentAccountName = ResolveReference(row, referenceCache, "Корр. счет", "correspondent_account");
+            return result;
+        }
+
+        private static string ResolveReference(
+            Dictionary<string, object> row,
+            Dictionary<string, Dictionary<Guid, string>> referenceCache,
+            params string[] fieldNames)
+        {
+            foreach (var fieldName in fieldNames)
+            {
+                if (!row.TryGetValue(fieldName, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (Guid.TryParse(value.ToString(), out var id) &&
+                    referenceCache.TryGetValue(fieldName, out var values) &&
+                    values.TryGetValue(id, out var displayValue))
+                {
+                    return displayValue;
+                }
+
+                return value.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static string BuildReferenceDisplay(Dictionary<string, object> row, MetadataField field)
+        {
+            var display = ReferenceDisplayHelper.BuildDisplayValue(row, field);
+            if (!string.IsNullOrWhiteSpace(display))
+                return display;
+
+            return row.FirstOrDefault(item => item.Key != "Id").Value?.ToString()
+                   ?? row.GetValueOrDefault("Id")?.ToString()
+                   ?? string.Empty;
+        }
+
+        private static Guid? ReadGuid(Dictionary<string, object> row, params string[] keys)
         {
             foreach (var key in keys)
             {
-                if (row.TryGetValue(key, out value))
-                    return true;
+                if (row.TryGetValue(key, out var value) && Guid.TryParse(value?.ToString(), out var id))
+                    return id;
             }
 
-            value = null;
+            return null;
+        }
+
+        private static DateTime? ReadDate(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is DateTime date)
+                    return date;
+
+                if (DateTime.TryParse(value.ToString(), out var parsed))
+                    return parsed;
+            }
+
+            return null;
+        }
+
+        private static decimal ReadDecimal(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value &&
+                    decimal.TryParse(value.ToString(), out var amount))
+                {
+                    return amount;
+                }
+            }
+
+            return 0m;
+        }
+
+        private static bool ReadBool(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is bool flag)
+                    return flag;
+
+                if (bool.TryParse(value.ToString(), out var parsed))
+                    return parsed;
+            }
+
             return false;
         }
 
@@ -398,13 +365,26 @@ namespace BIS.ERP.Views
             return string.Empty;
         }
 
-        private async void OnAddClick(object sender, RoutedEventArgs e)
+        private async void OnAddPaymentClick(object sender, RoutedEventArgs e)
+        {
+            await CreateCashOrderAsync(CashOrderPaymentKind, "Расходный КО");
+        }
+
+        private async void OnAddReceiptClick(object sender, RoutedEventArgs e)
+        {
+            await CreateCashOrderAsync(CashOrderReceiptKind, "Приходный КО");
+        }
+
+        private async Task CreateCashOrderAsync(string orderKind, string title)
         {
             try
             {
-                var dialog = new CashOrderDialog(_documentMetadata, _metadataService);
-                dialog.Owner = Window.GetWindow(this);
-                dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                var dialog = new CashOrderDialog(_documentMetadata, _metadataService, orderKind)
+                {
+                    Owner = Window.GetWindow(this),
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Title = title
+                };
 
                 if (dialog.ShowDialog() == true)
                 {
@@ -422,8 +402,7 @@ namespace BIS.ERP.Views
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
-            var selectedRow = DataGrid.SelectedItem as CashOrderRow;
-            if (selectedRow == null)
+            if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
                 MessageBox.Show("Выберите документ для редактирования!", "Внимание",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -432,9 +411,11 @@ namespace BIS.ERP.Views
 
             try
             {
-                var dialog = new CashOrderDialog(_documentMetadata, _metadataService, selectedRow.Id);
-                dialog.Owner = Window.GetWindow(this);
-                dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                var dialog = new CashOrderDialog(_documentMetadata, _metadataService, selectedRow.Id)
+                {
+                    Owner = Window.GetWindow(this),
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner
+                };
 
                 if (dialog.ShowDialog() == true)
                 {
@@ -452,8 +433,7 @@ namespace BIS.ERP.Views
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
-            var selectedRow = DataGrid.SelectedItem as CashOrderRow;
-            if (selectedRow == null)
+            if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
                 MessageBox.Show("Выберите документ для удаления!", "Внимание",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -462,28 +442,26 @@ namespace BIS.ERP.Views
 
             var result = MessageBox.Show("Удалить выбранный документ?", "Подтверждение",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+                return;
 
-            if (result == MessageBoxResult.Yes)
+            try
             {
-                try
-                {
-                    await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, selectedRow.Id);
-                    await LoadData();
-                    MessageBox.Show("Документ успешно удалён!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, selectedRow.Id);
+                await LoadData();
+                MessageBox.Show("Документ успешно удалён!", "Успех",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
         private async void OnPostClick(object sender, RoutedEventArgs e)
         {
-            var selectedRow = DataGrid.SelectedItem as CashOrderRow;
-            if (selectedRow == null)
+            if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
                 MessageBox.Show("Выберите документ для проведения!", "Внимание",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -493,32 +471,29 @@ namespace BIS.ERP.Views
             var actionText = selectedRow.IsPosted ? "Отменить проведение выбранного документа?" : "Провести выбранный документ?";
             var result = MessageBox.Show(actionText, "Подтверждение",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+                return;
 
-            if (result == MessageBoxResult.Yes)
+            try
             {
-                try
-                {
-                    StatusText.Text = selectedRow.IsPosted ? "Отмена проведения..." : "Проведение...";
+                StatusText.Text = selectedRow.IsPosted ? "Отмена проведения..." : "Проведение...";
+                if (selectedRow.IsPosted)
+                    await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
+                else
+                    await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
 
-                    // Меняем статус документа
-                    if (selectedRow.IsPosted)
-                        await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
-                    else
-                        await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
-
-                    await LoadData();
-                    MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка изменения проведения: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    StatusText.Text = "✅ Готово";
-                }
+                await LoadData();
+                MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка изменения проведения: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                StatusText.Text = "✅ Готово";
             }
         }
 
@@ -541,10 +516,14 @@ namespace BIS.ERP.Views
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var printFormService = new PrintFormService(context);
                 await printFormService.SeedCashOrderFormsAsync();
-                var forms = await printFormService.GetPrintFormsAsync(_documentMetadata.Id);
+                var formPrefix = selectedRow.IsReceipt ? "cash.receipt." : "cash.payment.";
+                var forms = (await printFormService.GetPrintFormsAsync(_documentMetadata.Id))
+                    .Where(form => form.Code.StartsWith(formPrefix, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
                 if (forms.Count == 0)
                 {
-                    MessageBox.Show("Для документа не настроены печатные формы.", "Печатная форма",
+                    MessageBox.Show("Для выбранного типа кассового ордера не настроены печатные формы.", "Печатная форма",
                         MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
@@ -557,11 +536,8 @@ namespace BIS.ERP.Views
                 var pdf = await printFormService.ExportDocumentAsync(selectionDialog.SelectedReport, selectedRow.Id);
                 StatusText.Text = "PDF сформирован";
 
-                // ✅ Открываем окно предпросмотра
-                var previewWindow = new PdfPreviewWindow(pdf);
-                previewWindow.Owner = Window.GetWindow(this);
+                var previewWindow = new PdfPreviewWindow(pdf) { Owner = Window.GetWindow(this) };
                 previewWindow.ShowDialog();
-
                 StatusText.Text = "Готово";
             }
             catch (Exception ex)
@@ -574,8 +550,7 @@ namespace BIS.ERP.Views
 
         private async void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            var selected = DataGrid.SelectedItem as CashOrderRow;
-            if (selected == null)
+            if (DataGrid.SelectedItem is not CashOrderRow selected)
                 return;
 
             PostingViewModel? posting = null;
@@ -586,14 +561,14 @@ namespace BIS.ERP.Views
                 var postings = await postingService.GetAllPostingsAsync(selected.DocDate.Date, selected.DocDate.Date);
                 posting = postings.FirstOrDefault(item =>
                     item.DocumentNumber == MetadataService.NormalizeLegacyDocumentNumber(selected.DocNumber) &&
-                    item.DocumentType == _documentMetadata.Name);
+                    item.DocumentType.Equals(selected.PostingDocumentType, StringComparison.OrdinalIgnoreCase));
             }
 
             posting ??= new PostingViewModel
             {
                 DocumentNumber = selected.DocNumber,
                 Date = selected.DocDate,
-                DocumentType = _documentMetadata.Name,
+                DocumentType = selected.PostingDocumentType,
                 DebitAccount = selected.DebitAccount,
                 CreditAccount = selected.CreditAccount,
                 CorrespondentAccount = ResolveCorrespondentAccount(selected),
@@ -606,40 +581,55 @@ namespace BIS.ERP.Views
                 Note = selected.Description
             };
 
-            var dialog = new PostingDetailsDialog(posting);
-            dialog.Owner = Window.GetWindow(this);
+            var dialog = new PostingDetailsDialog(posting) { Owner = Window.GetWindow(this) };
             dialog.ShowDialog();
         }
 
-        private string ResolveCorrespondentAccount(CashOrderRow selected)
+        private static string ResolveCorrespondentAccount(CashOrderRow selected)
         {
-            if (_documentMetadata.Name.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+            if (selected.IsReceipt)
                 return string.IsNullOrWhiteSpace(selected.CreditAccount)
                     ? selected.CorrespondentAccountName
                     : selected.CreditAccount;
 
-            if (_documentMetadata.Name.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
-                return string.IsNullOrWhiteSpace(selected.DebitAccount)
-                    ? selected.CorrespondentAccountName
-                    : selected.DebitAccount;
+            return string.IsNullOrWhiteSpace(selected.DebitAccount)
+                ? selected.CorrespondentAccountName
+                : selected.DebitAccount;
+        }
 
-            return selected.CorrespondentAccountName;
+        private static string ResolveOrderKind(Dictionary<string, object> row, string documentName)
+        {
+            var rawKind = GetRowString(row, "Тип КО", "order_kind", "cash_order_kind", "Тип", "document_type");
+            if (rawKind.Contains("приход", StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase) ||
+                documentName.Equals(CashOrderReceiptDocumentType, StringComparison.OrdinalIgnoreCase))
+            {
+                return CashOrderReceiptKind;
+            }
+
+            return CashOrderPaymentKind;
         }
 
         private void DataGrid_LoadingRow(object sender, DataGridRowEventArgs e)
         {
-            var row = e.Row.DataContext as CashOrderRow;
-            if (row != null && row.IsPosted)
-            {
+            if (e.Row.DataContext is CashOrderRow { IsPosted: true })
                 e.Row.Background = new SolidColorBrush(Color.FromRgb(212, 237, 218));
-            }
         }
-
     }
 
     public class CashOrderRow
     {
         public Guid Id { get; set; }
+        public Guid DocumentMetadataId { get; set; }
+        public MetadataObject? DocumentMetadata { get; set; }
+        public string DocumentType { get; set; } = string.Empty;
+        public string OrderKind { get; set; } = "Payment";
+        public bool IsReceipt => OrderKind.Equals("Receipt", StringComparison.OrdinalIgnoreCase);
+        public string OrderTypeDisplay => IsReceipt ? "Приходный" : "Расходный";
+        public string PostingDocumentType => IsReceipt ? "Приходный кассовый ордер" : "Расходный кассовый ордер";
+        public string PostingTypeDisplay => IsReceipt
+            ? "Приход: Дт касса / Кт корр. счет"
+            : "Расход: Дт корр. счет / Кт касса";
         public string DocNumber { get; set; } = string.Empty;
         public DateTime DocDate { get; set; }
         public string CashDeskName { get; set; } = string.Empty;
@@ -655,11 +645,10 @@ namespace BIS.ERP.Views
         public string IsPostedDisplay => LocalizationService.DisplayValue(IsPosted);
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
-
-        // НОВЫЕ СВОЙСТВА ДЛЯ ПЕЧАТНОЙ ФОРМЫ
         public string DebitAccount { get; set; } = string.Empty;
         public string CreditAccount { get; set; } = string.Empty;
         public decimal AmountInCurrency { get; set; }
         public string CashDeskId { get; set; } = string.Empty;
     }
 }
+

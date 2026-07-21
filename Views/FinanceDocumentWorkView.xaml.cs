@@ -91,20 +91,16 @@ namespace BIS.ERP.Views
         private void ConfigureColumns()
         {
             var isAdvanceReport = _documentKind == FinanceDocumentKind.AdvanceReport;
-            var isPowerOfAttorney = _documentKind == FinanceDocumentKind.PowerOfAttorney;
             var isPayrollStatement = _documentKind == FinanceDocumentKind.PayrollStatement;
 
             EmployeeColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            RepresentativeColumn.Visibility = isPowerOfAttorney ? Visibility.Visible : Visibility.Collapsed;
-            CounterpartyColumn.Visibility = isPowerOfAttorney ? Visibility.Visible : Visibility.Collapsed;
             AdvancePaymentColumn.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
             PeriodColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             DebitAccountColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             CreditAccountColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             PaymentAccountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            AmountColumn.Visibility = isPowerOfAttorney ? Visibility.Collapsed : Visibility.Visible;
+            AmountColumn.Visibility = Visibility.Visible;
             PayableAmountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            ValidUntilColumn.Visibility = isPowerOfAttorney ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void UpdateButtonsState()
@@ -361,7 +357,6 @@ namespace BIS.ERP.Views
     internal enum FinanceDocumentKind
     {
         AdvanceReport,
-        PowerOfAttorney,
         PayrollStatement,
         Other
     }
@@ -373,10 +368,10 @@ namespace BIS.ERP.Views
             return documentName switch
             {
                 "Авансовый отчет" => FinanceDocumentKind.AdvanceReport,
-                "Доверенность" => FinanceDocumentKind.PowerOfAttorney,
                 "Платежная ведомость" => FinanceDocumentKind.PayrollStatement,
                 _ => FinanceDocumentKind.Other
             };
         }
     }
 }
+

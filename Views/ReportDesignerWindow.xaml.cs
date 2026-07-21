@@ -506,8 +506,8 @@ namespace BIS.ERP.Views
 
                 var data = await _reportService.GetReportDataAsync(tempReport);
 
-                var previewWindow = new ReportPreviewWindow(data, tempReport, _reportService);
-                previewWindow.Owner = this;
+                var pdfBytes = _reportService.ExportToPdf(data, tempReport);
+                var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
                 previewWindow.ShowDialog();
             }
             catch (Exception ex)

@@ -18,7 +18,7 @@ namespace BIS.ERP.Services
         void ShowWarning(string message, string title = "Внимание");
         void ShowError(string message, string title = "Ошибка");
         bool Confirm(string message, string title = "Подтверждение");
-        Task<bool> ShowLoginAsync();
+        Task<bool> ShowLoginAsync(bool isConfiguratorMode = false);
         bool ShowCreateInfoBase(out string? infoBaseName);
         bool ShowEditInfoBase(
             InfoBase infoBase,
@@ -30,3 +30,4 @@ namespace BIS.ERP.Services
         void ShowSetup();
     }
 }
+

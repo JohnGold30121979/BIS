@@ -266,8 +266,8 @@ namespace BIS.ERP.Services
             var reports = await _context.Reports.AsNoTracking().ToListAsync();
 
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
-                "Проводки", "Приходный кассовый ордер", "Расходный кассовый ордер", "Платежное поручение",
-                "Платежная ведомость", "Доверенность", "Авансовый отчет", "Расчет курсовой разницы",
+                "Проводки", "Расходный/Приходный КО", "Платежное поручение",
+                "Платежная ведомость", "Авансовый отчет", "Расчет курсовой разницы",
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
             await MoveByNameToModuleAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
@@ -368,3 +368,5 @@ namespace BIS.ERP.Services
         };
     }
 }
+
+

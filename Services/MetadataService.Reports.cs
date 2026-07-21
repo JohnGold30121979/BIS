@@ -20,6 +20,38 @@ public partial class MetadataService
             await EnsureStandardFrxReportAsync(definition);
 
         await _context.SaveChangesAsync();
+        await MarkReconciliationFrxReportsAsTemplateVariantsAsync();
+    }
+
+    private async Task MarkReconciliationFrxReportsAsTemplateVariantsAsync()
+    {
+        var reportIds = await _context.Reports
+            .Where(report =>
+                EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") ||
+                (report.SourceFormat == "FoxProFRX" && EF.Functions.ILike(report.Name, "Акт сверки%")))
+            .Select(report => report.Id)
+            .ToListAsync();
+
+        if (reportIds.Count == 0)
+            return;
+
+        var now = DateTime.UtcNow;
+        await _context.Reports
+            .Where(report => reportIds.Contains(report.Id))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(report => report.IsActive, false)
+                .SetProperty(report => report.IsPrintForm, true)
+                .SetProperty(report => report.IsDefault, false)
+                .SetProperty(report => report.UpdatedAt, now));
+
+        var moduleItems = await _context.MetadataModuleItems
+            .Where(item => item.ObjectType == "Report" && reportIds.Contains(item.ObjectId))
+            .ToListAsync();
+        if (moduleItems.Count > 0)
+        {
+            _context.MetadataModuleItems.RemoveRange(moduleItems);
+            await _context.SaveChangesAsync();
+        }
     }
 
     private async Task EnsureStandardFrxReportAsync(StandardFrxReportTemplateDefinition definition)
@@ -131,7 +163,8 @@ public partial class MetadataService
         report.Template = string.Empty;
         report.Settings = "{}";
         report.Icon = definition.Icon;
-        report.IsActive = source != null;
+        // Native standard reports stay in metadata, but are hidden until page-perfect output is implemented.
+        report.IsActive = false;
         report.IsPrintForm = false;
         report.IsDefault = false;
         report.SourceFormat = "Native";
@@ -446,7 +479,7 @@ public partial class MetadataService
             Name: "Журнал приходных кассовых ордеров",
             Description: "Реестр приходных кассовых документов.",
             ModuleCode: ModuleMetadataService.FinanceCode,
-            SourceName: "Приходный кассовый ордер",
+            SourceName: "Расходный/Приходный КО",
             SourceObjectType: "Document",
             ReportType: "CashReceiptRegistry",
             Icon: "💵",
@@ -458,7 +491,7 @@ public partial class MetadataService
             Name: "Журнал расходных кассовых ордеров",
             Description: "Реестр расходных кассовых документов.",
             ModuleCode: ModuleMetadataService.FinanceCode,
-            SourceName: "Расходный кассовый ордер",
+            SourceName: "Расходный/Приходный КО",
             SourceObjectType: "Document",
             ReportType: "CashPaymentRegistry",
             Icon: "💸",
@@ -686,3 +719,4 @@ public partial class MetadataService
         string PageOrientation,
         IReadOnlyList<string> Fields);
 }
+

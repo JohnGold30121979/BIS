@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -375,8 +375,7 @@ namespace BIS.ERP.Services
         {
             var targetDocumentNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
-                "Приходный кассовый ордер",
-                "Расходный кассовый ордер",
+                CashOrderDocumentName,
                 "Платежное поручение"
             };
 
@@ -2128,39 +2127,254 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
-        private async Task EnsureCashOrderDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        private async Task EnsureUnifiedCashOrderDocumentAsync(MetadataConfiguration config)
         {
-            var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            var legacyDocuments = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .Where(item => item.ObjectType == "Document" &&
+                    (item.Name == CashOrderReceiptDocumentType || item.Name == CashOrderPaymentDocumentType))
+                .ToListAsync();
+            var legacyIds = legacyDocuments.Select(item => item.Id).ToList();
+
+            var document = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" &&
+                    (item.Name == CashOrderDocumentName || item.TableName == "doc_cash_orders"));
+
+            if (document == null)
             {
-                "Приходный кассовый ордер",
-                "Расходный кассовый ордер"
-            };
-
-            foreach (var document in documents.Where(document => targetNames.Contains(document.Name)))
-            {
-                NormalizeCashDeskReferenceFields(document);
-
-                var columns = document.Fields
-                    .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
-                    .Select(field => field.DbColumnName)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                var nextOrder = document.Fields.Count == 0 ? 1 : document.Fields.Max(field => field.Order) + 1;
-                foreach (var field in GetCashOrderRequiredFields(document.Id, nextOrder))
+                document = new MetadataObject
                 {
-                    if (columns.Contains(field.DbColumnName))
-                        continue;
+                    Id = Guid.NewGuid(),
+                    Name = CashOrderDocumentName,
+                    TableName = "doc_cash_orders",
+                    ObjectType = "Document",
+                    Description = "Единый журнал приходных и расходных кассовых ордеров",
+                    Icon = "💵",
+                    Order = 4,
+                    IsSystem = true,
+                    UsePostings = true,
+                    MetadataConfigId = config.Id
+                };
+                document.Fields = GetCashOrderFields(document.Id);
+                await _context.MetadataObjects.AddAsync(document);
+                await _context.SaveChangesAsync();
+            }
+            else
+            {
+                document.Name = CashOrderDocumentName;
+                document.TableName = "doc_cash_orders";
+                document.Description = "Единый журнал приходных и расходных кассовых ордеров";
+                document.Icon = "💵";
+                document.Order = document.Order == 0 ? 4 : document.Order;
+                document.IsSystem = true;
+                document.UsePostings = true;
+                if (document.MetadataConfigId == null)
+                    document.MetadataConfigId = config.Id;
+                await _context.SaveChangesAsync();
+            }
 
-                    field.Id = Guid.NewGuid();
-                    field.MetadataObjectId = document.Id;
-                    await _context.MetadataFields.AddAsync(field);
-                    await AddColumnToTableAsync(document.TableName, field);
-                    document.Fields.Add(field);
-                    columns.Add(field.DbColumnName);
+            await EnsureCashOrderMetadataFieldsAsync(document);
+            await CreateTableForCatalogAsync(document);
+            await MigrateLegacyCashOrderRowsAsync();
+            await ReassignCashOrderRelatedMetadataAsync(document, legacyIds);
+            await RemoveLegacyCashOrderMetadataAsync(legacyDocuments);
+            await DropLegacyCashOrderTablesAsync();
+            await EnsureIndependentDocumentNumberConfigurationAsync(CashOrderDocumentName);
+        }
+
+        private async Task EnsureCashOrderMetadataFieldsAsync(MetadataObject document)
+        {
+            await RemoveDuplicateMetadataFieldsAsync(document);
+
+            var existingByColumn = document.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.OrderBy(field => field.Order).First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetCashOrderFields(document.Id))
+            {
+                if (existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    existing.Name = desired.Name;
+                    existing.FieldType = desired.FieldType;
+                    existing.ReferenceCatalog = desired.ReferenceCatalog;
+                    existing.DisplayPattern = desired.DisplayPattern;
+                    existing.DisplayFields = desired.DisplayFields;
+                    existing.Order = desired.Order;
+                    existing.IsRequired = desired.IsRequired;
+                    existing.IsUnique = desired.IsUnique;
+                    existing.Length = desired.Length;
+                    existing.Precision = desired.Precision;
+                    existing.Scale = desired.Scale;
+                    continue;
                 }
+
+                desired.Id = Guid.NewGuid();
+                desired.MetadataObjectId = document.Id;
+                await _context.MetadataFields.AddAsync(desired);
+                await AddColumnToTableAsync(document.TableName, desired);
+                document.Fields.Add(desired);
+                existingByColumn[desired.DbColumnName] = desired;
             }
 
             await _context.SaveChangesAsync();
+        }
+
+        private async Task MigrateLegacyCashOrderRowsAsync()
+        {
+            await _context.Database.ExecuteSqlRawAsync(@"
+                DO $$
+                BEGIN
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""doc_number"" varchar(20) NOT NULL DEFAULT '';
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""doc_date"" timestamp NOT NULL DEFAULT NOW();
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""order_kind"" varchar(20) NOT NULL DEFAULT 'Payment';
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""amount"" decimal(18,2) NOT NULL DEFAULT 0;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""basis"" varchar(500);
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""correspondent_account"" varchar(50);
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_flow_item"" varchar(100);
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_account"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""description"" varchar(500);
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""is_posted"" boolean DEFAULT false;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""currency_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""employee_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""material_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""debit_account"" varchar(50);
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
+                    IF to_regclass('public.doc_cash_receipt') IS NOT NULL THEN
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""basis"" varchar(500);
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""correspondent_account"" varchar(50);
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""cash_flow_item"" varchar(100);
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""cash_account"" text;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""description"" varchar(500);
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""is_posted"" boolean DEFAULT false;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""currency_id"" text;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""employee_id"" text;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""material_id"" text;
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""debit_account"" varchar(50);
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
+                        ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
+
+                        INSERT INTO ""doc_cash_orders"" (""Id"", ""doc_number"", ""doc_date"", ""order_kind"", ""organization_id"", ""cash_desk_id"", ""amount"", ""basis"", ""correspondent_account"", ""cash_flow_item"", ""cash_account"", ""description"", ""is_posted"", ""currency_id"", ""employee_id"", ""material_id"", ""debit_account"", ""credit_account"", ""amount_currency"", ""CreatedAt"", ""UpdatedAt"")
+                        SELECT source.""Id"", COALESCE(source.""doc_number"", ''), COALESCE(source.""doc_date"", NOW()), 'Receipt', source.""organization_id"", source.""cash_desk_id"", COALESCE(source.""amount"", 0), source.""basis"", source.""correspondent_account"", source.""cash_flow_item"", source.""cash_account"", source.""description"", COALESCE(source.""is_posted"", false), source.""currency_id"", source.""employee_id"", source.""material_id"", source.""debit_account"", source.""credit_account"", COALESCE(source.""amount_currency"", 0), COALESCE(source.""CreatedAt"", NOW()), COALESCE(source.""UpdatedAt"", NOW())
+                        FROM ""doc_cash_receipt"" source
+                        WHERE NOT EXISTS (SELECT 1 FROM ""doc_cash_orders"" target WHERE target.""Id"" = source.""Id"");
+                    END IF;
+
+                    IF to_regclass('public.doc_cash_payment') IS NOT NULL THEN
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""basis"" varchar(500);
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""correspondent_account"" varchar(50);
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""cash_flow_item"" varchar(100);
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""cash_account"" text;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""description"" varchar(500);
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""is_posted"" boolean DEFAULT false;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""currency_id"" text;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""employee_id"" text;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""material_id"" text;
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""debit_account"" varchar(50);
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
+                        ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
+
+                        INSERT INTO ""doc_cash_orders"" (""Id"", ""doc_number"", ""doc_date"", ""order_kind"", ""organization_id"", ""cash_desk_id"", ""amount"", ""basis"", ""correspondent_account"", ""cash_flow_item"", ""cash_account"", ""description"", ""is_posted"", ""currency_id"", ""employee_id"", ""material_id"", ""debit_account"", ""credit_account"", ""amount_currency"", ""CreatedAt"", ""UpdatedAt"")
+                        SELECT source.""Id"", COALESCE(source.""doc_number"", ''), COALESCE(source.""doc_date"", NOW()), 'Payment', source.""organization_id"", source.""cash_desk_id"", COALESCE(source.""amount"", 0), source.""basis"", source.""correspondent_account"", source.""cash_flow_item"", source.""cash_account"", source.""description"", COALESCE(source.""is_posted"", false), source.""currency_id"", source.""employee_id"", source.""material_id"", source.""debit_account"", source.""credit_account"", COALESCE(source.""amount_currency"", 0), COALESCE(source.""CreatedAt"", NOW()), COALESCE(source.""UpdatedAt"", NOW())
+                        FROM ""doc_cash_payment"" source
+                        WHERE NOT EXISTS (SELECT 1 FROM ""doc_cash_orders"" target WHERE target.""Id"" = source.""Id"");
+                    END IF;
+                END $$;");
+        }
+
+        private async Task ReassignCashOrderRelatedMetadataAsync(MetadataObject document, IReadOnlyCollection<Guid> legacyIds)
+        {
+            if (legacyIds.Count > 0)
+            {
+                var reports = await _context.Reports
+                    .Where(report => report.DataSourceId.HasValue && legacyIds.Contains(report.DataSourceId.Value))
+                    .ToListAsync();
+                foreach (var report in reports)
+                {
+                    report.DataSourceId = document.Id;
+                    report.DataSourceType = "Document";
+                    report.UpdatedAt = DateTime.UtcNow;
+                }
+
+                var legacyModuleItems = await _context.MetadataModuleItems
+                    .Where(item => item.ObjectType == "Document" && legacyIds.Contains(item.ObjectId))
+                    .ToListAsync();
+                _context.MetadataModuleItems.RemoveRange(legacyModuleItems);
+            }
+
+            var cashReports = await _context.Reports
+                .Where(report => report.Code.StartsWith("cash.receipt.") || report.Code.StartsWith("cash.payment."))
+                .ToListAsync();
+            foreach (var report in cashReports)
+            {
+                report.DataSourceId = document.Id;
+                report.DataSourceType = "Document";
+                report.IsPrintForm = true;
+                report.UpdatedAt = DateTime.UtcNow;
+            }
+
+            var financeModule = await _context.MetadataModules.FirstOrDefaultAsync(module => module.Code == ModuleMetadataService.FinanceCode);
+            if (financeModule != null && !await _context.MetadataModuleItems.AnyAsync(item => item.ObjectType == "Document" && item.ObjectId == document.Id))
+            {
+                await _context.MetadataModuleItems.AddAsync(new MetadataModuleItem
+                {
+                    Id = Guid.NewGuid(),
+                    ModuleId = financeModule.Id,
+                    ObjectId = document.Id,
+                    ObjectType = "Document",
+                    Order = document.Order
+                });
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task RemoveLegacyCashOrderMetadataAsync(IReadOnlyCollection<MetadataObject> legacyDocuments)
+        {
+            if (legacyDocuments.Count == 0)
+                return;
+
+            var legacyIds = legacyDocuments.Select(item => item.Id).ToList();
+            var postingRules = await _context.MetadataPostingRules.Where(rule => legacyIds.Contains(rule.MetadataObjectId)).ToListAsync();
+            var calculations = await _context.MetadataCalculations.Where(calculation => legacyIds.Contains(calculation.MetadataObjectId)).ToListAsync();
+            var fields = await _context.MetadataFields.Where(field => legacyIds.Contains(field.MetadataObjectId)).ToListAsync();
+            _context.MetadataPostingRules.RemoveRange(postingRules);
+            _context.MetadataCalculations.RemoveRange(calculations);
+            _context.MetadataFields.RemoveRange(fields);
+            _context.MetadataObjects.RemoveRange(legacyDocuments);
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task DropLegacyCashOrderTablesAsync()
+        {
+            await CreateDocumentNumberingTableAsync();
+            await _context.Database.ExecuteSqlRawAsync(@"
+                DROP TABLE IF EXISTS ""doc_cash_receipt"" CASCADE;
+                DROP TABLE IF EXISTS ""doc_cash_payment"" CASCADE;
+                DELETE FROM doc_numbering
+                WHERE document_type = 'Расходный/Приходный КО';");
+        }
+        private async Task EnsureCashOrderDocumentStructureAsync(IEnumerable<MetadataObject> documents)
+        {
+            var document = documents.FirstOrDefault(document =>
+                document.Name.Equals(CashOrderDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                document.TableName.Equals("doc_cash_orders", StringComparison.OrdinalIgnoreCase));
+            if (document == null)
+                return;
+
+            document.Name = CashOrderDocumentName;
+            document.TableName = "doc_cash_orders";
+            document.UsePostings = true;
+            NormalizeCashDeskReferenceFields(document);
+            await EnsureCashOrderMetadataFieldsAsync(document);
         }
 
         private static void NormalizeCashDeskReferenceFields(MetadataObject document)
@@ -2311,3 +2525,8 @@ namespace BIS.ERP.Services
 
     }
 }
+
+
+
+
+

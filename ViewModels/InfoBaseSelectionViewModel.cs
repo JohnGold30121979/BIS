@@ -176,7 +176,7 @@ namespace BIS.ERP.ViewModels
                 return;
             }
 
-            if (!await _dialogService.ShowLoginAsync())
+            if (!await _dialogService.ShowLoginAsync(configMode))
                 return;
 
             var currentUser = _authService.CurrentUser;
@@ -216,3 +216,4 @@ namespace BIS.ERP.ViewModels
         }
     }
 }
+

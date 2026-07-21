@@ -43,8 +43,6 @@
                 <DataGridTextColumn Header="Номер" Binding="{Binding DocumentNumber}" Width="110"/>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocumentDate, StringFormat=dd.MM.yyyy}" Width="105"/>
                 <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding EmployeeName}" Width="190"/>
-                <DataGridTextColumn x:Name="RepresentativeColumn" Header="Представитель" Binding="{Binding RepresentativeName}" Width="190"/>
-                <DataGridTextColumn x:Name="CounterpartyColumn" Header="Поставщик" Binding="{Binding CounterpartyName}" Width="190"/>
                 <DataGridTextColumn x:Name="AdvancePaymentColumn" Header="Вид расчета" Binding="{Binding AdvancePaymentName}" Width="210"/>
                 <DataGridTextColumn x:Name="PeriodColumn" Header="Период" Binding="{Binding PeriodDisplay}" Width="170"/>
                 <DataGridTextColumn x:Name="DebitAccountColumn" Header="Дебет" Binding="{Binding DebitAccountDisplay}" Width="160"/>
@@ -52,7 +50,6 @@
                 <DataGridTextColumn x:Name="PaymentAccountColumn" Header="Счет выплаты" Binding="{Binding PaymentAccountDisplay}" Width="160"/>
                 <DataGridTextColumn x:Name="AmountColumn" Header="Сумма" Binding="{Binding Amount}" Width="105"/>
                 <DataGridTextColumn x:Name="PayableAmountColumn" Header="К выплате" Binding="{Binding PayableAmount}" Width="105"/>
-                <DataGridTextColumn x:Name="ValidUntilColumn" Header="Срок действия" Binding="{Binding ValidUntil, StringFormat=dd.MM.yyyy}" Width="120"/>
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="220"/>
                 <DataGridTextColumn Header="Проведен" Binding="{Binding IsPostedDisplay}" Width="90"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
@@ -66,3 +63,4 @@
         </StatusBar>
     </Grid>
 </UserControl>
+

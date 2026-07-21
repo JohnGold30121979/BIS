@@ -106,8 +106,6 @@ namespace BIS.ERP.Views
             ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
             ReferenceComboBoxSearchHelper.Attach(AdvanceEmployeeCombo, _employees);
             ReferenceComboBoxSearchHelper.Attach(PayrollEmployeeCombo, _employees);
-            ReferenceComboBoxSearchHelper.Attach(RepresentativeCombo, _employees);
-            ReferenceComboBoxSearchHelper.Attach(CounterpartyCombo, _organizations);
             ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, _currencies);
             ReferenceComboBoxSearchHelper.Attach(AdvancePaymentCombo, _advancePayments);
 
@@ -116,14 +114,6 @@ namespace BIS.ERP.Views
             {
                 ReferencePickerControlFactory.AttachEditor(
                     OrganizationCombo,
-                    _metadataService,
-                    organizationCatalog,
-                    this,
-                    items => _organizations = items,
-                    "Код организации",
-                    "Наименование");
-                ReferencePickerControlFactory.AttachEditor(
-                    CounterpartyCombo,
                     _metadataService,
                     organizationCatalog,
                     this,
@@ -145,14 +135,6 @@ namespace BIS.ERP.Views
                     "ФИО");
                 ReferencePickerControlFactory.AttachEditor(
                     PayrollEmployeeCombo,
-                    _metadataService,
-                    employeeCatalog,
-                    this,
-                    items => _employees = items,
-                    "Табельный номер",
-                    "ФИО");
-                ReferencePickerControlFactory.AttachEditor(
-                    RepresentativeCombo,
                     _metadataService,
                     employeeCatalog,
                     this,
@@ -226,23 +208,6 @@ namespace BIS.ERP.Views
                 OverrunAmountBox.Text = FormatDecimal(GetDecimal(record, "Перерасход", "overrun_amount"));
                 ReturnAmountBox.Text = FormatDecimal(GetDecimal(record, "Остаток к возврату", "return_amount"));
             }
-            else if (_documentKind == FinanceDocumentKind.PowerOfAttorney)
-            {
-                SelectComboByRecordValue(RepresentativeCombo, record, "Представитель", "representative_id");
-                SelectComboByRecordValue(CounterpartyCombo, record, "Поставщик", "counterparty_id");
-                BankAccountBox.Text = GetString(record, "Расчетный счет", "bank_account");
-                BankNameBox.Text = GetString(record, "Банк", "bank_name");
-                IdentityDocumentNameBox.Text = GetString(record, "Документ личности", "identity_document_name");
-                IdentityDocumentNumberBox.Text = GetString(record, "Номер документа личности", "identity_document_number");
-                IdentityDocumentDatePicker.SelectedDate = GetDate(record, "Дата документа личности", "identity_document_date");
-                IdentityDocumentIssuerBox.Text = GetString(record, "Кем выдан документ", "identity_document_issuer");
-                ValidUntilDatePicker.SelectedDate = GetDate(record, "Срок действия", "valid_until");
-                SourceDocumentNumberBox.Text = GetString(record, "Документ-основание", "source_document_number");
-                SourceDocumentDatePicker.SelectedDate = GetDate(record, "Дата документа-основания", "source_document_date");
-                ItemsDescriptionBox.Text = GetString(record, "Перечень ценностей", "items_description");
-                QuantityBox.Text = FormatDecimal(GetDecimal(record, "Количество", "quantity"));
-                UnitNameBox.Text = GetString(record, "Единица измерения", "unit_name");
-            }
             else if (_documentKind == FinanceDocumentKind.PayrollStatement)
             {
                 SelectComboByRecordValue(PayrollEmployeeCombo, record, "Сотрудник", "employee_id");
@@ -258,15 +223,13 @@ namespace BIS.ERP.Views
         private void ConfigureMode()
         {
             var isAdvanceReport = _documentKind == FinanceDocumentKind.AdvanceReport;
-            var isPowerOfAttorney = _documentKind == FinanceDocumentKind.PowerOfAttorney;
             var isPayrollStatement = _documentKind == FinanceDocumentKind.PayrollStatement;
 
             AdvanceReportPanel.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
-            PowerOfAttorneyPanel.Visibility = isPowerOfAttorney ? Visibility.Visible : Visibility.Collapsed;
             PayrollStatementPanel.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            CommonAmountPanel.Visibility = isPowerOfAttorney ? Visibility.Collapsed : Visibility.Visible;
-            DebitAccountPanel.Visibility = isPowerOfAttorney ? Visibility.Collapsed : Visibility.Visible;
-            CreditAccountPanel.Visibility = isPowerOfAttorney ? Visibility.Collapsed : Visibility.Visible;
+            CommonAmountPanel.Visibility = Visibility.Visible;
+            DebitAccountPanel.Visibility = Visibility.Visible;
+            CreditAccountPanel.Visibility = Visibility.Visible;
 
             if (isPayrollStatement)
                 CreditAccountPanel.Visibility = Visibility.Collapsed;
@@ -279,7 +242,6 @@ namespace BIS.ERP.Views
             ReportEndDatePicker.SelectedDate = today;
             PeriodStartDatePicker.SelectedDate = new DateTime(today.Year, today.Month, 1);
             PeriodEndDatePicker.SelectedDate = today;
-            ValidUntilDatePicker.SelectedDate = today.AddDays(10);
         }
 
         private async Task<string> GetNextNumberAsync()
@@ -491,8 +453,6 @@ namespace BIS.ERP.Views
 
             if (_documentKind == FinanceDocumentKind.AdvanceReport)
                 ApplyAdvanceReportData(data);
-            else if (_documentKind == FinanceDocumentKind.PowerOfAttorney)
-                ApplyPowerOfAttorneyData(data);
             else if (_documentKind == FinanceDocumentKind.PayrollStatement)
                 ApplyPayrollStatementData(data);
 
@@ -523,30 +483,6 @@ namespace BIS.ERP.Views
             SetFieldValueIfExists(data, "Принято к учету", acceptedAmount);
             SetFieldValueIfExists(data, "Перерасход", ReadDecimal(OverrunAmountBox.Text));
             SetFieldValueIfExists(data, "Остаток к возврату", ReadDecimal(ReturnAmountBox.Text));
-        }
-
-        private void ApplyPowerOfAttorneyData(Dictionary<string, object> data)
-        {
-            var representativeId = GetSelectedReferenceId(RepresentativeCombo);
-            if (representativeId == Guid.Empty)
-                throw new InvalidOperationException("Выберите представителя.");
-            if (!ValidUntilDatePicker.SelectedDate.HasValue)
-                throw new InvalidOperationException("Укажите срок действия доверенности.");
-
-            SetFieldValueIfExists(data, "Представитель", representativeId);
-            SetFieldValueIfExists(data, "Поставщик", GetSelectedReferenceId(CounterpartyCombo));
-            SetFieldValueIfExists(data, "Расчетный счет", BankAccountBox.Text);
-            SetFieldValueIfExists(data, "Банк", BankNameBox.Text);
-            SetFieldValueIfExists(data, "Документ личности", IdentityDocumentNameBox.Text);
-            SetFieldValueIfExists(data, "Номер документа личности", IdentityDocumentNumberBox.Text);
-            SetFieldValueIfExists(data, "Дата документа личности", IdentityDocumentDatePicker.SelectedDate ?? DateTime.Today);
-            SetFieldValueIfExists(data, "Кем выдан документ", IdentityDocumentIssuerBox.Text);
-            SetFieldValueIfExists(data, "Срок действия", ValidUntilDatePicker.SelectedDate.Value);
-            SetFieldValueIfExists(data, "Документ-основание", SourceDocumentNumberBox.Text);
-            SetFieldValueIfExists(data, "Дата документа-основания", SourceDocumentDatePicker.SelectedDate ?? DateTime.Today);
-            SetFieldValueIfExists(data, "Перечень ценностей", ItemsDescriptionBox.Text);
-            SetFieldValueIfExists(data, "Количество", ReadDecimal(QuantityBox.Text));
-            SetFieldValueIfExists(data, "Единица измерения", UnitNameBox.Text);
         }
 
         private void ApplyPayrollStatementData(Dictionary<string, object> data)
@@ -622,13 +558,7 @@ namespace BIS.ERP.Views
 
         private void UpdateAccountControlledFieldsVisibility()
         {
-            if (_documentKind == FinanceDocumentKind.PowerOfAttorney)
-            {
-                CurrencyPanel.Visibility = Visibility.Collapsed;
-                return;
-            }
-
-            var accountSettings = new[]
+var accountSettings = new[]
             {
                 _accountAnalytics.GetSettingsFromValue(_debitAccountValue),
                 _accountAnalytics.GetSettingsFromValue(_creditAccountValue),
@@ -821,3 +751,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+

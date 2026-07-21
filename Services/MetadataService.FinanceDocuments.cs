@@ -48,21 +48,6 @@ public partial class MetadataService
         await UpdateDocumentPostedStatus(document.TableName, recordId);
     }
 
-    private async Task ProcessPowerOfAttorneyAsync(
-        MetadataObject document,
-        Dictionary<string, object> recordData,
-        Guid recordId)
-    {
-        if (!TryGetGuid(recordData, out _, "representative_id", "Представитель"))
-            throw new InvalidOperationException("Для доверенности выберите представителя.");
-
-        var validUntil = GetDateValue(recordData, "valid_until", "Срок действия");
-        if (!validUntil.HasValue)
-            throw new InvalidOperationException("Для доверенности укажите срок действия.");
-
-        await UpdateDocumentPostedStatus(document.TableName, recordId);
-    }
-
     private async Task ProcessPayrollStatementAsync(
         MetadataObject document,
         Dictionary<string, object> recordData,
@@ -191,3 +176,5 @@ public partial class MetadataService
         return string.Empty;
     }
 }
+
+

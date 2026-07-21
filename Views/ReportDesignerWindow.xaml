@@ -1,4 +1,4 @@
-﻿<Window x:Class="BIS.ERP.Views.ReportDesignerWindow"
+<Window x:Class="BIS.ERP.Views.ReportDesignerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Конструктор отчетов - BIS ERP"
@@ -82,8 +82,7 @@
                                 <ComboBoxItem Content="Список" Tag="List"/>
                                 <ComboBoxItem Content="Карточка" Tag="Card"/>
                                 <ComboBoxItem Content="Счет-фактура на материалы (КР)" Tag="InvoiceMaterialsKg"/>
-                                <ComboBoxItem Content="Приходный кассовый ордер" Tag="CashReceiptOrder"/>
-                                <ComboBoxItem Content="Расходный кассовый ордер" Tag="CashPaymentOrder"/>
+                                <ComboBoxItem Content="Расходный/Приходный КО" Tag="CashOrder"/>
                                 <ComboBoxItem Content="Макет Visual FoxPro FRX" Tag="FoxProLayout"/>
                             </ComboBox>
 
@@ -633,3 +632,5 @@
         </Border>
     </Grid>
 </Window>
+
+

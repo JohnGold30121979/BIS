@@ -35,14 +35,16 @@ namespace BIS.ERP.Services
             return MessageBox.Show(_owner, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
         }
 
-        public async Task<bool> ShowLoginAsync()
+        public async Task<bool> ShowLoginAsync(bool isConfiguratorMode = false)
         {
             var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
             var infoBaseText = currentInfoBase == null
                 ? string.Empty
                 : $"Инфобаза: {currentInfoBase.Name} ({currentInfoBase.DatabaseName})";
 
-            var loginWindow = new LoginWindow(infoBaseText)
+            var selectedModeText = isConfiguratorMode ? "Режим: Конфигуратор" : "Режим: Рабочий режим";
+
+            var loginWindow = new LoginWindow(infoBaseText, selectedModeText)
             {
                 Owner = _owner,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner

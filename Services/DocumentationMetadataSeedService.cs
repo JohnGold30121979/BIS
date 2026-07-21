@@ -23,6 +23,7 @@ namespace BIS.ERP.Services
             await ExtendFixedAssetCardAsync();
             await EnsureFixedAssetCanonicalModelAsync();
             await EnsureDocumentsAsync();
+            await RemoveDeletedDocumentsAsync();
             await EnsureFixedAssetPeriodBalanceReportSourceAsync();
             await EnsureFixedAssetReportsAsync();
             await EnsureFinanceReportsAsync();
@@ -299,7 +300,7 @@ namespace BIS.ERP.Services
                 await EnsureObjectAsync(name, $"doc_asset_{Slug(name)}", "Document",
                     $"Документ модуля основных средств: {name}", "🏗", FixedAssetDocumentFields(name));
 
-            foreach (var name in new[] { "Платежная ведомость", "Доверенность", "Авансовый отчет", "Расчет курсовой разницы" })
+            foreach (var name in new[] { "Платежная ведомость", "Авансовый отчет", "Расчет курсовой разницы" })
                 await EnsureObjectAsync(name, $"doc_fin_{Slug(name)}", "Document",
                     $"Документ финансового учета: {name}", "💰", FinanceDocumentFields(name));
 
@@ -312,6 +313,26 @@ namespace BIS.ERP.Services
                     $"Документ учета материальных ценностей: {name}", "📦", InventoryDocumentFields());
         }
 
+        private async Task RemoveDeletedDocumentsAsync()
+        {
+            var deletedDocumentNames = new[] { "Доверенность" };
+            var deletedDocuments = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .Where(item => item.ObjectType == "Document" && deletedDocumentNames.Contains(item.Name))
+                .ToListAsync();
+
+            if (deletedDocuments.Count == 0)
+                return;
+
+            var deletedDocumentIds = deletedDocuments.Select(item => item.Id).ToArray();
+            var deletedAssignments = await _context.MetadataModuleItems
+                .Where(item => item.ObjectType == "Document" && deletedDocumentIds.Contains(item.ObjectId))
+                .ToListAsync();
+
+            _context.MetadataModuleItems.RemoveRange(deletedAssignments);
+            _context.MetadataObjects.RemoveRange(deletedDocuments);
+            await _context.SaveChangesAsync();
+        }
         private async Task EnsureFixedAssetReportsAsync()
         {
             var currentCardSource = await _context.MetadataObjects.Include(item => item.Fields)
@@ -729,7 +750,6 @@ namespace BIS.ERP.Services
             var fields = name switch
             {
                 "Авансовый отчет" => AdvanceReportFields(),
-                "Доверенность" => PowerOfAttorneyFields(),
                 "Платежная ведомость" => PayrollStatementFields(),
                 "Расчет курсовой разницы" => ExchangeRateDifferenceDocumentFields(),
                 _ => StandardDocumentFields()
@@ -757,27 +777,6 @@ namespace BIS.ERP.Services
             fields.Add(Field(Guid.Empty, "Остаток к возврату", "return_amount", "Decimal", 30));
             return fields;
         }
-
-        private static List<MetadataField> PowerOfAttorneyFields()
-        {
-            var fields = StandardDocumentFields();
-            fields.Insert(2, Field(Guid.Empty, "Представитель", "representative_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
-            fields.Add(Field(Guid.Empty, "Поставщик", "counterparty_id", "Reference", 20, false, "Организации"));
-            fields.Add(Field(Guid.Empty, "Расчетный счет", "bank_account", "String", 21));
-            fields.Add(Field(Guid.Empty, "Банк", "bank_name", "String", 22));
-            fields.Add(Field(Guid.Empty, "Документ личности", "identity_document_name", "String", 23));
-            fields.Add(Field(Guid.Empty, "Номер документа личности", "identity_document_number", "String", 24));
-            fields.Add(Field(Guid.Empty, "Дата документа личности", "identity_document_date", "DateTime", 25));
-            fields.Add(Field(Guid.Empty, "Кем выдан документ", "identity_document_issuer", "String", 26));
-            fields.Add(Field(Guid.Empty, "Срок действия", "valid_until", "DateTime", 27, true));
-            fields.Add(Field(Guid.Empty, "Документ-основание", "source_document_number", "String", 28));
-            fields.Add(Field(Guid.Empty, "Дата документа-основания", "source_document_date", "DateTime", 29));
-            fields.Add(Field(Guid.Empty, "Перечень ценностей", "items_description", "String", 30));
-            fields.Add(Field(Guid.Empty, "Количество", "quantity", "Decimal", 31));
-            fields.Add(Field(Guid.Empty, "Единица измерения", "unit_name", "String", 32));
-            return fields;
-        }
-
         private static List<MetadataField> PayrollStatementFields()
         {
             var fields = StandardDocumentFields();
@@ -1030,3 +1029,6 @@ namespace BIS.ERP.Services
         }
     }
 }
+
+
+

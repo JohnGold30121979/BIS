@@ -92,133 +92,111 @@ namespace BIS.ERP.Services
         public async Task SeedCashOrderFormsAsync()
         {
             await EnsureSchemaAsync();
-            var documents = await _context.MetadataObjects.AsNoTracking()
-                .Include(m => m.Fields)
-                .Where(item => item.ObjectType == "Document" &&
-                    (item.Name == "Приходный кассовый ордер" || item.Name == "Расходный кассовый ордер"))
+            var cashOrder = await _context.MetadataObjects.AsNoTracking()
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" &&
+                    (item.Name == "Расходный/Приходный КО" || item.TableName == "doc_cash_orders"));
+
+            if (cashOrder == null)
+                return;
+
+            var existingReports = await _context.Reports
+                .Where(item => item.Code.StartsWith("cash.receipt.") || item.Code.StartsWith("cash.payment."))
                 .ToListAsync();
-            var receipt = documents.FirstOrDefault(item => item.Name == "Приходный кассовый ордер");
-            var payment = documents.FirstOrDefault(item => item.Name == "Расходный кассовый ордер");
 
-            if (receipt != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.receipt.foxpro"))
+            void UpsertCashReport(
+                string code,
+                string name,
+                string titleText,
+                string description,
+                string reportType,
+                string sourceFormat,
+                string pageOrientation,
+                int order,
+                bool isDefault,
+                string template)
             {
-                var frxTemplate = GenerateCashReceiptFrxTemplate(receipt);
-                await _context.Reports.AddAsync(new Report
+                var report = existingReports.FirstOrDefault(item => item.Code == code);
+                if (report == null)
                 {
-                    Code = "cash.receipt.foxpro",
-                    Name = "Приходный кассовый ордер с квитанцией",
-                    TitleText = "Приходный кассовый ордер",
-                    Description = "ПКО и отрывная квитанция на одном листе",
-                    DataSourceType = "Document",
-                    DataSourceId = receipt.Id,
-                    ReportType = "FoxProLayout",
-                    IsPrintForm = true,
-                    IsActive = true,
-                    IsDefault = true,
-                    SourceFormat = "FoxProFRX",
-                    TemplateVersion = 1,
-                    Icon = "🖨",
-                    Order = 10,
-                    PageOrientation = "Landscape",
-                    ShowGridLines = false,
-                    ShowHeader = false,
-                    ShowFooter = false,
-                    ShowPageNumbers = false,
-                    Template = JsonSerializer.Serialize(frxTemplate, new JsonSerializerOptions { WriteIndented = true }),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                });
+                    report = new Report
+                    {
+                        Id = Guid.NewGuid(),
+                        Code = code,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.Reports.Add(report);
+                }
+
+                report.Name = name;
+                report.TitleText = titleText;
+                report.Description = description;
+                report.DataSourceType = "Document";
+                report.DataSourceId = cashOrder.Id;
+                report.ReportType = reportType;
+                report.IsPrintForm = true;
+                report.IsActive = true;
+                report.IsDefault = isDefault;
+                report.SourceFormat = sourceFormat;
+                report.TemplateVersion = 1;
+                report.Icon = "🖨";
+                report.Order = order;
+                report.PageOrientation = pageOrientation;
+                report.ShowGridLines = false;
+                report.ShowHeader = false;
+                report.ShowFooter = false;
+                report.ShowPageNumbers = false;
+                report.Template = template;
+                report.UpdatedAt = DateTime.UtcNow;
             }
 
-            if (payment != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.payment.foxpro"))
-            {
-                var frxTemplate = GenerateCashPaymentFrxTemplate(payment);
-                await _context.Reports.AddAsync(new Report
-                {
-                    Code = "cash.payment.foxpro",
-                    Name = "Расходный кассовый ордер",
-                    TitleText = "Расходный кассовый ордер",
-                    Description = "Унифицированная печатная форма РКО",
-                    DataSourceType = "Document",
-                    DataSourceId = payment.Id,
-                    ReportType = "FoxProLayout",
-                    IsPrintForm = true,
-                    IsActive = true,
-                    IsDefault = true,
-                    SourceFormat = "FoxProFRX",
-                    TemplateVersion = 1,
-                    Icon = "🖨",
-                    Order = 10,
-                    PageOrientation = "Portrait",
-                    ShowGridLines = false,
-                    ShowHeader = false,
-                    ShowFooter = false,
-                    ShowPageNumbers = false,
-                    Template = JsonSerializer.Serialize(frxTemplate, new JsonSerializerOptions { WriteIndented = true }),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                });
-            }
+            UpsertCashReport(
+                "cash.receipt.foxpro",
+                "Приходный кассовый ордер с квитанцией",
+                "Приходный кассовый ордер",
+                "ПКО и отрывная квитанция на одном листе",
+                "FoxProLayout",
+                "FoxProFRX",
+                "Landscape",
+                10,
+                true,
+                JsonSerializer.Serialize(GenerateCashReceiptFrxTemplate(cashOrder), new JsonSerializerOptions { WriteIndented = true }));
 
-            if (receipt != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.receipt.native"))
-            {
-                var nativeTemplate = CreateDefaultNativeTemplate("CashReceiptOrder");
-                await _context.Reports.AddAsync(new Report
-                {
-                    Code = "cash.receipt.native",
-                    Name = "Приходный кассовый ордер (нативный)",
-                    TitleText = "Приходный кассовый ордер",
-                    Description = "Настраиваемая нативная форма ПКО с квитанцией",
-                    DataSourceType = "Document",
-                    DataSourceId = receipt.Id,
-                    ReportType = "CashReceiptOrder",
-                    IsPrintForm = true,
-                    IsActive = true,
-                    IsDefault = false,
-                    SourceFormat = "Native",
-                    TemplateVersion = 1,
-                    Icon = "🖨",
-                    Order = 20,
-                    PageOrientation = "Landscape",
-                    ShowGridLines = false,
-                    ShowHeader = false,
-                    ShowFooter = false,
-                    ShowPageNumbers = false,
-                    Template = JsonSerializer.Serialize(nativeTemplate, new JsonSerializerOptions { WriteIndented = true }),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                });
-            }
+            UpsertCashReport(
+                "cash.payment.foxpro",
+                "Расходный кассовый ордер",
+                "Расходный кассовый ордер",
+                "Унифицированная печатная форма РКО",
+                "FoxProLayout",
+                "FoxProFRX",
+                "Portrait",
+                10,
+                true,
+                JsonSerializer.Serialize(GenerateCashPaymentFrxTemplate(cashOrder), new JsonSerializerOptions { WriteIndented = true }));
 
-            if (payment != null && !await _context.Reports.AnyAsync(item => item.Code == "cash.payment.native"))
-            {
-                var nativeTemplate = CreateDefaultNativeTemplate("CashPaymentOrder");
-                await _context.Reports.AddAsync(new Report
-                {
-                    Code = "cash.payment.native",
-                    Name = "Расходный кассовый ордер (нативный)",
-                    TitleText = "Расходный кассовый ордер",
-                    Description = "Настраиваемая нативная форма РКО",
-                    DataSourceType = "Document",
-                    DataSourceId = payment.Id,
-                    ReportType = "CashPaymentOrder",
-                    IsPrintForm = true,
-                    IsActive = true,
-                    IsDefault = false,
-                    SourceFormat = "Native",
-                    TemplateVersion = 1,
-                    Icon = "🖨",
-                    Order = 20,
-                    PageOrientation = "Portrait",
-                    ShowGridLines = false,
-                    ShowHeader = false,
-                    ShowFooter = false,
-                    ShowPageNumbers = false,
-                    Template = JsonSerializer.Serialize(nativeTemplate, new JsonSerializerOptions { WriteIndented = true }),
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                });
-            }
+            UpsertCashReport(
+                "cash.receipt.native",
+                "Приходный кассовый ордер (нативный)",
+                "Приходный кассовый ордер",
+                "Настраиваемая нативная форма ПКО с квитанцией",
+                "CashReceiptOrder",
+                "Native",
+                "Landscape",
+                20,
+                false,
+                JsonSerializer.Serialize(CreateDefaultNativeTemplate("CashReceiptOrder"), new JsonSerializerOptions { WriteIndented = true }));
+
+            UpsertCashReport(
+                "cash.payment.native",
+                "Расходный кассовый ордер (нативный)",
+                "Расходный кассовый ордер",
+                "Настраиваемая нативная форма РКО",
+                "CashPaymentOrder",
+                "Native",
+                "Portrait",
+                20,
+                false,
+                JsonSerializer.Serialize(CreateDefaultNativeTemplate("CashPaymentOrder"), new JsonSerializerOptions { WriteIndented = true }));
 
             await _context.SaveChangesAsync();
         }
@@ -732,10 +710,14 @@ namespace BIS.ERP.Services
             var correspondentAccount = GetString(row, "Корр. счет", "correspondent_account");
             correspondentAccount = await ResolveAccountCodeAsync(correspondentAccount);
             var cashDesk = await ResolveCashDeskAsync(GetString(row, "Касса", "cash_desk_id"));
-            var isPayment = documentName.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase);
+            var orderKind = GetString(row, "Тип КО", "order_kind", "cash_order_kind", "Тип", "document_type");
+            var isPayment = orderKind.Contains("расход", StringComparison.OrdinalIgnoreCase) ||
+                orderKind.Equals("Payment", StringComparison.OrdinalIgnoreCase) ||
+                documentName.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase);
+            var displayDocumentName = isPayment ? "Расходный кассовый ордер" : "Приходный кассовый ордер";
             var data = new CashOrderPrintData
             {
-                DocumentName = documentName,
+                DocumentName = displayDocumentName,
                 Number = GetString(row, "Номер", "Номер документа", "doc_number"),
                 Date = GetDate(row, "Дата", "doc_date"),
                 Organization = GetString(row, "Организация", "organization_id"),
@@ -2410,3 +2392,4 @@ namespace BIS.ERP.Services
         private readonly record struct CashDeskPrintInfo(string DisplayName, string Account);
     }
 }
+

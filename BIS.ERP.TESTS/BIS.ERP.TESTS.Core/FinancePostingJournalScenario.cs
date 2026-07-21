@@ -15,18 +15,13 @@ public sealed class FinancePostingJournalScenario : SmokeTestScenarioBase
     [
         new("Выписка счет-фактур", "Выписка счет-фактур"),
         new("Регистрация счет-фактур", "Регистрация счет-фактур"),
-        new("Приходный кассовый ордер", "Приходный кассовый ордер"),
-        new("Расходный кассовый ордер", "Расходный кассовый ордер"),
+        new("Приходный кассовый ордер", "Расходный/Приходный КО"),
+        new("Расходный кассовый ордер", "Расходный/Приходный КО"),
         new("Исходящее платежное поручение", "Платежное поручение"),
         new("Входящее платежное поручение", "Платежное поручение"),
         new("Авансовый отчет", "Авансовый отчет"),
         new("Платежная ведомость", "Платежная ведомость"),
         new("Расчет курсовой разницы", "Расчет курсовой разницы")
-    ];
-
-    private static readonly string[] OperationalDocumentsWithoutPosting =
-    [
-        "Доверенность"
     ];
 
     public override string Code => "finance-posting-journal";
@@ -134,8 +129,7 @@ public sealed class FinancePostingJournalScenario : SmokeTestScenarioBase
     {
         var expectedDocuments = PostingDocuments
             .Select(item => item.SourceDocumentName)
-            .Concat(OperationalDocumentsWithoutPosting)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         var documents = await context.MetadataObjects
@@ -151,7 +145,6 @@ public sealed class FinancePostingJournalScenario : SmokeTestScenarioBase
         }
 
         details.Add($"{databaseName}: проверены метаданные финансовых документов.");
-        details.Add($"{databaseName}: доверенность отмечена как операционный документ без бухгалтерской проводки.");
     }
 
     private static async Task VerifyControlPostingsAsync(
@@ -262,3 +255,6 @@ public sealed class FinancePostingJournalScenario : SmokeTestScenarioBase
         string PostingDocumentType,
         string SourceDocumentName);
 }
+
+
+

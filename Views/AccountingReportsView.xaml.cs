@@ -30,6 +30,7 @@ namespace BIS.ERP.Views
         private Report? _currentReport;
         private AccountingPeriod? _currentPeriod;
         private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
+        private bool _reconciliationVariantsLoaded;
 
         public AccountingReportsView(AppDbContext context)
         {
@@ -43,6 +44,22 @@ namespace BIS.ERP.Views
             _metadataService = new MetadataService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
+            Loaded += async (_, _) => await LoadReconciliationReportVariantsAsync();
+            UpdateReconciliationVariantVisibility();
+        }
+
+        public void SelectReportType(string reportType)
+        {
+            foreach (var item in ReportTypeCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (!string.Equals(item.Tag?.ToString(), reportType, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                ReportTypeCombo.SelectedItem = item;
+                break;
+            }
+
+            UpdateReconciliationVariantVisibility();
         }
 
         private async void OnGenerateClick(object sender, RoutedEventArgs e)
@@ -431,6 +448,7 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildOrganizationReconciliationAsync(DateTime start, DateTime end)
         {
             var calculation = await _organizationBalanceService.CalculateAsync(start, end);
+            var selectedVariant = GetSelectedReconciliationReportVariant();
             var table = new DataTable("Акт сверки");
             table.Columns.Add("Организация", typeof(string));
             table.Columns.Add("Вид расчета", typeof(string));
@@ -453,14 +471,114 @@ namespace BIS.ERP.Views
                     row.Balance, row.ModuleCode);
             }
 
+            var titlePrefix = selectedVariant?.IsStandard == false
+                ? selectedVariant.DisplayName
+                : "Акт сверки";
             var report = CreateReport(table,
-                $"Акт сверки за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+                $"{titlePrefix} за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+            report.ReportType = "ReconciliationAct";
             report.SummaryText = calculation.Warnings.Count == 0
                 ? "Акт сверки построен по активным настройкам взаиморасчетов с организациями."
                 : string.Join(Environment.NewLine, calculation.Warnings);
+            if (selectedVariant?.IsStandard == false)
+            {
+                report.SummaryText += Environment.NewLine +
+                    $"Выбран вариант печатной формы из метаданных: {selectedVariant.DisplayName}.";
+            }
             return (table, report);
         }
 
+        private async Task LoadReconciliationReportVariantsAsync()
+        {
+            if (_reconciliationVariantsLoaded)
+                return;
+
+            _reconciliationVariantsLoaded = true;
+            var variants = new List<ReconciliationReportVariant>
+            {
+                new()
+                {
+                    DisplayName = "Акт сверки",
+                    Description = "Стандартный расчетный вариант BIS ERP.",
+                    IsStandard = true
+                }
+            };
+            var variantsLoadError = string.Empty;
+
+            try
+            {
+                var reports = await _context.Reports.AsNoTracking()
+                    .Where(report =>
+                        EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") ||
+                        (report.SourceFormat == "FoxProFRX" && EF.Functions.ILike(report.Name, "Акт сверки%")))
+                    .OrderBy(report => report.Order)
+                    .ThenBy(report => report.Name)
+                    .Select(report => new
+                    {
+                        report.Id,
+                        report.Name,
+                        report.Description,
+                        report.Code
+                    })
+                    .ToListAsync();
+
+                foreach (var report in reports)
+                {
+                    var displayName = CleanReconciliationVariantName(report.Name);
+                    if (variants.Any(item => item.ReportId == report.Id || item.DisplayName.Equals(displayName, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+
+                    variants.Add(new ReconciliationReportVariant
+                    {
+                        ReportId = report.Id,
+                        DisplayName = displayName,
+                        Description = report.Description,
+                        Code = report.Code,
+                        IsStandard = false
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                variantsLoadError = $"FRX-варианты акта сверки не загружены: {ex.Message}";
+            }
+
+            ReconciliationVariantCombo.ItemsSource = variants;
+            ReconciliationVariantCombo.SelectedIndex = 0;
+            ReconciliationVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
+                ? variantsLoadError
+                : variants.Count == 1
+                    ? "FRX-варианты акта сверки в метаданных не найдены"
+                    : $"Доступно вариантов: {variants.Count}";
+            UpdateReconciliationVariantVisibility();
+        }
+
+        private void OnReportTypeSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateReconciliationVariantVisibility();
+        }
+
+        private void UpdateReconciliationVariantVisibility()
+        {
+            if (ReconciliationVariantPanel == null || ReportTypeCombo == null)
+                return;
+
+            ReconciliationVariantPanel.Visibility = IsOrganizationReconciliationSelected()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private bool IsOrganizationReconciliationSelected() =>
+            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
+                "OrganizationReconciliation", StringComparison.OrdinalIgnoreCase);
+
+        private ReconciliationReportVariant? GetSelectedReconciliationReportVariant() =>
+            ReconciliationVariantCombo?.SelectedItem as ReconciliationReportVariant;
+
+        private static string CleanReconciliationVariantName(string name) =>
+            (name ?? string.Empty)
+                .Replace(" (FRX FoxPro)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim();
         private async Task<List<PaymentOrderReportRow>> LoadPaymentOrderReportRowsAsync(DateTime? start, DateTime end)
         {
             var document = await _context.MetadataObjects
@@ -632,6 +750,15 @@ namespace BIS.ERP.Views
 
             value = null;
             return false;
+        }
+
+        private sealed class ReconciliationReportVariant
+        {
+            public Guid? ReportId { get; init; }
+            public string DisplayName { get; init; } = string.Empty;
+            public string Description { get; init; } = string.Empty;
+            public string Code { get; init; } = string.Empty;
+            public bool IsStandard { get; init; }
         }
 
         private sealed class PaymentOrderReportRow

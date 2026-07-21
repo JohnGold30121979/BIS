@@ -7,11 +7,11 @@ namespace BIS.ERP.Views
 {
     public partial class LoginWindow : Window
     {
-        public LoginWindow(string selectedInfoBaseText = "")
+        public LoginWindow(string selectedInfoBaseText = "", string selectedModeText = "")
         {
             InitializeComponent();
 
-            var viewModel = new LoginViewModel(ServiceLocator.AuthService, selectedInfoBaseText);
+            var viewModel = new LoginViewModel(ServiceLocator.AuthService, selectedInfoBaseText, selectedModeText);
             viewModel.LoginSucceeded += (_, _) =>
             {
                 DialogResult = true;
@@ -104,3 +104,4 @@ namespace BIS.ERP.Views
         private static bool IsEnterKey(Key key) => key is Key.Enter or Key.Return;
     }
 }
+

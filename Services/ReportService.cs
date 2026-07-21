@@ -1148,7 +1148,11 @@ namespace BIS.ERP.Services
         public async Task<List<Report>> GetNavigationReportsAsync()
         {
             var query = _context.Set<Report>().AsNoTracking()
-                .Where(report => report.IsActive && !report.IsPrintForm);
+                .Where(report => report.IsActive && !report.IsPrintForm)
+                .Where(report =>
+                    !(report.SourceFormat == "Native" && EF.Functions.Like(report.Code, "standard.%")) &&
+                    !EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") &&
+                    !(report.SourceFormat == "FoxProFRX" && EF.Functions.ILike(report.Name, "Акт сверки%")));
 
             return await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
         }

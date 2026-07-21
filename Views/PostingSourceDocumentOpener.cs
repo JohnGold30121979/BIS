@@ -73,6 +73,12 @@ namespace BIS.ERP.Views
                 return "Платежное поручение";
             }
 
+            if (documentType.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase) ||
+                documentType.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Расходный/Приходный КО";
+            }
+
             return documentType;
         }
 
@@ -139,7 +145,7 @@ namespace BIS.ERP.Views
                 .Where(row => DocumentTypeMatches(
                     postingDocumentType,
                     documentMetadata.Name,
-                    GetRowString(row, "Тип", "document_type", "DocumentType")))
+                    GetRowString(row, "Тип КО", "order_kind", "cash_order_kind", "Тип", "document_type", "DocumentType")))
                 .ToList();
 
             if (typeMatched.Count > 0)
@@ -159,6 +165,26 @@ namespace BIS.ERP.Views
             string metadataDocumentName,
             string recordDocumentType)
         {
+            if (metadataDocumentName.Equals("Расходный/Приходный КО", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(recordDocumentType))
+                    return true;
+
+                var expectsReceipt = postingDocumentType.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase);
+                var expectsPayment = postingDocumentType.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase);
+                if (expectsReceipt)
+                {
+                    return recordDocumentType.Equals("Receipt", StringComparison.OrdinalIgnoreCase) ||
+                           recordDocumentType.Contains("приход", StringComparison.OrdinalIgnoreCase);
+                }
+
+                if (expectsPayment)
+                {
+                    return recordDocumentType.Equals("Payment", StringComparison.OrdinalIgnoreCase) ||
+                           recordDocumentType.Contains("расход", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(recordDocumentType))
                 return true;
 
@@ -194,3 +220,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

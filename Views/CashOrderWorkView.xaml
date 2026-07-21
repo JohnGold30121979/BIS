@@ -22,8 +22,10 @@
 
         <!-- Панель инструментов -->
         <WrapPanel Grid.Row="1" Margin="0,0,0,10">
-            <Button x:Name="AddButton" Content="➕ Добавить" Width="100" Height="35" Margin="0,0,10,0"
-                    Background="#27AE60" Foreground="White" Click="OnAddClick"/>
+            <Button x:Name="AddPaymentButton" Content="➖ Расходный КО" Width="130" Height="35" Margin="0,0,10,0"
+                    Background="#E67E22" Foreground="White" Click="OnAddPaymentClick"/>
+            <Button x:Name="AddReceiptButton" Content="➕ Приходный КО" Width="130" Height="35" Margin="0,0,10,0"
+                    Background="#27AE60" Foreground="White" Click="OnAddReceiptClick"/>
             <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="35" Margin="0,0,10,0"
                     Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
             <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="35" Margin="0,0,10,0"
@@ -54,10 +56,12 @@
             </DataGrid.RowStyle>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
+                <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
                 <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="180"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="120"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="120"/>
+                <DataGridTextColumn Header="Тип проводки" Binding="{Binding PostingTypeDisplay}" Width="250"/>
                 <DataGridTextColumn Header="Сумма в сом" Binding="{Binding Amount, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="В валюте" Binding="{Binding AmountInCurrency, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding Description}" Width="150"/>

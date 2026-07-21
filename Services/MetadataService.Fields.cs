@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 
 namespace BIS.ERP.Services;
 
@@ -2088,6 +2088,126 @@ public partial class MetadataService
     };
     }
 
+    private List<MetadataField> GetCashOrderFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Номер", DbColumnName = "doc_number",
+                FieldType = "String", Length = 20, IsRequired = true, IsUnique = false,
+                Order = 1, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Дата", DbColumnName = "doc_date",
+                FieldType = "DateTime", IsRequired = true,
+                Order = 2, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Тип КО", DbColumnName = "order_kind",
+                FieldType = "String", Length = 20, IsRequired = true,
+                Order = 3, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Организация", DbColumnName = "organization_id",
+                FieldType = "Reference", ReferenceCatalog = "Организации",
+                DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование",
+                Order = 4, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Касса", DbColumnName = "cash_desk_id",
+                FieldType = "Reference", ReferenceCatalog = "Кассы",
+                DisplayPattern = "{Счет} - {Наименование кассы}", DisplayFields = "Счет,Наименование кассы",
+                Order = 5, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Сумма", DbColumnName = "amount",
+                FieldType = "Decimal", Precision = 18, Scale = 2, IsRequired = true,
+                Order = 6, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Основание", DbColumnName = "basis",
+                FieldType = "String", Length = 500,
+                Order = 7, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Корр. счет", DbColumnName = "correspondent_account",
+                FieldType = "String", Length = 50,
+                Order = 8, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Статья ДДС", DbColumnName = "cash_flow_item",
+                FieldType = "String", Length = 100,
+                Order = 9, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Счет кассы", DbColumnName = "cash_account",
+                FieldType = "Reference", ReferenceCatalog = "План счетов",
+                DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование",
+                Order = 10, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Примечание", DbColumnName = "description",
+                FieldType = "String", Length = 500,
+                Order = 11, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Проведён", DbColumnName = "is_posted",
+                FieldType = "Bool", IsRequired = true,
+                Order = 12, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Валюта", DbColumnName = "currency_id",
+                FieldType = "Reference", ReferenceCatalog = "Справочник валют",
+                DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование",
+                Order = 13, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Сотрудник", DbColumnName = "employee_id",
+                FieldType = "Reference", ReferenceCatalog = "Сотрудники (Списочный состав)",
+                DisplayPattern = "{Табельный номер} - {ФИО}", DisplayFields = "Табельный номер,ФИО",
+                Order = 14, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Материал", DbColumnName = "material_id",
+                FieldType = "Reference", ReferenceCatalog = "Справочник материалов",
+                DisplayPattern = "{Код} - {Наименование материала}", DisplayFields = "Код,Наименование материала",
+                Order = 15, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Дебет", DbColumnName = "debit_account",
+                FieldType = "String", Length = 50,
+                Order = 16, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Кредит", DbColumnName = "credit_account",
+                FieldType = "String", Length = 50,
+                Order = 17, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Сумма в валюте", DbColumnName = "amount_currency",
+                FieldType = "Decimal", Precision = 18, Scale = 2,
+                Order = 18, MetadataObjectId = metadataObjectId
+            }
+        };
+    }
     private List<MetadataField> GetCashReceiptFields(Guid metadataObjectId)
     {
         return new List<MetadataField>
@@ -2938,3 +3058,4 @@ public partial class MetadataService
     #endregion
 
 }
+

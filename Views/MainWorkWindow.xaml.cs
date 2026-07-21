@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using BIS.ERP.Views.Dialogs;
@@ -65,6 +65,11 @@ namespace BIS.ERP
         private static readonly HashSet<string> NotReadyFinanceDocuments = new(StringComparer.OrdinalIgnoreCase)
         {
             "Расчет курсовой разницы"
+        };
+
+        private static readonly HashSet<string> RemovedDocumentNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Доверенность"
         };
 
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
@@ -151,7 +156,7 @@ namespace BIS.ERP
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
             var catalogs = allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты").ToList();
             var documents = allMetadata
-                .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name))
+                .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name))
                 .ToList();
             var reports = await _reportService.GetNavigationReportsAsync();
             var modules = await _moduleMetadataService.GetModulesAsync();
@@ -202,8 +207,7 @@ namespace BIS.ERP
                     {
                         Id = $"ModuleDocuments:{module.Id}", Name = "Документы", Icon = "📄", Type = "Group"
                     };
-                    foreach (var document in moduleDocuments)
-                        group.Children.Add(CreateDocumentNavigationItem(document));
+                    AddDocumentNavigationItems(group, moduleDocuments);
                     moduleSection.Children.Add(group);
                 }
 
@@ -249,8 +253,7 @@ namespace BIS.ERP
                 {
                     Id = "UnassignedSection", Name = "НЕРАСПРЕДЕЛЕННЫЕ ОБЪЕКТЫ", Icon = "📂", Type = "Section"
                 };
-                foreach (var document in unassignedDocuments.OrderBy(document => document.Name))
-                    otherSection.Children.Add(CreateDocumentNavigationItem(document));
+                AddDocumentNavigationItems(otherSection, unassignedDocuments);
                 foreach (var report in unassignedReports.OrderBy(report => report.Name))
                     otherSection.Children.Add(new NavigationItem
                     {
@@ -283,13 +286,60 @@ namespace BIS.ERP
                 ShowNavigationOverview(NavigationItems[0]);
         }
 
+        private static bool IsCashOrderDocument(MetadataObject document)
+            => document.Name == "Расходный/Приходный КО" || document.TableName == "doc_cash_orders";
+
+        private static void AddDocumentNavigationItems(NavigationItem group, IEnumerable<MetadataObject> documents)
+        {
+            var orderedDocuments = documents
+                .OrderBy(document => document.Order)
+                .ThenBy(document => document.Name)
+                .ToList();
+            var cashOrderDocuments = orderedDocuments
+                .Where(IsCashOrderDocument)
+                .OrderBy(document => document.Order)
+                .ThenBy(document => document.Name)
+                .ToArray();
+            var cashOrdersNavigationAdded = false;
+
+            foreach (var document in orderedDocuments)
+            {
+                if (IsCashOrderDocument(document))
+                {
+                    if (!cashOrdersNavigationAdded)
+                    {
+                        group.Children.Add(CreateCashOrdersNavigationItem(cashOrderDocuments));
+                        cashOrdersNavigationAdded = true;
+                    }
+
+                    continue;
+                }
+
+                group.Children.Add(CreateDocumentNavigationItem(document));
+            }
+        }
+
+        private static NavigationItem CreateCashOrdersNavigationItem(MetadataObject[] cashOrderDocuments)
+        {
+            var firstDocument = cashOrderDocuments.FirstOrDefault();
+            return new NavigationItem
+            {
+                Id = "CashOrders",
+                Name = "Расходный/Приходный КО",
+                Icon = "💵",
+                Type = "CashOrder",
+                Tag = cashOrderDocuments,
+                Order = firstDocument?.Order ?? 0
+            };
+        }
+
         private static NavigationItem CreateDocumentNavigationItem(MetadataObject document)
         {
             var type = document.Name switch
             {
-                "Приходный кассовый ордер" or "Расходный кассовый ордер" => "CashOrder",
+                "Расходный/Приходный КО" => "CashOrder",
                 "Платежное поручение" => "PaymentOrder",
-                "Авансовый отчет" or "Доверенность" or "Платежная ведомость" => "FinanceDocument",
+                "Авансовый отчет" or "Платежная ведомость" => "FinanceDocument",
                 "Проводки" => "PostingsDocument",
                 InvoiceDocumentTypes.SalesIssue or InvoiceDocumentTypes.PurchaseRegistration => "InvoiceDocument",
                 _ => "DynamicDocument"
@@ -390,7 +440,7 @@ namespace BIS.ERP
 
             // Динамические документы
             var documents = (await _metadataService.GetDocumentsAsync())
-                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name))
+                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name))
                 .ToList();
             if (documents.Any())
             {
@@ -402,20 +452,32 @@ namespace BIS.ERP
                     Type = "Group"
                 };
 
+                var cashOrderDocuments = documents
+                    .Where(IsCashOrderDocument)
+                    .OrderBy(doc => doc.Order)
+                    .ToList();
+                var cashOrdersNavigationAdded = false;
+
                 foreach (var doc in documents.OrderBy(d => d.Order).ThenBy(d => d.Name))
                 {
-                    // Для кассовых ордеров используем кастомный тип
-                    if (doc.Name == "Приходный кассовый ордер" || doc.Name == "Расходный кассовый ордер")
+                    // Для кассовых ордеров используем один объединенный список.
+                    if (IsCashOrderDocument(doc))
                     {
-                        docsGroup.Children.Add(new NavigationItem
+                        if (!cashOrdersNavigationAdded)
                         {
-                            Id = doc.Id.ToString(),
-                            Name = doc.Name,
-                            Icon = doc.Icon,
-                            Type = "CashOrder",
-                            Tag = doc,
-                            Order = doc.Order
-                        });
+                            docsGroup.Children.Add(new NavigationItem
+                            {
+                                Id = "CashOrders",
+                                Name = "Расходный/Приходный КО",
+                                Icon = "💵",
+                                Type = "CashOrder",
+                                Tag = cashOrderDocuments.ToArray(),
+                                Order = cashOrderDocuments.Count > 0 ? cashOrderDocuments.Min(item => item.Order) : doc.Order
+                            });
+                            cashOrdersNavigationAdded = true;
+                        }
+
+                        continue;
                     }
                     // Для платежных поручений используем кастомный тип
                     else if (doc.Name == "Платежное поручение")
@@ -431,7 +493,6 @@ namespace BIS.ERP
                         });
                     }
                     else if (doc.Name == "Авансовый отчет" ||
-                             doc.Name == "Доверенность" ||
                              doc.Name == "Платежная ведомость")
                     {
                         docsGroup.Children.Add(new NavigationItem
@@ -1170,7 +1231,12 @@ namespace BIS.ERP
                     break;
 
                 case "CashOrder":
-                    if (item.Tag is MetadataObject cashOrderDocument)
+                    if (item.Tag is MetadataObject[] cashOrderDocuments && cashOrderDocuments.FirstOrDefault() is { } singleCashOrderDocument)
+                    {
+                        var cashOrderView = new CashOrderWorkView(singleCashOrderDocument, _metadataService);
+                        _navigation.NavigateTo(cashOrderView);
+                    }
+                    else if (item.Tag is MetadataObject cashOrderDocument)
                     {
                         var cashOrderView = new CashOrderWorkView(cashOrderDocument, _metadataService);
                         _navigation.NavigateTo(cashOrderView);
@@ -1207,8 +1273,7 @@ namespace BIS.ERP
                     break;
 
                 case "AccountingReports":
-                    var accountingContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                    _navigation.NavigateTo(new AccountingReportsView(accountingContext));
+                    await OpenAccountingReportsAsync();
                     break;
 
                 case "Profile":
@@ -1526,8 +1591,29 @@ namespace BIS.ERP
 
         #endregion
 
+        private async Task OpenAccountingReportsAsync(string? selectedReportType = null)
+        {
+            var context = await _infoBaseManager.GetCurrentDbContextAsync();
+            var view = new AccountingReportsView(context);
+            if (!string.IsNullOrWhiteSpace(selectedReportType))
+                view.SelectReportType(selectedReportType);
+            _navigation.NavigateTo(view);
+        }
+
+        private static bool IsReconciliationReport(Report report) =>
+            string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
+            report.Name.StartsWith("Акт сверки", StringComparison.CurrentCultureIgnoreCase) ||
+            (!string.IsNullOrWhiteSpace(report.Code) &&
+             report.Code.StartsWith("standard.frx.finance.reconciliation.", StringComparison.OrdinalIgnoreCase));
+
         private async Task OpenReport(Report report)
         {
+            if (IsReconciliationReport(report))
+            {
+                await OpenAccountingReportsAsync("OrganizationReconciliation");
+                return;
+            }
+
             _isLoadingReport = true;
             Mouse.OverrideCursor = Cursors.Wait;
 
@@ -1537,9 +1623,9 @@ namespace BIS.ERP
                 var reportService = new ReportService(context);
                 var loadedReport = await reportService.GetReportAsync(report.Id) ?? report;
                 var data = await reportService.GetReportDataAsync(loadedReport);
+                var pdf = reportService.ExportToPdf(data, loadedReport);
 
-                var preview = new ReportPreviewWindow(data, loadedReport, reportService);
-                preview.Owner = this;
+                var preview = new PdfPreviewWindow(pdf) { Owner = this };
                 preview.ShowDialog();
             }
             catch (Exception ex)
@@ -1631,3 +1717,7 @@ namespace BIS.ERP
         }
     }
 }
+
+
+
+
