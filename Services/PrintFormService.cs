@@ -958,7 +958,6 @@ namespace BIS.ERP.Services
 
         private static string ReadReconciliationOperation(DataRow row)
         {
-            var fallback = string.Empty;
             foreach (var candidate in new[]
                      {
                          "Наименование материала, вид операции", "Наименование", "Операция",
@@ -970,14 +969,17 @@ namespace BIS.ERP.Services
                 if (string.IsNullOrWhiteSpace(value))
                     continue;
 
-                if (!LooksLikeGeneratedRowLabel(value))
-                    return value;
-
-                var payload = ExtractGeneratedRowLabelPayload(value);
-                fallback = string.IsNullOrWhiteSpace(payload) ? value : payload;
+                var cleaned = CleanGeneratedRowLabels(value);
+                return string.IsNullOrWhiteSpace(cleaned) ? value.Trim() : cleaned;
             }
 
-            return fallback;
+            return string.Empty;
+        }
+
+        private static string CleanGeneratedRowLabels(string value)
+        {
+            var cleaned = Regex.Replace(value ?? string.Empty, @"(?i)\bстрока\s+\d+\s*:\s*", string.Empty).Trim();
+            return Regex.Replace(cleaned, @"\s{2,}", " ").Trim();
         }
 
         private static bool LooksLikeGeneratedRowLabel(string value) =>
@@ -2443,7 +2445,7 @@ namespace BIS.ERP.Services
 
                 if (element.Type == "Line")
                 {
-                    segments.Add(new FrxGridSegment(element.Left, element.Top, element.Left + element.Width, element.Top + element.Height));
+                    segments.Add(NormalizeRawFrxGridSegment(new FrxGridSegment(element.Left, element.Top, element.Left + element.Width, element.Top + element.Height)));
                     continue;
                 }
 
@@ -2467,7 +2469,7 @@ namespace BIS.ERP.Services
             var xAnchors = BuildAxisAnchors(segments.SelectMany(item => new[] { item.X1, item.X2 }), tolerance);
             var yAnchors = BuildAxisAnchors(segments.SelectMany(item => new[] { item.Y1, item.Y2 }), tolerance);
             var snapped = segments
-                .Select(segment => SnapGridSegment(segment, xAnchors, yAnchors, tolerance))
+                .Select(segment => SnapGridSegment(NormalizeRawFrxGridSegment(segment), xAnchors, yAnchors, tolerance))
                 .Where(segment => GetSegmentLength(segment) > tolerance * 0.4d)
                 .ToList();
 
@@ -2509,21 +2511,47 @@ namespace BIS.ERP.Services
             return anchors;
         }
 
+        private static FrxGridSegment NormalizeRawFrxGridSegment(FrxGridSegment segment)
+        {
+            var dx = Math.Abs(segment.X2 - segment.X1);
+            var dy = Math.Abs(segment.Y2 - segment.Y1);
+            if (dx <= 0 && dy <= 0)
+                return segment;
+
+            if (dx >= Math.Max(1d, dy) * 2d)
+            {
+                var y = Math.Round((segment.Y1 + segment.Y2) / 2d);
+                return new FrxGridSegment(Math.Min(segment.X1, segment.X2), y, Math.Max(segment.X1, segment.X2), y);
+            }
+
+            if (dy >= Math.Max(1d, dx) * 2d)
+            {
+                var x = Math.Round((segment.X1 + segment.X2) / 2d);
+                return new FrxGridSegment(x, Math.Min(segment.Y1, segment.Y2), x, Math.Max(segment.Y1, segment.Y2));
+            }
+
+            return segment;
+        }
+
         private static FrxGridSegment SnapGridSegment(FrxGridSegment segment, IReadOnlyList<double> xAnchors, IReadOnlyList<double> yAnchors, double tolerance)
         {
             var x1 = SnapCoordinate(segment.X1, xAnchors, tolerance);
             var x2 = SnapCoordinate(segment.X2, xAnchors, tolerance);
             var y1 = SnapCoordinate(segment.Y1, yAnchors, tolerance);
             var y2 = SnapCoordinate(segment.Y2, yAnchors, tolerance);
+            var dx = Math.Abs(x2 - x1);
+            var dy = Math.Abs(y2 - y1);
 
-            if (Math.Abs(y2 - y1) <= tolerance)
+            if (dy <= tolerance || dx >= Math.Max(1d, dy) * 2d)
             {
                 var y = SnapCoordinate((y1 + y2) / 2d, yAnchors, tolerance);
                 y1 = y;
                 y2 = y;
             }
 
-            if (Math.Abs(x2 - x1) <= tolerance)
+            dx = Math.Abs(x2 - x1);
+            dy = Math.Abs(y2 - y1);
+            if (dx <= tolerance || dy >= Math.Max(1d, dx) * 2d)
             {
                 var x = SnapCoordinate((x1 + x2) / 2d, xAnchors, tolerance);
                 x1 = x;
@@ -2658,7 +2686,7 @@ namespace BIS.ERP.Services
             {
                 var y = Math.Round(group.Average(item => item.Axis));
                 var intervals = group.Select(item => (item.Start, item.End)).OrderBy(item => item.Start).ToList();
-                foreach (var interval in MergeIntervals(intervals, tolerance))
+                foreach (var interval in MergeIntervals(intervals, tolerance * 1.8d))
                     yield return new FrxGridSegment(interval.Start, y, interval.End, y);
             }
         }
@@ -2669,7 +2697,7 @@ namespace BIS.ERP.Services
             {
                 var x = Math.Round(group.Average(item => item.Axis));
                 var intervals = group.Select(item => (item.Start, item.End)).OrderBy(item => item.Start).ToList();
-                foreach (var interval in MergeIntervals(intervals, tolerance))
+                foreach (var interval in MergeIntervals(intervals, tolerance * 1.8d))
                     yield return new FrxGridSegment(x, interval.Start, x, interval.End);
             }
         }
