@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using Npgsql;
@@ -524,7 +524,7 @@ namespace BIS.ERP.Services
         public byte[] ExportToExcel(DataTable dataTable, Report report)
         {
             using var workbook = new XLWorkbook();
-            var worksheet = workbook.Worksheets.Add(report.Name);
+            var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
 
             // Заголовок отчета
             var titleRow = worksheet.Cell(1, 1);
@@ -547,6 +547,19 @@ namespace BIS.ERP.Services
             return stream.ToArray();
         }
 
+        private static string BuildSafeExcelWorksheetName(string? name)
+        {
+            var invalidChars = new HashSet<char>(new[] { '[', ']', ':', '*', '?', '/', '\\' });
+            var safeName = new string((name ?? string.Empty)
+                .Select(ch => invalidChars.Contains(ch) || char.IsControl(ch) ? ' ' : ch)
+                .ToArray())
+                .Trim();
+
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "Report";
+
+            return safeName.Length <= 31 ? safeName : safeName[..31].Trim();
+        }
         public byte[] ExportToPdf(DataTable dataTable, Report report)
         {
             QuestPDF.Settings.License = LicenseType.Community;
@@ -1149,12 +1162,12 @@ namespace BIS.ERP.Services
         {
             var query = _context.Set<Report>().AsNoTracking()
                 .Where(report => report.IsActive && !report.IsPrintForm)
-                .Where(report =>
-                    !(report.SourceFormat == "Native" && EF.Functions.Like(report.Code, "standard.%")) &&
-                    !EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") &&
-                    !(report.SourceFormat == "FoxProFRX" && EF.Functions.ILike(report.Name, "Акт сверки%")));
+                .Where(report => !(report.SourceFormat == "Native" && EF.Functions.Like(report.Code, "standard.%")));
 
-            return await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
+            var reports = await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
+            return reports
+                .Where(report => !ReportClassificationService.IsReconciliationReport(report))
+                .ToList();
         }
 
         public async Task<Report?> GetReportAsync(Guid reportId)

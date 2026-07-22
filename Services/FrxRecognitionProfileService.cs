@@ -282,6 +282,44 @@ namespace BIS.ERP.Services
             },
             new FrxRecognitionProfile
             {
+                Code = "foxpro_reconciliation_act",
+                Name = "Visual FoxPro - Акт сверки",
+                FileNamePatterns = new List<string>
+                {
+                    "akt_sver*.frx",
+                    "akt_sal*.frx",
+                    "pr_vzp*.frx",
+                    "prreest*.frx",
+                    "pr_rees*.frx",
+                    "pr_vz*.frx"
+                },
+                RequiredExpressions = new List<string> { "name_kod", "debsum", "credsum" },
+                DefaultVariables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["sha"] = string.Empty,
+                    ["sha1"] = string.Empty,
+                    ["sha2"] = string.Empty,
+                    ["dtb"] = string.Empty,
+                    ["dtbeg"] = string.Empty,
+                    ["dtend"] = string.Empty,
+                    ["datobr"] = string.Empty
+                },
+                Layout = new FrxLayoutRecognitionOptions
+                {
+                    NormalizeBandTops = true,
+                    CompactVerticalGaps = false,
+                    DesiredVerticalGap = 700,
+                    MinGapToCompact = 1500
+                },
+                AlignmentOverrides = new List<FrxAlignmentOverride>
+                {
+                    new() { ExpressionPattern = @"(?i)^(?:.*\.)?(?:deb|cred|schet|korsch|kor_sch|prs|module|kod_arm)$", Alignment = "Center" },
+                    new() { ExpressionPattern = @"(?i)^(?:.*\.)?(?:debsum|credsum|sum_deb|sum_cred|deb_beg|cred_beg|deb_v|cred_v)$", Alignment = "Right" },
+                    new() { ExpressionPattern = @"(?i)^(?:dtoc\()?\s*(?:.*\.)?(?:date|datobr|dtbeg|dtend)\)?$", Alignment = "Center" }
+                }
+            },
+            new FrxRecognitionProfile
+            {
                 Code = "foxpro_invoice_kg",
                 Name = "Visual FoxPro - Счет-фактура КР",
                 FileNamePatterns = new List<string> { "pr_fak16.frx" },

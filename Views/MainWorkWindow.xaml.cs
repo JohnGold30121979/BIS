@@ -270,7 +270,7 @@ namespace BIS.ERP
             var dbfCount = await _documentService.GetDocumentsCountAsync();
             serviceSection.Children.Add(new NavigationItem
             {
-                Id = "DbfDocuments", Name = "DBF Документы", Icon = "🗄", Type = "DbfDocuments",
+                Id = "DbfDocuments", Name = "FoxPro documents", Icon = "🗄", Type = "DbfDocuments",
                 Badge = dbfCount > 0 ? dbfCount.ToString() : string.Empty
             });
             NavigationItems.Add(serviceSection);
@@ -535,12 +535,12 @@ namespace BIS.ERP
                 dataSection.Children.Add(docsGroup);
             }
 
-            // Импортированные DBF документы
+            // Imported FoxPro documents
             var dbfCount = await _documentService.GetDocumentsCountAsync();
             dataSection.Children.Add(new NavigationItem
             {
                 Id = "DbfDocuments",
-                Name = "DBF Документы",
+                Name = "FoxPro documents",
                 Icon = "🗄️",
                 Type = "DbfDocuments",
                 Badge = dbfCount > 0 ? dbfCount.ToString() : ""
@@ -1601,10 +1601,7 @@ namespace BIS.ERP
         }
 
         private static bool IsReconciliationReport(Report report) =>
-            string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
-            report.Name.StartsWith("Акт сверки", StringComparison.CurrentCultureIgnoreCase) ||
-            (!string.IsNullOrWhiteSpace(report.Code) &&
-             report.Code.StartsWith("standard.frx.finance.reconciliation.", StringComparison.OrdinalIgnoreCase));
+            ReportClassificationService.IsReconciliationReport(report);
 
         private async Task OpenReport(Report report)
         {

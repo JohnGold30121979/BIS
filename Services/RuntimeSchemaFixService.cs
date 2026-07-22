@@ -101,6 +101,25 @@ namespace BIS.ERP.Services
                         ALTER TABLE ""MetadataModuleItems"" ALTER COLUMN ""ObjectType"" TYPE varchar(80);
                     END IF;
 
+                    CREATE TABLE IF NOT EXISTS ""FoxProReportFieldRules"" (
+                        ""Id"" uuid NOT NULL,
+                        ""ProfileCode"" varchar(120) NOT NULL DEFAULT '',
+                        ""SourcePattern"" varchar(300) NOT NULL DEFAULT '',
+                        ""CanonicalField"" varchar(120) NOT NULL DEFAULT '',
+                        ""TargetFieldName"" varchar(300) NOT NULL DEFAULT '',
+                        ""TargetDisplayName"" varchar(300) NOT NULL DEFAULT '',
+                        ""IsRegex"" boolean NOT NULL DEFAULT false,
+                        ""IsActive"" boolean NOT NULL DEFAULT true,
+                        ""Priority"" integer NOT NULL DEFAULT 100,
+                        ""Description"" text NOT NULL DEFAULT '',
+                        ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        CONSTRAINT ""PK_FoxProReportFieldRules"" PRIMARY KEY (""Id"")
+                    );
+                    CREATE INDEX IF NOT EXISTS ""IX_FoxProReportFieldRules_SourcePattern""
+                        ON ""FoxProReportFieldRules"" (""SourcePattern"");
+                    CREATE INDEX IF NOT EXISTS ""IX_FoxProReportFieldRules_ProfileCode_IsActive""
+                        ON ""FoxProReportFieldRules"" (""ProfileCode"", ""IsActive"");
                     IF to_regclass('public.catalog_taxes') IS NOT NULL THEN
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS sort_order integer;

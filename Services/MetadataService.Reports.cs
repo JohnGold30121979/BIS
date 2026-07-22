@@ -13,24 +13,88 @@ public partial class MetadataService
         await new PrintFormService(_context).EnsureSchemaAsync();
         await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
         _context.ChangeTracker.Clear();
+        await DeleteDeprecatedObjectTreeReportsAsync();
 
-        foreach (var definition in BuildStandardReportDefinitions())
+        foreach (var definition in BuildStandardReportDefinitions().Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code)))
             await EnsureStandardReportAsync(definition);
-        foreach (var definition in StandardFrxReportTemplates.GetDefinitions())
+        foreach (var definition in StandardFrxReportTemplates.GetDefinitions().Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code)))
             await EnsureStandardFrxReportAsync(definition);
 
         await _context.SaveChangesAsync();
         await MarkReconciliationFrxReportsAsTemplateVariantsAsync();
     }
 
-    private async Task MarkReconciliationFrxReportsAsTemplateVariantsAsync()
+    private static readonly string[] DeprecatedObjectTreeReportCodes =
+    {
+        "standard.finance.trial-balance",
+        "standard.finance.general-ledger",
+        "standard.frx.finance.trial-balance",
+        "standard.frx.finance.general-ledger"
+    };
+
+    private static readonly string[] DeprecatedObjectTreeReportNames =
+    {
+        "Оборотно-сальдовая ведомость",
+        "Главная книга",
+        "Оборотно-сальдовая ведомость (FRX FoxPro)",
+        "Главная книга (FRX FoxPro)"
+    };
+
+    private static bool IsDeprecatedObjectTreeReportCode(string? code) =>
+        !string.IsNullOrWhiteSpace(code) &&
+        DeprecatedObjectTreeReportCodes.Contains(code, StringComparer.OrdinalIgnoreCase);
+
+    private async Task DeleteDeprecatedObjectTreeReportsAsync()
     {
         var reportIds = await _context.Reports
             .Where(report =>
-                EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") ||
-                (report.SourceFormat == "FoxProFRX" && EF.Functions.ILike(report.Name, "Акт сверки%")))
+                DeprecatedObjectTreeReportCodes.Contains(report.Code) ||
+                (DeprecatedObjectTreeReportNames.Contains(report.Name) &&
+                 ((report.Code == null || report.Code == string.Empty) ||
+                  report.Code.StartsWith("standard.finance.") ||
+                  report.Code.StartsWith("standard.frx.finance."))))
             .Select(report => report.Id)
             .ToListAsync();
+
+        if (reportIds.Count == 0)
+            return;
+
+        await _context.MetadataModuleItems
+            .Where(item => item.ObjectType == "Report" && reportIds.Contains(item.ObjectId))
+            .ExecuteDeleteAsync();
+
+        foreach (var reportId in reportIds)
+            await DeleteStandardReportDetailsAsync(reportId);
+
+        await _context.Reports
+            .Where(report => reportIds.Contains(report.Id))
+            .ExecuteDeleteAsync();
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task MarkReconciliationFrxReportsAsTemplateVariantsAsync()
+    {
+        var candidateReports = await _context.Reports
+            .Where(report =>
+                EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") ||
+                report.SourceFormat == "FoxProFRX" ||
+                report.ReportType == "FoxProLayout")
+            .Select(report => new Report
+            {
+                Id = report.Id,
+                Name = report.Name,
+                Description = report.Description,
+                Code = report.Code,
+                SourceFormat = report.SourceFormat,
+                ReportType = report.ReportType,
+                Template = report.Template
+            })
+            .ToListAsync();
+        var reportIds = candidateReports
+            .Where(ReportClassificationService.IsReconciliationReport)
+            .Select(report => report.Id)
+            .ToList();
 
         if (reportIds.Count == 0)
             return;
@@ -39,7 +103,6 @@ public partial class MetadataService
         await _context.Reports
             .Where(report => reportIds.Contains(report.Id))
             .ExecuteUpdateAsync(setters => setters
-                .SetProperty(report => report.IsActive, false)
                 .SetProperty(report => report.IsPrintForm, true)
                 .SetProperty(report => report.IsDefault, false)
                 .SetProperty(report => report.UpdatedAt, now));

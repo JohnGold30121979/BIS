@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
@@ -21,6 +21,7 @@ namespace BIS.ERP.Views
         private ReportService _reportService;
         private PrintFormService _printFormService;
         private MetadataService _metadataService;
+        private FoxProReportFieldRuleService _foxProRuleService;
         private Report _currentReport;
         private List<MetadataObject> _availableCatalogs;
         private ObservableCollection<ReportField> _reportFields;
@@ -28,6 +29,7 @@ namespace BIS.ERP.Views
         public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
+        public ObservableCollection<FoxProReportFieldRule> FoxProRules { get; } = new();
         private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
         public ReportDesignerWindow(Report report = null)
@@ -55,6 +57,9 @@ namespace BIS.ERP.Views
                 _reportService = new ReportService(context);
                 _printFormService = new PrintFormService(context);
                 _metadataService = new MetadataService(context);
+                _foxProRuleService = new FoxProReportFieldRuleService(context);
+                await _foxProRuleService.SeedDefaultRulesAsync();
+                await LoadFoxProRulesAsync();
 
                 await LoadDataSources();
 
@@ -106,6 +111,7 @@ namespace BIS.ERP.Views
             {
                 AvailableSourceFields.Clear();
                 AvailableDataFields.Clear();
+                AddComputedDataFields();
             }
         }
 
@@ -135,8 +141,7 @@ namespace BIS.ERP.Views
                 AvailableDataFields.Add(field);
             }
 
-            foreach (var field in GetPrintFormComputedFields())
-                AvailableDataFields.Add(field);
+            AddComputedDataFields();
 
             foreach (var field in catalog.Fields.OrderBy(field => field.Order))
             {
@@ -151,10 +156,27 @@ namespace BIS.ERP.Views
             await Task.CompletedTask;
         }
 
+        private void AddComputedDataFields()
+        {
+            var existing = AvailableDataFields
+                .Select(field => field.DbColumnName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetPrintFormComputedFields())
+            {
+                if (string.IsNullOrWhiteSpace(field.DbColumnName) || existing.Contains(field.DbColumnName))
+                    continue;
+
+                AvailableDataFields.Add(field);
+                existing.Add(field.DbColumnName);
+            }
+        }
         private void CommitDesignerGridEdits()
         {
             TryCommitGrid(ReportFieldsGrid);
             TryCommitGrid(ElementMappingGrid);
+            TryCommitGrid(FoxProRulesGrid);
             TryCommitGrid(NativeElementsGrid);
         }
 
@@ -941,7 +963,11 @@ namespace BIS.ERP.Views
                     ElementMappingGrid.ItemsSource = _frxElementMappings;
                 }
 
+                var autoApplied = ApplyFoxProRulesToEmptyMappings();
                 UpdateMappingPreview();
+
+                if (autoApplied > 0)
+                    StatusText.Text = $"FRX поля: автоматически применены правила: {autoApplied}.";
 
                 if (_frxElementMappings.Count > 0)
                     FrXFieldsTab.IsEnabled = true;
@@ -952,6 +978,221 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async Task LoadFoxProRulesAsync()
+        {
+            if (_foxProRuleService == null)
+                return;
+
+            FoxProRules.Clear();
+            foreach (var rule in await _foxProRuleService.GetRulesAsync())
+                FoxProRules.Add(rule);
+        }
+
+        private void OnApplyFoxProRulesClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            var applied = ApplyFoxProRulesToEmptyMappings();
+            UpdateMappingPreview();
+            StatusText.Text = applied == 0
+                ? "Общие правила не нашли новых соответствий."
+                : $"Общие правила применены: {applied}.";
+        }
+
+        private int ApplyFoxProRulesToEmptyMappings()
+        {
+            var applied = 0;
+            foreach (var mapping in _frxElementMappings)
+            {
+                if (!string.IsNullOrWhiteSpace(mapping.MappedFieldName))
+                    continue;
+
+                var source = GetMappingSource(mapping);
+                var target = FindRuleTargetField(source);
+                if (string.IsNullOrWhiteSpace(target))
+                    continue;
+
+                mapping.MappedFieldName = target;
+                mapping.MappedDisplayName = ResolveFieldDisplayName(target);
+                applied++;
+            }
+
+            return applied;
+        }
+
+        private async void OnSaveMappedFoxProRulesClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CommitDesignerGridEdits();
+                var profileCode = GetCurrentRecognitionProfileCode();
+                var added = 0;
+                foreach (var mapping in _frxElementMappings.Where(item => !string.IsNullOrWhiteSpace(item.MappedFieldName)))
+                {
+                    var source = FoxProReportKnowledgeBase.NormalizeRuleSource(GetMappingSource(mapping));
+                    if (string.IsNullOrWhiteSpace(source))
+                        continue;
+
+                    var existing = FoxProRules.FirstOrDefault(rule =>
+                        !rule.IsRegex &&
+                        FoxProReportKnowledgeBase.RuleMatches(rule, source));
+                    if (existing == null)
+                    {
+                        existing = new FoxProReportFieldRule
+                        {
+                            Id = Guid.NewGuid(),
+                            SourcePattern = source,
+                            Priority = 100,
+                            IsActive = true
+                        };
+                        FoxProRules.Add(existing);
+                        added++;
+                    }
+
+                    existing.ProfileCode = profileCode;
+                    existing.SourcePattern = source;
+                    existing.CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
+                    existing.TargetFieldName = mapping.MappedFieldName;
+                    existing.TargetDisplayName = ResolveFieldDisplayName(mapping.MappedFieldName);
+                    existing.Description = string.IsNullOrWhiteSpace(existing.Description)
+                        ? "Создано из визуального конструктора отчетов."
+                        : existing.Description;
+                    existing.IsActive = true;
+                }
+
+                await SaveFoxProRulesAsync();
+                StatusText.Text = added == 0
+                    ? "Общие правила обновлены."
+                    : $"Общие правила сохранены. Новых: {added}.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сохранения правил FoxPro: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OnAddFoxProRuleClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            var mapping = ElementMappingGrid.SelectedItem as FrXElementMappingViewModel;
+            var source = mapping == null ? string.Empty : FoxProReportKnowledgeBase.NormalizeRuleSource(GetMappingSource(mapping));
+            var target = mapping?.MappedFieldName ?? string.Empty;
+            FoxProRules.Add(new FoxProReportFieldRule
+            {
+                Id = Guid.NewGuid(),
+                ProfileCode = GetCurrentRecognitionProfileCode(),
+                SourcePattern = source,
+                CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source),
+                TargetFieldName = target,
+                TargetDisplayName = ResolveFieldDisplayName(target),
+                Priority = 100,
+                IsActive = true,
+                Description = "Пользовательское правило распознавания."
+            });
+        }
+
+        private void OnDeleteFoxProRuleClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            if (FoxProRulesGrid.SelectedItem is FoxProReportFieldRule rule)
+                FoxProRules.Remove(rule);
+        }
+
+        private async void OnSaveFoxProRulesClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CommitDesignerGridEdits();
+                await SaveFoxProRulesAsync();
+                StatusText.Text = "Список общих правил FoxPro сохранен.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сохранения списка правил FoxPro: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task SaveFoxProRulesAsync()
+        {
+            if (_foxProRuleService == null)
+                return;
+
+            foreach (var rule in FoxProRules)
+            {
+                rule.SourcePattern = FoxProReportKnowledgeBase.NormalizeRuleSource(rule.SourcePattern);
+                if (string.IsNullOrWhiteSpace(rule.CanonicalField))
+                    rule.CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(rule.SourcePattern);
+                rule.TargetDisplayName = ResolveFieldDisplayName(rule.TargetFieldName);
+                rule.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _foxProRuleService.SaveRulesAsync(FoxProRules);
+            await LoadFoxProRulesAsync();
+        }
+
+        private string FindRuleTargetField(string source)
+        {
+            var savedRule = FoxProRules
+                .Where(rule => rule.IsActive)
+                .OrderBy(rule => rule.Priority)
+                .FirstOrDefault(rule => FoxProReportKnowledgeBase.RuleMatches(rule, source));
+            if (!string.IsNullOrWhiteSpace(savedRule?.TargetFieldName))
+                return savedRule.TargetFieldName;
+
+            var canonical = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
+            foreach (var candidate in FoxProReportKnowledgeBase.GetTargetFieldCandidates(canonical))
+            {
+                var field = FindAvailableDataField(candidate);
+                if (field != null)
+                    return field.DbColumnName;
+            }
+
+            return string.Empty;
+        }
+
+        private FieldDef? FindAvailableDataField(string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                return null;
+
+            var normalized = NormalizeDesignerFieldName(candidate);
+            return AvailableDataFields.FirstOrDefault(field =>
+                field.DbColumnName.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                field.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                NormalizeDesignerFieldName(field.DbColumnName) == normalized ||
+                NormalizeDesignerFieldName(field.Name) == normalized);
+        }
+
+        private string ResolveFieldDisplayName(string fieldName)
+        {
+            return FindAvailableDataField(fieldName)?.Name ?? string.Empty;
+        }
+
+        private string GetCurrentRecognitionProfileCode()
+        {
+            try
+            {
+                var template = PrintFormService.DeserializePrintTemplate(TemplateTextBox.Text);
+                return template.RecognitionProfileCode;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string GetMappingSource(FrXElementMappingViewModel mapping)
+        {
+            return string.IsNullOrWhiteSpace(mapping.ElementExpression)
+                ? mapping.ElementText
+                : mapping.ElementExpression;
+        }
+
+        private static string NormalizeDesignerFieldName(string value)
+        {
+            return System.Text.RegularExpressions.Regex.Replace((value ?? string.Empty).Trim().ToLowerInvariant(), @"[\s\.\-]+", "_");
+        }
         private void UpdateMappingPreview()
         {
             if (_frxElementMappings.Count == 0)

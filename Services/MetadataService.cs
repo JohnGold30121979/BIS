@@ -189,9 +189,7 @@ namespace BIS.ERP.Services
             }
 
             var result = new List<Dictionary<string, object>>();
-            var sql = catalog.Name == "Организации"
-                ? $"SELECT * FROM \"{catalog.TableName}\" ORDER BY COALESCE(\"is_primary\", false) DESC, \"code\", \"CreatedAt\""
-                : $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
+            var sql = await BuildCatalogDataSelectSqlAsync(catalog);
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
@@ -248,6 +246,70 @@ namespace BIS.ERP.Services
             return result;
         }
 
+
+
+        private async Task<string> BuildCatalogDataSelectSqlAsync(MetadataObject catalog)
+        {
+            var safeTableName = QuoteIdentifier(catalog.TableName);
+            var sql = $"SELECT * FROM {safeTableName}";
+            var columns = await GetExistingColumnNamesAsync(catalog.TableName);
+            var orderParts = new List<string>();
+
+            if (string.Equals(catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase))
+            {
+                if (columns.Contains("is_primary"))
+                    orderParts.Add("COALESCE(\"is_primary\", false) DESC");
+                if (columns.Contains("code"))
+                    orderParts.Add("\"code\"");
+            }
+
+            if (columns.Contains("CreatedAt"))
+                orderParts.Add("\"CreatedAt\"");
+            else if (columns.Contains("Id"))
+                orderParts.Add("\"Id\"");
+
+            return orderParts.Count == 0
+                ? sql
+                : $"{sql} ORDER BY {string.Join(", ", orderParts)}";
+        }
+
+        private async Task<HashSet<string>> GetExistingColumnNamesAsync(string tableName)
+        {
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = @tableName";
+            var tableNameParameter = command.CreateParameter();
+            tableNameParameter.ParameterName = "@tableName";
+            tableNameParameter.Value = tableName;
+            command.Parameters.Add(tableNameParameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    if (!reader.IsDBNull(0))
+                        columns.Add(reader.GetString(0));
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            return columns;
+        }
 
         private async Task<Dictionary<Guid, string>> LoadReferenceDictionaryAsync(string catalogName)
         {

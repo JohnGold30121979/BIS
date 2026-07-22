@@ -1,11 +1,13 @@
 using BIS.ERP.Data;
 using BIS.ERP.Models;
+using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Text;
@@ -78,10 +80,29 @@ namespace BIS.ERP.Services
                     CONSTRAINT ""FK_ReportElementMappings_Reports_ReportId"" FOREIGN KEY (""ReportId"")
                         REFERENCES ""Reports"" (""Id"") ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS ""FoxProReportFieldRules"" (
+                    ""Id"" uuid NOT NULL,
+                    ""ProfileCode"" varchar(120) NOT NULL DEFAULT '',
+                    ""SourcePattern"" varchar(300) NOT NULL DEFAULT '',
+                    ""CanonicalField"" varchar(120) NOT NULL DEFAULT '',
+                    ""TargetFieldName"" varchar(300) NOT NULL DEFAULT '',
+                    ""TargetDisplayName"" varchar(300) NOT NULL DEFAULT '',
+                    ""IsRegex"" boolean NOT NULL DEFAULT false,
+                    ""IsActive"" boolean NOT NULL DEFAULT true,
+                    ""Priority"" integer NOT NULL DEFAULT 100,
+                    ""Description"" text NOT NULL DEFAULT '',
+                    ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                    ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
+                    CONSTRAINT ""PK_FoxProReportFieldRules"" PRIMARY KEY (""Id"")
+                );
                 CREATE INDEX IF NOT EXISTS ""IX_Reports_PrintForms""
                     ON ""Reports"" (""DataSourceId"", ""IsPrintForm"", ""IsActive"");
                 CREATE INDEX IF NOT EXISTS ""IX_ReportElementMappings_ReportId_ElementOrder""
-                    ON ""ReportElementMappings"" (""ReportId"", ""ElementOrder"");";
+                    ON ""ReportElementMappings"" (""ReportId"", ""ElementOrder"");
+                CREATE INDEX IF NOT EXISTS ""IX_FoxProReportFieldRules_SourcePattern""
+                    ON ""FoxProReportFieldRules"" (""SourcePattern"");
+                CREATE INDEX IF NOT EXISTS ""IX_FoxProReportFieldRules_ProfileCode_IsActive""
+                    ON ""FoxProReportFieldRules"" (""ProfileCode"", ""IsActive"");";
             await _context.Database.ExecuteSqlRawAsync(sql);
             lock (SchemaSyncLock)
             {
@@ -690,6 +711,176 @@ namespace BIS.ERP.Services
             return BuildTemplateLayoutPdf(report, sample, report.ElementMappings.ToList());
         }
 
+        public byte[] ExportReportTemplatePreview(DataTable dataTable, Report report)
+        {
+            var rules = new FoxProReportFieldRuleService(_context).GetActiveRulesSafe();
+            return ExportReportTemplatePreview(dataTable, report, rules);
+        }
+
+        public byte[] ExportReportTemplatePreview(
+            DataTable dataTable,
+            Report report,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules)
+        {
+            if (string.IsNullOrWhiteSpace(report.Template))
+                report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
+
+            var data = BuildReportPreviewData(dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>());
+            return BuildTemplateLayoutPdf(report, data, report.ElementMappings.ToList());
+        }
+
+        public byte[] ExportReportTemplateExcel(DataTable dataTable, Report report)
+        {
+            var rules = new FoxProReportFieldRuleService(_context).GetActiveRulesSafe();
+            return ExportReportTemplateExcel(dataTable, report, rules);
+        }
+
+        public byte[] ExportReportTemplateExcel(
+            DataTable dataTable,
+            Report report,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules)
+        {
+            if (string.IsNullOrWhiteSpace(report.Template))
+                report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
+
+            var data = BuildReportPreviewData(dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>());
+            return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList());
+        }
+        private static CashOrderPrintData BuildReportPreviewData(
+            DataTable dataTable,
+            Report report,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules = null)
+        {
+            var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            void Add(string key, object? value)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                    return;
+                extra[key] = value ?? string.Empty;
+                extra[NormalizeFieldName(key)] = value ?? string.Empty;
+            }
+
+            Add("report_name", report.Name);
+            Add("title", string.IsNullOrWhiteSpace(report.TitleText) ? report.Name : report.TitleText);
+            Add("subtitle", report.SubtitleText);
+            Add("summary", report.SummaryText);
+            AddReconciliationPeriodAliases(report, Add);
+
+            var rows = dataTable.Rows.Cast<DataRow>().Take(20).ToList();
+            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                var row = rows[rowIndex];
+                var number = rowIndex + 1;
+                foreach (DataColumn column in dataTable.Columns)
+                {
+                    var value = row[column];
+                    Add(column.ColumnName, value);
+                    Add($"line{number}_{column.ColumnName}", value);
+                    Add($"line{number}.{column.ColumnName}", value);
+                }
+
+                AddReconciliationAliases(number, row, Add);
+                AddConfiguredFoxProRuleAliases(number, row, rules ?? Array.Empty<FoxProReportFieldRule>(), Add);
+            }
+
+            var first = rows.FirstOrDefault();
+            var amount = first == null ? 0m : ReadPreviewDecimal(first, "Сумма Дт", "Сумма Кт", "Сумма", "Итого");
+            return new CashOrderPrintData
+            {
+                DocumentName = report.Name,
+                Number = string.Empty,
+                Date = DateTime.Today,
+                Organization = first == null ? string.Empty : ReadPreviewText(first, "Организация", "Контрагент", "Кому"),
+                DebitAccount = first == null ? string.Empty : ReadPreviewText(first, "Дебет"),
+                CreditAccount = first == null ? string.Empty : ReadPreviewText(first, "Кредит"),
+                Amount = amount,
+                AmountInCurrency = amount,
+                AmountInWords = RussianMoneyInWords(amount),
+                Basis = report.SubtitleText,
+                Note = "Предпросмотр отчета по импортированному FRX-макету",
+                ExtraFields = extra
+            };
+        }
+
+        private static void AddReconciliationPeriodAliases(Report report, Action<string, object?> add)
+        {
+            var match = Regex.Match(report.SubtitleText ?? string.Empty, @"(\d{2}\.\d{2}\.\d{4}).*?(\d{2}\.\d{2}\.\d{4})");
+            if (match.Success)
+            {
+                add("period_start", match.Groups[1].Value);
+                add("period_end", match.Groups[2].Value);
+                add("dtb", match.Groups[1].Value);
+                add("dtbeg", match.Groups[1].Value);
+                add("datobr", match.Groups[1].Value);
+                add("dtend", match.Groups[2].Value);
+                add("date_end", match.Groups[2].Value);
+            }
+
+            add("report_title", string.IsNullOrWhiteSpace(report.TitleText) ? report.Name : report.TitleText);
+            add("report_summary", report.SummaryText);
+            add("signature", report.FooterSignature);
+        }
+
+        private static void AddReconciliationAliases(int number, DataRow row, Action<string, object?> add)
+        {
+            var prefixes = FoxProReportKnowledgeBase.GetRowDatasetPrefixes(number);
+            var name = ReadPreviewText(row, "Наименование материала, вид операции", "Наименование", "Операция", "operation_name");
+            var debit = ReadPreviewText(row, "Дебет", "debit_account", "schet", "deb");
+            var credit = ReadPreviewText(row, "Кредит", "credit_account", "kor_sch", "korsch", "cred");
+            var debitAmount = ReadPreviewObject(row, "Сумма Дт", "Дебет сумма", "DEBSUM", "debit_amount");
+            var creditAmount = ReadPreviewObject(row, "Сумма Кт", "Кредит сумма", "CREDSUM", "credit_amount");
+            var doc = ReadPreviewText(row, "N докум", "Документ", "Номер", "document_number", "nom_dok");
+            var date = ReadPreviewText(row, "Дата", "document_date", "datobr");
+            var module = ReadPreviewText(row, "Модуль", "module", "prs", "kod_arm");
+
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "operation_name", name);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "debit_account", debit);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "credit_account", credit);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "debit_amount", debitAmount);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "credit_amount", creditAmount);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "document_number", doc);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "document_date", date);
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "module", module);
+        }
+
+        private static void AddConfiguredFoxProRuleAliases(
+            int number,
+            DataRow row,
+            IReadOnlyCollection<FoxProReportFieldRule> rules,
+            Action<string, object?> add)
+        {
+            if (rules.Count == 0)
+                return;
+
+            var prefixes = FoxProReportKnowledgeBase.GetRowDatasetPrefixes(number);
+            foreach (var rule in rules.Where(rule => rule.IsActive).OrderBy(rule => rule.Priority))
+            {
+                var candidates = new List<string>();
+                if (!string.IsNullOrWhiteSpace(rule.TargetFieldName))
+                    candidates.Add(rule.TargetFieldName);
+                if (!string.IsNullOrWhiteSpace(rule.TargetDisplayName))
+                    candidates.Add(rule.TargetDisplayName);
+                if (!string.IsNullOrWhiteSpace(rule.CanonicalField))
+                    candidates.AddRange(FoxProReportKnowledgeBase.GetTargetFieldCandidates(rule.CanonicalField));
+
+                var value = ReadPreviewObject(row, candidates.Where(candidate => !string.IsNullOrWhiteSpace(candidate)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+                if (value == null || value == DBNull.Value)
+                    continue;
+
+                var source = FoxProReportKnowledgeBase.NormalizeRuleSource(rule.SourcePattern);
+                if (string.IsNullOrWhiteSpace(source))
+                    continue;
+
+                add(source, value);
+                add(FoxProReportKnowledgeBase.StripDatasetPrefix(source), value);
+                foreach (var prefix in prefixes)
+                    add(prefix + FoxProReportKnowledgeBase.StripDatasetPrefix(source), value);
+
+                if (!string.IsNullOrWhiteSpace(rule.CanonicalField))
+                    FoxProReportKnowledgeBase.AddAliases(add, prefixes, rule.CanonicalField, value);
+            }
+        }
+
         private async Task<IReadOnlyCollection<ReportElementMapping>> LoadElementMappingsAsync(Report report)
         {
             if (report.ElementMappings?.Count > 0)
@@ -1190,6 +1381,183 @@ namespace BIS.ERP.Services
             })).GeneratePdf();
         }
 
+        private static byte[] BuildTemplateLayoutExcel(
+            Report report,
+            CashOrderPrintData data,
+            IReadOnlyCollection<ReportElementMapping>? mappings)
+        {
+            var frxReport = new FrxReport
+            {
+                Id = Guid.NewGuid(),
+                Name = report.Name,
+                OriginalFileName = string.Empty,
+                FrxXml = report.Template
+            };
+            var parser = new FrxParser();
+            var template = parser.GetPrintTemplate(frxReport);
+            if (template.Elements.Count == 0)
+                throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода в Excel.");
+
+            var layoutTemplate = FrxRecognitionProfileService.PrepareForRendering(template);
+            var mappingByOrder = (mappings ?? Array.Empty<ReportElementMapping>())
+                .GroupBy(item => item.ElementOrder)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+
+            using var workbook = new XLWorkbook();
+            var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
+            ConfigureFrxExcelWorksheet(worksheet, report);
+
+            var pageWidth = Math.Max(1000d, layoutTemplate.PageWidth);
+            var pageHeight = Math.Max(1000d, layoutTemplate.PageHeight);
+            var landscape = pageWidth >= pageHeight || string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
+            var maxColumns = landscape ? 88 : 66;
+            var maxRows = landscape ? 58 : 82;
+            var columnScale = (maxColumns - 1d) / pageWidth;
+            var rowScale = (maxRows - 1d) / pageHeight;
+
+            worksheet.Columns(1, maxColumns).Width = landscape ? 1.45 : 1.65;
+            worksheet.Rows(1, maxRows).Height = 9;
+
+            foreach (var element in layoutTemplate.Elements.OrderBy(item => item.Order))
+            {
+                if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
+                    continue;
+
+                var startRow = ToExcelIndex(element.Top, rowScale, maxRows);
+                var startColumn = ToExcelIndex(element.Left, columnScale, maxColumns);
+                var endRow = ToExcelIndex(element.Top + Math.Max(element.Height, 24), rowScale, maxRows, startRow);
+                var endColumn = ToExcelIndex(element.Left + Math.Max(element.Width, 24), columnScale, maxColumns, startColumn);
+
+                if (element.Type == "Line")
+                {
+                    ApplyFrxExcelLine(worksheet, element, startRow, startColumn, endRow, endColumn);
+                    continue;
+                }
+
+                if (element.Type == "Box")
+                {
+                    ApplyFrxExcelBox(worksheet, startRow, startColumn, endRow, endColumn);
+                    continue;
+                }
+
+                if (element.Type == "Picture")
+                    continue;
+
+                var value = ResolveElementValue(report, layoutTemplate, element, data, mappingByOrder);
+                if (string.IsNullOrWhiteSpace(value))
+                    continue;
+
+                WriteFrxExcelText(worksheet, element, value, startRow, startColumn, endRow, endColumn);
+            }
+
+            worksheet.Range(1, 1, maxRows, maxColumns).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
+        }
+
+        private static void ConfigureFrxExcelWorksheet(IXLWorksheet worksheet, Report report)
+        {
+            worksheet.ShowGridLines = false;
+            worksheet.Style.Font.FontName = string.IsNullOrWhiteSpace(report.FontName) ? "Arial" : report.FontName;
+            worksheet.PageSetup.PageOrientation = string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase)
+                ? XLPageOrientation.Landscape
+                : XLPageOrientation.Portrait;
+            worksheet.PageSetup.Margins.Top = 0.25;
+            worksheet.PageSetup.Margins.Bottom = 0.25;
+            worksheet.PageSetup.Margins.Left = 0.25;
+            worksheet.PageSetup.Margins.Right = 0.25;
+            worksheet.PageSetup.FitToPages(1, 0);
+            worksheet.PageSetup.CenterHorizontally = true;
+        }
+
+        private static int ToExcelIndex(double coordinate, double scale, int maxIndex, int minIndex = 1)
+        {
+            var index = (int)Math.Floor(Math.Max(0d, coordinate) * scale) + 1;
+            return Math.Clamp(index, minIndex, maxIndex);
+        }
+
+        private static void ApplyFrxExcelBox(IXLWorksheet worksheet, int startRow, int startColumn, int endRow, int endColumn)
+        {
+            var range = worksheet.Range(startRow, startColumn, endRow, endColumn);
+            range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.OutsideBorderColor = XLColor.Black;
+        }
+
+        private static void ApplyFrxExcelLine(
+            IXLWorksheet worksheet,
+            PrintFormElement element,
+            int startRow,
+            int startColumn,
+            int endRow,
+            int endColumn)
+        {
+            var range = worksheet.Range(startRow, startColumn, endRow, endColumn);
+            var horizontal = Math.Abs(element.Width) >= Math.Abs(element.Height);
+            if (horizontal)
+            {
+                range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+                range.Style.Border.TopBorderColor = XLColor.Black;
+                return;
+            }
+
+            range.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.LeftBorderColor = XLColor.Black;
+        }
+
+        private static void WriteFrxExcelText(
+            IXLWorksheet worksheet,
+            PrintFormElement element,
+            string value,
+            int startRow,
+            int startColumn,
+            int endRow,
+            int endColumn)
+        {
+            var range = worksheet.Range(startRow, startColumn, endRow, endColumn);
+            var cell = worksheet.Cell(startRow, startColumn);
+            cell.Value = value;
+
+            if (startRow != endRow || startColumn != endColumn)
+            {
+                try
+                {
+                    range.Merge(false);
+                }
+                catch
+                {
+                    // Старые FRX часто имеют наложения. Для Excel важнее открыть отчет, чем упасть на merge.
+                }
+            }
+
+            range.Style.Font.FontName = string.IsNullOrWhiteSpace(element.FontName) ? "Arial" : element.FontName;
+            range.Style.Font.FontSize = Math.Clamp(element.FontSize, 5d, 11d);
+            range.Style.Font.Bold = element.Bold;
+            range.Style.Font.Italic = element.Italic;
+            range.Style.Alignment.WrapText = false;
+            range.Style.Alignment.ShrinkToFit = true;
+            range.Style.Alignment.Horizontal = element.Alignment switch
+            {
+                "Right" => XLAlignmentHorizontalValues.Right,
+                "Center" => XLAlignmentHorizontalValues.Center,
+                _ => XLAlignmentHorizontalValues.Left
+            };
+        }
+
+        private static string BuildSafeExcelWorksheetName(string? name)
+        {
+            var invalidChars = new HashSet<char>(new[] { '[', ']', ':', '*', '?', '/', '\\' });
+            var safeName = new string((name ?? string.Empty)
+                .Select(ch => invalidChars.Contains(ch) || char.IsControl(ch) ? ' ' : ch)
+                .ToArray())
+                .Trim();
+
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "Report";
+
+            return safeName.Length <= 31 ? safeName : safeName[..31].Trim();
+        }
         private static string BuildTemplateSvg(
             PrintFormTemplate template,
             Report report,
@@ -1209,13 +1577,20 @@ namespace BIS.ERP.Services
             var svg = new StringBuilder();
             svg.Append($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width.ToString(CultureInfo.InvariantCulture)} {height.ToString(CultureInfo.InvariantCulture)}'>");
             svg.Append("<rect x='0' y='0' width='100%' height='100%' fill='white'/>");
-            svg.Append("<defs>");
-            foreach (var element in layoutTemplate.Elements.Where(item => item.Type is "Text" or "Expression"))
+            var textElements = layoutTemplate.Elements
+                .Where(item => item.Type is "Text" or "Expression")
+                .ToList();
+            var useClipPaths = layoutTemplate.Elements.Count <= 700 && textElements.Count <= 350;
+            if (useClipPaths)
             {
-                var clipHeight = Math.Max(element.Height, Math.Max(minFontSize, element.FontSize * fontScale) * 1.4);
-                svg.Append($"<clipPath id='clip{element.Order}'><rect x='{element.Left.ToString(CultureInfo.InvariantCulture)}' y='{element.Top.ToString(CultureInfo.InvariantCulture)}' width='{element.Width.ToString(CultureInfo.InvariantCulture)}' height='{clipHeight.ToString(CultureInfo.InvariantCulture)}'/></clipPath>");
+                svg.Append("<defs>");
+                foreach (var element in textElements)
+                {
+                    var clipHeight = Math.Max(element.Height, Math.Max(minFontSize, element.FontSize * fontScale) * 1.4);
+                    svg.Append($"<clipPath id='clip{element.Order}'><rect x='{element.Left.ToString(CultureInfo.InvariantCulture)}' y='{element.Top.ToString(CultureInfo.InvariantCulture)}' width='{element.Width.ToString(CultureInfo.InvariantCulture)}' height='{clipHeight.ToString(CultureInfo.InvariantCulture)}'/></clipPath>");
+                }
+                svg.Append("</defs>");
             }
-            svg.Append("</defs>");
             foreach (var element in layoutTemplate.Elements.OrderBy(item => item.Order))
             {
                 if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
@@ -1227,12 +1602,17 @@ namespace BIS.ERP.Services
                 var h = element.Height.ToString(CultureInfo.InvariantCulture);
                 if (element.Type == "Line")
                 {
-                    svg.Append($"<line x1='{x}' y1='{y}' x2='{(element.Left + element.Width).ToString(CultureInfo.InvariantCulture)}' y2='{(element.Top + element.Height).ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}'/>");
+                    var x1 = element.Left;
+                    var y1 = element.Top;
+                    var x2 = element.Left + element.Width;
+                    var y2 = element.Top + element.Height;
+                    SnapLineCoordinates(ref x1, ref y1, ref x2, ref y2, strokeWidth);
+                    svg.Append($"<line x1='{x1.ToString(CultureInfo.InvariantCulture)}' y1='{y1.ToString(CultureInfo.InvariantCulture)}' x2='{x2.ToString(CultureInfo.InvariantCulture)}' y2='{y2.ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}' stroke-linecap='square' shape-rendering='crispEdges'/>");
                     continue;
                 }
                 if (element.Type == "Box")
                 {
-                    svg.Append($"<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='none' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}'/>");
+                    svg.Append($"<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='none' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}' shape-rendering='crispEdges'/>");
                     continue;
                 }
                 if (element.Type == "Picture")
@@ -1251,13 +1631,31 @@ namespace BIS.ERP.Services
                 for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
                 {
                     var textY = element.Top + Math.Max(fontSize, element.Height * 0.75) + lineIndex * fontSize * 1.1;
-                    svg.Append($"<text x='{textX.ToString(CultureInfo.InvariantCulture)}' y='{textY.ToString(CultureInfo.InvariantCulture)}' clip-path='url(#clip{element.Order})' text-anchor='{anchor}' font-family='{EscapeXml(element.FontName)}' font-size='{fontSize.ToString(CultureInfo.InvariantCulture)}' font-weight='{fontWeight}' font-style='{fontStyle}'>{EscapeXml(lines[lineIndex])}</text>");
+                    var clipAttribute = useClipPaths ? $" clip-path='url(#clip{element.Order})'" : string.Empty;
+                    svg.Append($"<text x='{textX.ToString(CultureInfo.InvariantCulture)}' y='{textY.ToString(CultureInfo.InvariantCulture)}'{clipAttribute} text-anchor='{anchor}' font-family='{EscapeXml(element.FontName)}' font-size='{fontSize.ToString(CultureInfo.InvariantCulture)}' font-weight='{fontWeight}' font-style='{fontStyle}'>{EscapeXml(lines[lineIndex])}</text>");
                 }
             }
             svg.Append("</svg>");
             return svg.ToString();
         }
 
+        private static void SnapLineCoordinates(ref double x1, ref double y1, ref double x2, ref double y2, double strokeWidth)
+        {
+            var tolerance = Math.Max(1d, strokeWidth * 0.75d);
+            if (Math.Abs(y2 - y1) <= tolerance)
+            {
+                var y = Math.Round((y1 + y2) / 2d);
+                y1 = y;
+                y2 = y;
+            }
+
+            if (Math.Abs(x2 - x1) <= tolerance)
+            {
+                var x = Math.Round((x1 + x2) / 2d);
+                x1 = x;
+                x2 = x;
+            }
+        }
         private static PrintFormTemplate CompactImportedTemplateVerticalGaps(PrintFormTemplate template)
         {
             if (!ShouldCompactImportedTemplate(template) || template.Elements.Count < 2)
@@ -1571,6 +1969,14 @@ namespace BIS.ERP.Services
                 }
 
                 if (functionName.Equals("dtoc", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
+                {
+                    var value = EvaluateFoxExpression(arguments[0], data);
+                    return TryParseFoxDate(value, out var dateValue)
+                        ? dateValue.ToString("dd.MM.yyyy")
+                        : value;
+                }
+
+                if (functionName.Equals("ctod", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
                     return EvaluateFoxExpression(arguments[0], data);
 
                 if (functionName.Equals("mr", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
@@ -1585,11 +1991,26 @@ namespace BIS.ERP.Services
                     return string.IsNullOrWhiteSpace(EvaluateFoxExpression(arguments[0], data)) ? ".T." : ".F.";
 
                 if (functionName.Equals("day", StringComparison.OrdinalIgnoreCase))
-                    return data.Date.Day.ToString(CultureInfo.InvariantCulture);
+                {
+                    var dateValue = arguments.Count >= 1 && TryParseFoxDate(EvaluateFoxExpression(arguments[0], data), out var parsedDate)
+                        ? parsedDate
+                        : data.Date;
+                    return dateValue.Day.ToString(CultureInfo.InvariantCulture);
+                }
                 if (functionName.Equals("month", StringComparison.OrdinalIgnoreCase))
-                    return data.Date.Month.ToString(CultureInfo.InvariantCulture);
+                {
+                    var dateValue = arguments.Count >= 1 && TryParseFoxDate(EvaluateFoxExpression(arguments[0], data), out var parsedDate)
+                        ? parsedDate
+                        : data.Date;
+                    return dateValue.Month.ToString(CultureInfo.InvariantCulture);
+                }
                 if (functionName.Equals("year", StringComparison.OrdinalIgnoreCase))
-                    return data.Date.Year.ToString(CultureInfo.InvariantCulture);
+                {
+                    var dateValue = arguments.Count >= 1 && TryParseFoxDate(EvaluateFoxExpression(arguments[0], data), out var parsedDate)
+                        ? parsedDate
+                        : data.Date;
+                    return dateValue.Year.ToString(CultureInfo.InvariantCulture);
+                }
             }
 
             var wrapped = Regex.Match(normalized, @"(?i)^(?:alltrim|alltr|trim)\((.+)\)$");
@@ -1734,6 +2155,17 @@ namespace BIS.ERP.Services
             return false;
         }
 
+        private static bool TryParseFoxDate(string value, out DateTime date)
+        {
+            var text = (value ?? string.Empty).Trim().Trim('"', '\'');
+            return DateTime.TryParseExact(text,
+                       new[] { "dd.MM.yyyy", "d.M.yyyy", "yyyy-MM-dd", "MM/dd/yyyy" },
+                       CultureInfo.InvariantCulture,
+                       DateTimeStyles.None,
+                       out date) ||
+                   DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.None, out date) ||
+                   DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+        }
         private static string GetRussianMonthName(int month)
         {
             var months = new[]
@@ -1826,9 +2258,9 @@ namespace BIS.ERP.Services
             var text = (value ?? string.Empty).Trim();
             if (string.IsNullOrWhiteSpace(text))
                 return false;
-            if (Regex.IsMatch(text, @"(?i)\b(?:substr|subs|alltrim|alltr|trim|iif|str|dtoc|day|month|year)\s*\("))
+            if (Regex.IsMatch(text, @"(?i)\b(?:substr|subs|alltrim|alltr|trim|iif|str|dtoc|ctod|day|month|year|transform|tran)\s*\("))
                 return true;
-            if (Regex.IsMatch(text, @"(?i)\b(?:fact|curFACTSW|irfactsw)[._][A-Za-z0-9_]+\b"))
+            if (Regex.IsMatch(text, @"(?i)\b(?:fact|curFACTSW|irfactsw|ved|ved2|ved3|ved4|db_cr|db_crs|dbcr|dbcrs|ksprorg|avt_p)[._][A-Za-z0-9_]+\b"))
                 return true;
             if (Regex.IsMatch(text, @"^[A-Z]{1,4}_[A-Z0-9_]+$"))
                 return true;
@@ -2149,7 +2581,7 @@ namespace BIS.ERP.Services
             if (Regex.IsMatch(direct, @"^[A-Za-z][A-Za-z0-9]*[._][A-Za-z0-9_]+$"))
                 return direct;
 
-            var match = Regex.Match(direct, @"(?i)\b(?:fact|curFACTSW|irfactsw)[._][A-Za-z0-9_]+\b");
+            var match = Regex.Match(direct, @"(?i)\b(?:fact|curFACTSW|irfactsw|ved|ved2|ved3|ved4|db_cr|db_crs|dbcr|dbcrs|ksprorg|avt_p)[._][A-Za-z0-9_]+\b");
             return match.Success ? match.Value : string.Empty;
         }
 
@@ -2311,6 +2743,54 @@ namespace BIS.ERP.Services
             return string.Empty;
         }
 
+        private static string ReadPreviewText(DataRow row, params string[] columns)
+        {
+            var value = ReadPreviewObject(row, columns);
+            return FormatPlainValue(value);
+        }
+
+        private static object? ReadPreviewObject(DataRow row, params string[] columns)
+        {
+            foreach (var column in columns.Where(column => !string.IsNullOrWhiteSpace(column)))
+            {
+                if (row.Table.Columns.Contains(column))
+                {
+                    var value = row[column];
+                    if (value != null && value != DBNull.Value)
+                        return value;
+                }
+
+                var normalizedCandidate = NormalizeFieldName(column);
+                foreach (DataColumn dataColumn in row.Table.Columns)
+                {
+                    if (!NormalizeFieldName(dataColumn.ColumnName).Equals(normalizedCandidate, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var value = row[dataColumn];
+                    if (value != null && value != DBNull.Value)
+                        return value;
+                }
+            }
+
+            return null;
+        }
+
+        private static decimal ReadPreviewDecimal(DataRow row, params string[] columns)
+        {
+            foreach (var column in columns)
+            {
+                var value = ReadPreviewObject(row, column);
+                if (value == null)
+                    continue;
+                if (value is decimal decimalValue)
+                    return decimalValue;
+                if (decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.CurrentCulture, out var parsed) ||
+                    decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out parsed))
+                    return parsed;
+            }
+
+            return 0m;
+        }
         private sealed class CashOrderPrintData
         {
             public string DocumentName { get; init; } = string.Empty;

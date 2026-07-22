@@ -242,6 +242,52 @@
                                 </DataGrid.Columns>
                             </DataGrid>
 
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button Content="Применить общие правила" Width="170" Height="30" Margin="0,0,8,0"
+                                        Background="#2980B9" Foreground="White" Click="OnApplyFoxProRulesClick"/>
+                                <Button Content="Сохранить привязки как правила" Width="210" Height="30" Margin="0,0,8,0"
+                                        Background="#16A085" Foreground="White" Click="OnSaveMappedFoxProRulesClick"/>
+                                <Button Content="Сохранить список правил" Width="170" Height="30"
+                                        Background="#34495E" Foreground="White" Click="OnSaveFoxProRulesClick"/>
+                            </StackPanel>
+
+                            <TextBlock Text="💡 Для каждого элемента макета выберите поле данных. Если нажать 'Сохранить привязки как правила', такие же FoxPro-поля будут распознаваться автоматически в других похожих отчетах." 
+                                       FontSize="11" Foreground="Gray" Margin="0,0,0,10"/>
+
+                            <Expander Header="Общие правила распознавания FoxPro-полей" IsExpanded="False" Margin="0,0,0,12">
+                                <StackPanel Margin="0,8,0,0">
+                                    <DataGrid x:Name="FoxProRulesGrid" AutoGenerateColumns="False"
+                                              ItemsSource="{Binding FoxProRules}"
+                                              CanUserAddRows="False" CanUserDeleteRows="False"
+                                              RowHeight="34" MaxHeight="230" Margin="0,0,0,8">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="FoxPro поле/выражение" Binding="{Binding SourcePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="190"/>
+                                            <DataGridTextColumn Header="Каноническое поле" Binding="{Binding CanonicalField, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                                            <DataGridTemplateColumn Header="Поле данных" Width="180">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <ComboBox ItemsSource="{Binding DataContext.AvailableDataFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                  DisplayMemberPath="Name"
+                                                                  SelectedValuePath="DbColumnName"
+                                                                  SelectedValue="{Binding TargetFieldName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                  Height="25" Margin="2"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTextColumn Header="Профиль" Binding="{Binding ProfileCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                                            <DataGridTextColumn Header="Приоритет" Binding="{Binding Priority, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
+                                            <DataGridCheckBoxColumn Header="Regex" Binding="{Binding IsRegex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                                            <DataGridCheckBoxColumn Header="Активно" Binding="{Binding IsActive, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                                            <DataGridTextColumn Header="Комментарий" Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Добавить правило" Width="130" Height="28" Margin="0,0,8,0" Click="OnAddFoxProRuleClick"/>
+                                        <Button Content="Удалить правило" Width="130" Height="28" Click="OnDeleteFoxProRuleClick"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+
                             <TextBlock Text="💡 Для каждого элемента макета выберите, какое поле данных в него подставлять." 
                                        FontSize="11" Foreground="Gray" Margin="0,0,0,10"/>
 

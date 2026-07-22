@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Configurator.Views;
+using BIS.ERP.Configurator.Views;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -108,6 +108,7 @@ namespace BIS.ERP.Views
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
+                await new FoxProReportFieldRuleService(_context).EnsureSchemaAsync();
                 _regulatedTemplateService = new RegulatedReportTemplateService(_context);
                 await _regulatedTemplateService.EnsureSchemaAsync();
                 await new DocumentationMetadataSeedService(_context).EnsureAsync();
@@ -1511,17 +1512,17 @@ namespace BIS.ERP.Views
                 {
                     AddCompactSectionRows(
                         target,
-                        "📥 Импортированные DBF документы",
+                        "📥 Imported FoxPro documents",
                         importedDocuments.Select(CreateDynamicDocumentCard),
-                        "Импортированные DBF документы не найдены.");
+                        "Imported FoxPro documents not found.");
                 }
                 else
                 {
                     tileBlocks!.Children.Add(CreateMetadataCategoryBlock(
-                        "📥 Импортированные DBF документы",
+                        "📥 Imported FoxPro documents",
                         importedDocuments.Count,
                         importedDocuments.Select(CreateCompactImportedDocumentCard),
-                        "Импортированные DBF документы не найдены."));
+                        "Imported FoxPro documents not found."));
                 }
             }
             catch (Exception ex)
@@ -1711,6 +1712,46 @@ namespace BIS.ERP.Views
             _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
             BuildMetadataTree();
             ShowReportsList();
+        }
+
+        private async Task<Report?> RefreshReportsTreeAndSelectReportAsync(Guid reportId, bool showEditor)
+        {
+            _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
+            BuildMetadataTree();
+            var refreshedReport = _reports.FirstOrDefault(report => report.Id == reportId);
+            if (refreshedReport == null)
+            {
+                ShowReportsList();
+                return null;
+            }
+
+            if (showEditor)
+                ShowReportEditor(refreshedReport);
+            SelectReportTreeItem(reportId);
+            return refreshedReport;
+        }
+
+        private void SelectReportTreeItem(Guid reportId)
+        {
+            var item = FindReportTreeItem(MetadataTree, reportId);
+            if (item == null)
+                return;
+            item.IsSelected = true;
+            item.BringIntoView();
+            _selectedReportTreeItem = item;
+        }
+
+        private static TreeViewItem? FindReportTreeItem(ItemsControl parent, Guid reportId)
+        {
+            foreach (var item in parent.Items.OfType<TreeViewItem>())
+            {
+                if (item.Tag is Report report && report.Id == reportId)
+                    return item;
+                var nested = FindReportTreeItem(item, reportId);
+                if (nested != null)
+                    return nested;
+            }
+            return null;
         }
 
         private async Task ToggleReportAvailabilityAndShowListAsync(Report report)
@@ -2461,7 +2502,7 @@ namespace BIS.ERP.Views
                 var fullReport = await LoadFullReportAsync(report);
                 var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
-                    await LoadMetadata();
+                    await RefreshReportsTreeAndSelectReportAsync(report.Id, showEditor: true);
             };
             mainPanel.Children.Add(designerButton);
 
@@ -2477,7 +2518,7 @@ namespace BIS.ERP.Views
             availabilityButton.Click += async (_, _) =>
             {
                 await new PrintFormService(_context).SetAvailabilityAsync(report.Id, !report.IsActive);
-                await LoadMetadata();
+                await RefreshReportsTreeAndSelectReportAsync(report.Id, showEditor: true);
             };
             mainPanel.Children.Add(availabilityButton);
 
@@ -2628,7 +2669,7 @@ namespace BIS.ERP.Views
                 var fullReport = await LoadFullReportAsync(_selectedReport);
                 var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
-                    await LoadMetadata();
+                    await RefreshReportsTreeAndSelectReportAsync(_selectedReport.Id, showEditor: true);
             }
         }
 
@@ -2637,7 +2678,7 @@ namespace BIS.ERP.Views
             if (_selectedReport != null)
             {
                 await new PrintFormService(_context).SetAvailabilityAsync(_selectedReport.Id, !_selectedReport.IsActive);
-                await LoadMetadata();
+                await RefreshReportsTreeAndSelectReportAsync(_selectedReport.Id, showEditor: true);
             }
         }
 
