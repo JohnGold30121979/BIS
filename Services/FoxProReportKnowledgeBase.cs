@@ -11,7 +11,7 @@ namespace BIS.ERP.Services
         private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> CanonicalAliases =
             new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
             {
-                ["operation_name"] = new[] { "name_kod", "naim", "name", "operation", "material_name" },
+                ["operation_name"] = new[] { "name_kod", "naim", "name", "operation", "material_name", "tex", "text" },
                 ["debit_account"] = new[] { "schet", "deb", "debet", "debit", "debit_account" },
                 ["credit_account"] = new[] { "kor_sch", "korsch", "cred", "credit", "credit_account" },
                 ["debit_amount"] = new[] { "debsum", "sum_deb", "deb_beg", "deb_v", "debit_amount" },
@@ -181,6 +181,8 @@ namespace BIS.ERP.Services
 
             Add("name_kod", "operation_name", "operation_name", "Акт сверки - наименование операции");
             Add("naim", "operation_name", "operation_name", "Акт сверки - наименование операции");
+            Add("tex", "operation_name", "operation_name", "Акт сверки - наименование операции");
+            Add("text", "operation_name", "operation_name", "Акт сверки - наименование операции");
             Add("schet", "debit_account", "debit_account", "Акт сверки - дебет");
             Add("deb", "debit_account", "debit_account", "Акт сверки - дебет");
             Add("korsch", "credit_account", "credit_account", "Акт сверки - кредит");

@@ -726,7 +726,7 @@ namespace BIS.ERP.Services
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
             var data = BuildReportPreviewData(dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>());
-            return BuildTemplateLayoutPdf(report, data, report.ElementMappings.ToList());
+            return BuildTemplateLayoutPdf(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
         }
 
         public byte[] ExportReportTemplateExcel(DataTable dataTable, Report report)
@@ -744,8 +744,287 @@ namespace BIS.ERP.Services
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
             var data = BuildReportPreviewData(dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>());
-            return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList());
+            return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
         }
+
+        public byte[] ExportProgrammaticReconciliationActPreview(DataTable dataTable, Report report)
+        {
+            if (dataTable == null)
+                throw new ArgumentNullException(nameof(dataTable));
+            if (report == null)
+                throw new ArgumentNullException(nameof(report));
+
+            return BuildReconciliationActPdf(dataTable, report);
+        }
+
+        public byte[] ExportProgrammaticReconciliationActExcel(DataTable dataTable, Report report)
+        {
+            if (dataTable == null)
+                throw new ArgumentNullException(nameof(dataTable));
+            if (report == null)
+                throw new ArgumentNullException(nameof(report));
+
+            return BuildReconciliationActExcel(dataTable, report);
+        }
+
+        private static byte[] BuildReconciliationActPdf(DataTable dataTable, Report report)
+        {
+            var rows = dataTable.Rows.Cast<DataRow>().ToList();
+            var title = rows.Select(ReadReconciliationOperation).FirstOrDefault(value => value.StartsWith("АКТ", StringComparison.OrdinalIgnoreCase)) ?? report.Name;
+            var period = rows.Select(ReadReconciliationOperation).FirstOrDefault(value => value.StartsWith("Период", StringComparison.OrdinalIgnoreCase)) ?? report.SubtitleText;
+            var summary = rows.Select(ReadReconciliationOperation).LastOrDefault(value => value.Contains("задолж", StringComparison.OrdinalIgnoreCase)) ?? report.SummaryText;
+            var bodyRows = rows
+                .Where(row => !ShouldSkipReconciliationBodyRow(row, summary))
+                .ToList();
+
+            return QuestPDF.Fluent.Document.Create(document => document.Page(page =>
+            {
+                page.Size(PageSizes.A4.Landscape());
+                page.Margin(10, Unit.Millimetre);
+                page.DefaultTextStyle(text => text.FontFamily("Times New Roman").FontSize(8));
+                page.Content().Column(column =>
+                {
+                    column.Item().AlignCenter().Text("АКТ СВЕРКИ").Bold().FontSize(12);
+                    column.Item().AlignCenter().PaddingTop(4).Text(title).SemiBold();
+                    if (!string.IsNullOrWhiteSpace(period))
+                        column.Item().AlignCenter().PaddingTop(3).Text(period);
+                    column.Item().AlignRight().PaddingTop(6).Text("Лист 1").Italic();
+                    column.Item().PaddingTop(4).Table(table =>
+                    {
+                        table.ColumnsDefinition(columns =>
+                        {
+                            columns.RelativeColumn(4.2f);
+                            columns.ConstantColumn(62);
+                            columns.ConstantColumn(62);
+                            columns.ConstantColumn(72);
+                            columns.ConstantColumn(72);
+                            columns.ConstantColumn(62);
+                            columns.ConstantColumn(62);
+                            columns.ConstantColumn(38);
+                        });
+
+                        AddReconciliationPdfHeader(table);
+                        foreach (var row in bodyRows)
+                            AddReconciliationPdfRow(table, row);
+                    });
+
+                    if (!string.IsNullOrWhiteSpace(summary))
+                    {
+                        column.Item().PaddingTop(10).Text(summary).SemiBold();
+                        var amount = ExtractLastReconciliationAmount(rows);
+                        if (amount != 0m)
+                            column.Item().PaddingTop(3).Text($"составляет {RussianMoneyInWords(Math.Abs(amount))}");
+                    }
+
+                    column.Item().PaddingTop(24).Row(row =>
+                    {
+                        row.RelativeItem().Text("Руководитель нашей организации __________________________");
+                        row.RelativeItem().Text("Руководитель контрагента __________________________");
+                    });
+                    column.Item().PaddingTop(18).Row(row =>
+                    {
+                        row.RelativeItem().Text("Главный бухгалтер нашей организации _____________________");
+                        row.RelativeItem().Text("Главный бухгалтер контрагента _____________________");
+                    });
+                });
+            })).GeneratePdf();
+        }
+
+        private static byte[] BuildReconciliationActExcel(DataTable dataTable, Report report)
+        {
+            using var workbook = new XLWorkbook();
+            var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
+            worksheet.Style.Font.FontName = "Times New Roman";
+            worksheet.Style.Font.FontSize = 9;
+            worksheet.ShowGridLines = false;
+            worksheet.Columns(1, 8).AdjustToContents();
+            worksheet.Column(1).Width = 44;
+            worksheet.Columns(2, 8).Width = 12;
+
+            var rows = dataTable.Rows.Cast<DataRow>().ToList();
+            var currentRow = 1;
+            worksheet.Range(currentRow, 1, currentRow, 8).Merge().Value = "АКТ СВЕРКИ";
+            worksheet.Cell(currentRow, 1).Style.Font.Bold = true;
+            worksheet.Cell(currentRow, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            currentRow++;
+
+            var title = rows.Select(ReadReconciliationOperation).FirstOrDefault(value => value.StartsWith("АКТ", StringComparison.OrdinalIgnoreCase)) ?? report.Name;
+            worksheet.Range(currentRow, 1, currentRow, 8).Merge().Value = title;
+            worksheet.Cell(currentRow, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            worksheet.Cell(currentRow, 1).Style.Font.Bold = true;
+            currentRow++;
+
+            var period = rows.Select(ReadReconciliationOperation).FirstOrDefault(value => value.StartsWith("Период", StringComparison.OrdinalIgnoreCase)) ?? report.SubtitleText;
+            if (!string.IsNullOrWhiteSpace(period))
+            {
+                worksheet.Range(currentRow, 1, currentRow, 8).Merge().Value = period;
+                worksheet.Cell(currentRow, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                currentRow += 2;
+            }
+
+            var headers = new[] { "Наименование материала, вид операции", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "N докум", "Дата", "Модуль" };
+            for (var column = 0; column < headers.Length; column++)
+            {
+                var cell = worksheet.Cell(currentRow, column + 1);
+                cell.Value = headers[column];
+                cell.Style.Font.Bold = true;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#D9E6F2");
+                cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            }
+            currentRow++;
+
+            var summary = rows.Select(ReadReconciliationOperation).LastOrDefault(value => value.Contains("задолж", StringComparison.OrdinalIgnoreCase)) ?? report.SummaryText;
+            foreach (var row in rows.Where(row => !ShouldSkipReconciliationBodyRow(row, summary)))
+            {
+                WriteReconciliationExcelRow(worksheet, currentRow, row);
+                currentRow++;
+            }
+
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                currentRow += 2;
+                worksheet.Range(currentRow, 1, currentRow, 8).Merge().Value = summary;
+                worksheet.Cell(currentRow, 1).Style.Font.Bold = true;
+            }
+
+            worksheet.SheetView.FreezeRows(4);
+            worksheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+            worksheet.PageSetup.FitToPages(1, 0);
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
+        }
+
+        private static void AddReconciliationPdfHeader(TableDescriptor table)
+        {
+            foreach (var title in new[] { "Наименование материала, вид операции", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "N докум", "Дата", "Модуль" })
+                table.Cell().Border(1).Background("#D9E6F2").Padding(3).AlignCenter().Text(title).Bold();
+        }
+
+        private static void AddReconciliationPdfRow(TableDescriptor table, DataRow row)
+        {
+            var operation = ReadReconciliationOperation(row);
+            var isImportant = operation.StartsWith("САЛЬДО", StringComparison.OrdinalIgnoreCase) ||
+                              operation.Contains("ИТОГО", StringComparison.OrdinalIgnoreCase) ||
+                              operation.Contains("Пара счетов", StringComparison.OrdinalIgnoreCase);
+            AddPdfCell(table, operation, isImportant, false);
+            AddPdfCell(table, ReadPreviewText(row, "Дебет"), isImportant, true);
+            AddPdfCell(table, ReadPreviewText(row, "Кредит"), isImportant, true);
+            AddPdfCell(table, FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Дт")), isImportant, true);
+            AddPdfCell(table, FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Кт")), isImportant, true);
+            AddPdfCell(table, ReadPreviewText(row, "N докум", "Документ", "Номер"), isImportant, true);
+            AddPdfCell(table, ReadPreviewText(row, "Дата"), isImportant, true);
+            AddPdfCell(table, ReadPreviewText(row, "Модуль"), isImportant, true);
+        }
+
+        private static void AddPdfCell(TableDescriptor table, string value, bool bold, bool center)
+        {
+            var cell = table.Cell().Border(1).Padding(2);
+            if (center)
+                cell = cell.AlignCenter();
+            var text = cell.Text(value ?? string.Empty);
+            if (bold)
+                text.Bold();
+        }
+
+        private static void WriteReconciliationExcelRow(IXLWorksheet worksheet, int rowIndex, DataRow row)
+        {
+            var values = new[]
+            {
+                ReadReconciliationOperation(row),
+                ReadPreviewText(row, "Дебет"),
+                ReadPreviewText(row, "Кредит"),
+                FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Дт")),
+                FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Кт")),
+                ReadPreviewText(row, "N докум", "Документ", "Номер"),
+                ReadPreviewText(row, "Дата"),
+                ReadPreviewText(row, "Модуль")
+            };
+            var important = values[0].StartsWith("САЛЬДО", StringComparison.OrdinalIgnoreCase) ||
+                            values[0].Contains("ИТОГО", StringComparison.OrdinalIgnoreCase) ||
+                            values[0].Contains("Пара счетов", StringComparison.OrdinalIgnoreCase);
+            for (var index = 0; index < values.Length; index++)
+            {
+                var cell = worksheet.Cell(rowIndex, index + 1);
+                cell.Value = values[index];
+                cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                if (important)
+                    cell.Style.Font.Bold = true;
+                if (index > 0)
+                    cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            }
+        }
+
+        private static string ReadReconciliationOperation(DataRow row)
+        {
+            var fallback = string.Empty;
+            foreach (var candidate in new[]
+                     {
+                         "Наименование материала, вид операции", "Наименование", "Операция",
+                         "Описание", "Вид операции", "Материал", "Номенклатура",
+                         "operation_name", "name_kod", "naim", "tex", "text"
+                     })
+            {
+                var value = ReadPreviewText(row, candidate);
+                if (string.IsNullOrWhiteSpace(value))
+                    continue;
+
+                if (!LooksLikeGeneratedRowLabel(value))
+                    return value;
+
+                var payload = ExtractGeneratedRowLabelPayload(value);
+                fallback = string.IsNullOrWhiteSpace(payload) ? value : payload;
+            }
+
+            return fallback;
+        }
+
+        private static bool LooksLikeGeneratedRowLabel(string value) =>
+            Regex.IsMatch(value ?? string.Empty, @"(?i)^\s*строка\s+\d+\s*:");
+
+        private static string ExtractGeneratedRowLabelPayload(string value)
+        {
+            var match = Regex.Match(value ?? string.Empty, @"(?i)^\s*строка\s+\d+\s*:\s*(.+)$");
+            return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
+        }
+
+        private static bool ShouldSkipReconciliationBodyRow(DataRow row, string summary)
+        {
+            var operation = ReadReconciliationOperation(row);
+            return string.IsNullOrWhiteSpace(operation) ||
+                   operation.StartsWith("АКТ", StringComparison.OrdinalIgnoreCase) ||
+                   operation.StartsWith("Период", StringComparison.OrdinalIgnoreCase) ||
+                   (!string.IsNullOrWhiteSpace(summary) && operation.Equals(summary, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string FormatReconciliationAmount(object? value)
+        {
+            if (value == null || value == DBNull.Value)
+                return string.Empty;
+            if (value is decimal decimalValue)
+                return decimalValue == 0m ? string.Empty : decimalValue.ToString("N2");
+            return decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.CurrentCulture, out var parsed) ||
+                   decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)
+                ? parsed == 0m ? string.Empty : parsed.ToString("N2")
+                : value.ToString() ?? string.Empty;
+        }
+
+        private static decimal ExtractLastReconciliationAmount(IEnumerable<DataRow> rows)
+        {
+            foreach (var row in rows.Reverse())
+            {
+                var debit = ReadPreviewDecimal(row, "Сумма Дт");
+                var credit = ReadPreviewDecimal(row, "Сумма Кт");
+                if (debit != 0m)
+                    return debit;
+                if (credit != 0m)
+                    return -credit;
+            }
+
+            return 0m;
+        }
+
         private static CashOrderPrintData BuildReportPreviewData(
             DataTable dataTable,
             Report report,
@@ -783,7 +1062,11 @@ namespace BIS.ERP.Services
                 AddConfiguredFoxProRuleAliases(number, row, rules ?? Array.Empty<FoxProReportFieldRule>(), Add);
             }
 
-            var first = rows.FirstOrDefault();
+            AddReconciliationSummaryAliases(rows, report, Add);
+            var first = rows.FirstOrDefault(IsReconciliationDataRow) ?? rows.FirstOrDefault();
+            if (first != null)
+                AddReconciliationAliases(0, first, Add);
+
             var amount = first == null ? 0m : ReadPreviewDecimal(first, "Сумма Дт", "Сумма Кт", "Сумма", "Итого");
             return new CashOrderPrintData
             {
@@ -821,10 +1104,136 @@ namespace BIS.ERP.Services
             add("signature", report.FooterSignature);
         }
 
+        private static string? ExtractReconciliationPeriodEnd(Report report)
+        {
+            var match = Regex.Match(report.SubtitleText ?? string.Empty, @"(\d{2}\.\d{2}\.\d{4}).*?(\d{2}\.\d{2}\.\d{4})");
+            return match.Success ? match.Groups[2].Value : null;
+        }
+        private static void AddReconciliationSummaryAliases(
+            IReadOnlyList<DataRow> rows,
+            Report report,
+            Action<string, object?> add)
+        {
+            if (rows.Count == 0)
+                return;
+
+            var title = rows
+                .Select(row => ReadPreviewText(row, "Наименование материала, вид операции", "Наименование", "Операция"))
+                .FirstOrDefault(value => value.StartsWith("АКТ", StringComparison.OrdinalIgnoreCase))
+                ?? report.Name;
+            var summary = rows
+                .Select(row => ReadPreviewText(row, "Наименование материала, вид операции", "Наименование", "Операция"))
+                .LastOrDefault(value => value.Contains("задолж", StringComparison.OrdinalIgnoreCase))
+                ?? report.SummaryText;
+            var organization = ExtractQuotedOrganizationName(title);
+            if (string.IsNullOrWhiteSpace(organization))
+                organization = ExtractQuotedOrganizationName(report.Name);
+
+            add("sha", "АКТ СВЕРКИ");
+            add("sha1", title);
+            add("sha2", summary);
+            add("txt_zak1", organization);
+            add("name_kod", organization);
+            add("ksprorg.naim_orgp", organization);
+            add("ksprorg_naim_orgp", organization);
+            add("_PAGENO", 1);
+            add("_pageno", 1);
+            add("pageno", 1);
+            add("date()", ExtractReconciliationPeriodEnd(report) ?? DateTime.Today.ToString("dd.MM.yyyy"));
+
+            var pairRow = rows.FirstOrDefault(row =>
+                ReadPreviewText(row, "Наименование материала, вид операции").Contains("Пара счетов", StringComparison.OrdinalIgnoreCase));
+            if (pairRow != null)
+            {
+                var pairText = ReadPreviewText(pairRow, "Наименование материала, вид операции");
+                var match = Regex.Match(pairText, @"(\d{6,})\s*-\s*(\d{6,})");
+                if (match.Success)
+                {
+                    AddDatasetAliases(add, ReconciliationPairPrefixes, "korsch", match.Groups[1].Value);
+                    AddDatasetAliases(add, ReconciliationPairPrefixes, "kor_sch", match.Groups[2].Value);
+                    AddDatasetAliases(add, ReconciliationPairPrefixes, "name_sch", pairText);
+                }
+            }
+
+            var opening = rows.FirstOrDefault(row =>
+                ReadPreviewText(row, "Наименование материала, вид операции").StartsWith("САЛЬДО НА", StringComparison.OrdinalIgnoreCase));
+            if (opening != null)
+            {
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "deb_beg", ReadPreviewObject(opening, "Сумма Дт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "cred_beg", ReadPreviewObject(opening, "Сумма Кт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "deb_beg_v", ReadPreviewObject(opening, "Сумма Дт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "cred_beg_v", ReadPreviewObject(opening, "Сумма Кт"));
+            }
+
+            var turnover = rows.FirstOrDefault(row =>
+                ReadPreviewText(row, "Наименование материала, вид операции").Contains("ИТОГО ОБОРОТОВ", StringComparison.OrdinalIgnoreCase));
+            if (turnover != null)
+            {
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "debsum", ReadPreviewObject(turnover, "Сумма Дт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "credsum", ReadPreviewObject(turnover, "Сумма Кт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "debsum_v", ReadPreviewObject(turnover, "Сумма Дт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "credsum_v", ReadPreviewObject(turnover, "Сумма Кт"));
+            }
+
+            var closing = rows.LastOrDefault(row =>
+                ReadPreviewText(row, "Наименование материала, вид операции").StartsWith("САЛЬДО НА", StringComparison.OrdinalIgnoreCase));
+            if (closing != null)
+            {
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "deb", ReadPreviewObject(closing, "Сумма Дт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "cred", ReadPreviewObject(closing, "Сумма Кт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "deb_v", ReadPreviewObject(closing, "Сумма Дт"));
+                AddDatasetAliases(add, ReconciliationPairPrefixes, "cred_v", ReadPreviewObject(closing, "Сумма Кт"));
+            }
+        }
+
+        private static readonly string[] ReconciliationPairPrefixes =
+        {
+            "ved_sch.", "ved_sch_",
+            "ved_obj.", "ved_obj_",
+            "ved_org.", "ved_org_"
+        };
+
+        private static void AddDatasetAliases(Action<string, object?> add, IEnumerable<string> prefixes, string field, object? value)
+        {
+            foreach (var prefix in prefixes)
+                add(prefix + field, value);
+        }
+
+        private static string ExtractQuotedOrganizationName(string? text)
+        {
+            var match = Regex.Match(text ?? string.Empty, "[\"«](.+?)[\"»]");
+            return match.Success ? match.Groups[1].Value.Trim() : string.Empty;
+        }
+
+        private static bool IsReconciliationDataRow(DataRow row)
+        {
+            var operation = ReadReconciliationOperation(row);
+            var hasIdentity = !string.IsNullOrWhiteSpace(ReadPreviewText(row, "Дебет", "debit_account", "schet", "deb")) ||
+                              !string.IsNullOrWhiteSpace(ReadPreviewText(row, "Кредит", "credit_account", "kor_sch", "korsch", "cred")) ||
+                              !string.IsNullOrWhiteSpace(ReadPreviewText(row, "N докум", "Документ", "Номер", "document_number", "nom_dok")) ||
+                              !string.IsNullOrWhiteSpace(ReadPreviewText(row, "Дата", "date", "document_date", "datobr"));
+            var hasAmount = HasMeaningfulPreviewValue(ReadPreviewObject(row, "Сумма Дт", "Дебет сумма", "DEBSUM", "debit_amount")) ||
+                            HasMeaningfulPreviewValue(ReadPreviewObject(row, "Сумма Кт", "Кредит сумма", "CREDSUM", "credit_amount"));
+
+            return hasIdentity || (hasAmount && !string.IsNullOrWhiteSpace(operation));
+        }
+
+        private static bool HasMeaningfulPreviewValue(object? value)
+        {
+            if (value == null || value == DBNull.Value)
+                return false;
+
+            var text = value.ToString();
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            return !decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out var currentParsed) || currentParsed != 0m ||
+                   !decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var invariantParsed) || invariantParsed != 0m;
+        }
         private static void AddReconciliationAliases(int number, DataRow row, Action<string, object?> add)
         {
             var prefixes = FoxProReportKnowledgeBase.GetRowDatasetPrefixes(number);
-            var name = ReadPreviewText(row, "Наименование материала, вид операции", "Наименование", "Операция", "operation_name");
+            var name = ReadReconciliationOperation(row);
             var debit = ReadPreviewText(row, "Дебет", "debit_account", "schet", "deb");
             var credit = ReadPreviewText(row, "Кредит", "credit_account", "kor_sch", "korsch", "cred");
             var debitAmount = ReadPreviewObject(row, "Сумма Дт", "Дебет сумма", "DEBSUM", "debit_amount");
@@ -1359,7 +1768,9 @@ namespace BIS.ERP.Services
         private static byte[] BuildTemplateLayoutPdf(
             Report report,
             CashOrderPrintData data,
-            IReadOnlyCollection<ReportElementMapping>? mappings)
+            IReadOnlyCollection<ReportElementMapping>? mappings,
+            DataTable? dataTable = null,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules = null)
         {
             var frxReport = new FrxReport
             {
@@ -1372,7 +1783,8 @@ namespace BIS.ERP.Services
             var template = parser.GetPrintTemplate(frxReport);
             if (template.Elements.Count == 0)
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
-            var svg = BuildTemplateSvg(template, report, data, mappings ?? Array.Empty<ReportElementMapping>());
+            var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
+            var svg = BuildTemplateSvg(layoutTemplate, report, data, mappings ?? Array.Empty<ReportElementMapping>(), true);
             return QuestPDF.Fluent.Document.Create(document => document.Page(page =>
             {
                 page.Size(report.PageOrientation == "Landscape" ? PageSizes.A4.Landscape() : PageSizes.A4);
@@ -1384,7 +1796,9 @@ namespace BIS.ERP.Services
         private static byte[] BuildTemplateLayoutExcel(
             Report report,
             CashOrderPrintData data,
-            IReadOnlyCollection<ReportElementMapping>? mappings)
+            IReadOnlyCollection<ReportElementMapping>? mappings,
+            DataTable? dataTable = null,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules = null)
         {
             var frxReport = new FrxReport
             {
@@ -1398,7 +1812,7 @@ namespace BIS.ERP.Services
             if (template.Elements.Count == 0)
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода в Excel.");
 
-            var layoutTemplate = FrxRecognitionProfileService.PrepareForRendering(template);
+            var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
             var mappingByOrder = (mappings ?? Array.Empty<ReportElementMapping>())
                 .GroupBy(item => item.ElementOrder)
                 .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
@@ -1423,32 +1837,22 @@ namespace BIS.ERP.Services
                 if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
                     continue;
 
-                var startRow = ToExcelIndex(element.Top, rowScale, maxRows);
-                var startColumn = ToExcelIndex(element.Left, columnScale, maxColumns);
-                var endRow = ToExcelIndex(element.Top + Math.Max(element.Height, 24), rowScale, maxRows, startRow);
-                var endColumn = ToExcelIndex(element.Left + Math.Max(element.Width, 24), columnScale, maxColumns, startColumn);
-
-                if (element.Type == "Line")
-                {
-                    ApplyFrxExcelLine(worksheet, element, startRow, startColumn, endRow, endColumn);
-                    continue;
-                }
-
-                if (element.Type == "Box")
-                {
-                    ApplyFrxExcelBox(worksheet, startRow, startColumn, endRow, endColumn);
-                    continue;
-                }
-
-                if (element.Type == "Picture")
+                if (element.Type is "Line" or "Box" or "Picture")
                     continue;
 
                 var value = ResolveElementValue(report, layoutTemplate, element, data, mappingByOrder);
                 if (string.IsNullOrWhiteSpace(value))
                     continue;
 
+                var startRow = ToExcelIndex(element.Top, rowScale, maxRows);
+                var startColumn = ToExcelIndex(element.Left, columnScale, maxColumns);
+                var endRow = ToExcelIndex(element.Top + Math.Max(element.Height, 24), rowScale, maxRows, startRow);
+                var endColumn = ToExcelIndex(element.Left + Math.Max(element.Width, 24), columnScale, maxColumns, startColumn);
                 WriteFrxExcelText(worksheet, element, value, startRow, startColumn, endRow, endColumn);
             }
+
+            foreach (var segment in BuildFrxGridSegments(layoutTemplate, mappingByOrder, 1d))
+                ApplyFrxExcelGridSegment(worksheet, segment, rowScale, columnScale, maxRows, maxColumns);
 
             worksheet.Range(1, 1, maxRows, maxColumns).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 
@@ -1457,6 +1861,443 @@ namespace BIS.ERP.Services
             return stream.ToArray();
         }
 
+        private static PrintFormTemplate PrepareTemplateForReportRendering(
+            PrintFormTemplate template,
+            Report report,
+            CashOrderPrintData data,
+            IReadOnlyCollection<ReportElementMapping> mappings,
+            DataTable? dataTable,
+            IReadOnlyCollection<FoxProReportFieldRule> rules)
+        {
+            var layoutTemplate = FrxRecognitionProfileService.PrepareForRendering(template);
+            if (!IsFoxProTemplate(layoutTemplate, report))
+                return layoutTemplate;
+
+            return ShouldPackReconciliationFrxTemplate(layoutTemplate, report, dataTable)
+                ? BuildPackedReconciliationFrxTemplate(layoutTemplate, report, data, mappings, dataTable!, rules)
+                : BuildPackedStaticFrxTemplate(layoutTemplate, report, data, mappings);
+        }
+
+        private static bool IsFoxProTemplate(PrintFormTemplate template, Report report) =>
+            template.SourceFormat.Equals("FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+            report.SourceFormat.Equals("FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+            template.OriginalFileName.EndsWith(".frx", StringComparison.OrdinalIgnoreCase);
+
+        private static bool ShouldPackReconciliationFrxTemplate(PrintFormTemplate template, Report report, DataTable? dataTable)
+        {
+            if (dataTable == null || dataTable.Rows.Count == 0)
+                return false;
+
+            return IsFoxProTemplate(template, report) && IsReconciliationActReport(dataTable, report);
+        }
+        private static bool IsReconciliationActReport(DataTable dataTable, Report report)
+        {
+            if (string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
+                ContainsIgnoreCase(report.Name, "акт свер") ||
+                ContainsIgnoreCase(report.TitleText, "акт свер"))
+                return true;
+
+            return dataTable.Rows.Cast<DataRow>().Take(8)
+                .Select(ReadReconciliationOperation)
+                .Any(value => value.StartsWith("АКТ СВЕРКИ", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static PrintFormTemplate BuildPackedReconciliationFrxTemplate(
+            PrintFormTemplate template,
+            Report report,
+            CashOrderPrintData summaryData,
+            IReadOnlyCollection<ReportElementMapping> mappings,
+            DataTable dataTable,
+            IReadOnlyCollection<FoxProReportFieldRule> rules)
+        {
+            var bands = BuildEffectiveBands(template);
+            if (bands.Count == 0 || template.Elements.Count == 0)
+                return template;
+
+            var rows = dataTable.Rows.Cast<DataRow>().ToList();
+            var summary = rows
+                .Select(ReadReconciliationOperation)
+                .LastOrDefault(value => value.Contains("задолж", StringComparison.OrdinalIgnoreCase))
+                ?? report.SummaryText;
+            var detailRows = rows
+                .Where(row => IsReconciliationMovementRow(row, summary))
+                .ToList();
+            if (detailRows.Count == 0)
+                detailRows = rows.Where(IsReconciliationDataRow).ToList();
+
+            var mappingByOrder = mappings
+                .GroupBy(item => item.ElementOrder)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+            var elementsByBand = bands.ToDictionary(
+                band => band,
+                band => template.Elements
+                    .Where(element => ReferenceEquals(FindBandForElement(element, bands), band))
+                    .OrderBy(element => element.Top)
+                    .ThenBy(element => element.Left)
+                    .ThenBy(element => element.Order)
+                    .ToList());
+
+            var packedElements = new List<PrintFormElement>();
+            var packedBands = new List<PrintFormBand>();
+            var currentTop = Math.Clamp(template.PageHeight * 0.018, 60, 240);
+            var nextOrder = 1;
+            PrintFormBand? previousBand = null;
+
+            foreach (var band in bands)
+            {
+                if (!elementsByBand.TryGetValue(band, out var bandElements) || bandElements.Count == 0)
+                    continue;
+
+                if (IsReconciliationDataBand(band, bandElements))
+                {
+                    foreach (var row in detailRows)
+                    {
+                        var rowData = BuildReportPreviewDataForRow(dataTable, report, row, rules, summaryData);
+                        AppendPackedBand(template, report, band, bandElements, rowData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                        previousBand = band;
+                    }
+                    continue;
+                }
+
+                AppendPackedBand(template, report, band, bandElements, summaryData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                previousBand = band;
+            }
+
+            if (packedElements.Count == 0)
+                return template;
+
+            var bottomMargin = Math.Clamp(template.PageHeight * 0.025, 100, 320);
+            return new PrintFormTemplate
+            {
+                SourceFormat = template.SourceFormat,
+                OriginalFileName = template.OriginalFileName,
+                RecognitionProfileCode = template.RecognitionProfileCode,
+                LayoutNormalized = true,
+                PageWidth = template.PageWidth,
+                PageHeight = Math.Max(1000, packedElements.Max(element => element.Top + Math.Max(element.Height, 1)) + bottomMargin),
+                Bands = packedBands,
+                Elements = packedElements
+            };
+        }
+
+        private static PrintFormTemplate BuildPackedStaticFrxTemplate(
+            PrintFormTemplate template,
+            Report report,
+            CashOrderPrintData data,
+            IReadOnlyCollection<ReportElementMapping> mappings)
+        {
+            var bands = BuildEffectiveBands(template);
+            if (bands.Count <= 1 || template.Elements.Count == 0)
+                return CompactImportedTemplateVerticalGaps(template);
+
+            var mappingByOrder = mappings
+                .GroupBy(item => item.ElementOrder)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+            var elementsByBand = bands.ToDictionary(
+                band => band,
+                band => template.Elements
+                    .Where(element => ReferenceEquals(FindBandForElement(element, bands), band))
+                    .OrderBy(element => element.Top)
+                    .ThenBy(element => element.Left)
+                    .ThenBy(element => element.Order)
+                    .ToList());
+
+            var packedElements = new List<PrintFormElement>();
+            var packedBands = new List<PrintFormBand>();
+            var currentTop = Math.Clamp(template.PageHeight * 0.018, 60, 240);
+            var nextOrder = 1;
+            PrintFormBand? previousBand = null;
+
+            foreach (var band in bands)
+            {
+                if (!elementsByBand.TryGetValue(band, out var bandElements) || bandElements.Count == 0)
+                    continue;
+
+                AppendPackedBand(template, report, band, bandElements, data, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                previousBand = band;
+            }
+
+            if (packedElements.Count == 0)
+                return template;
+
+            var bottomMargin = Math.Clamp(template.PageHeight * 0.025, 100, 320);
+            return new PrintFormTemplate
+            {
+                SourceFormat = template.SourceFormat,
+                OriginalFileName = template.OriginalFileName,
+                RecognitionProfileCode = template.RecognitionProfileCode,
+                LayoutNormalized = true,
+                PageWidth = template.PageWidth,
+                PageHeight = Math.Max(1000, packedElements.Max(element => element.Top + Math.Max(element.Height, 1)) + bottomMargin),
+                Bands = packedBands,
+                Elements = packedElements
+            };
+        }
+        private static bool IsReconciliationDataBand(PrintFormBand band, IReadOnlyList<PrintFormElement> bandElements)
+        {
+            if (IsDetailBand(band) ||
+                band.Type.Contains("Data", StringComparison.OrdinalIgnoreCase) ||
+                band.Type.Contains("Данные", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (IsPageHeaderBand(band) || IsSummaryBand(band))
+                return false;
+
+            return bandElements.Any(LooksLikeReconciliationMovementElement) &&
+                   !bandElements.Any(LooksLikeReconciliationGroupElement);
+        }
+
+        private static bool LooksLikeReconciliationMovementElement(PrintFormElement element)
+        {
+            var source = $"{element.Expression} {element.Text}";
+            if (string.IsNullOrWhiteSpace(source))
+                return false;
+
+            return Regex.IsMatch(source,
+                @"(?i)\b(?:ved\d*|db_crs?|dbcrs?)[._](?:tex|text|name_kod|schet|deb|debet|kredit|cred|korsch|kor_sch|debsum|credsum|dok|dokum|nom_dok|date|datobr|prs|kod_arm|module)\b");
+        }
+
+        private static bool LooksLikeReconciliationGroupElement(PrintFormElement element)
+        {
+            var source = $"{element.Expression} {element.Text}".ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(source))
+                return false;
+
+            return source.Contains("сальдо") ||
+                   source.Contains("итого") ||
+                   source.Contains("пара счет") ||
+                   source.Contains("ved_org") ||
+                   source.Contains("ved_obj") ||
+                   source.Contains("ved_sch") ||
+                   source.Contains("deb_beg") ||
+                   source.Contains("cred_beg");
+        }
+        private static void AppendPackedBand(
+            PrintFormTemplate template,
+            Report report,
+            PrintFormBand band,
+            IReadOnlyList<PrintFormElement> sourceElements,
+            CashOrderPrintData data,
+            IReadOnlyDictionary<int, ReportElementMapping> mappingByOrder,
+            List<PrintFormBand> packedBands,
+            List<PrintFormElement> packedElements,
+            ref double currentTop,
+            ref int nextOrder,
+            PrintFormBand? previousBand)
+        {
+            var visibleElements = sourceElements
+                .Where(element => !mappingByOrder.TryGetValue(element.Order, out var mapping) || mapping.IsVisible)
+                .ToList();
+            if (visibleElements.Count == 0)
+                return;
+
+            currentTop += GetPackedReconciliationBandGap(template, previousBand, band);
+            var contentTop = visibleElements.Min(element => element.Top);
+            var contentBottom = visibleElements.Max(element => element.Top + Math.Max(element.Height, 1));
+            var packedBandTop = currentTop;
+            var packedBandHeight = Math.Max(1, contentBottom - contentTop);
+            packedBands.Add(new PrintFormBand
+            {
+                Type = band.Type,
+                Top = packedBandTop,
+                Height = packedBandHeight,
+                Order = packedBands.Count + 1
+            });
+
+            foreach (var element in visibleElements.OrderBy(element => element.Top).ThenBy(element => element.Left).ThenBy(element => element.Order))
+            {
+                var clone = ClonePrintFormElement(element);
+                clone.Top = packedBandTop + Math.Max(0, element.Top - contentTop);
+                clone.Order = nextOrder++;
+
+                if (clone.Type is "Text" or "Expression")
+                {
+                    clone.Text = ResolveElementValue(report, template, element, data, mappingByOrder);
+                    clone.Expression = string.Empty;
+                    clone.Type = "Text";
+                }
+
+                packedElements.Add(clone);
+            }
+
+            currentTop = packedBandTop + packedBandHeight;
+        }
+
+        private static double GetPackedReconciliationBandGap(PrintFormTemplate template, PrintFormBand? previousBand, PrintFormBand currentBand)
+        {
+            if (previousBand == null)
+                return 0;
+
+            var sectionGap = Math.Clamp(template.PageHeight * 0.006, 12, 90);
+            if (IsPageHeaderBand(previousBand) || IsSummaryBand(currentBand))
+                return sectionGap;
+
+            // FRX borders often sit on band edges. Extra inner gaps draw parallel lines as a thick stripe.
+            return 0;
+        }
+
+        private static IReadOnlyList<PrintFormBand> BuildEffectiveBands(PrintFormTemplate template)
+        {
+            if (template.Bands.Count == 0)
+            {
+                var top = template.Elements.Min(element => element.Top);
+                var bottom = template.Elements.Max(element => element.Top + Math.Max(element.Height, 1));
+                return new[]
+                {
+                    new PrintFormBand
+                    {
+                        Type = "Detail",
+                        Top = top,
+                        Height = Math.Max(1, bottom - top),
+                        Order = 1
+                    }
+                };
+            }
+
+            var bands = template.Bands
+                .OrderBy(band => band.Top)
+                .ThenBy(band => band.Order)
+                .Select(ClonePrintFormBand)
+                .ToList();
+
+            if (bands.All(band => Math.Abs(band.Top) < 0.001))
+            {
+                double top = 0;
+                foreach (var band in bands.OrderBy(band => band.Order))
+                {
+                    band.Top = top;
+                    top += Math.Max(1, band.Height);
+                }
+            }
+
+            return bands.OrderBy(band => band.Top).ThenBy(band => band.Order).ToList();
+        }
+
+        private static PrintFormBand FindBandForElement(PrintFormElement element, IReadOnlyList<PrintFormBand> bands)
+        {
+            const double tolerance = 2d;
+            var byCoordinate = bands
+                .Where(band => element.Top >= band.Top - tolerance && element.Top <= band.Top + Math.Max(band.Height, 1) + tolerance)
+                .OrderBy(band => Math.Abs(element.Top - band.Top))
+                .FirstOrDefault();
+            if (byCoordinate != null)
+                return byCoordinate;
+
+            var previous = bands.LastOrDefault(band => element.Top >= band.Top - tolerance);
+            if (previous != null)
+                return previous;
+
+            var byType = bands.FirstOrDefault(band => band.Type.Equals(element.BandType, StringComparison.OrdinalIgnoreCase));
+            return byType ?? bands[0];
+        }
+
+        private static bool IsReconciliationMovementRow(DataRow row, string summary)
+        {
+            if (ShouldSkipReconciliationBodyRow(row, summary))
+                return false;
+
+            var operation = ReadReconciliationOperation(row);
+            if (operation.StartsWith("САЛЬДО", StringComparison.OrdinalIgnoreCase) ||
+                operation.Contains("ИТОГО", StringComparison.OrdinalIgnoreCase) ||
+                operation.Contains("Пара счетов", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return IsReconciliationDataRow(row);
+        }
+
+        private static CashOrderPrintData BuildReportPreviewDataForRow(
+            DataTable dataTable,
+            Report report,
+            DataRow row,
+            IReadOnlyCollection<FoxProReportFieldRule> rules,
+            CashOrderPrintData summaryData)
+        {
+            var extra = new Dictionary<string, object>(summaryData.ExtraFields, StringComparer.OrdinalIgnoreCase);
+            void Add(string key, object? value)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                    return;
+                extra[key] = value ?? string.Empty;
+                extra[NormalizeFieldName(key)] = value ?? string.Empty;
+            }
+
+            foreach (DataColumn column in dataTable.Columns)
+                Add(column.ColumnName, row[column]);
+
+            AddReconciliationAliases(0, row, Add);
+            AddReconciliationAliases(1, row, Add);
+            AddConfiguredFoxProRuleAliases(0, row, rules, Add);
+            AddConfiguredFoxProRuleAliases(1, row, rules, Add);
+
+            var dateText = ReadPreviewText(row, "Дата", "document_date", "datobr");
+            var rowDate = TryParseFoxDate(dateText, out var parsedDate) ? parsedDate : summaryData.Date;
+            var debitAmount = ReadPreviewDecimal(row, "Сумма Дт", "Дебет сумма", "debit_amount", "debsum");
+            var creditAmount = ReadPreviewDecimal(row, "Сумма Кт", "Кредит сумма", "credit_amount", "credsum");
+            var amount = debitAmount != 0m ? debitAmount : creditAmount;
+
+            return new CashOrderPrintData
+            {
+                DocumentName = summaryData.DocumentName,
+                Number = ReadPreviewText(row, "N докум", "Документ", "Номер", "document_number", "dok"),
+                Date = rowDate,
+                Organization = summaryData.Organization,
+                Inn = summaryData.Inn,
+                Okpo = summaryData.Okpo,
+                Person = summaryData.Person,
+                CashDesk = summaryData.CashDesk,
+                CorrespondentAccount = summaryData.CorrespondentAccount,
+                DebitAccount = ReadPreviewText(row, "Дебет", "debit_account", "schet", "deb"),
+                CreditAccount = ReadPreviewText(row, "Кредит", "credit_account", "kor_sch", "korsch", "cred"),
+                Amount = amount,
+                AmountInCurrency = amount,
+                AmountInWords = RussianMoneyInWords(Math.Abs(amount)),
+                Basis = ReadReconciliationOperation(row),
+                Note = summaryData.Note,
+                ExtraFields = extra
+            };
+        }
+
+        private static bool IsDetailBand(PrintFormBand band) =>
+            band.Type.Contains("Detail", StringComparison.OrdinalIgnoreCase) ||
+            band.Type.Contains("Детал", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsPageHeaderBand(PrintFormBand band) =>
+            band.Type.Contains("PageHeader", StringComparison.OrdinalIgnoreCase) ||
+            band.Type.Contains("Title", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsSummaryBand(PrintFormBand band) =>
+            band.Type.Contains("Summary", StringComparison.OrdinalIgnoreCase) ||
+            band.Type.Contains("PageFooter", StringComparison.OrdinalIgnoreCase);
+
+        private static bool ContainsIgnoreCase(string? value, string fragment) =>
+            !string.IsNullOrWhiteSpace(value) && value.Contains(fragment, StringComparison.OrdinalIgnoreCase);
+
+        private static PrintFormBand ClonePrintFormBand(PrintFormBand band) => new()
+        {
+            Type = band.Type,
+            Top = band.Top,
+            Height = band.Height,
+            Order = band.Order
+        };
+
+        private static PrintFormElement ClonePrintFormElement(PrintFormElement element) => new()
+        {
+            Type = element.Type,
+            Text = element.Text,
+            Expression = element.Expression,
+            BandType = element.BandType,
+            Left = element.Left,
+            Top = element.Top,
+            Width = element.Width,
+            Height = element.Height,
+            FontName = element.FontName,
+            FontSize = element.FontSize,
+            Bold = element.Bold,
+            Italic = element.Italic,
+            Alignment = element.Alignment,
+            BorderStyle = element.BorderStyle,
+            Order = element.Order
+        };
         private static void ConfigureFrxExcelWorksheet(IXLWorksheet worksheet, Report report)
         {
             worksheet.ShowGridLines = false;
@@ -1504,6 +2345,34 @@ namespace BIS.ERP.Services
 
             range.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
             range.Style.Border.LeftBorderColor = XLColor.Black;
+        }
+
+        private static void ApplyFrxExcelGridSegment(
+            IXLWorksheet worksheet,
+            FrxGridSegment segment,
+            double rowScale,
+            double columnScale,
+            int maxRows,
+            int maxColumns)
+        {
+            var horizontal = Math.Abs(segment.Y2 - segment.Y1) <= Math.Abs(segment.X2 - segment.X1);
+            if (horizontal)
+            {
+                var row = ToExcelIndex((segment.Y1 + segment.Y2) / 2d, rowScale, maxRows);
+                var startColumn = ToExcelIndex(Math.Min(segment.X1, segment.X2), columnScale, maxColumns);
+                var endColumn = ToExcelIndex(Math.Max(segment.X1, segment.X2), columnScale, maxColumns, startColumn);
+                var range = worksheet.Range(row, startColumn, row, endColumn);
+                range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+                range.Style.Border.TopBorderColor = XLColor.Black;
+                return;
+            }
+
+            var column = ToExcelIndex((segment.X1 + segment.X2) / 2d, columnScale, maxColumns);
+            var startRow = ToExcelIndex(Math.Min(segment.Y1, segment.Y2), rowScale, maxRows);
+            var endRow = ToExcelIndex(Math.Max(segment.Y1, segment.Y2), rowScale, maxRows, startRow);
+            var verticalRange = worksheet.Range(startRow, column, endRow, column);
+            verticalRange.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
+            verticalRange.Style.Border.LeftBorderColor = XLColor.Black;
         }
 
         private static void WriteFrxExcelText(
@@ -1558,13 +2427,303 @@ namespace BIS.ERP.Services
 
             return safeName.Length <= 31 ? safeName : safeName[..31].Trim();
         }
+
+        private readonly record struct FrxGridSegment(double X1, double Y1, double X2, double Y2);
+
+        private static IReadOnlyList<FrxGridSegment> BuildFrxGridSegments(
+            PrintFormTemplate template,
+            IReadOnlyDictionary<int, ReportElementMapping> mappingByOrder,
+            double strokeWidth)
+        {
+            var segments = new List<FrxGridSegment>();
+            foreach (var element in template.Elements)
+            {
+                if (mappingByOrder.TryGetValue(element.Order, out var mapping) && !mapping.IsVisible)
+                    continue;
+
+                if (element.Type == "Line")
+                {
+                    segments.Add(new FrxGridSegment(element.Left, element.Top, element.Left + element.Width, element.Top + element.Height));
+                    continue;
+                }
+
+                if (element.Type != "Box")
+                    continue;
+
+                var left = element.Left;
+                var top = element.Top;
+                var right = element.Left + element.Width;
+                var bottom = element.Top + element.Height;
+                segments.Add(new FrxGridSegment(left, top, right, top));
+                segments.Add(new FrxGridSegment(left, bottom, right, bottom));
+                segments.Add(new FrxGridSegment(left, top, left, bottom));
+                segments.Add(new FrxGridSegment(right, top, right, bottom));
+            }
+
+            if (segments.Count == 0)
+                return Array.Empty<FrxGridSegment>();
+
+            var tolerance = GetFrxGridSnapTolerance(template, strokeWidth);
+            var xAnchors = BuildAxisAnchors(segments.SelectMany(item => new[] { item.X1, item.X2 }), tolerance);
+            var yAnchors = BuildAxisAnchors(segments.SelectMany(item => new[] { item.Y1, item.Y2 }), tolerance);
+            var snapped = segments
+                .Select(segment => SnapGridSegment(segment, xAnchors, yAnchors, tolerance))
+                .Where(segment => GetSegmentLength(segment) > tolerance * 0.4d)
+                .ToList();
+
+            var merged = MergeFrxGridSegments(snapped, tolerance);
+            return CollapseNearDuplicateGridSegments(merged, strokeWidth);
+        }
+
+        private static double GetFrxGridSnapTolerance(PrintFormTemplate template, double strokeWidth)
+        {
+            var pageSize = Math.Max(1d, Math.Min(template.PageWidth, template.PageHeight));
+            var coordinateTolerance = pageSize * 0.0035d;
+            var strokeTolerance = Math.Max(2d, strokeWidth * 1.5d);
+            return Math.Clamp(Math.Max(coordinateTolerance, strokeTolerance), 2d, 60d);
+        }
+
+        private static List<double> BuildAxisAnchors(IEnumerable<double> values, double tolerance)
+        {
+            var sorted = values.Where(value => !double.IsNaN(value) && !double.IsInfinity(value)).OrderBy(value => value).ToList();
+            var anchors = new List<double>();
+            if (sorted.Count == 0)
+                return anchors;
+
+            var group = new List<double> { sorted[0] };
+            foreach (var value in sorted.Skip(1))
+            {
+                var current = group.Average();
+                if (Math.Abs(value - current) <= tolerance)
+                {
+                    group.Add(value);
+                    continue;
+                }
+
+                anchors.Add(Math.Round(group.Average()));
+                group.Clear();
+                group.Add(value);
+            }
+
+            anchors.Add(Math.Round(group.Average()));
+            return anchors;
+        }
+
+        private static FrxGridSegment SnapGridSegment(FrxGridSegment segment, IReadOnlyList<double> xAnchors, IReadOnlyList<double> yAnchors, double tolerance)
+        {
+            var x1 = SnapCoordinate(segment.X1, xAnchors, tolerance);
+            var x2 = SnapCoordinate(segment.X2, xAnchors, tolerance);
+            var y1 = SnapCoordinate(segment.Y1, yAnchors, tolerance);
+            var y2 = SnapCoordinate(segment.Y2, yAnchors, tolerance);
+
+            if (Math.Abs(y2 - y1) <= tolerance)
+            {
+                var y = SnapCoordinate((y1 + y2) / 2d, yAnchors, tolerance);
+                y1 = y;
+                y2 = y;
+            }
+
+            if (Math.Abs(x2 - x1) <= tolerance)
+            {
+                var x = SnapCoordinate((x1 + x2) / 2d, xAnchors, tolerance);
+                x1 = x;
+                x2 = x;
+            }
+
+            return new FrxGridSegment(x1, y1, x2, y2);
+        }
+
+        private static double SnapCoordinate(double value, IReadOnlyList<double> anchors, double tolerance)
+        {
+            if (anchors.Count == 0)
+                return value;
+
+            var nearest = value;
+            var nearestDistance = double.MaxValue;
+            foreach (var anchor in anchors)
+            {
+                var distance = Math.Abs(anchor - value);
+                if (distance >= nearestDistance)
+                    continue;
+
+                nearest = anchor;
+                nearestDistance = distance;
+            }
+
+            return nearestDistance <= tolerance ? nearest : value;
+        }
+
+        private static double GetSegmentLength(FrxGridSegment segment)
+        {
+            var dx = segment.X2 - segment.X1;
+            var dy = segment.Y2 - segment.Y1;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        private static IReadOnlyList<FrxGridSegment> MergeFrxGridSegments(IReadOnlyList<FrxGridSegment> segments, double tolerance)
+        {
+            var horizontal = segments.Where(segment => Math.Abs(segment.Y2 - segment.Y1) <= tolerance).Select(segment => (Y: (segment.Y1 + segment.Y2) / 2d, Start: Math.Min(segment.X1, segment.X2), End: Math.Max(segment.X1, segment.X2))).ToList();
+            var vertical = segments.Where(segment => Math.Abs(segment.X2 - segment.X1) <= tolerance).Select(segment => (X: (segment.X1 + segment.X2) / 2d, Start: Math.Min(segment.Y1, segment.Y2), End: Math.Max(segment.Y1, segment.Y2))).ToList();
+            var diagonal = segments.Where(segment => Math.Abs(segment.Y2 - segment.Y1) > tolerance && Math.Abs(segment.X2 - segment.X1) > tolerance).ToList();
+
+            var result = new List<FrxGridSegment>();
+            result.AddRange(MergeHorizontalGridSegments(horizontal, tolerance));
+            result.AddRange(MergeVerticalGridSegments(vertical, tolerance));
+            result.AddRange(diagonal);
+            return result.Where(segment => GetSegmentLength(segment) > tolerance * 0.4d).OrderBy(segment => segment.Y1).ThenBy(segment => segment.X1).ToList();
+        }
+
+        private static IReadOnlyList<FrxGridSegment> CollapseNearDuplicateGridSegments(IReadOnlyList<FrxGridSegment> segments, double strokeWidth)
+        {
+            if (segments.Count < 2)
+                return segments;
+
+            var duplicateTolerance = Math.Clamp(strokeWidth * 4d, 3d, 140d);
+            var result = new List<FrxGridSegment>();
+            foreach (var segment in segments.OrderBy(item => Math.Min(item.Y1, item.Y2)).ThenBy(item => Math.Min(item.X1, item.X2)))
+            {
+                if (TryMergeNearDuplicateGridSegment(result, segment, duplicateTolerance))
+                    continue;
+
+                result.Add(segment);
+            }
+
+            return result.OrderBy(segment => segment.Y1).ThenBy(segment => segment.X1).ToList();
+        }
+
+        private static bool TryMergeNearDuplicateGridSegment(List<FrxGridSegment> result, FrxGridSegment segment, double tolerance)
+        {
+            var horizontal = IsHorizontalGridSegment(segment, tolerance);
+            var vertical = IsVerticalGridSegment(segment, tolerance);
+            if (!horizontal && !vertical)
+                return false;
+
+            for (var index = 0; index < result.Count; index++)
+            {
+                var existing = result[index];
+                if (horizontal && IsHorizontalGridSegment(existing, tolerance))
+                {
+                    var existingY = (existing.Y1 + existing.Y2) / 2d;
+                    var segmentY = (segment.Y1 + segment.Y2) / 2d;
+                    var existingStart = Math.Min(existing.X1, existing.X2);
+                    var existingEnd = Math.Max(existing.X1, existing.X2);
+                    var segmentStart = Math.Min(segment.X1, segment.X2);
+                    var segmentEnd = Math.Max(segment.X1, segment.X2);
+                    if (Math.Abs(existingY - segmentY) <= tolerance && IntervalsOverlapEnough(existingStart, existingEnd, segmentStart, segmentEnd))
+                    {
+                        var y = Math.Round((existingY + segmentY) / 2d);
+                        result[index] = new FrxGridSegment(Math.Min(existingStart, segmentStart), y, Math.Max(existingEnd, segmentEnd), y);
+                        return true;
+                    }
+                }
+
+                if (vertical && IsVerticalGridSegment(existing, tolerance))
+                {
+                    var existingX = (existing.X1 + existing.X2) / 2d;
+                    var segmentX = (segment.X1 + segment.X2) / 2d;
+                    var existingStart = Math.Min(existing.Y1, existing.Y2);
+                    var existingEnd = Math.Max(existing.Y1, existing.Y2);
+                    var segmentStart = Math.Min(segment.Y1, segment.Y2);
+                    var segmentEnd = Math.Max(segment.Y1, segment.Y2);
+                    if (Math.Abs(existingX - segmentX) <= tolerance && IntervalsOverlapEnough(existingStart, existingEnd, segmentStart, segmentEnd))
+                    {
+                        var x = Math.Round((existingX + segmentX) / 2d);
+                        result[index] = new FrxGridSegment(x, Math.Min(existingStart, segmentStart), x, Math.Max(existingEnd, segmentEnd));
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsHorizontalGridSegment(FrxGridSegment segment, double tolerance) =>
+            Math.Abs(segment.Y2 - segment.Y1) <= tolerance * 0.5d;
+
+        private static bool IsVerticalGridSegment(FrxGridSegment segment, double tolerance) =>
+            Math.Abs(segment.X2 - segment.X1) <= tolerance * 0.5d;
+
+        private static bool IntervalsOverlapEnough(double startA, double endA, double startB, double endB)
+        {
+            var overlap = Math.Min(endA, endB) - Math.Max(startA, startB);
+            if (overlap <= 0)
+                return false;
+
+            var shortest = Math.Min(endA - startA, endB - startB);
+            return shortest <= 0 || overlap >= shortest * 0.5d;
+        }
+        private static IEnumerable<FrxGridSegment> MergeHorizontalGridSegments(List<(double Y, double Start, double End)> segments, double tolerance)
+        {
+            foreach (var group in GroupAxisSegments(segments.Select(item => (Axis: item.Y, item.Start, item.End)).OrderBy(item => item.Axis).ThenBy(item => item.Start), tolerance))
+            {
+                var y = Math.Round(group.Average(item => item.Axis));
+                var intervals = group.Select(item => (item.Start, item.End)).OrderBy(item => item.Start).ToList();
+                foreach (var interval in MergeIntervals(intervals, tolerance))
+                    yield return new FrxGridSegment(interval.Start, y, interval.End, y);
+            }
+        }
+
+        private static IEnumerable<FrxGridSegment> MergeVerticalGridSegments(List<(double X, double Start, double End)> segments, double tolerance)
+        {
+            foreach (var group in GroupAxisSegments(segments.Select(item => (Axis: item.X, item.Start, item.End)).OrderBy(item => item.Axis).ThenBy(item => item.Start), tolerance))
+            {
+                var x = Math.Round(group.Average(item => item.Axis));
+                var intervals = group.Select(item => (item.Start, item.End)).OrderBy(item => item.Start).ToList();
+                foreach (var interval in MergeIntervals(intervals, tolerance))
+                    yield return new FrxGridSegment(x, interval.Start, x, interval.End);
+            }
+        }
+
+        private static IEnumerable<List<(double Axis, double Start, double End)>> GroupAxisSegments(IEnumerable<(double Axis, double Start, double End)> orderedSegments, double tolerance)
+        {
+            var group = new List<(double Axis, double Start, double End)>();
+            foreach (var segment in orderedSegments)
+            {
+                if (group.Count == 0 || Math.Abs(segment.Axis - group.Average(item => item.Axis)) <= tolerance)
+                {
+                    group.Add(segment);
+                    continue;
+                }
+
+                yield return group;
+                group = new List<(double Axis, double Start, double End)> { segment };
+            }
+
+            if (group.Count > 0)
+                yield return group;
+        }
+
+        private static IEnumerable<(double Start, double End)> MergeIntervals(IReadOnlyList<(double Start, double End)> intervals, double tolerance)
+        {
+            if (intervals.Count == 0)
+                yield break;
+
+            var start = intervals[0].Start;
+            var end = intervals[0].End;
+            foreach (var interval in intervals.Skip(1))
+            {
+                if (interval.Start <= end + tolerance)
+                {
+                    end = Math.Max(end, interval.End);
+                    continue;
+                }
+
+                yield return (start, end);
+                start = interval.Start;
+                end = interval.End;
+            }
+
+            yield return (start, end);
+        }
+
         private static string BuildTemplateSvg(
             PrintFormTemplate template,
             Report report,
             CashOrderPrintData data,
-            IReadOnlyCollection<ReportElementMapping> mappings)
+            IReadOnlyCollection<ReportElementMapping> mappings,
+            bool templatePrepared = false)
         {
-            var layoutTemplate = FrxRecognitionProfileService.PrepareForRendering(template);
+            var layoutTemplate = templatePrepared ? template : FrxRecognitionProfileService.PrepareForRendering(template);
             var width = Math.Max(1000, layoutTemplate.PageWidth);
             var height = Math.Max(1000, layoutTemplate.PageHeight);
             var useCompactScale = width < 5000 && height < 5000;
@@ -1591,33 +2750,16 @@ namespace BIS.ERP.Services
                 }
                 svg.Append("</defs>");
             }
+            foreach (var segment in BuildFrxGridSegments(layoutTemplate, mappingByOrder, strokeWidth))
+                AppendSvgGridLine(svg, segment, strokeWidth);
+
             foreach (var element in layoutTemplate.Elements.OrderBy(item => item.Order))
             {
                 if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
                     continue;
 
-                var x = element.Left.ToString(CultureInfo.InvariantCulture);
-                var y = element.Top.ToString(CultureInfo.InvariantCulture);
-                var w = element.Width.ToString(CultureInfo.InvariantCulture);
-                var h = element.Height.ToString(CultureInfo.InvariantCulture);
-                if (element.Type == "Line")
-                {
-                    var x1 = element.Left;
-                    var y1 = element.Top;
-                    var x2 = element.Left + element.Width;
-                    var y2 = element.Top + element.Height;
-                    SnapLineCoordinates(ref x1, ref y1, ref x2, ref y2, strokeWidth);
-                    svg.Append($"<line x1='{x1.ToString(CultureInfo.InvariantCulture)}' y1='{y1.ToString(CultureInfo.InvariantCulture)}' x2='{x2.ToString(CultureInfo.InvariantCulture)}' y2='{y2.ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}' stroke-linecap='square' shape-rendering='crispEdges'/>");
+                if (element.Type is "Line" or "Box" or "Picture")
                     continue;
-                }
-                if (element.Type == "Box")
-                {
-                    svg.Append($"<rect x='{x}' y='{y}' width='{w}' height='{h}' fill='none' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}' shape-rendering='crispEdges'/>");
-                    continue;
-                }
-                if (element.Type == "Picture")
-                    continue;
-
                 var value = ResolveElementValue(report, layoutTemplate, element, data, mappingByOrder);
                 if (string.IsNullOrWhiteSpace(value))
                     continue;
@@ -1637,6 +2779,16 @@ namespace BIS.ERP.Services
             }
             svg.Append("</svg>");
             return svg.ToString();
+        }
+
+        private static void AppendSvgGridLine(StringBuilder svg, FrxGridSegment segment, double strokeWidth)
+        {
+            var x1 = segment.X1;
+            var y1 = segment.Y1;
+            var x2 = segment.X2;
+            var y2 = segment.Y2;
+            SnapLineCoordinates(ref x1, ref y1, ref x2, ref y2, strokeWidth);
+            svg.Append($"<line x1='{x1.ToString(CultureInfo.InvariantCulture)}' y1='{y1.ToString(CultureInfo.InvariantCulture)}' x2='{x2.ToString(CultureInfo.InvariantCulture)}' y2='{y2.ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}' stroke-linecap='square' shape-rendering='crispEdges'/>");
         }
 
         private static void SnapLineCoordinates(ref double x1, ref double y1, ref double x2, ref double y2, double strokeWidth)
@@ -1968,6 +3120,9 @@ namespace BIS.ERP.Services
                     return value;
                 }
 
+                if (functionName.Equals("date", StringComparison.OrdinalIgnoreCase) && arguments.Count == 0)
+                    return DateTime.Today.ToString("dd.MM.yyyy");
+
                 if (functionName.Equals("dtoc", StringComparison.OrdinalIgnoreCase) && arguments.Count >= 1)
                 {
                     var value = EvaluateFoxExpression(arguments[0], data);
@@ -2109,7 +3264,16 @@ namespace BIS.ERP.Services
                 ["nakl1"] = string.Empty,
                 ["dovn1"] = string.Empty,
                 ["dovd1"] = string.Empty,
-                ["dovf1"] = string.Empty
+                ["dovf1"] = string.Empty,
+                ["_PAGENO"] = "1",
+                ["_pageno"] = "1",
+                ["pageno"] = "1",
+                ["date()"] = DateTime.Today.ToString("dd.MM.yyyy"),
+                ["na1"] = data.ExtraFields.TryGetValue("sha2", out var summaryValue) ? FormatPlainValue(summaryValue) : data.Note,
+                ["p1"] = "Руководитель",
+                ["p2"] = "Главный бухгалтер",
+                ["p3"] = "Руководитель контрагента",
+                ["p4"] = "Главный бухгалтер контрагента"
             };
 
             foreach (var pair in FrxRecognitionProfileService.GetDefaultVariables())

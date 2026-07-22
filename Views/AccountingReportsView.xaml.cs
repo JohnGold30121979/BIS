@@ -702,11 +702,7 @@ namespace BIS.ERP.Views
             try
             {
                 var reports = await _context.Reports.AsNoTracking()
-                    .Where(report =>
-                        report.IsActive &&
-                        (EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") ||
-                         report.SourceFormat == "FoxProFRX" ||
-                         report.ReportType == "FoxProLayout"))
+                    .Where(report => report.IsActive)
                     .OrderBy(report => report.Order)
                     .ThenBy(report => report.Name)
                     .Select(report => new
@@ -742,8 +738,8 @@ namespace BIS.ERP.Views
 
                 foreach (var report in candidateReports)
                 {
-                    var displayName = CleanReconciliationVariantName(report.Name);
-                    if (variants.Any(item => item.ReportId == report.Id || item.DisplayName.Equals(displayName, StringComparison.OrdinalIgnoreCase)))
+                    var displayName = BuildReconciliationVariantDisplayName(report.Name, report.SourceFormat, report.ReportType);
+                    if (variants.Any(item => item.ReportId == report.Id))
                         continue;
 
                     variants.Add(new ReconciliationReportVariant
@@ -758,7 +754,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                variantsLoadError = $"FoxPro report templates для акта сверки не загружены: {ex.Message}";
+                variantsLoadError = $"Макеты акта сверки не загружены: {ex.Message}";
             }
 
             ReconciliationVariantCombo.ItemsSource = variants;
@@ -766,7 +762,7 @@ namespace BIS.ERP.Views
             ReconciliationVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
                 ? variantsLoadError
                 : variants.Count == 1
-                    ? "FoxPro report templates для акта сверки в метаданных не найдены"
+                    ? "Макеты акта сверки в метаданных не найдены"
                     : $"Доступно вариантов: {variants.Count}";
             UpdateReconciliationVariantVisibility();
         }
@@ -792,6 +788,23 @@ namespace BIS.ERP.Views
 
         private ReconciliationReportVariant? GetSelectedReconciliationReportVariant() =>
             ReconciliationVariantCombo?.SelectedItem as ReconciliationReportVariant;
+
+        private static string BuildReconciliationVariantDisplayName(string name, string sourceFormat, string reportType)
+        {
+            var cleanName = CleanReconciliationVariantName(name);
+            var sourceLabel = GetReconciliationVariantSourceLabel(sourceFormat, reportType);
+            return string.IsNullOrWhiteSpace(sourceLabel) ? cleanName : $"{cleanName} [{sourceLabel}]";
+        }
+
+        private static string GetReconciliationVariantSourceLabel(string? sourceFormat, string? reportType)
+        {
+            if (string.Equals(sourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase))
+                return "FRX";
+            if (string.Equals(sourceFormat, "Native", StringComparison.OrdinalIgnoreCase))
+                return "Нативный";
+            return string.Empty;
+        }
 
         private static string CleanReconciliationVariantName(string name) =>
             (name ?? string.Empty)
@@ -1226,12 +1239,53 @@ namespace BIS.ERP.Views
             (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));
 
+        private static bool HasNativeTemplate(Report report) =>
+            !string.IsNullOrWhiteSpace(report.Template) &&
+            string.Equals(report.SourceFormat, "Native", StringComparison.OrdinalIgnoreCase);
+
         private bool ShouldUseFoxProExcelLayout(Report report) =>
-            HasFoxProTemplate(report) &&
-            string.Equals(GetSelectedReportOutputFormat(), "ExcelFoxPro", StringComparison.OrdinalIgnoreCase);
+            HasFoxProTemplate(report) && IsFoxProExcelFormat(GetSelectedReportOutputFormat());
 
         private string GetSelectedReportOutputFormat() =>
-            (ReportOutputFormatCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ExcelNative";
+            (ReportOutputFormatCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ProgramExcel";
+
+        private static bool IsProgrammaticExcelFormat(string format) =>
+            FormatIs(format, "ProgramExcel", "ExcelNative");
+
+        private static bool IsProgrammaticPdfFormat(string format) =>
+            FormatIs(format, "ProgramPdf");
+
+        private static bool IsNativeExcelFormat(string format) =>
+            FormatIs(format, "NativeExcel");
+
+        private static bool IsNativePdfFormat(string format) =>
+            FormatIs(format, "NativePdf");
+
+        private static bool IsFoxProExcelFormat(string format) =>
+            FormatIs(format, "FoxProExcel", "ExcelFoxPro");
+
+        private static bool IsFoxProPdfFormat(string format) =>
+            FormatIs(format, "FoxProPdf", "PdfFoxPro");
+
+        private static bool IsTaxExcelFormat(string format) =>
+            FormatIs(format, "TaxExcel");
+
+        private static bool FormatIs(string format, params string[] expected) =>
+            expected.Any(value => string.Equals(format, value, StringComparison.OrdinalIgnoreCase));
+
+        private static bool IsReconciliationActReport(DataTable? dataTable, Report? report)
+        {
+            if (report == null)
+                return false;
+
+            return string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
+                   ContainsIgnoreCase(report.Name, "Акт сверки") ||
+                   (dataTable != null && ContainsIgnoreCase(dataTable.TableName, "Акт сверки"));
+        }
+
+        private static bool ContainsIgnoreCase(string? value, string fragment) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(fragment, StringComparison.OrdinalIgnoreCase);
 
         private static bool TryReadGuid(Dictionary<string, object> row, out Guid id, params string[] keys)
         {
@@ -1637,7 +1691,7 @@ namespace BIS.ERP.Views
         private void OnOpenReportClick(object sender, RoutedEventArgs e)
         {
             var format = GetSelectedReportOutputFormat();
-            if (string.Equals(format, "TaxExcel", StringComparison.OrdinalIgnoreCase))
+            if (IsTaxExcelFormat(format))
             {
                 OnExportVatClick(sender, e);
                 return;
@@ -1650,7 +1704,19 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            if (string.Equals(format, "PdfFoxPro", StringComparison.OrdinalIgnoreCase))
+            if (IsProgrammaticPdfFormat(format))
+            {
+                OnExportProgrammaticPdfClick(sender, e);
+                return;
+            }
+
+            if (IsNativePdfFormat(format))
+            {
+                OnExportNativePdfClick(sender, e);
+                return;
+            }
+
+            if (IsFoxProPdfFormat(format))
             {
                 OnExportFrxPdfClick(sender, e);
                 return;
@@ -1755,6 +1821,110 @@ namespace BIS.ERP.Views
             return report;
         }
 
+        private async void OnExportProgrammaticPdfClick(object sender, RoutedEventArgs e)
+        {
+            if (_currentData == null || _currentReport == null)
+            {
+                MessageBox.Show("Сначала сформируйте отчет.", "Программный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Открытие программного PDF...";
+
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                byte[] pdfBytes;
+                if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
+                {
+                    var printFormService = new PrintFormService(_context);
+                    pdfBytes = await Task.Run(() =>
+                        printFormService.ExportProgrammaticReconciliationActPreview(dataSnapshot, reportSnapshot));
+                }
+                else
+                {
+                    pdfBytes = await Task.Run(() => _reportService.ExportToPdf(dataSnapshot, reportSnapshot));
+                }
+
+                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_PROGRAM", "pdf");
+                File.WriteAllBytes(outputPath, pdfBytes);
+                OpenGeneratedFile(outputPath);
+                StatusText.Text = $"Программный PDF открыт: {Path.GetFileName(outputPath)}";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка открытия программного PDF";
+                MessageBox.Show($"Ошибка открытия программного PDF: {ex.Message}", "Программный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
+        }
+
+        private async void OnExportNativePdfClick(object sender, RoutedEventArgs e)
+        {
+            if (_currentData == null || _currentReport == null)
+            {
+                MessageBox.Show("Сначала сформируйте отчет.", "Нативный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!HasNativeTemplate(_currentReport))
+            {
+                MessageBox.Show(
+                    "Для выбранного отчета нет нативного макета конструктора. Откройте конструктор и сохраните макет либо выберите программный или FRX-формат.",
+                    "Нативный PDF", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Открытие PDF по нативному макету конструктора...";
+
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                var printFormService = new PrintFormService(_context);
+                var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot));
+                var completedTask = await Task.WhenAny(pdfTask, Task.Delay(TimeSpan.FromSeconds(20)));
+                if (completedTask != pdfTask)
+                {
+                    _ = pdfTask.ContinueWith(task =>
+                    {
+                        if (task.Exception != null)
+                            System.Diagnostics.Debug.WriteLine(task.Exception.GetBaseException().Message);
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+
+                    StatusText.Text = "Нативный PDF обрабатывается слишком долго.";
+                    MessageBox.Show(
+                        "Нативный макет обрабатывается слишком долго. Операция остановлена, приложение не будет ждать бесконечно.",
+                        "Нативный PDF", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_NATIVE", "pdf");
+                File.WriteAllBytes(outputPath, await pdfTask);
+                OpenGeneratedFile(outputPath);
+                StatusText.Text = $"Нативный PDF открыт: {Path.GetFileName(outputPath)}";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка открытия нативного PDF";
+                MessageBox.Show($"Ошибка открытия нативного PDF: {ex.Message}", "Нативный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
+        }
+
         private async void OnExportFrxPdfClick(object sender, RoutedEventArgs e)
         {
             if (_currentData == null || _currentReport == null)
@@ -1827,28 +1997,46 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var requestedFoxProLayout = string.Equals(GetSelectedReportOutputFormat(), "ExcelFoxPro", StringComparison.OrdinalIgnoreCase);
-                if (requestedFoxProLayout && !HasFoxProTemplate(_currentReport))
+                var format = GetSelectedReportOutputFormat();
+                if (IsTaxExcelFormat(format))
+                {
+                    OnExportVatClick(sender, e);
+                    return;
+                }
+
+                var useFoxProExcelLayout = IsFoxProExcelFormat(format);
+                var useNativeExcelLayout = IsNativeExcelFormat(format);
+                if (useFoxProExcelLayout && !HasFoxProTemplate(_currentReport))
                 {
                     MessageBox.Show(
-                        "Для выбранного отчета не подключен FRX-шаблон. Выберите вариант акта сверки с FRX в конфигураторе или откройте 'Excel таблица'.",
-                        "Excel по FRX-макету", MessageBoxButton.OK, MessageBoxImage.Information);
+                        "Для выбранного отчета не подключен FRX-шаблон. Выберите вариант акта сверки с FRX в конфигураторе или откройте программный формат.",
+                        "FRX FoxPro Excel", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (useNativeExcelLayout && !HasNativeTemplate(_currentReport))
+                {
+                    MessageBox.Show(
+                        "Для выбранного отчета нет нативного макета конструктора. Откройте конструктор и сохраните макет либо выберите программный или FRX-формат.",
+                        "Нативный Excel", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
                 IsEnabled = false;
-                var useFoxProExcelLayout = requestedFoxProLayout;
-                StatusText.Text = useFoxProExcelLayout
-                    ? "Открытие Excel по старому FRX-макету FoxPro..."
-                    : "Открытие Excel-таблицы...";
+                var formatTitle = useFoxProExcelLayout
+                    ? "FRX FoxPro Excel"
+                    : useNativeExcelLayout
+                        ? "Нативный Excel"
+                        : "Программный Excel";
+                StatusText.Text = $"Открытие {formatTitle}...";
 
-                var excelBaseName = useFoxProExcelLayout ? $"{_currentReport.Name}_FRX" : _currentReport.Name;
-                var outputPath = BuildTemporaryExcelPath(excelBaseName, "xlsx");
+                var suffix = useFoxProExcelLayout ? "FRX" : useNativeExcelLayout ? "NATIVE" : "PROGRAM";
+                var outputPath = BuildTemporaryExcelPath($"{_currentReport.Name}_{suffix}", "xlsx");
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
                 byte[] excelBytes;
-                if (useFoxProExcelLayout)
+                if (useFoxProExcelLayout || useNativeExcelLayout)
                 {
-                    var dataSnapshot = _currentData.Copy();
-                    var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
                     var ruleService = new FoxProReportFieldRuleService(_context);
                     await ruleService.SeedDefaultRulesAsync();
                     var rules = await ruleService.GetRulesAsync(includeInactive: false);
@@ -1856,16 +2044,20 @@ namespace BIS.ERP.Views
                     excelBytes = await Task.Run(() =>
                         printFormService.ExportReportTemplateExcel(dataSnapshot, reportSnapshot, rules));
                 }
+                else if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
+                {
+                    var printFormService = new PrintFormService(_context);
+                    excelBytes = await Task.Run(() =>
+                        printFormService.ExportProgrammaticReconciliationActExcel(dataSnapshot, reportSnapshot));
+                }
                 else
                 {
-                    excelBytes = await Task.Run(() => _reportService.ExportToExcel(_currentData, _currentReport));
+                    excelBytes = await Task.Run(() => _reportService.ExportToExcel(dataSnapshot, reportSnapshot));
                 }
 
                 File.WriteAllBytes(outputPath, excelBytes);
                 OpenGeneratedFile(outputPath);
-                StatusText.Text = useFoxProExcelLayout
-                    ? $"Excel по FRX-макету открыт: {Path.GetFileName(outputPath)}"
-                    : $"Excel-таблица открыта: {Path.GetFileName(outputPath)}";
+                StatusText.Text = $"{formatTitle} открыт: {Path.GetFileName(outputPath)}";
             }
             catch (Exception ex)
             {
