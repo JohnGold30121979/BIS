@@ -78,7 +78,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="txtBirthDate" Grid.Column="0" Height="30" Padding="8,4" Text="../../...."
+                <TextBox x:Name="txtBirthDate" Grid.Column="0" Height="30" Padding="8,4" Text="ДД/ММ/ГГГГ"
                          PreviewTextInput="DateTextBox_PreviewTextInput" PreviewKeyDown="DateTextBox_PreviewKeyDown"
                          GotKeyboardFocus="DateTextBox_GotKeyboardFocus" LostKeyboardFocus="DateTextBox_LostKeyboardFocus"/>
                 <DatePicker x:Name="calBirthDate" Grid.Column="1" Width="34" Height="30" Margin="5,0,0,0"
@@ -91,7 +91,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="txtHireDate" Grid.Column="0" Height="30" Padding="8,4" Text="../../...."
+                <TextBox x:Name="txtHireDate" Grid.Column="0" Height="30" Padding="8,4" Text="ДД/ММ/ГГГГ"
                          PreviewTextInput="DateTextBox_PreviewTextInput" PreviewKeyDown="DateTextBox_PreviewKeyDown"
                          GotKeyboardFocus="DateTextBox_GotKeyboardFocus" LostKeyboardFocus="DateTextBox_LostKeyboardFocus"/>
                 <DatePicker x:Name="calHireDate" Grid.Column="1" Width="34" Height="30" Margin="5,0,0,0"
@@ -104,7 +104,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="txtTerminationDate" Grid.Column="0" Height="30" Padding="8,4" Text="../../...."
+                <TextBox x:Name="txtTerminationDate" Grid.Column="0" Height="30" Padding="8,4" Text="ДД/ММ/ГГГГ"
                          PreviewTextInput="DateTextBox_PreviewTextInput" PreviewKeyDown="DateTextBox_PreviewKeyDown"
                          GotKeyboardFocus="DateTextBox_GotKeyboardFocus" LostKeyboardFocus="DateTextBox_LostKeyboardFocus"/>
                 <DatePicker x:Name="calTerminationDate" Grid.Column="1" Width="34" Height="30" Margin="5,0,0,0"
@@ -141,7 +141,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="txtPassportIssueDate" Grid.Column="0" Height="30" Padding="8,4" Text="../../...."
+                <TextBox x:Name="txtPassportIssueDate" Grid.Column="0" Height="30" Padding="8,4" Text="ДД/ММ/ГГГГ"
                          PreviewTextInput="DateTextBox_PreviewTextInput" PreviewKeyDown="DateTextBox_PreviewKeyDown"
                          GotKeyboardFocus="DateTextBox_GotKeyboardFocus" LostKeyboardFocus="DateTextBox_LostKeyboardFocus"/>
                 <DatePicker x:Name="calPassportIssueDate" Grid.Column="1" Width="34" Height="30" Margin="5,0,0,0"

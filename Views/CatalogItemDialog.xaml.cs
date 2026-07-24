@@ -542,12 +542,8 @@ namespace BIS.ERP.Views
 
         private bool ShouldDefaultActiveField(MetadataField field)
         {
-            if (!IsActiveField(field))
-                return false;
-
-            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(_catalog.Name, "Должности", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(_catalog.Name, "Подразделения", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(_catalog.ObjectType, "Catalog", StringComparison.OrdinalIgnoreCase) &&
+                   IsActiveField(field);
         }
 
         private static bool IsActiveField(MetadataField field)
