@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -363,7 +363,7 @@ namespace BIS.ERP.Services
             if (metadata == null)
                 return DateTime.Today.ToString("yyMM") + "0001";
 
-            return await _metadataService.GetNextDocumentNumberAsync(metadata.Name);
+            return await _metadataService.GetNextDocumentNumberAsync(metadata);
         }
 
         public async Task<Guid?> FindInvoiceIdAsync(string documentNumber, DateTime? documentDate = null)

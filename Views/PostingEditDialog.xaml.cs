@@ -170,7 +170,7 @@ namespace BIS.ERP.Views
             {
                 try
                 {
-                    result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document.Name);
+                    result.DocumentNumber = await _metadataService.GetNextDocumentNumberAsync(_document);
                 }
                 catch
                 {

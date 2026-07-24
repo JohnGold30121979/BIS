@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using System;
@@ -82,7 +82,7 @@ namespace BIS.ERP.Views.Dialogs
 
                     try
                     {
-                        numberTextBox.Text = await _metadataService.GetNextDocumentNumberAsync(_metadata.Name);
+                        numberTextBox.Text = await _metadataService.GetNextDocumentNumberAsync(_metadata);
                     }
                     catch
                     {

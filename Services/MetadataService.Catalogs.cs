@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -2205,7 +2205,7 @@ namespace BIS.ERP.Services
             await ReassignCashOrderRelatedMetadataAsync(document, legacyIds);
             await RemoveLegacyCashOrderMetadataAsync(legacyDocuments);
             await DropLegacyCashOrderTablesAsync();
-            await EnsureIndependentDocumentNumberConfigurationAsync(CashOrderDocumentName);
+            await EnsureDocumentNumberConfigurationAsync(document);
         }
 
         private async Task EnsureCashOrderMetadataFieldsAsync(MetadataObject document)

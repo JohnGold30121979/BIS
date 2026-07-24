@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -248,7 +248,7 @@ namespace BIS.ERP.Views
         {
             try
             {
-                return await _metadataService.GetNextDocumentNumberAsync(_document.Name);
+                return await _metadataService.GetNextDocumentNumberAsync(_document);
             }
             catch
             {

@@ -15,16 +15,11 @@ namespace BIS.ERP.Services
     public partial class MetadataService
     {
         private readonly AppDbContext _context;
-        private const string GlobalDocumentNumberingKey = "Все документы";
         private const string CashOrderDocumentName = "Расходный/Приходный КО";
         private const string CashOrderReceiptDocumentType = "Приходный кассовый ордер";
         private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
         private const string CashOrderReceiptKind = "Receipt";
         private const string CashOrderPaymentKind = "Payment";
-        private static readonly HashSet<string> IndependentDocumentNumberingNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            CashOrderDocumentName
-        };
 
         public MetadataService(AppDbContext context)
         {
@@ -737,6 +732,18 @@ namespace BIS.ERP.Services
                 .ToListAsync();
         }
 
+        private async Task<MetadataObject?> LoadDocumentByNameAsync(string documentName)
+        {
+            var normalizedName = documentName.Trim();
+            var normalizedNameLower = normalizedName.ToLower();
+
+            return await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Document" &&
+                    item.Name.ToLower() == normalizedNameLower);
+        }
+
         private async Task UpdateTableStructureAsync(MetadataObject catalog)
         {
             var sqlBuilder = new StringBuilder();
@@ -1306,10 +1313,7 @@ namespace BIS.ERP.Services
                 await EnsureCashOrderDocumentNumberIsUniqueAsync(metadata, data, documentNumber, currentRecordId);
                 return;
             }
-            var documents = await LoadDocumentMetadataAsync();
-            var documentsToCheck = UsesIndependentDocumentNumbering(metadata.Name)
-                ? documents.Where(document => document.Id == metadata.Id)
-                : documents.Where(document => !UsesIndependentDocumentNumbering(document.Name));
+            var documentsToCheck = new[] { metadata };
             var connection = _context.Database.GetDbConnection();
             var connectionOpened = false;
 
@@ -1894,6 +1898,9 @@ namespace BIS.ERP.Services
 
                 await _context.SaveChangesAsync();
 
+                if (obj.ObjectType == "Document")
+                    await EnsureDocumentNumberConfigurationAsync(obj);
+
                 System.Diagnostics.Debug.WriteLine($"Объект {obj.Name} обновлен. Добавлено {newFields.Count} новых полей.");
             }
             catch (Exception ex)
@@ -2047,6 +2054,9 @@ namespace BIS.ERP.Services
         {
             await _context.MetadataObjects.AddAsync(obj);
             await _context.SaveChangesAsync();
+
+            if (obj.ObjectType == "Document")
+                await EnsureDocumentNumberConfigurationAsync(obj);
         }
 
         public async Task DeleteMetadataObjectAsync(Guid id)
@@ -2054,6 +2064,9 @@ namespace BIS.ERP.Services
             var obj = await _context.MetadataObjects.FindAsync(id);
             if (obj != null)
             {
+                if (obj.ObjectType == "Document")
+                    await DeleteDocumentNumberingConfigurationAsync(obj);
+
                 _context.MetadataObjects.Remove(obj);
                 await _context.SaveChangesAsync();
             }
@@ -4058,33 +4071,38 @@ namespace BIS.ERP.Services
             }
         }
 
-        private async Task AddDefaultNumberingRecordsAsync()
-        {
-            const string insertSql = @"
-                INSERT INTO doc_numbering (document_type, current_number, prefix) 
-                VALUES (@documentType, 1, '')
-                ON CONFLICT (document_type) DO NOTHING";
-
-            await _context.Database.ExecuteSqlRawAsync(
-                insertSql,
-                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey));
-        }       
+        private Task AddDefaultNumberingRecordsAsync() => Task.CompletedTask;
 
         public Task<string> GetNextCashOrderDocumentNumberAsync(string orderKind)
         {
             return GetNextDocumentNumberByKeyAsync(CashOrderDocumentName, GetCashOrderNumberingKey(orderKind));
         }
 
-        public Task<string> GetNextDocumentNumberAsync(string documentName)
+        public async Task<string> GetNextDocumentNumberAsync(string documentName)
         {
-            return GetNextDocumentNumberByKeyAsync(documentName, GetDocumentNumberingKey(documentName));
+            var document = await LoadDocumentByNameAsync(documentName);
+            if (document != null)
+                return await GetNextDocumentNumberAsync(document);
+
+            return await GetNextDocumentNumberByKeyAsync(documentName, GetDocumentNumberingKey(documentName));
         }
 
-        private async Task<string> GetNextDocumentNumberByKeyAsync(string documentName, string numberingKey)
+        public Task<string> GetNextDocumentNumberAsync(MetadataObject document)
+        {
+            return GetNextDocumentNumberByKeyAsync(document.Name, GetDocumentNumberingKey(document), document);
+        }
+
+        private async Task<string> GetNextDocumentNumberByKeyAsync(
+            string documentName,
+            string numberingKey,
+            MetadataObject? document = null)
         {
             try
             {
-                await EnsureDocumentNumberConfigurationAsync(documentName);
+                if (document != null)
+                    await EnsureDocumentNumberConfigurationAsync(document);
+                else
+                    await EnsureDocumentNumberConfigurationAsync(documentName);
 
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = @"
@@ -4132,7 +4150,54 @@ namespace BIS.ERP.Services
         {
             await CreateDocumentNumberingTableAsync();
             documents ??= await LoadDocumentMetadataAsync();
-            var nextNumber = await GetSuggestedNextGlobalDocumentNumberAsync(documents);
+
+            var cashOrderNumberingEnsured = false;
+            foreach (var document in documents.Where(IsManagedDocument))
+            {
+                if (IsCashOrderDocument(document))
+                {
+                    if (!cashOrderNumberingEnsured)
+                    {
+                        await EnsureCashOrderDocumentNumberConfigurationsAsync(documents);
+                        cashOrderNumberingEnsured = true;
+                    }
+
+                    continue;
+                }
+
+                await EnsureDocumentNumberConfigurationAsync(document);
+            }
+        }
+
+        private async Task EnsureDocumentNumberConfigurationAsync(string documentName)
+        {
+            var document = await LoadDocumentByNameAsync(documentName);
+            if (document != null)
+            {
+                await EnsureDocumentNumberConfigurationAsync(document);
+                return;
+            }
+
+            await EnsureLegacyDocumentNumberConfigurationAsync(documentName);
+        }
+
+        private async Task EnsureDocumentNumberConfigurationAsync(MetadataObject document)
+        {
+            if (IsCashOrderDocument(document))
+            {
+                await EnsureCashOrderDocumentNumberConfigurationsAsync();
+                return;
+            }
+
+            await EnsureDocumentNumberConfigurationForDocumentAsync(document);
+        }
+
+        private async Task EnsureDocumentNumberConfigurationForDocumentAsync(MetadataObject document)
+        {
+            await CreateDocumentNumberingTableAsync();
+
+            var nextNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
+            var numberingKey = GetDocumentNumberingKey(document);
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4141,7 +4206,7 @@ namespace BIS.ERP.Services
 
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
-                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey),
+                new NpgsqlParameter("@documentType", numberingKey),
                 new NpgsqlParameter("@currentNumber", nextNumber));
 
             const string updateSql = @"
@@ -4152,22 +4217,11 @@ namespace BIS.ERP.Services
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
-                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey),
+                new NpgsqlParameter("@documentType", numberingKey),
                 new NpgsqlParameter("@currentNumber", nextNumber));
-
-            foreach (var documentName in IndependentDocumentNumberingNames)
-                await EnsureIndependentDocumentNumberConfigurationAsync(documentName, documents);
         }
 
-        private async Task EnsureDocumentNumberConfigurationAsync(string documentName)
-        {
-            if (UsesIndependentDocumentNumbering(documentName))
-                await EnsureIndependentDocumentNumberConfigurationAsync(documentName);
-            else
-                await EnsureGlobalDocumentNumberConfigurationAsync();
-        }
-
-        private async Task EnsureIndependentDocumentNumberConfigurationAsync(
+        private async Task EnsureLegacyDocumentNumberConfigurationAsync(
             string documentName,
             List<MetadataObject>? documents = null)
         {
@@ -4208,6 +4262,29 @@ namespace BIS.ERP.Services
                 updateSql,
                 new NpgsqlParameter("@documentType", documentName),
                 new NpgsqlParameter("@currentNumber", nextNumber));
+        }
+
+        private async Task DeleteDocumentNumberingConfigurationAsync(MetadataObject document)
+        {
+            await CreateDocumentNumberingTableAsync();
+
+            if (IsCashOrderDocument(document))
+            {
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"DELETE FROM doc_numbering
+                      WHERE document_type IN (@receiptDocumentType, @paymentDocumentType, @legacyDocumentName)",
+                    new NpgsqlParameter("@receiptDocumentType", CashOrderReceiptDocumentType),
+                    new NpgsqlParameter("@paymentDocumentType", CashOrderPaymentDocumentType),
+                    new NpgsqlParameter("@legacyDocumentName", document.Name));
+                return;
+            }
+
+            await _context.Database.ExecuteSqlRawAsync(
+                @"DELETE FROM doc_numbering
+                  WHERE document_type = @documentKey
+                     OR document_type = @legacyDocumentName",
+                new NpgsqlParameter("@documentKey", GetDocumentNumberingKey(document)),
+                new NpgsqlParameter("@legacyDocumentName", document.Name));
         }
 
         private async Task EnsureCashOrderDocumentNumberConfigurationsAsync(List<MetadataObject>? documents = null)
@@ -4316,12 +4393,6 @@ namespace BIS.ERP.Services
             return nextNumber > int.MaxValue ? int.MaxValue : (int)nextNumber;
         }
 
-        private Task<int> GetSuggestedNextGlobalDocumentNumberAsync(IEnumerable<MetadataObject> documents)
-        {
-            return GetSuggestedNextDocumentNumberAsync(
-                documents.Where(document => !UsesIndependentDocumentNumbering(document.Name)));
-        }
-
         private async Task<int> GetSuggestedNextDocumentNumberAsync(
             IEnumerable<MetadataObject> documents)
         {
@@ -4418,11 +4489,6 @@ namespace BIS.ERP.Services
             return metadata.ObjectType == "Document" && FindDocumentNumberField(metadata) != null;
         }
 
-        private static bool UsesIndependentDocumentNumbering(string documentName)
-        {
-            return IndependentDocumentNumberingNames.Contains(documentName);
-        }
-
         private static bool IsCashOrderDocument(MetadataObject metadata)
         {
             return metadata.ObjectType == "Document" &&
@@ -4461,14 +4527,25 @@ namespace BIS.ERP.Services
             return CashOrderPaymentKind;
         }
 
+        private static string GetDocumentNumberingKey(MetadataObject document)
+        {
+            if (IsCashOrderDocument(document))
+                return CashOrderPaymentDocumentType;
+
+            return GetDocumentNumberingKey(document.Id);
+        }
+
+        private static string GetDocumentNumberingKey(Guid documentId)
+        {
+            return $"doc:{documentId:N}";
+        }
+
         private static string GetDocumentNumberingKey(string documentName)
         {
             if (IsCashOrderDocumentName(documentName))
                 return CashOrderPaymentDocumentType;
 
-            return UsesIndependentDocumentNumbering(documentName)
-                ? documentName
-                : GlobalDocumentNumberingKey;
+            return documentName;
         }
 
         private static bool IsPostingsDocument(MetadataObject metadata)
