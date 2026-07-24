@@ -1,102 +1,37 @@
 ﻿<Window x:Class="BIS.ERP.Views.PostingDetailsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Детали проводки" Height="640" Width="620"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
-    <Grid Margin="15">
+        Title="Детали проводки" Height="520" Width="580"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#F5F6FA">
+    <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="📋 Детали проводки" FontSize="16" FontWeight="Bold" Margin="0,0,0,15"/>
+        <!-- Заголовок -->
+        <Border Grid.Row="0" Background="White" CornerRadius="10" Padding="20" Margin="0,0,0,15">
+            <TextBlock x:Name="TitleText" FontSize="18" Foreground="#2C3E50"/>
+        </Border>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="170"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        <!-- Детали проводки -->
+        <Border Grid.Row="1" Background="White" CornerRadius="10" Padding="5">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" BorderThickness="0"
+                          Foreground="#333333">
+                <StackPanel x:Name="DetailsPanel" Margin="10,5"/>
+            </ScrollViewer>
+        </Border>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Документ:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DocumentNumberText" Grid.Row="0" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Дата:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DateText" Grid.Row="1" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Тип:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DocumentTypeText" Grid.Row="2" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Модуль:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="ModuleText" Grid.Row="3" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Дебет:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DebitText" Grid.Row="4" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="Расшифровка дебета:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DebitNameText" Grid.Row="5" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
-
-                <TextBlock Grid.Row="6" Grid.Column="0" Text="Кредит:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CreditText" Grid.Row="6" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="7" Grid.Column="0" Text="Расшифровка кредита:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CreditNameText" Grid.Row="7" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
-
-                <TextBlock Grid.Row="8" Grid.Column="0" Text="Корр. счет:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CorrespondentText" Grid.Row="8" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="9" Grid.Column="0" Text="Операция:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="DirectionText" Grid.Row="9" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="10" Grid.Column="0" Text="Сумма (сом):" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="AmountText" Grid.Row="10" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="11" Grid.Column="0" Text="Сумма (валюта):" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="AmountCurrencyText" Grid.Row="11" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="12" Grid.Column="0" Text="Валюта:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CurrencyText" Grid.Row="12" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="13" Grid.Column="0" Text="Организация:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="OrganizationText" Grid.Row="13" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
-
-                <TextBlock Grid.Row="14" Grid.Column="0" Text="Сотрудник:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="EmployeeText" Grid.Row="14" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
-
-                <TextBlock Grid.Row="15" Grid.Column="0" Text="Создана:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="CreatedAtText" Grid.Row="15" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="16" Grid.Column="0" Text="Статус:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="StatusText" Grid.Row="16" Grid.Column="1" Margin="0,5"/>
-
-                <TextBlock Grid.Row="17" Grid.Column="0" Text="Примечание:" FontWeight="Bold" Margin="0,5"/>
-                <TextBlock x:Name="NoteText" Grid.Row="17" Grid.Column="1" Margin="0,5" TextWrapping="Wrap"/>
-            </Grid>
-        </ScrollViewer>
-
-        <Button Grid.Row="2" Content="Закрыть" Width="100" Height="35" Margin="0,10,0,0"
-                HorizontalAlignment="Right" Click="OnCloseClick"
-                Background="#3498DB" Foreground="White"/>
+        <!-- Кнопка закрытия -->
+        <Border Grid.Row="2" Background="White" CornerRadius="10" Padding="15" Margin="0,15,0,0">
+            <Button Content="Закрыть" Width="120" Height="36"
+                    HorizontalAlignment="Right"
+                    Click="OnCloseClick"
+                    Background="#3498DB" Foreground="White"
+                    FontSize="13"
+                    Cursor="Hand"/>
+        </Border>
     </Grid>
 </Window>
