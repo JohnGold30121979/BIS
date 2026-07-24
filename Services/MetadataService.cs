@@ -20,6 +20,7 @@ namespace BIS.ERP.Services
         private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
         private const string CashOrderReceiptKind = "Receipt";
         private const string CashOrderPaymentKind = "Payment";
+        private const long MaxDocumentNumberUsedForCounter = 999_999_999;
 
         public MetadataService(AppDbContext context)
         {
@@ -1472,16 +1473,18 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            Dictionary<string, object>? documentRecord = null;
             if (metadata.ObjectType == "Document")
             {
-                var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
-                await EnsureDocumentDateCanBeModifiedAsync(metadata, recordData);
+                documentRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+                await EnsureDocumentDateCanBeModifiedAsync(metadata, documentRecord);
+                await DeleteDocumentPostingsAsync(metadata, documentRecord);
             }
 
             Dictionary<string, object>? previousRecord = null;
             if (IsPostingsDocument(metadata))
             {
-                previousRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+                previousRecord = documentRecord ?? await GetRecordDataAsync(metadata.TableName, recordId);
             }
 
             var sql = $"DELETE FROM \"{metadata.TableName}\" WHERE \"Id\" = '{recordId}'";
@@ -1499,6 +1502,63 @@ namespace BIS.ERP.Services
                 metadata.ObjectType,
                 metadata.Name,
                 recordId);
+        }
+
+        private async Task DeleteDocumentPostingsAsync(MetadataObject document, Dictionary<string, object> record)
+        {
+            var documentNumber = NormalizeLegacyDocumentNumber(GetDocumentNumberFromData(record));
+            if (string.IsNullOrWhiteSpace(documentNumber))
+                return;
+
+            var documentTypes = GetPostingDocumentTypesForDocument(document, record)
+                .Where(type => !string.IsNullOrWhiteSpace(type))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (documentTypes.Count == 0)
+                return;
+
+            var parameters = new List<NpgsqlParameter>
+            {
+                new("@number", documentNumber)
+            };
+            var typeParameterNames = new List<string>();
+            for (var index = 0; index < documentTypes.Count; index++)
+            {
+                var parameterName = $"@type{index}";
+                typeParameterNames.Add(parameterName);
+                parameters.Add(new NpgsqlParameter(parameterName, documentTypes[index]));
+            }
+
+            var sql = $@"
+                DELETE FROM doc_postings
+                WHERE doc_number = @number
+                  AND document_type IN ({string.Join(", ", typeParameterNames)});";
+            await _context.Database.ExecuteSqlRawAsync(sql, parameters.ToArray());
+        }
+
+        private static IEnumerable<string> GetPostingDocumentTypesForDocument(
+            MetadataObject document,
+            Dictionary<string, object> record)
+        {
+            yield return document.Name;
+
+            if (document.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "Исходящее платежное поручение";
+                yield return "Входящее платежное поручение";
+                var orderType = GetStringValue(record, "order_type", "Тип");
+                if (!string.IsNullOrWhiteSpace(orderType))
+                    yield return orderType.Contains("Вход", StringComparison.OrdinalIgnoreCase)
+                        ? "Входящее платежное поручение"
+                        : "Исходящее платежное поручение";
+            }
+
+            if (IsCashOrderDocumentName(document.Name))
+            {
+                yield return CashOrderReceiptDocumentType;
+                yield return CashOrderPaymentDocumentType;
+                yield return GetCashOrderPostingDocumentType(ResolveCashOrderKind(record, document.Name));
+            }
         }
 
         private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
@@ -2236,8 +2296,9 @@ namespace BIS.ERP.Services
                     ?? throw new InvalidOperationException("Документ не найден.");
                 var isCashOrder = IsCashOrderDocumentName(document.Name);
                 var isFixedAssetDocument = ModuleMetadataService.FixedAssetDocumentNames.Contains(document.Name);
-                if (!isCashOrder && !isFixedAssetDocument)
-                    throw new InvalidOperationException("Отмена проведения поддерживается для кассовых документов и документов основных средств.");
+                var isPaymentOrder = document.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase);
+                if (!isCashOrder && !isFixedAssetDocument && !isPaymentOrder)
+                    throw new InvalidOperationException("Отмена проведения поддерживается для кассовых документов, платежных поручений и документов основных средств.");
 
                 var record = await GetRecordDataAsync(document.TableName, recordId);
                 await EnsureDocumentDateCanBeModifiedAsync(document, record);
@@ -2245,17 +2306,13 @@ namespace BIS.ERP.Services
                     throw new InvalidOperationException("Документ не проведен.");
 
                 var amount = Convert.ToDecimal(record.GetValueOrDefault("amount") ?? 0m);
-                var documentNumber = NormalizeLegacyDocumentNumber(record.GetValueOrDefault("doc_number")?.ToString());
+                var documentNumber = NormalizeLegacyDocumentNumber(GetDocumentNumberFromData(record));
                 if (isFixedAssetDocument)
                 {
                     await ReverseFixedAssetDocumentAsync(document, record, recordId);
                 }
 
-                await _context.Database.ExecuteSqlRawAsync(@"
-                    DELETE FROM doc_postings
-                    WHERE doc_number = @number AND document_type = @type;",
-                    new NpgsqlParameter("@number", documentNumber),
-                    new NpgsqlParameter("@type", document.Name));
+                await DeleteDocumentPostingsAsync(document, record);
 
                 var tableName = QuoteIdentifier(document.TableName);
                 await _context.Database.ExecuteSqlRawAsync($@"
@@ -2276,6 +2333,14 @@ namespace BIS.ERP.Services
                 await transaction.RollbackAsync();
                 throw;
             }
+        }
+
+        public Task<List<PostingViewModel>> GetPostingsByDocumentAsync(
+            string documentType,
+            string documentNumber,
+            DateTime? documentDate = null)
+        {
+            return new PostingService(_context).GetPostingsByDocumentAsync(documentType, documentNumber, documentDate);
         }
 
         private async Task ProcessDocumentByPostingRulesAsync(
@@ -3324,78 +3389,29 @@ namespace BIS.ERP.Services
             if (amountCurrency <= 0 && amount > 0 && exchangeRate > 0)
                 amountCurrency = Math.Round(amount / exchangeRate, 2, MidpointRounding.AwayFromZero);
 
-            // Получаем код нашего счёта
-            string ourAccountCode = string.Empty;
-            if (recordData.ContainsKey("our_account_id") && recordData["our_account_id"] != null)
+            async Task<string> ResolvePaymentAccountCodeAsync(params string[] keys)
             {
-                if (Guid.TryParse(recordData["our_account_id"].ToString(), out var ourAccountId))
-                {
-                    ourAccountCode = await GetAccountCodeById(ourAccountId);
-                }
-                else
-                {
-                    ourAccountCode = recordData["our_account_id"].ToString();
-                }
+                var rawValue = GetStringValue(recordData, keys);
+                if (string.IsNullOrWhiteSpace(rawValue))
+                    return string.Empty;
+
+                return Guid.TryParse(rawValue, out var accountId)
+                    ? await GetAccountCodeById(accountId)
+                    : rawValue;
             }
-            else if (recordData.ContainsKey("Наш счет") && recordData["Наш счет"] != null)
-            {
-                if (Guid.TryParse(recordData["Наш счет"].ToString(), out var ourAccountId))
-                {
-                    ourAccountCode = await GetAccountCodeById(ourAccountId);
-                }
-                else
-                {
-                    ourAccountCode = recordData["Наш счет"].ToString();
-                }
-            }
+
+            // Наш счет всегда идет в дебет платежного поручения.
+            var ourAccountCode = await ResolvePaymentAccountCodeAsync("our_account_id", "Наш счет", "Дебет", "debit_account");
             if (string.IsNullOrWhiteSpace(ourAccountCode))
                 throw new Exception("Для платежного поручения укажите наш счет.");
 
-            // Получаем корреспондирующий счёт
-            string corrAccountCode = "";
-            if (recordData.ContainsKey("correspondent_account") && recordData["correspondent_account"] != null)
-            {
-                if (Guid.TryParse(recordData["correspondent_account"].ToString(), out var corrAccountId))
-                {
-                    corrAccountCode = await GetAccountCodeById(corrAccountId);
-                }
-                else
-                {
-                    corrAccountCode = recordData["correspondent_account"].ToString();
-                }
-            }
-            else if (recordData.ContainsKey("Корр. счет") && recordData["Корр. счет"] != null)
-            {
-                if (Guid.TryParse(recordData["Корр. счет"].ToString(), out var corrAccountId))
-                {
-                    corrAccountCode = await GetAccountCodeById(corrAccountId);
-                }
-                else
-                {
-                    corrAccountCode = recordData["Корр. счет"].ToString();
-                }
-            }
-
-            if (string.IsNullOrEmpty(corrAccountCode))
-            {
+            // Корреспондирующий счет всегда идет в кредит платежного поручения.
+            var corrAccountCode = await ResolvePaymentAccountCodeAsync("correspondent_account", "Корр. счет", "Корр счет", "Коррсчет", "Кредит", "credit_account");
+            if (string.IsNullOrWhiteSpace(corrAccountCode))
                 throw new Exception("Для платежного поручения укажите корреспондирующий счет.");
-            }
-
-            // Определяем счета для проводки
-            string debitAccount, creditAccount;
-            if (isOutgoing)
-            {
-                // Исходящее: Дт (корр. счёт) — Кт (наш счёт)
-                debitAccount = corrAccountCode;
-                creditAccount = ourAccountCode;
-            }
-            else
-            {
-                // Входящее: Дт (наш счёт) — Кт (корр. счёт)
-                debitAccount = ourAccountCode;
-                creditAccount = corrAccountCode;
-            }
-
+            // Платежное поручение в этой системе: наш счет = дебет, корр. счет = кредит.
+            var debitAccount = ourAccountCode;
+            var creditAccount = corrAccountCode;
             System.Diagnostics.Debug.WriteLine($"debitAccount: {debitAccount}, creditAccount: {creditAccount}");
 
             // Создаём проводку с указанием типа документа
@@ -4126,7 +4142,11 @@ namespace BIS.ERP.Services
                     using var reader = await command.ExecuteReaderAsync();
                     if (await reader.ReadAsync())
                     {
-                        return reader.GetInt32(0).ToString();
+                        var currentNumber = reader.GetInt32(0);
+                        if (currentNumber > 0 && currentNumber <= MaxDocumentNumberUsedForCounter)
+                            return currentNumber.ToString();
+
+                        return "1";
                     }
                 }
                 finally
@@ -4363,12 +4383,13 @@ namespace BIS.ERP.Services
 
                 using var command = connection.CreateCommand();
                 command.CommandText = $@"
-                    SELECT COALESCE(
-                        MAX(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), ''), '0')::BIGINT),
-                        0)
-                    FROM {quotedTableName}
-                    WHERE LOWER(COALESCE(""order_kind""::text, '')) = LOWER(@orderKind)";
-
+                    SELECT COALESCE(MAX(digits::BIGINT), 0)
+                    FROM (
+                        SELECT NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), '') AS digits
+                        FROM {quotedTableName}
+                        WHERE LOWER(COALESCE(""order_kind""::text, '')) = LOWER(@orderKind)
+                    ) normalized_numbers
+                    WHERE digits ~ '^\d{{1,9}}$'";
                 var orderKindParameter = command.CreateParameter();
                 orderKindParameter.ParameterName = "@orderKind";
                 orderKindParameter.Value = NormalizeCashOrderKind(orderKind);
@@ -4390,7 +4411,7 @@ namespace BIS.ERP.Services
             }
 
             var nextNumber = maxDocumentNumber + 1;
-            return nextNumber > int.MaxValue ? int.MaxValue : (int)nextNumber;
+            return nextNumber > MaxDocumentNumberUsedForCounter ? 1 : (int)nextNumber;
         }
 
         private async Task<int> GetSuggestedNextDocumentNumberAsync(
@@ -4429,11 +4450,12 @@ namespace BIS.ERP.Services
 
                         using var maxCommand = connection.CreateCommand();
                         maxCommand.CommandText = $@"
-                            SELECT COALESCE(
-                                MAX(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), ''), '0')::BIGINT),
-                                0)
-                            FROM {quotedTableName}";
-
+                            SELECT COALESCE(MAX(digits::BIGINT), 0)
+                            FROM (
+                                SELECT NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), '') AS digits
+                                FROM {quotedTableName}
+                            ) normalized_numbers
+                            WHERE digits ~ '^\d{{1,9}}$'";
                         var maxValue = await maxCommand.ExecuteScalarAsync();
                         if (maxValue != null && maxValue != DBNull.Value)
                         {
@@ -4457,7 +4479,7 @@ namespace BIS.ERP.Services
             }
 
             var nextNumber = maxDocumentNumber + 1;
-            return nextNumber > int.MaxValue ? int.MaxValue : (int)nextNumber;
+            return nextNumber > MaxDocumentNumberUsedForCounter ? 1 : (int)nextNumber;
         }
 
         private async Task NormalizeDocumentTableNumbersAsync(MetadataObject document)
@@ -4601,7 +4623,7 @@ namespace BIS.ERP.Services
 
         internal static string GenerateFallbackDocumentNumber()
         {
-            return DateTime.Now.ToString("yyyyMMddHHmmssfff");
+            return "1";
         }
 
         private static string QuoteIdentifier(string identifier)

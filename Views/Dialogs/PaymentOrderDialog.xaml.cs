@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -283,9 +283,9 @@ namespace BIS.ERP.Views
                     if (record.ContainsKey("Курс")) ExchangeRateBox.Text = record["Курс"].ToString();
                     if (record.ContainsKey("Назначение платежа")) PurposeBox.Text = record["Назначение платежа"].ToString();
                     if (record.ContainsKey("Примечание")) DescriptionBox.Text = record["Примечание"].ToString();
-                    if (record.TryGetValue("Наш счет", out var ourAccountValue))
+                    if (TryGetRecordValue(record, out var ourAccountValue, "Наш счет", "our_account_id", "Дебет", "debit_account"))
                         ApplySelectedOurAccount(ourAccountValue);
-                    if (record.TryGetValue("Корр. счет", out var accountValue))
+                    if (TryGetRecordValue(record, out var accountValue, "Корр. счет", "correspondent_account", "Кредит", "credit_account"))
                         ApplySelectedCorrAccount(accountValue);
 
                     SelectComboByRecordValue(OrganizationCombo, record, "Организация");
@@ -477,12 +477,20 @@ namespace BIS.ERP.Views
                     return;
                 }
 
+                if (!TryReadDecimal(AmountBox.Text, out var amount) || amount <= 0)
+                {
+                    MessageBox.Show("Сумма должна быть больше 0.", "Проверка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AmountBox.Focus();
+                    return;
+                }
+
                 var itemData = new Dictionary<string, object>
                 {
                     ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
                     ["Тип"] = documentType,  
-                    ["Сумма"] = TryReadDecimal(AmountBox.Text, out var amount) ? amount : 0,
+                    ["Сумма"] = amount,
                     ["Назначение платежа"] = PurposeBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
                     ["Проведён"] = false
@@ -495,6 +503,7 @@ namespace BIS.ERP.Views
                 SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
                 SetFieldValueIfExists(itemData, "Банк", string.Empty);
                 SetFieldValueIfExists(itemData, "Наш счет", _selectedOurAccountId);
+                SetFieldValueIfExists(itemData, "Дебет", _selectedOurAccountId);
                 SetFieldValueIfExists(itemData, "Расчетный счет контрагента", string.Empty);
                 SetFieldValueIfExists(itemData, "Счет контрагента", string.Empty);
                 SetFieldValueIfExists(itemData, "Валюта",
@@ -514,6 +523,8 @@ namespace BIS.ERP.Views
                         ? material.Id
                         : string.Empty);
                 SetFieldValueIfExists(itemData, "Корр. счет",
+                    _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
+                SetFieldValueIfExists(itemData, "Кредит",
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
                 SetFieldValueIfExists(itemData, "Классификация платежа",
                     _selectedPaymentClassificationId != Guid.Empty ? _selectedPaymentClassificationId : string.Empty);
@@ -637,6 +648,20 @@ namespace BIS.ERP.Views
                     showUnmappedFields: false));
         }
 
+        private static bool TryGetRecordValue(
+            Dictionary<string, object> record,
+            out object value,
+            params string[] fieldNames)
+        {
+            foreach (var fieldName in fieldNames)
+            {
+                if (record.TryGetValue(fieldName, out value) && value != null && value != DBNull.Value)
+                    return true;
+            }
+
+            value = string.Empty;
+            return false;
+        }
         private void SetFieldValueIfExists(Dictionary<string, object> itemData, string fieldName, object value)
         {
             if (_document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
