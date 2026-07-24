@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -139,6 +139,7 @@ namespace BIS.ERP.Services
         public Guid Id { get; set; }
         public string Code { get; set; } = string.Empty;
         public string DisplayName { get; set; } = string.Empty;
+        public string AccountType { get; set; } = string.Empty;
         public string ClosingModule { get; set; } = string.Empty;
     }
 
@@ -203,6 +204,9 @@ namespace BIS.ERP.Services
                     Id = id,
                     Code = code,
                     DisplayName = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}",
+                    AccountType = row.GetValueOrDefault("Тип счета")?.ToString() ??
+                                  row.GetValueOrDefault("account_type")?.ToString() ??
+                                  string.Empty,
                     ClosingModule = row.GetValueOrDefault("Закрывает модуль")?.ToString() ??
                                     row.GetValueOrDefault("closing_module_code")?.ToString() ??
                                     string.Empty

@@ -729,6 +729,9 @@ namespace BIS.ERP.Views
                     _itemData[field.Name] = value ?? DBNull.Value;
                 }
 
+                if (!ValidateChartOfAccountsCatalogLinks())
+                    return;
+
                 DialogResult = true;
                 Close();
             }
@@ -796,6 +799,95 @@ namespace BIS.ERP.Views
             }
         }
 
+        private bool ValidateChartOfAccountsCatalogLinks()
+        {
+            if (!string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var accountCode = GetItemText("Код", "code");
+            if (!IsAccountWithoutCatalogLinks(accountCode))
+                return true;
+
+            var linkedFields = GetEditableFields()
+                .Where(IsChartOfAccountsCatalogLinkField)
+                .Where(field => TryGetBool(GetItemValue(field.Name), out var isLinked) && isLinked)
+                .Select(field => field.Name)
+                .ToList();
+
+            if (linkedFields.Count == 0)
+                return true;
+
+            MessageBox.Show(
+                $"Счета класса 6 и выше не могут быть связаны со справочниками.\n\n" +
+                $"Счет {accountCode} ведется сам по себе.\n" +
+                $"Отключите признаки связи: {string.Join(", ", linkedFields)}.",
+                "План счетов",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            return false;
+        }
+
+        private static bool IsChartOfAccountsCatalogLinkField(MetadataField field)
+        {
+            return field.DbColumnName is "link_organizations" or
+                   "link_employees" or
+                   "link_currencies" or
+                   "link_personal_accounts" or
+                   "link_materials" or
+                   "link_construction_objects" or
+                   "link_sites";
+        }
+
+        private static bool IsAccountWithoutCatalogLinks(string? accountCode)
+        {
+            var firstDigit = accountCode?.Trim().FirstOrDefault(char.IsDigit);
+            return firstDigit >= '6' && firstDigit <= '9';
+        }
+
+        private string GetItemText(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var value = GetItemValue(key);
+                if (value != null && value != DBNull.Value && !string.IsNullOrWhiteSpace(value.ToString()))
+                    return value.ToString()!.Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private object? GetItemValue(string key)
+        {
+            if (_itemData.TryGetValue(key, out var value))
+                return value;
+
+            var field = _catalog.Fields.FirstOrDefault(item =>
+                item.Name.Equals(key, StringComparison.OrdinalIgnoreCase) ||
+                item.DbColumnName.Equals(key, StringComparison.OrdinalIgnoreCase));
+
+            if (field != null && _itemData.TryGetValue(field.Name, out value))
+                return value;
+
+            return null;
+        }
+
+        private static bool TryGetBool(object? value, out bool result)
+        {
+            if (value is bool boolValue)
+            {
+                result = boolValue;
+                return true;
+            }
+
+            if (value == null || value == DBNull.Value)
+            {
+                result = false;
+                return false;
+            }
+
+            return bool.TryParse(value.ToString(), out result);
+        }
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
             DialogResult = false;

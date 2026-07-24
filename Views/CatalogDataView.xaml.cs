@@ -617,20 +617,88 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var escapedValue = EscapeRowFilterValue(searchText);
-            var filterParts = _dataTable.Columns
-                .Cast<DataColumn>()
-                .Where(column => !column.ColumnName.Equals("Id", StringComparison.OrdinalIgnoreCase))
-                .Select(column => $"CONVERT([{EscapeColumnName(column.ColumnName)}], 'System.String') LIKE '%{escapedValue}%'")
-                .ToList();
+            if (IsChartOfAccountsCatalog)
+            {
+                ApplyChartOfAccountsSearchFilter(searchText);
+            }
+            else
+            {
+                var escapedValue = EscapeRowFilterValue(searchText);
+                var filterParts = _dataTable.Columns
+                    .Cast<DataColumn>()
+                    .Where(column => !column.ColumnName.Equals("Id", StringComparison.OrdinalIgnoreCase))
+                    .Select(column => $"CONVERT([{EscapeColumnName(column.ColumnName)}], 'System.String') LIKE '%{escapedValue}%'")
+                    .ToList();
 
-            _dataTable.DefaultView.RowFilter = string.Join(" OR ", filterParts);
+                _dataTable.DefaultView.RowFilter = string.Join(" OR ", filterParts);
+            }
 
             StatusText.Text = IsChartOfAccountsCatalog
                 ? $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}"
                 : $"🔍 Найдено записей: {_dataTable.DefaultView.Count}";
         }
 
+        private void ApplyChartOfAccountsSearchFilter(string searchText)
+        {
+            const string markerColumn = "__search_match";
+            if (!_dataTable.Columns.Contains(markerColumn))
+                _dataTable.Columns.Add(markerColumn, typeof(bool));
+
+            foreach (DataRow row in _dataTable.Rows)
+                row[markerColumn] = MatchesChartOfAccountsSearch(row, searchText);
+
+            _dataTable.DefaultView.RowFilter = $"[{markerColumn}] = true";
+        }
+
+        private static bool MatchesChartOfAccountsSearch(DataRow row, string searchText)
+        {
+            var code = GetRowText(row, "Код", "code");
+            var name = GetRowText(row, "Наименование", "name");
+            var type = GetRowText(row, "Тип счета", "account_type");
+            var digitSearch = ExtractDigits(searchText);
+
+            if (!string.IsNullOrEmpty(digitSearch))
+                return ExtractDigits(code).StartsWith(digitSearch, StringComparison.Ordinal);
+
+            return name.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                   type.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                   code.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetRowText(DataRow row, params string[] columns)
+        {
+            foreach (var column in columns)
+            {
+                if (row.Table.Columns.Contains(column))
+                    return row[column]?.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static bool ContainsDigitsInOrder(string valueDigits, string searchDigits)
+        {
+            if (string.IsNullOrEmpty(searchDigits))
+                return true;
+
+            var searchIndex = 0;
+            foreach (var digit in valueDigits)
+            {
+                if (digit != searchDigits[searchIndex])
+                    continue;
+
+                searchIndex++;
+                if (searchIndex == searchDigits.Length)
+                    return true;
+            }
+
+            return false;
+        }
         private static string EscapeColumnName(string value) =>
             value.Replace("]", "]]");
 
