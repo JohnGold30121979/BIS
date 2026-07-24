@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using System;
 using System.Collections.Generic;
 using System.Windows;
@@ -28,8 +28,8 @@ namespace BIS.ERP.Views
                 ("Документ", posting.DocumentNumber),
                 ("Дата", posting.Date.ToString("dd.MM.yyyy HH:mm")),
                 ("Модуль", string.IsNullOrWhiteSpace(posting.ModuleName) ? "нет данных" : posting.ModuleName),
-                ("Дебет", FormatAccount(posting.DebitAccount, posting.DebitAccountName)),
-                ("Кредит", FormatAccount(posting.CreditAccount, posting.CreditAccountName)),
+                ("Дебет", FormatAccountCode(posting.DebitAccount, posting.DebitAccountName)),
+                ("Кредит", FormatAccountCode(posting.CreditAccount, posting.CreditAccountName)),
                 ("Операция", posting.Direction),
                 ("Сумма (сом)", posting.Amount.ToString("N2")),
                 ("Сумма (валюта)", posting.AmountCurrency > 0 ? posting.AmountCurrency.ToString("N2") : null),
@@ -108,15 +108,16 @@ namespace BIS.ERP.Views
             DetailsPanel.Children.Add(grid);
         }
 
-        private static string FormatAccount(string accountCode, string accountName)
+        private static string FormatAccountCode(string accountCode, string accountName)
         {
-            if (string.IsNullOrWhiteSpace(accountCode))
-                return accountName ?? string.Empty;
+            var value = string.IsNullOrWhiteSpace(accountCode) ? accountName : accountCode;
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
 
-            if (string.IsNullOrWhiteSpace(accountName))
-                return accountCode;
-
-            return $"{accountCode} - {accountName}";
+            var separatorIndex = value.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? value[..separatorIndex].Trim()
+                : value.Trim();
         }
 
         private void OnCloseClick(object sender, RoutedEventArgs e)

@@ -244,11 +244,25 @@ namespace BIS.ERP.Views
             if (string.IsNullOrWhiteSpace(value))
                 return string.Empty;
 
-            if (Guid.TryParse(value, out var id) && TryResolveReference(referenceCache, id, out var displayName, keys))
-                return displayName;
-
             var account = accountAnalytics.FindAccount(value);
-            return account?.DisplayName ?? value;
+            if (account != null)
+                return account.Code;
+
+            if (Guid.TryParse(value, out var id) && TryResolveReference(referenceCache, id, out var displayName, keys))
+                return ExtractAccountCode(displayName);
+
+            return ExtractAccountCode(value);
+        }
+
+        private static string ExtractAccountCode(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var separatorIndex = value.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? value[..separatorIndex].Trim()
+                : value.Trim();
         }
 
         private void UpdateAnalyticColumns(

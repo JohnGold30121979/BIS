@@ -3403,13 +3403,13 @@ namespace BIS.ERP.Services
             // Наш счет всегда идет в дебет платежного поручения.
             var ourAccountCode = await ResolvePaymentAccountCodeAsync("our_account_id", "Наш счет", "Дебет", "debit_account");
             if (string.IsNullOrWhiteSpace(ourAccountCode))
-                throw new Exception("Для платежного поручения укажите наш счет.");
+                throw new Exception("Для платежного поручения укажите счет дебета.");
 
             // Корреспондирующий счет всегда идет в кредит платежного поручения.
             var corrAccountCode = await ResolvePaymentAccountCodeAsync("correspondent_account", "Корр. счет", "Корр счет", "Коррсчет", "Кредит", "credit_account");
             if (string.IsNullOrWhiteSpace(corrAccountCode))
-                throw new Exception("Для платежного поручения укажите корреспондирующий счет.");
-            // Платежное поручение в этой системе: наш счет = дебет, корр. счет = кредит.
+                throw new Exception("Для платежного поручения укажите счет кредита.");
+            // Платежное поручение в этой системе: дебет и кредит берутся из одноименных полей.
             var debitAccount = ourAccountCode;
             var creditAccount = corrAccountCode;
             System.Diagnostics.Debug.WriteLine($"debitAccount: {debitAccount}, creditAccount: {creditAccount}");

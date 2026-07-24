@@ -369,7 +369,7 @@ namespace BIS.ERP.Views
                     var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
                     var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
                     if (Guid.TryParse(dialog.SelectedAccount["Id"].ToString(), out var accountId))
-                        applySelection(accountId, $"{accountCode} - {accountName}");
+                        applySelection(accountId, BuildAccountCodeDisplay(accountCode, accountName));
                 }
             }
             catch (Exception ex)
@@ -465,14 +465,14 @@ namespace BIS.ERP.Views
 
                 if (_selectedOurAccountId == Guid.Empty)
                 {
-                    MessageBox.Show("Укажите наш счет для формирования проводки.", "Проверка",
+                    MessageBox.Show("Укажите счет дебета для формирования проводки.", "Проверка",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
                 if (_selectedCorrAccountId == Guid.Empty)
                 {
-                    MessageBox.Show("Укажите корреспондирующий счет для формирования проводки.", "Проверка",
+                    MessageBox.Show("Укажите счет кредита для формирования проводки.", "Проверка",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
@@ -560,7 +560,7 @@ namespace BIS.ERP.Views
                 return;
 
             _selectedOurAccountId = account.Id;
-            OurAccountBox.Text = account.DisplayName;
+            OurAccountBox.Text = account.Code;
         }
 
         private void ApplySelectedCorrAccount(object accountValue)
@@ -570,7 +570,7 @@ namespace BIS.ERP.Views
                 return;
 
             _selectedCorrAccountId = account.Id;
-            CorrAccountBox.Text = account.DisplayName;
+            CorrAccountBox.Text = account.Code;
         }
 
         private void ApplySelectedPaymentClassification(object value)
@@ -646,6 +646,20 @@ namespace BIS.ERP.Views
                     "Справочник материалов",
                     showWhenNoAccountSelected: false,
                     showUnmappedFields: false));
+        }
+
+        private static string BuildAccountCodeDisplay(string? accountCode, string? accountName = null)
+        {
+            if (!string.IsNullOrWhiteSpace(accountCode))
+                return accountCode.Trim();
+
+            if (string.IsNullOrWhiteSpace(accountName))
+                return string.Empty;
+
+            var separatorIndex = accountName.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? accountName[..separatorIndex].Trim()
+                : accountName.Trim();
         }
 
         private static bool TryGetRecordValue(
