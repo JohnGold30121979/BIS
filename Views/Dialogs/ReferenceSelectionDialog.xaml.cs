@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,6 +10,7 @@ namespace BIS.ERP.Views
 {
     public partial class ReferenceSelectionDialog : Window
     {
+        private static readonly IValueConverter GridValueConverter = new ReferenceGridValueConverter();
         private readonly List<Dictionary<string, object>> _items;
         private readonly string _firstField;
         private readonly string _secondField;
@@ -22,16 +24,16 @@ namespace BIS.ERP.Views
             string secondField = null)
         {
             InitializeComponent();
-            _items = items;
+            _items = items ?? new List<Dictionary<string, object>>();
             _firstField = firstField;
             _secondField = secondField;
-            _filteredItems = items;
+            _filteredItems = _items;
 
             // Динамически создаем колонки
-            if (items != null && items.Count > 0)
+            if (_items.Count > 0)
             {
                 // Определяем все возможные ключи (поля)
-                var allKeys = items.SelectMany(d => d.Keys).Distinct().ToList();
+                var allKeys = _items.SelectMany(d => d.Keys).Distinct().ToList();
                 // Исключаем служебные поля
                 var excludeKeys = new[] { "CreatedAt", "UpdatedAt", "CreatedBy", "UpdatedBy", "IsDeleted" };
                 var displayKeys = allKeys.Where(k => !excludeKeys.Contains(k) && k != "Id").ToList();
@@ -65,7 +67,7 @@ namespace BIS.ERP.Views
                     var column = new DataGridTextColumn
                     {
                         Header = key,
-                        Binding = new Binding($"[{key}]") // Индексатор словаря
+                        Binding = CreateValueBinding(key)
                     };
                     ItemsGrid.Columns.Add(column);
                 }
@@ -83,7 +85,28 @@ namespace BIS.ERP.Views
             }
             else
             {
-                ItemsGrid.AutoGenerateColumns = true;
+                ItemsGrid.AutoGenerateColumns = false;
+                ItemsGrid.Columns.Clear();
+
+                foreach (var key in new[] { firstField, secondField }
+                             .Where(key => !string.IsNullOrWhiteSpace(key))
+                             .Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    ItemsGrid.Columns.Add(new DataGridTextColumn
+                    {
+                        Header = key,
+                        Binding = CreateValueBinding(key)
+                    });
+                }
+
+                if (ItemsGrid.Columns.Count == 0)
+                {
+                    ItemsGrid.Columns.Add(new DataGridTextColumn
+                    {
+                        Header = "Id",
+                        Binding = new Binding("[Id]")
+                    });
+                }
             }
 
             ItemsGrid.ItemsSource = _filteredItems;
@@ -136,6 +159,48 @@ namespace BIS.ERP.Views
         {
             DialogResult = false;
             Close();
+        }
+        private static Binding CreateValueBinding(string key)
+        {
+            return new Binding($"[{key}]")
+            {
+                Converter = GridValueConverter,
+                ConverterParameter = key
+            };
+        }
+
+        private sealed class ReferenceGridValueConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                if (IsActiveField(parameter?.ToString()) && TryGetBool(value, out var isActive))
+                    return isActive ? "Активен" : "Неактивен";
+
+                return value ?? string.Empty;
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return Binding.DoNothing;
+            }
+
+            private static bool IsActiveField(string? fieldName)
+            {
+                return fieldName?.Equals("Активен", StringComparison.OrdinalIgnoreCase) == true ||
+                       fieldName?.Equals("Активна", StringComparison.OrdinalIgnoreCase) == true ||
+                       fieldName?.Equals("is_active", StringComparison.OrdinalIgnoreCase) == true;
+            }
+
+            private static bool TryGetBool(object value, out bool result)
+            {
+                if (value is bool boolValue)
+                {
+                    result = boolValue;
+                    return true;
+                }
+
+                return bool.TryParse(value?.ToString(), out result);
+            }
         }
     }
 }

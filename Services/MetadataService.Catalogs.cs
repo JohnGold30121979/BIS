@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -1040,6 +1040,31 @@ namespace BIS.ERP.Services
             {
                 await AddPositionDataToTable(catalog);
                 System.Diagnostics.Debug.WriteLine("Добавлены начальные данные в справочник 'Должности'");
+            }
+        
+
+            await NormalizePositionCodesAsync(catalog);
+        }
+
+        private async Task NormalizePositionCodesAsync(MetadataObject catalog)
+        {
+            var legacyCodes = new[]
+            {
+                new { OldCode = "DIR", NewCode = "1" },
+                new { OldCode = "ACCT", NewCode = "2" },
+                new { OldCode = "ECON", NewCode = "3" }
+            };
+
+            foreach (var item in legacyCodes)
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{catalog.TableName}""
+                    SET ""code"" = '{item.NewCode}', ""UpdatedAt"" = NOW()
+                    WHERE ""code"" = '{item.OldCode}'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM ""{catalog.TableName}"" existing
+                          WHERE existing.""code"" = '{item.NewCode}'
+                      );");
             }
         }
 

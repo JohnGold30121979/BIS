@@ -34,6 +34,9 @@
         // Отображаемое подразделение (для совместимости)
         public string Department { get; set; } = string.Empty;
         
+        public string Gender { get; set; } = string.Empty;
+        public string MaritalStatus { get; set; } = string.Empty;
+        
         public DateTime? BirthDate { get; set; }
         public DateTime? HireDate { get; set; }
         public DateTime? TerminationDate { get; set; }

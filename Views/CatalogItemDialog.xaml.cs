@@ -509,7 +509,7 @@ namespace BIS.ERP.Views
                     var checkBox = new CheckBox { Content = "Да", Margin = new Thickness(0, 5, 0, 0) };
                     if (existingData != null && existingData.ContainsKey(field.Name))
                         checkBox.IsChecked = (bool?)existingData[field.Name];
-                    else if (_isNewRecord && IsOrganizationsActiveField(field))
+                    else if (_isNewRecord && ShouldDefaultActiveField(field))
                         checkBox.IsChecked = true;
                     return checkBox;
 
@@ -540,11 +540,21 @@ namespace BIS.ERP.Views
             textBox.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
         }
 
-        private bool IsOrganizationsActiveField(MetadataField field)
+        private bool ShouldDefaultActiveField(MetadataField field)
         {
-            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
-                   (string.Equals(field.Name, "Активен", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(field.DbColumnName, "is_active", StringComparison.OrdinalIgnoreCase));
+            if (!IsActiveField(field))
+                return false;
+
+            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(_catalog.Name, "Должности", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(_catalog.Name, "Подразделения", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsActiveField(MetadataField field)
+        {
+            return string.Equals(field.Name, "Активен", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.Name, "Активна", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.DbColumnName, "is_active", StringComparison.OrdinalIgnoreCase);
         }
         private async Task<string> GenerateNextCatalogCodeAsync(MetadataField codeField)
         {

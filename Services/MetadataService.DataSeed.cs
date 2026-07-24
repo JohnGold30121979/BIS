@@ -735,9 +735,9 @@ namespace BIS.ERP.Services
         {
             var positions = new[]
             {
-                new { code = "DIR", name = "Директор", description = "Генеральный директор", is_active = true },
-                new { code = "ACCT", name = "Бухгалтер", description = "Главный бухгалтер", is_active = true },
-                new { code = "ECON", name = "Экономист", description = "Экономист", is_active = true }
+                new { code = "1", name = "Директор", description = "Генеральный директор", is_active = true },
+                new { code = "2", name = "Бухгалтер", description = "Главный бухгалтер", is_active = true },
+                new { code = "3", name = "Экономист", description = "Экономист", is_active = true }
             };
 
             foreach (var position in positions)

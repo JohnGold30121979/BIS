@@ -1389,11 +1389,33 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
+            Name = "Пол",
+            DbColumnName = "gender",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 20,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Семейное положение",
+            DbColumnName = "marital_status",
+            FieldType = "String",
+            Length = 80,
+            IsRequired = false,
+            Order = 21,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
             Name = "Активен",
             DbColumnName = "is_active",
             FieldType = "Bool",
             IsRequired = false,
-            Order = 20,
+            Order = 22,
             MetadataObjectId = metadataObjectId
         }
       };
