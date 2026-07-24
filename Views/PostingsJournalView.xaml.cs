@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -73,33 +74,18 @@ namespace BIS.ERP.Views
         {
             var query = _allPostings.AsEnumerable();
 
-            if (!string.IsNullOrWhiteSpace(txtDebetFilter.Text))
-                query = query.Where(p => p.DebitAccount.Contains(txtDebetFilter.Text));
-
-            if (!string.IsNullOrWhiteSpace(txtCreditFilter.Text))
-                query = query.Where(p => p.CreditAccount.Contains(txtCreditFilter.Text));
-
-            if (!string.IsNullOrWhiteSpace(txtOrganizationFilter.Text))
-                query = query.Where(p => p.Organization != null && p.Organization.Contains(txtOrganizationFilter.Text));
-
-            if (!string.IsNullOrWhiteSpace(txtEmployeeFilter.Text))
-                query = query.Where(p => p.Employee != null && p.Employee.Contains(txtEmployeeFilter.Text));
-
-            if (!string.IsNullOrWhiteSpace(txtDocumentFilter.Text))
-                query = query.Where(p => p.DocumentNumber.Contains(txtDocumentFilter.Text));
-
-            if (!string.IsNullOrWhiteSpace(txtQuickSearch.Text))
-            {
-                var searchText = txtQuickSearch.Text.ToLower();
-                query = query.Where(p =>
-                    p.DebitAccount.ToLower().Contains(searchText) ||
-                    p.CreditAccount.ToLower().Contains(searchText) ||
-                    p.DocumentNumber.ToLower().Contains(searchText) ||
-                    (p.ModuleName?.ToLower().Contains(searchText) ?? false) ||
-                    (p.Note?.ToLower().Contains(searchText) ?? false) ||
-                    (p.Organization?.ToLower().Contains(searchText) ?? false) ||
-                    (p.Employee?.ToLower().Contains(searchText) ?? false));
-            }
+            query = ApplyColumnFilter(query, DateFilterBox.Text, p => p.Date.ToString("dd.MM.yyyy"));
+            query = ApplyColumnFilter(query, DocumentFilterBox.Text, p => p.DocumentNumber);
+            query = ApplyColumnFilter(query, DocumentTypeFilterBox.Text, p => p.DocumentType);
+            query = ApplyColumnFilter(query, ModuleFilterBox.Text, p => p.ModuleName);
+            query = ApplyColumnFilter(query, DebitFilterBox.Text, p => p.DebitAccount);
+            query = ApplyColumnFilter(query, CreditFilterBox.Text, p => p.CreditAccount);
+            query = ApplyColumnFilter(query, AmountFilterBox.Text, p => FormatAmount(p.Amount));
+            query = ApplyColumnFilter(query, AmountCurrencyFilterBox.Text, p => FormatAmount(p.AmountCurrency));
+            query = ApplyColumnFilter(query, CurrencyFilterBox.Text, p => p.Currency);
+            query = ApplyColumnFilter(query, OrganizationFilterBox.Text, p => p.Organization);
+            query = ApplyColumnFilter(query, EmployeeFilterBox.Text, p => p.Employee);
+            query = ApplyColumnFilter(query, NoteFilterBox.Text, p => p.Note);
 
             _filteredPostings.Clear();
             foreach (var item in query)
@@ -108,25 +94,45 @@ namespace BIS.ERP.Views
             }
 
             PostingsGrid.ItemsSource = _filteredPostings;
-
-
+            StatusText.Text = $"Показано {_filteredPostings.Count} проводок";
             TotalInfo.Text = $"Общая сумма: {_filteredPostings.Sum(p => p.Amount):N2} сом";
         }
 
-        private void OnQuickSearchChanged(object sender, TextChangedEventArgs e) => ApplyFilters();
+        private static IEnumerable<PostingViewModel> ApplyColumnFilter(
+            IEnumerable<PostingViewModel> query,
+            string filter,
+            Func<PostingViewModel, string?> valueSelector)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return query;
+
+            var filterText = filter.Trim();
+            return query.Where(posting => MatchesOrderedColumnFilter(valueSelector(posting), filterText));
+        }
+
+        private static bool MatchesOrderedColumnFilter(string? value, string filterText)
+        {
+            var valueText = (value ?? string.Empty).Trim();
+            if (valueText.Length == 0)
+                return false;
+
+            var filterDigits = ExtractDigits(filterText);
+            if (filterDigits.Length > 0)
+                return ExtractDigits(valueText).StartsWith(filterDigits, StringComparison.Ordinal);
+
+            return valueText.StartsWith(filterText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static string FormatAmount(decimal amount) => amount.ToString("N2");
+
+        private void OnColumnFilterChanged(object sender, TextChangedEventArgs e) => ApplyFilters();
 
         private async void OnRefreshClick(object sender, RoutedEventArgs e) => await LoadPostingsAsync();
-
-        private void OnClearFiltersClick(object sender, RoutedEventArgs e)
-        {
-            txtDebetFilter.Text = "";
-            txtCreditFilter.Text = "";
-            txtOrganizationFilter.Text = "";
-            txtEmployeeFilter.Text = "";
-            txtDocumentFilter.Text = "";
-            txtQuickSearch.Text = "";
-            ApplyFilters();
-        }
 
         private void OnTurnoversClick(object sender, RoutedEventArgs e)
         {
