@@ -90,6 +90,8 @@ namespace BIS.ERP.Views
                     _controls[field.Name] = inputControl;
                 }
 
+                AttachOrganizationNameSync();
+
                 System.Diagnostics.Debug.WriteLine($"=== BuildFieldsAsync COMPLETED ===");
             }
             catch (Exception ex)
@@ -100,6 +102,34 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void AttachOrganizationNameSync()
+        {
+            if (!string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!_controls.TryGetValue("Наименование", out var nameControl) ||
+                !_controls.TryGetValue("Полное наименование", out var fullNameControl) ||
+                nameControl is not TextBox nameBox ||
+                fullNameControl is not TextBox fullNameBox)
+                return;
+
+            var lastAutoValue = string.Empty;
+            if (string.IsNullOrWhiteSpace(fullNameBox.Text) && !string.IsNullOrWhiteSpace(nameBox.Text))
+            {
+                fullNameBox.Text = nameBox.Text;
+                lastAutoValue = nameBox.Text;
+            }
+
+            nameBox.TextChanged += (_, _) =>
+            {
+                if (!string.IsNullOrWhiteSpace(fullNameBox.Text) &&
+                    !string.Equals(fullNameBox.Text, lastAutoValue, StringComparison.Ordinal))
+                    return;
+
+                fullNameBox.Text = nameBox.Text;
+                lastAutoValue = nameBox.Text;
+            };
+        }
         private bool ShouldUseAccountPicker(MetadataField field)
         {
             return AccountAnalyticsRules.IsAccountSelectorField(field) &&
@@ -479,6 +509,8 @@ namespace BIS.ERP.Views
                     var checkBox = new CheckBox { Content = "Да", Margin = new Thickness(0, 5, 0, 0) };
                     if (existingData != null && existingData.ContainsKey(field.Name))
                         checkBox.IsChecked = (bool?)existingData[field.Name];
+                    else if (_isNewRecord && IsOrganizationsActiveField(field))
+                        checkBox.IsChecked = true;
                     return checkBox;
 
                 default: // String
@@ -508,6 +540,12 @@ namespace BIS.ERP.Views
             textBox.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
         }
 
+        private bool IsOrganizationsActiveField(MetadataField field)
+        {
+            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
+                   (string.Equals(field.Name, "Активен", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(field.DbColumnName, "is_active", StringComparison.OrdinalIgnoreCase));
+        }
         private async Task<string> GenerateNextCatalogCodeAsync(MetadataField codeField)
         {
             var rows = await _metadataService.GetCatalogDataAsync(_catalog.Id);

@@ -25,27 +25,27 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="AddButton" Content="➕ Добавить" 
+                            Width="125" Height="35" Margin="5,0,5,0"
+                            Background="#27AE60" Foreground="White" Click="OnAddClick"/>
                     <Button x:Name="EditButton" Content="✏️ Редактировать" 
-                            Width="110" Height="35" Margin="0,0,10,0"
+                            Width="117" Height="35" Margin="5,0,5,0"
                             Background="#3498DB" Foreground="White" Click="OnEditClick"
                             IsEnabled="False"/>
+                    <Button x:Name="RefreshButton" Content="🔄 Обновить" 
+                            Width="90" Height="35" Margin="5,0,5,0"
+                            Background="#3498DB" Foreground="White" Click="OnRefreshClick"/>
                     <Button x:Name="DeleteButton" Content="🗑️ Удалить" 
-                            Width="90" Height="35" Margin="0,0,10,0"
+                            Width="90" Height="35" Margin="5,0,5,0"
                             Background="#E74C3C" Foreground="White" Click="OnDeleteClick"
                             IsEnabled="False"/>
                     <Button x:Name="ExportButton" Content="📎 Экспорт" 
-                            Width="90" Height="35" Margin="0,0,10,0"
+                            Width="90" Height="35" Margin="5,0,5,0"
                             Background="#9B59B6" Foreground="White" Click="OnExportClick"/>
                     <Button x:Name="ImportDbfButton" Content="📥 Загрузить DBF"
-                            Width="130" Height="35" Margin="0,0,10,0"
+                            Width="130" Height="35" Margin="5,0,5,0"
                             Background="#16A085" Foreground="White" Click="OnImportDbfClick"
                             Visibility="Collapsed"/>
-                    <Button x:Name="AddButton" Content="➕ Добавить" 
-                            Width="100" Height="35" Margin="0,0,10,0"
-                            Background="#27AE60" Foreground="White" Click="OnAddClick"/>
-                    <Button x:Name="RefreshButton" Content="🔄 Обновить" 
-                            Width="90" Height="35"
-                            Background="#3498DB" Foreground="White" Click="OnRefreshClick"/>
                 </StackPanel>
             </Grid>
         </Border>
