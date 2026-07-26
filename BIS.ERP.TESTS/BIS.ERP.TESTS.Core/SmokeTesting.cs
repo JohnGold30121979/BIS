@@ -155,12 +155,67 @@ public abstract class SmokeTestScenarioBase : ISmokeTestScenario
                     result.Add(new(name, databaseName, connectionString));
             }
         }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InvalidCatalogName)
+        {
+            Report(progress, $"INFO: сконфигурированная база «{settings.DatabaseName}» не найдена. Пробуем перечислить доступные базы.");
+            await TryLoadDatabasesFromPostgresAsync(settings, result, progress, cancellationToken);
+        }
         catch (Exception ex)
         {
             Report(progress, $"INFO: список информационных баз не прочитан: {ex.Message}");
         }
 
         return result;
+    }
+
+    private static async Task TryLoadDatabasesFromPostgresAsync(
+        TestSettings settings,
+        List<DatabaseCandidate> result,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var fallbackDatabase = string.Equals(settings.DatabaseName, "postgres", StringComparison.OrdinalIgnoreCase)
+            ? "template1"
+            : "postgres";
+
+        try
+        {
+            await using var connection = new NpgsqlConnection(settings.ConnectionString(fallbackDatabase));
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+                SELECT datname
+                FROM pg_database
+                WHERE datistemplate = false
+                  AND datallowconn = true
+                ORDER BY datname;";
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var databaseName = reader.GetString(0);
+                var connectionString = settings.ConnectionString(databaseName);
+                var label = string.Equals(databaseName, settings.DatabaseName, StringComparison.OrdinalIgnoreCase)
+                    ? "Текущая база из appsettings"
+                    : databaseName;
+
+                if (result.All(item => !string.Equals(item.DatabaseName, databaseName, StringComparison.OrdinalIgnoreCase)))
+                    result.Add(new(label, databaseName, connectionString));
+            }
+
+            if (result.Count == 1)
+            {
+                Report(progress, "INFO: на сервере не найдено доступных баз данных.");
+            }
+            else
+            {
+                Report(progress, $"INFO: найдено баз данных: {result.Count - 1}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Report(progress, $"INFO: не удалось получить список баз через {fallbackDatabase}: {ex.Message}");
+        }
     }
 
     internal static async Task<bool> HasRequiredTableAsync(
@@ -278,6 +333,13 @@ public sealed class SqlQueryConsoleService
             }
 
             return new ConnectionCheckResult(true, "Подключение успешно.");
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InvalidCatalogName)
+        {
+            return new ConnectionCheckResult(
+                false,
+                $"База данных «{settings.DatabaseName}» не существует на сервере. " +
+                $"Проверьте имя базы и создайте её, либо используйте существующую (например, postgres или bis_master).");
         }
         catch (Exception ex)
         {

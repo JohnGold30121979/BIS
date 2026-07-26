@@ -1,7 +1,7 @@
 ﻿{
   "Host": "localhost",
   "Port": 5432,
-  "DatabaseName": "bis_OsOO_1_20260701_163902",
+  "DatabaseName": "bis_OsOO_1_20260725_080837",
   "Username": "postgres",
-  "Password": "postgres"
+  "Password": "qwerty123"
 }

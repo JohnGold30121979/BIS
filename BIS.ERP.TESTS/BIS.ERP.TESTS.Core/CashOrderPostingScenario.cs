@@ -9,7 +9,7 @@ namespace BIS.ERP.Testing;
 
 public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
 {
-    private const string TestDocumentPrefix = "TEST-CASH-ORDER-";
+    private const string TestDocumentPrefix = "";
     private const string CashOrderDocumentName = "Расходный/Приходный КО";
     private const string CashOrderReceiptKind = "Receipt";
     private const string CashOrderPaymentKind = "Payment";
@@ -89,7 +89,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderReceiptKind,
                 PostingDocumentType: CashOrderReceiptPostingType,
-                Number: $"{TestDocumentPrefix}{runPrefix}-01",
+                Number: $"{runPrefix}01",
                 Amount: 15000m,
                 CorrespondentAccount: "6010",
                 ExpectedDebit: "3010",
@@ -99,7 +99,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderPaymentKind,
                 PostingDocumentType: CashOrderPaymentPostingType,
-                Number: $"{TestDocumentPrefix}{runPrefix}-02",
+                Number: $"{runPrefix}02",
                 Amount: 8000m,
                 CorrespondentAccount: "4010",
                 ExpectedDebit: "4010",
@@ -109,7 +109,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderPaymentKind,
                 PostingDocumentType: CashOrderPaymentPostingType,
-                Number: $"{TestDocumentPrefix}{runPrefix}-03",
+                Number: $"{runPrefix}03",
                 Amount: 25000m,
                 CorrespondentAccount: "6810",
                 ExpectedDebit: "6810",
@@ -119,7 +119,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderPaymentKind,
                 PostingDocumentType: CashOrderPaymentPostingType,
-                Number: $"{TestDocumentPrefix}{runPrefix}-04",
+                Number: $"{runPrefix}04",
                 Amount: 5000m,
                 CorrespondentAccount: "6850",
                 ExpectedDebit: "6850",
