@@ -165,13 +165,17 @@ namespace BIS.ERP.Views
             if (selected == null)
                 return;
 
-            if (await PostingSourceDocumentOpener.TryOpenAsync(
-                    selected,
-                    null,
-                    Window.GetWindow(this),
-                    isReadOnly: true))
+            if (InvoiceDocumentTypes.IsSales(selected.DocumentType) ||
+                InvoiceDocumentTypes.IsPurchase(selected.DocumentType))
             {
-                return;
+                if (await PostingSourceDocumentOpener.TryOpenAsync(
+                        selected,
+                        null,
+                        Window.GetWindow(this),
+                        isReadOnly: true))
+                {
+                    return;
+                }
             }
 
             var dialog = new PostingDetailsDialog(selected);

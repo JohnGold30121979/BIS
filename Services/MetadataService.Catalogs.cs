@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -1161,6 +1161,7 @@ namespace BIS.ERP.Services
             }
 
             await _context.SaveChangesAsync();
+            await AddSupplyKindDataToTable(catalog);
         }
 
         // Справочник "Виды оплаты"
@@ -1195,8 +1196,14 @@ namespace BIS.ERP.Services
             }
         }
 
-        private async Task EnsurePaymentKindCatalogStructureAsync() =>
+        private async Task EnsurePaymentKindCatalogStructureAsync()
+        {
             await EnsureCatalogStructureAsync("Виды оплаты", GetPaymentKindFields);
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Виды оплаты");
+            if (catalog != null)
+                await AddPaymentKindDataToTable(catalog);
+        }
 
         // Справочник "Классификация платежей"
         private async Task CreatePaymentClassificationCatalog(MetadataConfiguration config)
@@ -1266,8 +1273,14 @@ namespace BIS.ERP.Services
             }
         }
 
-        private async Task EnsureDeliveryTypeCatalogStructureAsync() =>
+        private async Task EnsureDeliveryTypeCatalogStructureAsync()
+        {
             await EnsureCatalogStructureAsync("Типы поставки", GetDeliveryTypeFields);
+            var catalog = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Типы поставки");
+            if (catalog != null)
+                await AddDeliveryTypeDataToTable(catalog);
+        }
 
         private async Task EnsureCatalogStructureAsync(
             string catalogName,

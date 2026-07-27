@@ -561,9 +561,9 @@ namespace BIS.ERP.Services
 
             return invoice.PaymentKind?.Trim().ToUpperInvariant() switch
             {
-                "CASH" => "10",
-                "CARD" => "11",
-                "CHEQUE" => "30",
+                "1" or "CASH" => "10",
+                "2" or "CARD" => "11",
+                "4" or "CHEQUE" => "30",
                 _ => "20"
             };
         }
@@ -578,9 +578,8 @@ namespace BIS.ERP.Services
 
             return invoice.DeliveryKind?.Trim().ToUpperInvariant() switch
             {
-                "SERVICE" => "101",
-                "OTHER" => "299",
-                "SAMOVIVOZ" => "101",
+                "2" or "SERVICE" or "SAMOVIVOZ" => "101",
+                "3" or "OTHER" => "299",
                 _ => "100"
             };
         }
@@ -595,10 +594,9 @@ namespace BIS.ERP.Services
 
             return invoice.SupplyKind?.Trim().ToUpperInvariant() switch
             {
-                "EXEMPT" => "101",
-                "IMP" => "200",
-                "IMPORT" => "200",
-                "EXPORT" => "300",
+                "2" or "EXEMPT" or "WITHOUT_TAX" or "NON_TAXABLE_SUPPLY" or "EXEMPT_SUPPLY" or "ZERO_SUPPLY" => "101",
+                "3" or "IMP" or "IMPORT" => "200",
+                "4" or "EXPORT" => "300",
                 _ => "100"
             };
         }

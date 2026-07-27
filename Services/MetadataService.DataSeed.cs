@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -626,11 +626,13 @@ namespace BIS.ERP.Services
         private async Task AddSupplyKindDataToTable(MetadataObject catalog)
         {
             var tableName = catalog.TableName;
+            await NormalizeDeliveryKindSeedCodesAsync(tableName);
+
             var items = new[]
             {
-            new { code = "GOODS", name = "Поставка товаров", description = "Используется для стандартной товарной поставки ЭСФ.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
-            new { code = "SERVICE", name = "Работы / услуги", description = "Наблюдалось в FoxPro-выгрузках как код 101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
-            new { code = "OTHER", name = "Прочая поставка", description = "Наблюдалось в FoxPro-выгрузках как код 299.", esf_code = "299", is_active = true, sort_order = 3, is_default = false }
+            new { code = "1", name = "Поставка товаров", description = "Используется для стандартной товарной поставки ЭСФ.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
+            new { code = "2", name = "Работы / услуги", description = "Наблюдалось в FoxPro-выгрузках как код 101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
+            new { code = "3", name = "Прочая поставка", description = "Наблюдалось в FoxPro-выгрузках как код 299.", esf_code = "299", is_active = true, sort_order = 3, is_default = false }
             };
 
             foreach (var item in items)
@@ -655,18 +657,176 @@ namespace BIS.ERP.Services
                     System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
                 }
             }
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                DELETE FROM ""{tableName}""
+                WHERE ""code"" IN ('GOODS', 'SERVICE', 'OTHER', 'OPT', 'ROZN', 'IMP', 'EXPORT', 'REMNANTS_2009', 'ZERO_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'NON_TAXABLE_SUPPLY', 'STANDARD', 'EXPRESS', 'SAMOVIVOZ');");
         }
-        
+
+        private async Task NormalizeDeliveryKindSeedCodesAsync(string tableName)
+        {
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{tableName}"" AS source
+                    SET ""is_active"" = false,
+                        ""UpdatedAt"" = NOW()
+                    WHERE source.""code"" IN ('GOODS', 'SERVICE', 'OTHER')
+                    AND EXISTS (
+                        SELECT 1
+                        FROM ""{tableName}"" AS target
+                        WHERE target.""code"" = CASE source.""code""
+                            WHEN 'GOODS' THEN '1'
+                            WHEN 'SERVICE' THEN '2'
+                            WHEN 'OTHER' THEN '3'
+                            ELSE source.""code""
+                        END
+                    );
+
+                    UPDATE ""{tableName}"" AS source
+                    SET ""code"" = CASE source.""code""
+                            WHEN 'GOODS' THEN '1'
+                            WHEN 'SERVICE' THEN '2'
+                            WHEN 'OTHER' THEN '3'
+                            ELSE source.""code""
+                        END,
+                        ""UpdatedAt"" = NOW()
+                    WHERE source.""code"" IN ('GOODS', 'SERVICE', 'OTHER')
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM ""{tableName}"" AS target
+                        WHERE target.""code"" = CASE source.""code""
+                            WHEN 'GOODS' THEN '1'
+                            WHEN 'SERVICE' THEN '2'
+                            WHEN 'OTHER' THEN '3'
+                            ELSE source.""code""
+                        END
+                    );
+
+                    DO $$
+                    BEGIN
+                        IF to_regclass('public.doc_sales_invoice') IS NOT NULL THEN
+                            UPDATE doc_sales_invoice
+                            SET delivery_kind = CASE delivery_kind
+                                    WHEN 'GOODS' THEN '1'
+                                    WHEN 'SERVICE' THEN '2'
+                                    WHEN 'OTHER' THEN '3'
+                                    WHEN 'SAMOVIVOZ' THEN '2'
+                                    ELSE '1'
+                                END,
+                                ""UpdatedAt"" = NOW()
+                            WHERE delivery_kind IN ('GOODS', 'SERVICE', 'OTHER', 'OPT', 'ROZN', 'IMP', 'EXPORT', 'REMNANTS_2009', 'ZERO_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'NON_TAXABLE_SUPPLY', 'STANDARD', 'EXPRESS', 'SAMOVIVOZ', 'TAXABLE');
+                        END IF;
+
+                        IF to_regclass('public.doc_purchase_invoice') IS NOT NULL THEN
+                            UPDATE doc_purchase_invoice
+                            SET delivery_kind = CASE delivery_kind
+                                    WHEN 'GOODS' THEN '1'
+                                    WHEN 'SERVICE' THEN '2'
+                                    WHEN 'OTHER' THEN '3'
+                                    WHEN 'SAMOVIVOZ' THEN '2'
+                                    ELSE '1'
+                                END,
+                                ""UpdatedAt"" = NOW()
+                            WHERE delivery_kind IN ('GOODS', 'SERVICE', 'OTHER', 'OPT', 'ROZN', 'IMP', 'EXPORT', 'REMNANTS_2009', 'ZERO_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'NON_TAXABLE_SUPPLY', 'STANDARD', 'EXPRESS', 'SAMOVIVOZ', 'TAXABLE');
+                        END IF;
+                    END $$;");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника 'Виды поставки': {ex.Message}");
+            }
+        }
+                private async Task NormalizePaymentKindSeedCodesAsync(string tableName)
+        {
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{tableName}"" AS source
+                    SET ""is_active"" = false,
+                        ""UpdatedAt"" = NOW()
+                    WHERE source.""code"" IN ('CASH', 'CARD', 'TRANSFER', 'CHEQUE')
+                    AND EXISTS (
+                        SELECT 1
+                        FROM ""{tableName}"" AS target
+                        WHERE target.""code"" = CASE source.""code""
+                            WHEN 'CASH' THEN '1'
+                            WHEN 'CARD' THEN '2'
+                            WHEN 'TRANSFER' THEN '3'
+                            WHEN 'CHEQUE' THEN '4'
+                            ELSE source.""code""
+                        END
+                    );
+
+                    UPDATE ""{tableName}"" AS source
+                    SET ""code"" = CASE source.""code""
+                            WHEN 'CASH' THEN '1'
+                            WHEN 'CARD' THEN '2'
+                            WHEN 'TRANSFER' THEN '3'
+                            WHEN 'CHEQUE' THEN '4'
+                            ELSE source.""code""
+                        END,
+                        ""UpdatedAt"" = NOW()
+                    WHERE source.""code"" IN ('CASH', 'CARD', 'TRANSFER', 'CHEQUE')
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM ""{tableName}"" AS target
+                        WHERE target.""code"" = CASE source.""code""
+                            WHEN 'CASH' THEN '1'
+                            WHEN 'CARD' THEN '2'
+                            WHEN 'TRANSFER' THEN '3'
+                            WHEN 'CHEQUE' THEN '4'
+                            ELSE source.""code""
+                        END
+                    );
+
+                    DO $$
+                    BEGIN
+                        IF to_regclass('public.doc_sales_invoice') IS NOT NULL THEN
+                            UPDATE doc_sales_invoice
+                            SET payment_kind = CASE payment_kind
+                                    WHEN 'CASH' THEN '1'
+                                    WHEN 'CARD' THEN '2'
+                                    WHEN 'TRANSFER' THEN '3'
+                                    WHEN 'CHEQUE' THEN '4'
+                                    ELSE payment_kind
+                                END,
+                                ""UpdatedAt"" = NOW()
+                            WHERE payment_kind IN ('CASH', 'CARD', 'TRANSFER', 'CHEQUE');
+                        END IF;
+
+                        IF to_regclass('public.doc_purchase_invoice') IS NOT NULL THEN
+                            UPDATE doc_purchase_invoice
+                            SET payment_kind = CASE payment_kind
+                                    WHEN 'CASH' THEN '1'
+                                    WHEN 'CARD' THEN '2'
+                                    WHEN 'TRANSFER' THEN '3'
+                                    WHEN 'CHEQUE' THEN '4'
+                                    ELSE payment_kind
+                                END,
+                                ""UpdatedAt"" = NOW()
+                            WHERE payment_kind IN ('CASH', 'CARD', 'TRANSFER', 'CHEQUE');
+                        END IF;
+                    END $$;");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника 'Виды оплаты': {ex.Message}");
+            }
+        }
+
         // Начальные данные для справочника "Виды оплаты"       
         private async Task AddPaymentKindDataToTable(MetadataObject catalog)
         {
             var tableName = catalog.TableName;
+            await NormalizePaymentKindSeedCodesAsync(tableName);
+
             var items = new[]
             {
-            new { code = "CASH", name = "Наличные", rate = 0m, esf_code = "10", is_active = true, is_default = false },
-            new { code = "CARD", name = "Банковская карта", rate = 0m, esf_code = "11", is_active = true, is_default = false },
-            new { code = "TRANSFER", name = "Безналичный перевод", rate = 0m, esf_code = "20", is_active = true, is_default = true },
-            new { code = "CHEQUE", name = "Чек", rate = 0m, esf_code = "30", is_active = true, is_default = false }
+            new { code = "1", name = "Наличные", rate = 0m, esf_code = "10", is_active = true, is_default = false },
+            new { code = "2", name = "Банковская карта", rate = 0m, esf_code = "11", is_active = true, is_default = false },
+            new { code = "3", name = "Безналичный перевод", rate = 0m, esf_code = "20", is_active = true, is_default = true },
+            new { code = "4", name = "Чек", rate = 0m, esf_code = "30", is_active = true, is_default = false }
             };
 
             foreach (var item in items)
@@ -690,18 +850,24 @@ namespace BIS.ERP.Services
                     System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
                 }
             }
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}""
+                SET ""is_active"" = false, ""UpdatedAt"" = NOW()
+                WHERE ""code"" IN ('CASH', 'CARD', 'TRANSFER', 'CHEQUE');");
         }
-      
-        // Начальные данные для справочника "Типы поставки"
+              // Начальные данные для справочника "Типы поставки"
         private async Task AddDeliveryTypeDataToTable(MetadataObject catalog)
         {
             var tableName = catalog.TableName;
+            await NormalizeDeliveryTypeSeedCodesAsync(tableName);
+
             var items = new[]
             {
-            new { code = "TAXABLE", name = "Облагаемая поставка", description = "FoxPro/XML: vatDeliveryTypeCode=100.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
-            new { code = "EXEMPT", name = "Необлагаемая / без НДС", description = "FoxPro/XML: vatDeliveryTypeCode=101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
-            new { code = "IMPORT", name = "Импорт", description = "Резерв под vatDeliveryTypeCode=200.", esf_code = "200", is_active = true, sort_order = 3, is_default = false },
-            new { code = "EXPORT", name = "Экспорт", description = "Резерв под vatDeliveryTypeCode=300.", esf_code = "300", is_active = true, sort_order = 4, is_default = false }
+                new { code = "1", name = "Облагаемая поставка", description = "FoxPro/XML: vatDeliveryTypeCode=100.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
+                new { code = "2", name = "Необлагаемая / без НДС", description = "FoxPro/XML: vatDeliveryTypeCode=101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
+                new { code = "3", name = "Импорт", description = "Резерв под vatDeliveryTypeCode=200.", esf_code = "200", is_active = true, sort_order = 3, is_default = false },
+                new { code = "4", name = "Экспорт", description = "Резерв под vatDeliveryTypeCode=300.", esf_code = "300", is_active = true, sort_order = 4, is_default = false }
             };
 
             foreach (var item in items)
@@ -725,6 +891,74 @@ namespace BIS.ERP.Services
                 {
                     System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
                 }
+            }
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                DELETE FROM ""{tableName}""
+                WHERE ""code"" IN ('TAXABLE', 'EXEMPT', 'IMPORT', 'EXPORT', 'IMP', 'WITHOUT_TAX', 'NON_TAXABLE_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'ZERO_SUPPLY', 'STANDARD', 'EXPRESS', 'GOODS', 'SERVICE', 'OTHER', 'SAMOVIVOZ', 'OPT', 'ROZN', 'REMNANTS_2009');
+
+                UPDATE ""{tableName}""
+                SET ""is_default"" = true, ""UpdatedAt"" = NOW()
+                WHERE ""code"" = '1'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM ""{tableName}""
+                      WHERE COALESCE(""is_active"", false) = true
+                        AND COALESCE(""is_default"", false) = true
+                  );");
+        }
+
+        private async Task NormalizeDeliveryTypeSeedCodesAsync(string tableName)
+        {
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    DO $$
+                    BEGIN
+                        IF to_regclass('public.doc_sales_invoice') IS NOT NULL THEN
+                            UPDATE doc_sales_invoice
+                            SET supply_kind = CASE UPPER(supply_kind)
+                                    WHEN 'EXEMPT' THEN '2'
+                                    WHEN 'WITHOUT_TAX' THEN '2'
+                                    WHEN 'NON_TAXABLE_SUPPLY' THEN '2'
+                                    WHEN 'EXEMPT_SUPPLY' THEN '2'
+                                    WHEN 'ZERO_SUPPLY' THEN '2'
+                                    WHEN 'IMP' THEN '3'
+                                    WHEN 'IMPORT' THEN '3'
+                                    WHEN 'EXPORT' THEN '4'
+                                    ELSE '1'
+                                END,
+                                ""UpdatedAt"" = NOW()
+                            WHERE supply_kind IS NOT NULL
+                              AND UPPER(supply_kind) IN ('TAXABLE', 'EXEMPT', 'IMPORT', 'EXPORT', 'IMP', 'WITHOUT_TAX', 'NON_TAXABLE_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'ZERO_SUPPLY', 'STANDARD', 'EXPRESS', 'GOODS', 'SERVICE', 'OTHER', 'SAMOVIVOZ', 'OPT', 'ROZN', 'REMNANTS_2009');
+                        END IF;
+
+                        IF to_regclass('public.doc_purchase_invoice') IS NOT NULL THEN
+                            UPDATE doc_purchase_invoice
+                            SET supply_kind = CASE UPPER(supply_kind)
+                                    WHEN 'EXEMPT' THEN '2'
+                                    WHEN 'WITHOUT_TAX' THEN '2'
+                                    WHEN 'NON_TAXABLE_SUPPLY' THEN '2'
+                                    WHEN 'EXEMPT_SUPPLY' THEN '2'
+                                    WHEN 'ZERO_SUPPLY' THEN '2'
+                                    WHEN 'IMP' THEN '3'
+                                    WHEN 'IMPORT' THEN '3'
+                                    WHEN 'EXPORT' THEN '4'
+                                    ELSE '1'
+                                END,
+                                ""UpdatedAt"" = NOW()
+                            WHERE supply_kind IS NOT NULL
+                              AND UPPER(supply_kind) IN ('TAXABLE', 'EXEMPT', 'IMPORT', 'EXPORT', 'IMP', 'WITHOUT_TAX', 'NON_TAXABLE_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'ZERO_SUPPLY', 'STANDARD', 'EXPRESS', 'GOODS', 'SERVICE', 'OTHER', 'SAMOVIVOZ', 'OPT', 'ROZN', 'REMNANTS_2009');
+                        END IF;
+                    END $$;
+
+                    UPDATE ""{tableName}""
+                    SET ""is_default"" = false, ""UpdatedAt"" = NOW()
+                    WHERE ""code"" IN ('TAXABLE', 'EXEMPT', 'IMPORT', 'EXPORT', 'IMP', 'WITHOUT_TAX', 'NON_TAXABLE_SUPPLY', 'EXEMPT_SUPPLY', 'TAXABLE_SUPPLY', 'ZERO_SUPPLY', 'STANDARD', 'EXPRESS', 'GOODS', 'SERVICE', 'OTHER', 'SAMOVIVOZ', 'OPT', 'ROZN', 'REMNANTS_2009');");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника 'Типы поставки': {ex.Message}");
             }
         }
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -35,6 +35,7 @@ namespace BIS.ERP.Views
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            await new InvoiceMetadataSeedService(context).EnsureAsync();
             _invoiceService = new InvoiceService(context);
             _invoiceService.Configure(_documentMetadata);
             await _invoiceService.EnsureSchemaAsync();

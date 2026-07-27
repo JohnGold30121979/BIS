@@ -31,8 +31,7 @@ namespace BIS.ERP.Views.Dialogs
         private bool _synchronizingHeaderTaxSelection;
         private bool _isInvoiceEditingEnabled = true;
         private bool _isApplyingCurrencyValues;
-        private const string DefaultSalesCounterpartyAccount = "14100000";
-        private const string DefaultPurchaseCounterpartyAccount = "31100000";
+        private bool _isRestoringNormalWindowState;
         private const string DefaultSalesLineAccount = "61100000";
         private const string DefaultPurchaseLineAccount = "16100000";
 
@@ -74,9 +73,75 @@ namespace BIS.ERP.Views.Dialogs
                 ? $"Редактирование: {document.Name}"
                 : $"Новый документ: {document.Name}";
             LinesGrid.ItemsSource = _lines;
+            StateChanged += OnWindowStateChanged;
             Loaded += async (_, _) => await InitializeAsync();
         }
 
+
+        private void OnWindowStateChanged(object? sender, EventArgs e)
+        {
+            if (_isRestoringNormalWindowState || WindowState != WindowState.Maximized)
+                return;
+
+            var restoreWidth = RestoreBounds.Width > 0 && !double.IsNaN(RestoreBounds.Width)
+                ? RestoreBounds.Width
+                : Width;
+            var restoreHeight = RestoreBounds.Height > 0 && !double.IsNaN(RestoreBounds.Height)
+                ? RestoreBounds.Height
+                : Height;
+
+            try
+            {
+                _isRestoringNormalWindowState = true;
+                WindowState = WindowState.Normal;
+                Width = Math.Max(MinWidth, restoreWidth);
+                Height = Math.Max(MinHeight, restoreHeight);
+                CenterWindowInCurrentContext();
+            }
+            finally
+            {
+                _isRestoringNormalWindowState = false;
+            }
+        }
+
+        private void CenterWindowInCurrentContext()
+        {
+            var workArea = SystemParameters.WorkArea;
+            var windowWidth = Width > 0 && !double.IsNaN(Width) ? Width : ActualWidth;
+            var windowHeight = Height > 0 && !double.IsNaN(Height) ? Height : ActualHeight;
+            if (windowWidth <= 0 || double.IsNaN(windowWidth))
+                windowWidth = MinWidth;
+            if (windowHeight <= 0 || double.IsNaN(windowHeight))
+                windowHeight = MinHeight;
+
+            var left = workArea.Left + (workArea.Width - windowWidth) / 2;
+            var top = workArea.Top + (workArea.Height - windowHeight) / 2;
+
+            if (Owner is { IsVisible: true } && Owner.WindowState != WindowState.Maximized)
+            {
+                var ownerWidth = Owner.ActualWidth > 0 && !double.IsNaN(Owner.ActualWidth) ? Owner.ActualWidth : Owner.Width;
+                var ownerHeight = Owner.ActualHeight > 0 && !double.IsNaN(Owner.ActualHeight) ? Owner.ActualHeight : Owner.Height;
+                if (ownerWidth > 0 && ownerHeight > 0 && !double.IsNaN(Owner.Left) && !double.IsNaN(Owner.Top))
+                {
+                    left = Owner.Left + (ownerWidth - windowWidth) / 2;
+                    top = Owner.Top + (ownerHeight - windowHeight) / 2;
+                }
+            }
+
+            Left = ClampToWorkArea(left, workArea.Left, workArea.Right - windowWidth);
+            Top = ClampToWorkArea(top, workArea.Top, workArea.Bottom - windowHeight);
+        }
+
+        private static double ClampToWorkArea(double value, double min, double max)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                return min;
+
+            if (max < min)
+                return min;
+
+            return Math.Min(Math.Max(value, min), max);
+        }
         private async Task InitializeAsync()
         {
             try
@@ -190,12 +255,11 @@ namespace BIS.ERP.Views.Dialogs
                     DatePicker.SelectedDate = DateTime.Today;
                     NumberBox.Text = await _invoiceService.GenerateDocumentNumberAsync();
                     ModuleCodeBox.Text = assignedModuleName;
-                    SetHeaderAccount(GetDefaultHeaderAccountCode());
-                    SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TRANSFER");
-                    SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "GOODS");
+                    SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "3");
+                    SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "1");
                     SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
                     SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
-                    SelectDefaultReference(SupplyKindCombo, SupplyKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "TAXABLE");
+                    SelectDefaultReference(SupplyKindCombo, SupplyKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "1");
                 }
 
                 RecalculateTotals();
@@ -425,16 +489,6 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
-        private string GetDefaultHeaderAccountCode()
-        {
-            var preferred = InvoiceDocumentTypes.IsSales(_document.Name)
-                ? DefaultSalesCounterpartyAccount
-                : DefaultPurchaseCounterpartyAccount;
-            return AccountItems.Any(item => item.Value.Equals(preferred, StringComparison.OrdinalIgnoreCase))
-                ? preferred
-                : AccountItems.FirstOrDefault()?.Value ?? preferred;
-        }
-
         private string GetDefaultLineAccountCode()
         {
             var preferred = InvoiceDocumentTypes.IsSales(_document.Name)
@@ -562,11 +616,14 @@ namespace BIS.ERP.Views.Dialogs
         {
             return storedValue?.Trim().ToUpperInvariant() switch
             {
-                "GOODS" or "SERVICE" or "OTHER" => storedValue.Trim().ToUpperInvariant(),
+                "1" or "2" or "3" => storedValue.Trim(),
+                "GOODS" => "1",
+                "SERVICE" or "SAMOVIVOZ" => "2",
+                "OTHER" => "3",
                 "OPT" or "ROZN" or "IMP" or "EXPORT" or
                 "REMNANTS_2009" or "ZERO_SUPPLY" or "EXEMPT_SUPPLY" or
                 "TAXABLE_SUPPLY" or "NON_TAXABLE_SUPPLY" or
-                "STANDARD" or "EXPRESS" or "SAMOVIVOZ" or "TAXABLE" => "GOODS",
+                "STANDARD" or "EXPRESS" or "TAXABLE" => "1",
                 _ => storedValue
             };
         }
@@ -575,10 +632,12 @@ namespace BIS.ERP.Views.Dialogs
         {
             return storedValue?.Trim().ToUpperInvariant() switch
             {
-                "TAXABLE" or "EXEMPT" or "IMPORT" or "EXPORT" => storedValue.Trim().ToUpperInvariant(),
-                "IMP" => "IMPORT",
-                "WITHOUT_TAX" or "NON_TAXABLE_SUPPLY" or "EXEMPT_SUPPLY" => "EXEMPT",
-                _ => string.IsNullOrWhiteSpace(storedValue) ? string.Empty : "TAXABLE"
+                "1" or "2" or "3" or "4" => storedValue.Trim(),
+                "EXEMPT" or "WITHOUT_TAX" or "NON_TAXABLE_SUPPLY" or "EXEMPT_SUPPLY" or "ZERO_SUPPLY" => "2",
+                "IMP" or "IMPORT" => "3",
+                "EXPORT" => "4",
+                "TAXABLE" or "TAXABLE_SUPPLY" or "STANDARD" or "EXPRESS" or "GOODS" or "SERVICE" or "OTHER" or "SAMOVIVOZ" or "OPT" or "ROZN" or "REMNANTS_2009" => "1",
+                _ => string.IsNullOrWhiteSpace(storedValue) ? string.Empty : "1"
             };
         }
 

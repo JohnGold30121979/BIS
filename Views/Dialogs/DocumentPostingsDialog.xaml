@@ -17,10 +17,8 @@
                   IsReadOnly="True" AlternatingRowBackground="#F5F5F5">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="90"/>
-                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="90"/>
-                <DataGridTextColumn Header="Расшифровка дебета" Binding="{Binding DebitAccountName}" Width="180"/>
-                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="90"/>
-                <DataGridTextColumn Header="Расшифровка кредита" Binding="{Binding CreditAccountName}" Width="180"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="120"/>
+                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="120"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, StringFormat=N2}" Width="100"/>
                 <DataGridTextColumn Header="Содержание" Binding="{Binding Note}" Width="*"/>
             </DataGrid.Columns>

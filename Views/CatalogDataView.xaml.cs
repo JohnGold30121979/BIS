@@ -78,6 +78,8 @@ namespace BIS.ERP.Views
                 ProgressText.Text = "⏳ Загрузка...";
 
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+                if (IsAdvancePaymentsCatalog)
+                    data = SortRowsByNumericCode(data).ToList();
 
                 // Загружаем все справочники один раз
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
@@ -142,7 +144,7 @@ namespace BIS.ERP.Views
                 {
                     Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
-                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 125 : 150,
+                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -150,7 +152,7 @@ namespace BIS.ERP.Views
                 {
                     Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
-                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 125 : 150,
+                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -171,6 +173,31 @@ namespace BIS.ERP.Views
             }
         }
 
+
+        private static IEnumerable<Dictionary<string, object>> SortRowsByNumericCode(IEnumerable<Dictionary<string, object>> rows)
+        {
+            return rows
+                .OrderBy(row => TryGetNumericCode(row, out var _) ? 0 : 1)
+                .ThenBy(row => TryGetNumericCode(row, out var code) ? code : int.MaxValue)
+                .ThenBy(row => GetCodeText(row), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool TryGetNumericCode(IReadOnlyDictionary<string, object> row, out int code)
+        {
+            code = 0;
+            return int.TryParse(GetCodeText(row), NumberStyles.Integer, CultureInfo.InvariantCulture, out code);
+        }
+
+        private static string GetCodeText(IReadOnlyDictionary<string, object> row)
+        {
+            if (row.TryGetValue("Код", out var localized) && localized != null && localized != DBNull.Value)
+                return localized.ToString()?.Trim() ?? string.Empty;
+
+            if (row.TryGetValue("code", out var raw) && raw != null && raw != DBNull.Value)
+                return raw.ToString()?.Trim() ?? string.Empty;
+
+            return string.Empty;
+        }
         /// <summary>
         /// Универсальная загрузка данных для всех Reference полей
         /// </summary>
@@ -421,19 +448,19 @@ namespace BIS.ERP.Views
             {
                 var advanceWidth = field.Name switch
                 {
-                    "Код" => 70,
-                    "Орг" => 55,
-                    "Таб №" => 60,
-                    "Валюта" => 70,
-                    "Остаток брать из модуля" => 90,
-                    "Дебет" => 130,
-                    "Кредит" => 130,
-                    "Участвует во взаиморасчетах" => 85,
-                    "Формировать проводки авансовых платежей" => 85,
-                    "Участвует во внутренних взаиморасчетах" => 90,
-                    "Вид расчета" => 260,
-                    "Активен" => 70,
-                    _ => field.FieldType == "Bool" ? 65 : 120
+                    "Код" => 56,
+                    "Орг" => 48,
+                    "Таб №" => 54,
+                    "Валюта" => 62,
+                    "Остаток брать из модуля" => 78,
+                    "Дебет" => 112,
+                    "Кредит" => 112,
+                    "Участвует во взаиморасчетах" => 74,
+                    "Формировать проводки авансовых платежей" => 74,
+                    "Участвует во внутренних взаиморасчетах" => 78,
+                    "Вид расчета" => 220,
+                    "Активен" => 62,
+                    _ => field.FieldType == "Bool" ? 56 : 105
                 };
 
                 return new DataGridLength(advanceWidth, DataGridLengthUnitType.Pixel);
@@ -444,26 +471,26 @@ namespace BIS.ERP.Views
 
             var width = field.Name switch
             {
-                "Код" => 78,
-                "Наименование" => 185,
-                "Тип счета" => 96,
-                "Описание" => 150,
-                "Уровень" => 48,
-                "Активен" => 58,
-                "Закрывает модуль" => 78,
-                "Группа аналитических статей" => 92,
-                "Признак печати" => 72,
-                "Сохранять остатки" => 82,
-                "Связь с организациями" => 48,
-                "Связь со списочным составом" => 48,
-                "Связь с валютами" => 48,
-                "Связь с лицевыми счетами" => 56,
-                "Связь с материалами" => 56,
-                "Связь с объектами строительства" => 62,
-                "Связь с участками" => 52,
-                "Код налога" => 58,
-                "Валюта счета" => 92,
-                _ => field.FieldType == "Bool" ? 48 : 96
+                "Код" => 70,
+                "Наименование" => 165,
+                "Тип счета" => 86,
+                "Описание" => 130,
+                "Уровень" => 42,
+                "Активен" => 52,
+                "Закрывает модуль" => 70,
+                "Группа аналитических статей" => 82,
+                "Признак печати" => 64,
+                "Сохранять остатки" => 72,
+                "Связь с организациями" => 42,
+                "Связь со списочным составом" => 42,
+                "Связь с валютами" => 42,
+                "Связь с лицевыми счетами" => 48,
+                "Связь с материалами" => 48,
+                "Связь с объектами строительства" => 54,
+                "Связь с участками" => 46,
+                "Код налога" => 46,
+                "Валюта счета" => 82,
+                _ => field.FieldType == "Bool" ? 42 : 86
             };
 
             return new DataGridLength(width, DataGridLengthUnitType.Pixel);
@@ -472,26 +499,26 @@ namespace BIS.ERP.Views
         private double GetColumnMinWidth(MetadataField field)
         {
             if (IsAdvancePaymentsCatalog)
-                return field.FieldType == "Bool" ? 45 : 70;
+                return field.FieldType == "Bool" ? 40 : 62;
 
             if (!IsChartOfAccountsCatalog)
-                return 100;
+                return 88;
 
             return field.Name switch
             {
-                "Код" => 62,
-                "Наименование" => 135,
-                "Тип счета" => 80,
-                "Описание" => 105,
-                "Уровень" => 40,
-                "Активен" => 50,
-                "Закрывает модуль" => 68,
-                "Группа аналитических статей" => 80,
-                "Признак печати" => 62,
-                "Сохранять остатки" => 68,
-                "Код налога" => 52,
-                "Валюта счета" => 78,
-                _ => field.FieldType == "Bool" ? 40 : 56
+                "Код" => 56,
+                "Наименование" => 118,
+                "Тип счета" => 72,
+                "Описание" => 92,
+                "Уровень" => 36,
+                "Активен" => 44,
+                "Закрывает модуль" => 60,
+                "Группа аналитических статей" => 70,
+                "Признак печати" => 54,
+                "Сохранять остатки" => 60,
+                "Код налога" => 46,
+                "Валюта счета" => 68,
+                _ => field.FieldType == "Bool" ? 36 : 50
             };
         }
 

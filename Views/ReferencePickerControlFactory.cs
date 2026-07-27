@@ -66,7 +66,7 @@ namespace BIS.ERP.Views
 
             var selectButton = CreateActionButton("?", "Выбрать из справочника");
             var addButton = CreateActionButton("+", "Добавить запись в справочник");
-            var editButton = CreateActionButton("Изм.", "Изменить выбранную запись");
+            var editButton = CreateActionButton("Изм", "Изменить выбранную запись");
 
             Grid.SetColumn(selectButton, 1);
             Grid.SetColumn(addButton, 2);
@@ -260,14 +260,17 @@ namespace BIS.ERP.Views
             };
         }
 
-        private static Button CreateActionButton(string content, string tooltip)
+        private static Button CreateActionButton(string content, string tooltip, double height = 30)
         {
             return new Button
             {
                 Content = content,
-                Width = content.Length > 1 ? 46 : 34,
-                Height = 30,
-                Margin = new Thickness(5, 0, 0, 0),
+                Width = content.Length > 1 ? 56 : 34,
+                Height = height,
+                Margin = new Thickness(6, 0, 0, 0),
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
                 ToolTip = tooltip
             };
         }
@@ -322,9 +325,10 @@ namespace BIS.ERP.Views
             Grid.SetColumnSpan(comboBox, 1);
             wrapper.Children.Add(comboBox);
 
-            var selectButton = CreateActionButton("?", "Выбрать из справочника");
-            var addButton = CreateActionButton("+", "Добавить запись в справочник");
-            var editButton = CreateActionButton("Изм.", "Изменить выбранную запись");
+            var buttonHeight = !double.IsNaN(comboBox.Height) && comboBox.Height > 0 ? comboBox.Height : 30;
+            var selectButton = CreateActionButton("?", "Выбрать из справочника", buttonHeight);
+            var addButton = CreateActionButton("+", "Добавить запись в справочник", buttonHeight);
+            var editButton = CreateActionButton("Изм", "Изменить выбранную запись", buttonHeight);
 
             selectButton.Click += async (_, _) => await selectAction();
             addButton.Click += async (_, _) => await addAction();
