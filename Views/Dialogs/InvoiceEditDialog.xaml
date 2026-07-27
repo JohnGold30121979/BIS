@@ -57,7 +57,7 @@
             </StackPanel>
 
             <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Счет стороны Б"/>
+                <TextBlock x:Name="HeaderAccountLabel" Text="Счет расчетов"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -138,7 +138,7 @@
                   SelectionChanged="OnLineSelectionChanged">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="2.4*" MinWidth="220"/>
-                <DataGridTemplateColumn Header="Счет стороны А" Width="230" MinWidth="190">
+                <DataGridTemplateColumn x:Name="LineAccountColumn" Header="Счет операции" Width="230" MinWidth="190">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
@@ -156,30 +156,8 @@
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="Без налогов" Binding="{Binding AmountWithoutTax, UpdateSourceTrigger=PropertyChanged, StringFormat=N2}" Width="105"/>
-                <DataGridTemplateColumn Header="НДС" Width="130">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <ComboBox ItemsSource="{Binding DataContext.VatTaxItems, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      DisplayMemberPath="DisplayName" SelectedValuePath="Value"
-                                      SelectedValue="{Binding VatTaxCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      IsTextSearchEnabled="True"
-                                      IsEnabled="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="% НДС" Binding="{Binding VatRate, StringFormat=N2}" Width="70" IsReadOnly="True"/>
                 <DataGridTextColumn Header="Сумма НДС" Binding="{Binding VatAmount, StringFormat=N2}" Width="90" IsReadOnly="True"/>
-                <DataGridTemplateColumn Header="Налог с прод." Width="140">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <ComboBox ItemsSource="{Binding DataContext.SalesTaxItems, RelativeSource={RelativeSource AncestorType=Window}}"
-                                      DisplayMemberPath="DisplayName" SelectedValuePath="Value"
-                                      SelectedValue="{Binding SalesTaxCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      IsTextSearchEnabled="True"
-                                      IsEnabled="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}}"/>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="НСП" Binding="{Binding SalesTaxRate, StringFormat=N2}" Width="70" IsReadOnly="True"/>
                 <DataGridTextColumn Header="Сумма НП" Binding="{Binding SalesTaxAmount, StringFormat=N2}" Width="90" IsReadOnly="True"/>
                 <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, StringFormat=N2}" Width="100" IsReadOnly="True"/>

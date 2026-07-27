@@ -1,4 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -18,6 +21,8 @@ namespace BIS.ERP.Views
         private readonly bool _isSalesMode;
         private InvoiceService? _invoiceService;
         private InvoiceEsfExchangeService? _invoiceEsfExchangeService;
+        private readonly List<InvoiceListRow> _allInvoices = new();
+        private readonly ObservableCollection<InvoiceListRow> _filteredInvoices = new();
 
         public InvoiceWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
@@ -32,6 +37,35 @@ namespace BIS.ERP.Views
             Loaded += OnLoaded;
         }
 
+        private async Task<string> ResolveAssignedModuleNameAsync()
+        {
+            try
+            {
+                var assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(
+                    _documentMetadata.Id,
+                    _documentMetadata.ObjectType);
+                if (!string.IsNullOrWhiteSpace(assignedModuleName))
+                    return NormalizeModuleName(assignedModuleName);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения модуля документа {_documentMetadata.Name}: {ex.Message}");
+            }
+
+            return _isSalesMode || _isRegistrationMode ? "Финансы" : string.Empty;
+        }
+
+        private static string NormalizeModuleName(string moduleName)
+        {
+            var trimmed = moduleName.Trim();
+            return trimmed.ToUpperInvariant() switch
+            {
+                "ФИН" or "ФИНАНСЫ" or "FIN" or "FINANCE" => "Финансы",
+                "ОС" or "FIXEDASSETS" => "Основные средства",
+                "ТМЦ" or "МАТЕРИАЛЫ" or "INVENTORY" => "Учет материальных ценностей",
+                _ => trimmed
+            };
+        }
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
@@ -71,7 +105,6 @@ namespace BIS.ERP.Views
             EditButton.Width = 120;
 
             TaxBlankColumn.Visibility = Visibility.Visible;
-            ModuleColumn.Visibility = Visibility.Visible;
             BasisColumn.Visibility = Visibility.Collapsed;
             EsfNumberColumn.Visibility = Visibility.Collapsed;
             EsfStatusColumn.Visibility = Visibility.Collapsed;
@@ -94,11 +127,21 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Загрузка...";
                 var postedCount = await _invoiceService.EnsureSavedInvoicesPostedAsync();
                 var invoices = await _invoiceService.GetInvoicesAsync();
-                InvoicesGrid.ItemsSource = invoices;
+                var defaultModuleName = await ResolveAssignedModuleNameAsync();
+                foreach (var invoice in invoices)
+                {
+                    invoice.ModuleCode = string.IsNullOrWhiteSpace(invoice.ModuleCode)
+                        ? defaultModuleName
+                        : NormalizeModuleName(invoice.ModuleCode);
+                }
+
+                _allInvoices.Clear();
+                _allInvoices.AddRange(invoices);
                 LinesGrid.ItemsSource = null;
+                ApplyInvoiceFilters(updateEmptyLines: true);
                 StatusText.Text = postedCount > 0
-                    ? $"Загружено документов: {invoices.Count}; автоматически проведено: {postedCount}"
-                    : $"Загружено документов: {invoices.Count}";
+                    ? $"Загружено документов: {_allInvoices.Count}; показано: {_filteredInvoices.Count}; автоматически проведено: {postedCount}"
+                    : $"Загружено документов: {_allInvoices.Count}; показано: {_filteredInvoices.Count}";
                 UpdateButtonsState();
             }
             catch (Exception ex)
@@ -108,6 +151,68 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void ApplyInvoiceFilters(bool updateEmptyLines = false)
+        {
+            IEnumerable<InvoiceListRow> query = _allInvoices;
+
+            query = ApplyColumnFilter(query, DateFilterBox.Text, invoice => invoice.DocDate.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture));
+            query = ApplyColumnFilter(query, ModuleFilterBox.Text, invoice => invoice.ModuleCode);
+            query = ApplyColumnFilter(query, DocumentFilterBox.Text, invoice => invoice.DocNumber);
+            query = ApplyColumnFilter(query, AmountFilterBox.Text, invoice => FormatAmount(invoice.TotalAmount));
+            query = ApplyColumnFilter(query, EsfNumberFilterBox.Text, invoice => invoice.EsfNumber);
+            query = ApplyColumnFilter(query, TaxBlankFilterBox.Text, invoice => invoice.TaxBlankNumber);
+            query = ApplyColumnFilter(query, OrganizationFilterBox.Text, invoice => invoice.OrganizationName);
+
+            _filteredInvoices.Clear();
+            foreach (var invoice in query)
+                _filteredInvoices.Add(invoice);
+
+            if (InvoicesGrid.ItemsSource == null)
+                InvoicesGrid.ItemsSource = _filteredInvoices;
+
+            if (updateEmptyLines || _filteredInvoices.Count == 0)
+                LinesGrid.ItemsSource = null;
+
+            StatusText.Text = $"Показано документов: {_filteredInvoices.Count} из {_allInvoices.Count}";
+            UpdateButtonsState();
+        }
+
+        private static IEnumerable<InvoiceListRow> ApplyColumnFilter(
+            IEnumerable<InvoiceListRow> query,
+            string filter,
+            Func<InvoiceListRow, string?> valueSelector)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return query;
+
+            var filterText = filter.Trim();
+            return query.Where(invoice => MatchesOrderedColumnFilter(valueSelector(invoice), filterText));
+        }
+
+        private static bool MatchesOrderedColumnFilter(string? value, string filterText)
+        {
+            var valueText = (value ?? string.Empty).Trim();
+            if (valueText.Length == 0)
+                return false;
+
+            var normalizedFilter = filterText.Trim();
+            var filterDigits = ExtractDigits(normalizedFilter);
+            if (filterDigits.Length > 0)
+                return ExtractDigits(valueText).StartsWith(filterDigits, StringComparison.Ordinal);
+
+            return valueText.StartsWith(normalizedFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static string FormatAmount(decimal amount) => amount.ToString("N2", CultureInfo.CurrentCulture);
+
+        private void OnColumnFilterChanged(object sender, TextChangedEventArgs e) => ApplyInvoiceFilters(updateEmptyLines: true);
+
+        private void OnInvoiceFilterChanged(object sender, TextChangedEventArgs e) => OnColumnFilterChanged(sender, e);
         private async void OnInvoiceSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateButtonsState();

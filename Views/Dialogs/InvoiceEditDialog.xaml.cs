@@ -29,6 +29,7 @@ namespace BIS.ERP.Views.Dialogs
         private bool _isRecalculating;
         private bool _isPosted;
         private bool _synchronizingHeaderTaxSelection;
+        private bool _isApplyingHeaderTaxValues;
         private bool _isInvoiceEditingEnabled = true;
         private bool _isApplyingCurrencyValues;
         private bool _isRestoringNormalWindowState;
@@ -62,6 +63,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             InitializeComponent();
             _document = document;
+            ApplyAccountFieldLabels();
             _metadataService = metadataService;
             _invoiceService = invoiceService;
             _editId = editId;
@@ -78,6 +80,18 @@ namespace BIS.ERP.Views.Dialogs
         }
 
 
+        private void ApplyAccountFieldLabels()
+        {
+            HeaderAccountLabel.Text = "Счет расчетов";
+            LineAccountColumn.Header = GetLineAccountLabel();
+        }
+
+        private string GetLineAccountLabel()
+        {
+            return InvoiceDocumentTypes.IsSales(_document.Name)
+                ? "Счет дохода"
+                : "Счет операции";
+        }
         private void OnWindowStateChanged(object? sender, EventArgs e)
         {
             if (_isRestoringNormalWindowState || WindowState != WindowState.Maximized)
@@ -441,29 +455,26 @@ namespace BIS.ERP.Views.Dialogs
             if (_isRecalculating || sender is not EditableInvoiceLine line)
                 return;
 
-            if (e.PropertyName == nameof(EditableInvoiceLine.VatTaxCode))
-                ApplyTaxRate(line, line.VatTaxCode, _vatTaxesByCode, isVat: true);
-            if (e.PropertyName == nameof(EditableInvoiceLine.SalesTaxCode))
-                ApplyTaxRate(line, line.SalesTaxCode, _salesTaxesByCode, isVat: false);
+            if (!_isApplyingHeaderTaxValues)
+            {
+                if (e.PropertyName == nameof(EditableInvoiceLine.VatTaxCode))
+                    ApplyTaxRate(line, line.VatTaxCode, _vatTaxesByCode, isVat: true);
+                if (e.PropertyName == nameof(EditableInvoiceLine.SalesTaxCode))
+                    ApplyTaxRate(line, line.SalesTaxCode, _salesTaxesByCode, isVat: false);
+            }
 
-            if (e.PropertyName is nameof(EditableInvoiceLine.AmountWithoutTax)
-                or nameof(EditableInvoiceLine.VatRate)
-                or nameof(EditableInvoiceLine.SalesTaxRate)
-                or nameof(EditableInvoiceLine.VatTaxCode)
-                or nameof(EditableInvoiceLine.SalesTaxCode))
+            if (!_isApplyingHeaderTaxValues &&
+                e.PropertyName is nameof(EditableInvoiceLine.AmountWithoutTax)
+                    or nameof(EditableInvoiceLine.VatRate)
+                    or nameof(EditableInvoiceLine.SalesTaxRate)
+                    or nameof(EditableInvoiceLine.VatTaxCode)
+                    or nameof(EditableInvoiceLine.SalesTaxCode))
             {
                 RecalculateTotals();
             }
 
             if (e.PropertyName == nameof(EditableInvoiceLine.AccountCode))
                 UpdateCurrencyPanelVisibility();
-
-            if (LinesGrid.SelectedItem == line &&
-                e.PropertyName is nameof(EditableInvoiceLine.VatTaxCode)
-                    or nameof(EditableInvoiceLine.SalesTaxCode))
-            {
-                SyncHeaderTaxControls(line);
-            }
         }
 
         private void ApplyTaxRate(
@@ -612,6 +623,36 @@ namespace BIS.ERP.Views.Dialogs
                     .FirstOrDefault(item => item.Value.Equals(selectedValue, StringComparison.OrdinalIgnoreCase));
         }
 
+        private void ApplySelectedHeaderTaxesToLines()
+        {
+            var selectedVatTax = GetSelectedReferenceOption(HeaderVatTaxCombo);
+            var selectedSalesTax = GetSelectedReferenceOption(HeaderSalesTaxCombo);
+            if (selectedVatTax == null && selectedSalesTax == null)
+                return;
+
+            _isApplyingHeaderTaxValues = true;
+            try
+            {
+                foreach (var line in _lines)
+                {
+                    if (selectedVatTax != null)
+                    {
+                        line.VatTaxCode = selectedVatTax.Value;
+                        line.VatRate = selectedVatTax.Rate;
+                    }
+
+                    if (selectedSalesTax != null)
+                    {
+                        line.SalesTaxCode = selectedSalesTax.Value;
+                        line.SalesTaxRate = selectedSalesTax.Rate;
+                    }
+                }
+            }
+            finally
+            {
+                _isApplyingHeaderTaxValues = false;
+            }
+        }
         private static string NormalizeLegacyDeliveryKind(string storedValue)
         {
             return storedValue?.Trim().ToUpperInvariant() switch
@@ -674,7 +715,7 @@ namespace BIS.ERP.Views.Dialogs
                 {
                     accountCode = GetDefaultLineAccountCode();
                     MessageBox.Show(
-                        "Счет стороны А не должен совпадать со счетом стороны Б. Подставлен счет по умолчанию.",
+                        $"{GetLineAccountLabel()} не должен совпадать со счетом расчетов. Подставлен счет по умолчанию.",
                         "Проверка счетов",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
@@ -749,7 +790,6 @@ namespace BIS.ERP.Views.Dialogs
             var hasSelection = LinesGrid.SelectedItem != null;
             DeleteLineButton.IsEnabled = hasSelection && !_isReadOnlyMode;
             LinePostingsButton.IsEnabled = hasSelection && _editId.HasValue && _isPosted;
-            SyncHeaderTaxControls(LinesGrid.SelectedItem as EditableInvoiceLine);
         }
 
         private void OnHeaderVatTaxChanged(object sender, SelectionChangedEventArgs e)
@@ -757,15 +797,7 @@ namespace BIS.ERP.Views.Dialogs
             if (_synchronizingHeaderTaxSelection || _isReadOnlyMode)
                 return;
 
-            if (LinesGrid.SelectedItem is not EditableInvoiceLine selectedLine)
-                return;
-
-            var selectedTax = GetSelectedReferenceOption(HeaderVatTaxCombo);
-            if (selectedTax == null)
-                return;
-
-            selectedLine.VatTaxCode = selectedTax.Value;
-            selectedLine.VatRate = selectedTax.Rate;
+            ApplySelectedHeaderTaxesToLines();
             RecalculateTotals();
         }
 
@@ -774,15 +806,7 @@ namespace BIS.ERP.Views.Dialogs
             if (_synchronizingHeaderTaxSelection || _isReadOnlyMode)
                 return;
 
-            if (LinesGrid.SelectedItem is not EditableInvoiceLine selectedLine)
-                return;
-
-            var selectedTax = GetSelectedReferenceOption(HeaderSalesTaxCombo);
-            if (selectedTax == null)
-                return;
-
-            selectedLine.SalesTaxCode = selectedTax.Value;
-            selectedLine.SalesTaxRate = selectedTax.Rate;
+            ApplySelectedHeaderTaxesToLines();
             RecalculateTotals();
         }
 
@@ -836,13 +860,15 @@ namespace BIS.ERP.Views.Dialogs
 
         private void RecalculateTotals()
         {
+            ApplySelectedHeaderTaxesToLines();
+
             foreach (var line in _lines)
             {
                 InvoiceService.RecalculateLine(line);
                 line.NotifyCalculatedProperties();
             }
 
-            var document = BuildDocumentFromForm();
+            var document = BuildDocumentFromForm(applyHeaderTaxes: false);
             InvoiceService.RecalculateTotals(document);
             TotalWithoutTaxText.Text = document.AmountWithoutTax.ToString("N2");
             TotalVatText.Text = document.VatTotal.ToString("N2");
@@ -964,8 +990,11 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
-        private InvoiceDocument BuildDocumentFromForm()
+        private InvoiceDocument BuildDocumentFromForm(bool applyHeaderTaxes = true)
         {
+            if (applyHeaderTaxes)
+                ApplySelectedHeaderTaxesToLines();
+
             var organizationId = GetOrganizationItemId(OrganizationCombo.SelectedItem);
             Guid? currencyId = null;
             if (CurrencyPanel.Visibility == Visibility.Visible &&
