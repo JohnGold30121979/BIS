@@ -83,8 +83,10 @@ namespace BIS.ERP.Views
             query = ApplyColumnFilter(query, AmountFilterBox.Text, p => FormatAmount(p.Amount));
             query = ApplyColumnFilter(query, AmountCurrencyFilterBox.Text, p => FormatAmount(p.AmountCurrency));
             query = ApplyColumnFilter(query, CurrencyFilterBox.Text, p => p.Currency);
-            query = ApplyColumnFilter(query, OrganizationFilterBox.Text, p => p.Organization);
-            query = ApplyColumnFilter(query, EmployeeFilterBox.Text, p => p.Employee);
+            if (IsOrganizationColumnVisible())
+                query = ApplyColumnFilter(query, OrganizationFilterBox.Text, p => p.Organization);
+            if (IsEmployeeColumnVisible())
+                query = ApplyColumnFilter(query, EmployeeFilterBox.Text, p => p.Employee);
             query = ApplyColumnFilter(query, NoteFilterBox.Text, p => p.Note);
 
             _filteredPostings.Clear();
@@ -98,6 +100,25 @@ namespace BIS.ERP.Views
             TotalInfo.Text = $"Общая сумма: {_filteredPostings.Sum(p => p.Amount):N2} сом";
         }
 
+        private void OnColumnVisibilityChanged(object sender, RoutedEventArgs e)
+        {
+            ApplyAnalyticsColumnVisibility();
+            ApplyFilters();
+        }
+
+        private void ApplyAnalyticsColumnVisibility()
+        {
+            OrganizationColumn.Visibility = IsOrganizationColumnVisible()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            EmployeeColumn.Visibility = IsEmployeeColumnVisible()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private bool IsOrganizationColumnVisible() => ShowOrganizationColumnCheckBox?.IsChecked == true;
+
+        private bool IsEmployeeColumnVisible() => ShowEmployeeColumnCheckBox?.IsChecked == true;
         private static IEnumerable<PostingViewModel> ApplyColumnFilter(
             IEnumerable<PostingViewModel> query,
             string filter,

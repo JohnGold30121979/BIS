@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="BIS.ERP.Views.PostingsView"
+<UserControl x:Class="BIS.ERP.Views.PostingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -32,6 +32,12 @@
                     Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
             <Button x:Name="SearchButton" Content="🔍 Поиск" Width="100" Height="35"
                     Background="#F39C12" Foreground="White" Click="OnSearchClick"/>
+            <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
+            <TextBlock Text="Показать поля:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+            <CheckBox x:Name="ShowOrganizationColumnCheckBox" Content="Организация" IsChecked="False"
+                      VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
+            <CheckBox x:Name="ShowEmployeeColumnCheckBox" Content="Сотрудник" IsChecked="False"
+                      VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
         </StackPanel>
 
         <!-- Таблица проводок -->
@@ -40,10 +46,9 @@
           MouseDoubleClick="PostingsGrid_MouseDoubleClick"
           AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="100"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding [Дата], StringFormat={}{0:dd.MM.yyyy}}" Width="100"/>
                 <DataGridTextColumn Header="Номер документа" Binding="{Binding [Номер документа]}" Width="120"/>
                 <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="120"/>
-                <DataGridTextColumn Header="Касса" Binding="{Binding [Касса]}" Width="170"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
                 <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом]}" Width="120"/>

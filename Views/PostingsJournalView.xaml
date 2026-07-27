@@ -41,8 +41,14 @@
                     <Button Content="🔍 Поиск" Click="OnRefreshClick"
                              Background="#3498DB" Foreground="White" 
                               Padding="15,8" Margin="5"/>
-                    <Button Content="📊 Обороты по счету" Click="OnTurnoversClick" 
+                                        <Button Content="📊 Обороты по счету" Click="OnTurnoversClick" 
                            Background="#9B59B6" Foreground="White" Padding="15,8" Margin="5"/>
+                    <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
+                    <TextBlock Text="Показать поля:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <CheckBox x:Name="ShowOrganizationColumnCheckBox" Content="Организация" IsChecked="False"
+                              VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
+                    <CheckBox x:Name="ShowEmployeeColumnCheckBox" Content="Сотрудник" IsChecked="False"
+                              VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
                 </StackPanel>
               
             </Grid>
@@ -183,7 +189,7 @@
                         </StackPanel>
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding Organization}" Width="150">
+                <DataGridTextColumn x:Name="OrganizationColumn" Binding="{Binding Organization}" Width="150" Visibility="Collapsed">
                     <DataGridTextColumn.Header>
                         <StackPanel>
                             <TextBlock Text="Организация"/>
@@ -191,7 +197,7 @@
                         </StackPanel>
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding Employee}" Width="120">
+                <DataGridTextColumn x:Name="EmployeeColumn" Binding="{Binding Employee}" Width="120" Visibility="Collapsed">
                     <DataGridTextColumn.Header>
                         <StackPanel>
                             <TextBlock Text="Сотрудник"/>

@@ -400,6 +400,7 @@ namespace BIS.ERP.Views
                     return;
 
                 var rows = await _metadataService.GetCatalogDataAsync(cashDeskCatalog.Id);
+                var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(cashDeskCatalog, _metadataService);
                 if (rows.Count == 0)
                 {
                     MessageBox.Show("В справочнике касс нет данных. Добавьте кассу кнопкой '+'.", "Кассы",
@@ -407,7 +408,7 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new ReferenceSelectionDialog(rows, "Наименование кассы", "Счет")
+                var dialog = new ReferenceSelectionDialog(rows, "Наименование кассы", "Счет", referenceMaps)
                 {
                     Owner = this,
                     Title = "Выбор: Кассы"

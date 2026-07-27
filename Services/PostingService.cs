@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -45,6 +45,7 @@ namespace BIS.ERP.Services
             var employeeMap = await LoadReferenceMapAsync("Сотрудники (Списочный состав)");
             var accountMap = await LoadAccountMapAsync();
             var moduleLookup = await LoadModuleLookupAsync();
+            var cashOrderAnalytics = await LoadCashOrderAnalyticsMapAsync(startDate, endDate);
 
             // 1. Проводки из doc_postings
             try
@@ -79,11 +80,27 @@ namespace BIS.ERP.Services
 
                 foreach (var row in rows)
                 {
+                    var normalizedDocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(row.DocumentNumber);
+                    var organizationValue = row.Organization;
+                    var employeeValue = row.Employee;
+
+                    if (IsCashOrderDocumentType(row.DocumentType) &&
+                        (string.IsNullOrWhiteSpace(organizationValue) || string.IsNullOrWhiteSpace(employeeValue)) &&
+                        cashOrderAnalytics.TryGetValue(
+                            BuildPostingAnalyticsKey(row.DocumentType, normalizedDocumentNumber, row.Date),
+                            out var analytics))
+                    {
+                        if (string.IsNullOrWhiteSpace(organizationValue))
+                            organizationValue = analytics.Organization;
+                        if (string.IsNullOrWhiteSpace(employeeValue))
+                            employeeValue = analytics.Employee;
+                    }
+
                     postings.Add(new PostingViewModel
                     {
                         Id = row.Id,
                         Date = row.Date,
-                        DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(row.DocumentNumber),
+                        DocumentNumber = normalizedDocumentNumber,
                         DocumentType = row.DocumentType,
                         ModuleCode = row.ModuleCode,
                         ModuleName = ResolveModuleName(row.ModuleCode, row.DocumentType, moduleLookup),
@@ -97,8 +114,8 @@ namespace BIS.ERP.Services
                         AmountCurrency = row.AmountCurrency,
                         Currency = row.Currency,
                         Note = row.Note,
-                        Organization = ResolveReference(row.Organization, organizationMap),
-                        Employee = ResolveReference(row.Employee, employeeMap),
+                        Organization = ResolveReference(organizationValue, organizationMap),
+                        Employee = ResolveReference(employeeValue, employeeMap),
                         Site = "",
                         ResponsiblePerson = "",
                         DocumentId = null,
@@ -365,6 +382,115 @@ namespace BIS.ERP.Services
             return string.Empty;
         }
 
+        private async Task<Dictionary<string, PostingAnalytics>> LoadCashOrderAnalyticsMapAsync(DateTime? startDate, DateTime? endDate)
+        {
+            var result = new Dictionary<string, PostingAnalytics>(StringComparer.OrdinalIgnoreCase);
+            var connection = _context.Database.GetDbConnection();
+            var wasClosed = connection.State != ConnectionState.Open;
+
+            try
+            {
+                if (wasClosed)
+                    await _context.Database.OpenConnectionAsync();
+
+                using (var existsCommand = connection.CreateCommand())
+                {
+                    existsCommand.CommandText = "SELECT to_regclass('public.doc_cash_orders') IS NOT NULL;";
+                    if (await existsCommand.ExecuteScalarAsync() is not bool tableExists || !tableExists)
+                        return result;
+                }
+
+                var sql = @"
+                    SELECT COALESCE(doc_number, '') AS doc_number,
+                           doc_date AS doc_date,
+                           COALESCE(order_kind, '') AS order_kind,
+                           COALESCE(organization_id::text, '') AS organization_id,
+                           COALESCE(employee_id::text, '') AS employee_id
+                    FROM doc_cash_orders
+                    WHERE 1 = 1";
+
+                using var command = connection.CreateCommand();
+                if (startDate.HasValue)
+                {
+                    sql += " AND DATE(doc_date) >= DATE(@startDate)";
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = "@startDate";
+                    parameter.Value = startDate.Value.Date;
+                    command.Parameters.Add(parameter);
+                }
+
+                if (endDate.HasValue)
+                {
+                    sql += " AND DATE(doc_date) <= DATE(@endDate)";
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = "@endDate";
+                    parameter.Value = endDate.Value.Date;
+                    command.Parameters.Add(parameter);
+                }
+
+                command.CommandText = sql;
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    if (reader["doc_date"] == DBNull.Value)
+                        continue;
+
+                    var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(reader["doc_number"]?.ToString());
+                    var documentDate = Convert.ToDateTime(reader["doc_date"]).Date;
+                    var documentType = ResolveCashOrderDocumentTypeFromKind(reader["order_kind"]?.ToString());
+                    var key = BuildPostingAnalyticsKey(documentType, documentNumber, documentDate);
+
+                    result[key] = new PostingAnalytics(
+                        reader["organization_id"]?.ToString() ?? string.Empty,
+                        reader["employee_id"]?.ToString() ?? string.Empty);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки аналитики кассовых ордеров: {ex.Message}");
+            }
+            finally
+            {
+                if (wasClosed)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            return result;
+        }
+
+        private static bool IsCashOrderDocumentType(string? documentType)
+        {
+            var normalized = NormalizeCashOrderDocumentType(documentType);
+            return normalized.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase) ||
+                   normalized.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveCashOrderDocumentTypeFromKind(string? orderKind)
+        {
+            var value = orderKind?.Trim() ?? string.Empty;
+            return value.Equals("Receipt", StringComparison.OrdinalIgnoreCase) ||
+                   value.Contains("приход", StringComparison.OrdinalIgnoreCase)
+                ? "Приходный кассовый ордер"
+                : "Расходный кассовый ордер";
+        }
+
+        private static string NormalizeCashOrderDocumentType(string? documentType)
+        {
+            var value = documentType?.Trim() ?? string.Empty;
+            if (value.Equals("Receipt", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("приход", StringComparison.OrdinalIgnoreCase))
+                return "Приходный кассовый ордер";
+            if (value.Equals("Payment", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("расход", StringComparison.OrdinalIgnoreCase))
+                return "Расходный кассовый ордер";
+
+            return value;
+        }
+
+        private static string BuildPostingAnalyticsKey(string? documentType, string? documentNumber, DateTime documentDate)
+        {
+            return $"{NormalizeCashOrderDocumentType(documentType)}|{MetadataService.NormalizeLegacyDocumentNumber(documentNumber)}|{documentDate.Date:yyyy-MM-dd}";
+        }
         private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(string catalogName)
         {
             try
@@ -450,6 +576,7 @@ namespace BIS.ERP.Services
             public bool IsActive { get; set; }
         }
 
+        private sealed record PostingAnalytics(string Organization, string Employee);
         private sealed class ModuleLookup
         {
             public Dictionary<string, string> NameByCode { get; } = new(StringComparer.OrdinalIgnoreCase);

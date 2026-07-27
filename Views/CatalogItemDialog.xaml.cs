@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -84,6 +84,7 @@ namespace BIS.ERP.Views
                     }
 
                     await ApplyGeneratedCodeAsync(field, inputControl);
+                    ApplyCatalogFieldState(field, inputControl);
 
                     panel.Children.Add(inputControl);
                     FieldsPanel.Children.Add(panel);
@@ -538,6 +539,35 @@ namespace BIS.ERP.Views
             textBox.IsReadOnly = true;
             textBox.ToolTip = "Код формируется автоматически при добавлении записи.";
             textBox.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
+        }
+
+        private void ApplyCatalogFieldState(MetadataField field, Control inputControl)
+        {
+            if (!IsCashDeskBalanceField(field))
+                return;
+
+            if (inputControl is TextBox textBox)
+            {
+                if (string.IsNullOrWhiteSpace(textBox.Text))
+                    textBox.Text = "0";
+
+                textBox.IsReadOnly = true;
+            }
+
+            inputControl.IsEnabled = false;
+            inputControl.ToolTip = "Поле рассчитывается системой и временно недоступно для ручного изменения.";
+            inputControl.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
+        }
+
+        private bool IsCashDeskBalanceField(MetadataField field)
+        {
+            if (!string.Equals(_catalog.Name, "Кассы", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return string.Equals(field.Name, "Начальный остаток", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.Name, "Текущий остаток", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.DbColumnName, "initial_balance", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.DbColumnName, "current_balance", StringComparison.OrdinalIgnoreCase);
         }
 
         private bool ShouldDefaultActiveField(MetadataField field)

@@ -1,8 +1,9 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -93,6 +94,7 @@ namespace BIS.ERP.Views
         {
             public Dictionary<string, object>? ExistingData { get; set; }
             public Dictionary<string, List<ReferenceItem>> ReferenceData { get; set; } = new();
+            public Dictionary<string, MetadataObject> ReferenceCatalogs { get; set; } = new();
             public AccountAnalyticsRegistry AccountAnalytics { get; set; } = new();
             public string DocumentNumber { get; set; } = string.Empty;
             public string? AssignedModuleName { get; set; }
@@ -123,6 +125,7 @@ namespace BIS.ERP.Views
             {
                 if (catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
                 {
+                    result.ReferenceCatalogs[field.Name] = refCatalog;
                     var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
                     var items = new List<ReferenceItem>();
 
@@ -192,7 +195,7 @@ namespace BIS.ERP.Views
 
             foreach (var field in _document.Fields.OrderBy(GetPostingFieldDisplayOrder).ThenBy(f => f.Order))
             {
-                if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
+                if (IsSystemField(field) || IsModuleField(field))
                     continue;
 
                 var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
@@ -277,6 +280,15 @@ namespace BIS.ERP.Views
                     var checkBox = new CheckBox { Content = "Да", Height = 30 };
                     if (currentValue is bool b)
                         checkBox.IsChecked = b;
+                    else if (!editId.HasValue && IsActiveField(field))
+                        checkBox.IsChecked = true;
+
+                    if (!editId.HasValue && IsActiveField(field))
+                    {
+                        checkBox.IsChecked = true;
+                        checkBox.IsEnabled = false;
+                    }
+
                     inputControl = checkBox;
                 }
                 else
@@ -308,6 +320,7 @@ namespace BIS.ERP.Views
                 }
 
                 panel.Children.Add(inputControl);
+                AttachReferenceEditorIfNeeded(field, inputControl, dialogData);
                 FieldsPanel.Children.Add(panel);
                 _fieldControls[field.Name] = inputControl;
                 _fieldPanels[field.Name] = panel;
@@ -316,6 +329,27 @@ namespace BIS.ERP.Views
             UpdateAnalyticControlsVisibility();
         }
 
+        private void AttachReferenceEditorIfNeeded(
+            MetadataField field,
+            Control inputControl,
+            PostingDialogData dialogData)
+        {
+            if (inputControl is not ComboBox comboBox ||
+                field.FieldType != "Reference" ||
+                string.IsNullOrWhiteSpace(field.ReferenceCatalog) ||
+                field.ReferenceCatalog.Equals("Кассы", StringComparison.OrdinalIgnoreCase) ||
+                !dialogData.ReferenceCatalogs.TryGetValue(field.Name, out var referenceCatalog))
+            {
+                return;
+            }
+
+            ReferencePickerControlFactory.AttachEditor(
+                comboBox,
+                _metadataService,
+                referenceCatalog,
+                this,
+                items => comboBox.ItemsSource = items);
+        }
         private void ApplyCashDeskSelectionToPostingAccounts()
         {
             if (!_fieldControls.TryGetValue("Касса", out var cashControl) ||
@@ -450,7 +484,7 @@ namespace BIS.ERP.Views
 
                 foreach (var field in _document.Fields.OrderBy(GetPostingFieldDisplayOrder).ThenBy(f => f.Order))
                 {
-                    if (field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt")
+                    if (IsSystemField(field) || IsModuleField(field))
                         continue;
 
                     if (!_fieldControls.TryGetValue(field.Name, out var control))
@@ -485,17 +519,21 @@ namespace BIS.ERP.Views
                         itemData[field.Name] = value;
                 }
 
-                // Добавляем тип документа для ручных проводок
+                // Добавляем системные значения для ручных проводок.
                 if (!itemData.ContainsKey("Тип документа"))
                 {
                     itemData["Тип документа"] = "Ручная проводка";
                 }
 
+                if (_document.Fields.Any(IsModuleField) && !string.IsNullOrWhiteSpace(_assignedModuleName))
+                    itemData["Модуль"] = _assignedModuleName;
+
+                if (!_editId.HasValue && _document.Fields.Any(IsActiveField))
+                    itemData["Активен"] = true;
+
                 var debitAccount = itemData.GetValueOrDefault("Дебет")?.ToString();
                 var creditAccount = itemData.GetValueOrDefault("Кредит")?.ToString();
-                var amount = itemData.TryGetValue("Сумма в сом", out var amountValue)
-                    ? Convert.ToDecimal(amountValue)
-                    : 0m;
+                var amount = ReadPostingAmount(itemData);
 
                 if (string.IsNullOrWhiteSpace(debitAccount) || string.IsNullOrWhiteSpace(creditAccount))
                     throw new Exception("Укажите счета дебета и кредита");
@@ -526,6 +564,56 @@ namespace BIS.ERP.Views
             }
         }
 
+        private static bool IsSystemField(MetadataField field) =>
+            field.Name == "Id" || field.Name == "CreatedAt" || field.Name == "UpdatedAt";
+
+        private static bool IsModuleField(MetadataField field) =>
+            field.Name.Equals("Модуль", StringComparison.OrdinalIgnoreCase) ||
+            field.DbColumnName.Equals("module_code", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsActiveField(MetadataField field) =>
+            field.Name.Equals("Активен", StringComparison.OrdinalIgnoreCase) ||
+            field.DbColumnName.Equals("is_active", StringComparison.OrdinalIgnoreCase);
+
+        private static decimal ReadPostingAmount(Dictionary<string, object> itemData)
+        {
+            foreach (var key in new[] { "Сумма в сом", "Сумма" })
+            {
+                if (itemData.TryGetValue(key, out var value))
+                    return ToDecimal(value);
+            }
+
+            return 0m;
+        }
+
+        private static decimal ToDecimal(object? value)
+        {
+            if (value == null || value == DBNull.Value)
+                return 0m;
+            if (value is decimal decimalValue)
+                return decimalValue;
+            if (value is IConvertible convertible)
+            {
+                try
+                {
+                    return convertible.ToDecimal(CultureInfo.CurrentCulture);
+                }
+                catch
+                {
+                    // Ниже пробуем строковый разбор с обеими распространенными культурами.
+                }
+            }
+
+            var text = value.ToString();
+            if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.CurrentCulture, out var currentValue))
+                return currentValue;
+            if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var invariantValue))
+                return invariantValue;
+            if (decimal.TryParse(text?.Replace(",", "."), NumberStyles.Number, CultureInfo.InvariantCulture, out var normalizedValue))
+                return normalizedValue;
+
+            return 0m;
+        }
         private object? ParseFieldValue(string text, string fieldType)
         {
             if (string.IsNullOrWhiteSpace(text))
@@ -543,7 +631,7 @@ namespace BIS.ERP.Views
                 return fieldType switch
                 {
                     "Int" => int.Parse(text),
-                    "Decimal" => decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture),
+                    "Decimal" => ToDecimal(text),
                     _ => text
                 };
             }
@@ -569,9 +657,9 @@ namespace BIS.ERP.Views
             return field.Name switch
             {
                 "Номер документа" => 1,
-                "Дата" => 2,
-                "Касса" => 3,
-                "Тип документа" => 4,
+                "Тип документа" => 2,
+                "Дата" => 3,
+                "Касса" => 4,
                 _ => 100 + field.Order
             };
         }

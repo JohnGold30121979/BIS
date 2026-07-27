@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
 {
@@ -21,10 +22,14 @@ namespace BIS.ERP.Views
         public ReferenceSelectionDialog(
             List<Dictionary<string, object>> items,
             string firstField = null,
-            string secondField = null)
+            string secondField = null,
+            IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps = null)
         {
             InitializeComponent();
-            _items = items ?? new List<Dictionary<string, object>>();
+            var sourceItems = items ?? new List<Dictionary<string, object>>();
+            _items = referenceMaps != null && referenceMaps.Count > 0
+                ? ReferenceDisplayHelper.ResolveRows(sourceItems, referenceMaps)
+                : sourceItems;
             _firstField = firstField;
             _secondField = secondField;
             _filteredItems = _items;

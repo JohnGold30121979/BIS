@@ -67,14 +67,23 @@
                      Width="100" Height="30" Margin="6,0,0,8"
                      IsReadOnly="True" Background="LightGray"
                      TextAlignment="Center"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Корр. счет:" VerticalAlignment="Center"/>
+            <Grid Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="30" IsReadOnly="True" Background="LightGray"/>
+                <Button Grid.Column="1" Content="?" Width="34" Height="30" Margin="5,0,0,0" Click="SelectAccount_Click"/>
+            </Grid>
 
-            <TextBlock x:Name="OrganizationLabel" Grid.Row="4" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"
+            <TextBlock x:Name="OrganizationLabel" Grid.Row="5" Grid.Column="0" Text="Организация:" VerticalAlignment="Center"
                        Visibility="Collapsed"/>
-            <ComboBox x:Name="OrganizationCombo" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"
+            <ComboBox x:Name="OrganizationCombo" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"
                       DisplayMemberPath="DisplayName" SelectedValuePath="Id"
                       Visibility="Collapsed"/>
 
-            <StackPanel Grid.Row="5" Grid.ColumnSpan="3">
+            <StackPanel Grid.Row="6" Grid.ColumnSpan="3">
                 <Grid x:Name="CurrencyPanel" Visibility="Collapsed" Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="130"/>
@@ -111,23 +120,14 @@
                 </Grid>
             </StackPanel>
 
-            <TextBlock Grid.Row="6" Grid.Column="0" Text="Сумма:" VerticalAlignment="Center"/>
-            <TextBox x:Name="AmountBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8" Text="0"
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Сумма:" VerticalAlignment="Center"/>
+            <TextBox x:Name="AmountBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8" Text="0"
                      TextChanged="OnPostingPreviewChanged"/>
 
-            <TextBlock Grid.Row="7" Grid.Column="0" Text="Основание:" VerticalAlignment="Center"/>
-            <TextBox x:Name="BasisBox" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"
+            <TextBlock Grid.Row="8" Grid.Column="0" Text="Основание:" VerticalAlignment="Center"/>
+            <TextBox x:Name="BasisBox" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Height="30" Margin="0,0,0,8"
                      TextChanged="OnPostingPreviewChanged"/>
 
-            <TextBlock Grid.Row="8" Grid.Column="0" Text="Корр. счет:" VerticalAlignment="Center"/>
-            <Grid Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="30" IsReadOnly="True" Background="LightGray"/>
-                <Button Grid.Column="1" Content="?" Width="34" Height="30" Margin="5,0,0,0" Click="SelectAccount_Click"/>
-            </Grid>
 
             <TextBlock Grid.Row="9" Grid.Column="0" Text="Примечание:" VerticalAlignment="Top"/>
             <TextBox x:Name="DescriptionBox" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Height="56" Margin="0,0,0,10"

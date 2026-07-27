@@ -3331,8 +3331,20 @@ namespace BIS.ERP.Services
                 throw new Exception($"Для проведения кассового документа укажите корреспондирующий счет. Приход увеличивает кассу: Дт {cashAccountCode} / Кт корр.счет; расход уменьшает кассу: Дт корр.счет / Кт {cashAccountCode}.");
             }
 
+            var organizationId = GetNullableGuid(recordData, "organization_id", "Организация");
+            var employeeId = GetNullableGuid(recordData, "employee_id", "Сотрудник");
+
             // Создаём проводку с указанием типа документа
-            await CreatePosting(docNumber!, postingDate, debitAccount, creditAccount, amount, description!, documentType);            
+            await CreatePosting(
+                docNumber!,
+                postingDate,
+                debitAccount,
+                creditAccount,
+                amount,
+                description!,
+                documentType,
+                organizationId: organizationId,
+                employeeId: employeeId);            
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
@@ -3414,8 +3426,22 @@ namespace BIS.ERP.Services
             var creditAccount = corrAccountCode;
             System.Diagnostics.Debug.WriteLine($"debitAccount: {debitAccount}, creditAccount: {creditAccount}");
 
+            var organizationId = GetNullableGuid(recordData, "organization_id", "Организация");
+            var employeeId = GetNullableGuid(recordData, "employee_id", "Сотрудник");
+
             // Создаём проводку с указанием типа документа
-            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description, documentType, amountCurrency, currencyId);
+            await CreatePosting(
+                docNumber,
+                postingDate,
+                debitAccount,
+                creditAccount,
+                amount,
+                description,
+                documentType,
+                amountCurrency,
+                currencyId,
+                organizationId,
+                employeeId);
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
@@ -3485,7 +3511,9 @@ namespace BIS.ERP.Services
             string? description,
             string documentType = "",
             decimal amountCurrency = 0m,
-            string? currencyId = null)
+            string? currencyId = null,
+            Guid? organizationId = null,
+            Guid? employeeId = null)
         {
             try
             {
@@ -3501,7 +3529,7 @@ namespace BIS.ERP.Services
                 var sql = @"
                     INSERT INTO doc_postings 
                     (""Id"", posting_date, doc_number, document_type, module_code, debit_account, credit_account, 
-                     amount_kgs, amount_currency, currency_id, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
+                     amount_kgs, amount_currency, currency_id, organization_id, employee_id, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
                     VALUES (
                         @id,
                         @postingDate,
@@ -3513,6 +3541,8 @@ namespace BIS.ERP.Services
                         @amount,
                         @amountCurrency,
                         @currencyId,
+                        @organizationId,
+                        @employeeId,
                         @description,
                         @isActive,
                         NOW(),
@@ -3530,6 +3560,8 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@amount", amount),
                     new NpgsqlParameter("@amountCurrency", amountCurrency),
                     new NpgsqlParameter("@currencyId", string.IsNullOrWhiteSpace(currencyId) ? DBNull.Value : (object)currencyId),
+                    new NpgsqlParameter("@organizationId", (object?)organizationId ?? DBNull.Value),
+                    new NpgsqlParameter("@employeeId", (object?)employeeId ?? DBNull.Value),
                     new NpgsqlParameter("@description", (object?)description ?? DBNull.Value),
                     new NpgsqlParameter("@documentType", documentType),
                     new NpgsqlParameter("@isActive", true));
@@ -3551,6 +3583,8 @@ namespace BIS.ERP.Services
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2);
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS organization_id uuid;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS employee_id uuid;
                     END IF;
                 END $$;");
         }
@@ -3977,6 +4011,12 @@ namespace BIS.ERP.Services
             return code;
         }
 
+        private static Guid? GetNullableGuid(Dictionary<string, object> data, params string[] keys)
+        {
+            return TryGetGuid(data, out var value, keys) && value != Guid.Empty
+                ? value
+                : null;
+        }
         private static bool TryGetGuid(Dictionary<string, object> data, out Guid value, params string[] keys)
         {
             foreach (var key in keys)

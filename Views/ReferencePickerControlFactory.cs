@@ -381,10 +381,12 @@ namespace BIS.ERP.Views
             string? secondDisplayField = null)
         {
             var rows = await metadataService.GetCatalogDataAsync(referenceCatalog.Id);
+            var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(referenceCatalog, metadataService);
             var dialog = new ReferenceSelectionDialog(
                 rows,
                 firstDisplayField ?? FindFirstDisplayField(referenceCatalog),
-                secondDisplayField ?? FindSecondDisplayField(referenceCatalog))
+                secondDisplayField ?? FindSecondDisplayField(referenceCatalog),
+                referenceMaps)
             {
                 Owner = owner,
                 Title = $"Выбор: {referenceCatalog.Name}"

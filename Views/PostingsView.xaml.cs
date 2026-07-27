@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -84,10 +84,7 @@ namespace BIS.ERP.Views
 
             AmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             CurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
-            OrganizationColumn.Visibility = GetAnalyticColumnVisibility(
-                "Организация", "Организации", rawRows, accountFields, accountAnalytics);
-            EmployeeColumn.Visibility = GetAnalyticColumnVisibility(
-                "Сотрудник", "Сотрудники (Списочный состав)", rawRows, accountFields, accountAnalytics);
+            ApplyAnalyticsColumnVisibility();
             MaterialColumn.Visibility = GetAnalyticColumnVisibility(
                 "Материал", "Справочник материалов", rawRows, accountFields, accountAnalytics);
         }
@@ -105,6 +102,24 @@ namespace BIS.ERP.Views
                 : Visibility.Collapsed;
         }
 
+        private void OnColumnVisibilityChanged(object sender, RoutedEventArgs e)
+        {
+            ApplyAnalyticsColumnVisibility();
+        }
+
+        private void ApplyAnalyticsColumnVisibility()
+        {
+            OrganizationColumn.Visibility = IsOrganizationColumnVisible()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            EmployeeColumn.Visibility = IsEmployeeColumnVisible()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private bool IsOrganizationColumnVisible() => ShowOrganizationColumnCheckBox?.IsChecked == true;
+
+        private bool IsEmployeeColumnVisible() => ShowEmployeeColumnCheckBox?.IsChecked == true;
         private void PostingsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             bool hasSelection = PostingsGrid.SelectedItem != null;

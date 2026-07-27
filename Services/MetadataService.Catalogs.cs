@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -877,6 +877,7 @@ namespace BIS.ERP.Services
                 else if (field.DbColumnName?.Equals("current_balance", StringComparison.OrdinalIgnoreCase) == true)
                 {
                     field.Order = Math.Max(field.Order, 6);
+                    field.IsRequired = false;
                 }
                 else if (field.DbColumnName?.Equals("is_active", StringComparison.OrdinalIgnoreCase) == true)
                 {

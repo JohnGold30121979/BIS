@@ -2093,7 +2093,7 @@ public partial class MetadataService
             FieldType = "Decimal",
             Precision = 18,
             Scale = 2,
-            IsRequired = true,
+            IsRequired = false,
             Order = 6,
             MetadataObjectId = metadataObjectId
         },
