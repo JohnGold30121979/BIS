@@ -1,8 +1,9 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -22,6 +23,9 @@ namespace BIS.ERP.Views
 
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
+        private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
+        private AccountAnalyticsRegistry _accountAnalytics = new();
+        private string _moduleName = string.Empty;
         private bool _isLoading;
 
         public CashOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)
@@ -29,6 +33,7 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
+            PostingDetailsGrid.ItemsSource = _postingDetails;
             InitializeHeader(documentMetadata.Icon, CashOrderDocumentName, documentMetadata.Description);
         }
 
@@ -78,6 +83,7 @@ namespace BIS.ERP.Views
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateButtonsState();
+            UpdateSelectedPostingDetails();
             if (DataGrid.SelectedItem is CashOrderRow selected)
             {
                 StatusText.Text = selected.IsPosted
@@ -86,6 +92,101 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void UpdateSelectedPostingDetails()
+        {
+            _postingDetails.Clear();
+
+            if (DataGrid?.SelectedItem is not CashOrderRow row)
+            {
+                SetDetailColumnsVisibility(false, false, false, false);
+                _postingDetails.Add(new Dictionary<string, object>
+                {
+                    ["Документ"] = "Выберите кассовый ордер в списке выше"
+                });
+                return;
+            }
+
+            var selectedSettings = new[]
+            {
+                _accountAnalytics.GetSettingsByCode(row.DebitAccount),
+                _accountAnalytics.GetSettingsByCode(row.CreditAccount)
+            };
+            var showCurrency = ShouldShowPostingAnalytic("Валюта", "Справочник валют", selectedSettings);
+            var showOrganization = ShouldShowPostingAnalytic("Организация", "Организации", selectedSettings);
+            var showEmployee = ShouldShowPostingAnalytic("Сотрудник", "Сотрудники (Списочный состав)", selectedSettings);
+            var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
+            SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
+
+            var detail = new Dictionary<string, object>();
+            SetPostingDetail(detail, "Документ", row.DocNumber);
+            SetPostingDetail(detail, "Тип документа", row.PostingDocumentType);
+            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Модуль", _moduleName);
+            SetPostingDetail(detail, "Дебет", ExtractAccountCode(row.DebitAccount));
+            SetPostingDetail(detail, "Кредит", ExtractAccountCode(row.CreditAccount));
+            SetPostingDetail(detail, "Сумма", row.Amount.ToString("N2"));
+
+            if (showCurrency)
+            {
+                SetPostingDetail(detail, "Сумма вал.", row.AmountInCurrency != 0m ? row.AmountInCurrency.ToString("N2") : null);
+                SetPostingDetail(detail, "Валюта", row.CurrencyName);
+            }
+
+            if (showOrganization)
+                SetPostingDetail(detail, "Организация", row.OrganizationName);
+
+            if (showEmployee)
+                SetPostingDetail(detail, "Сотрудник", row.EmployeeName);
+
+            if (showMaterial)
+                SetPostingDetail(detail, "Материал", row.MaterialName);
+
+            SetPostingDetail(detail, "Статус", row.IsPosted ? "Проведён" : "Не проведён");
+            SetPostingDetail(detail, "Примечание", row.Description);
+            _postingDetails.Add(detail);
+        }
+
+        private bool ShouldShowPostingAnalytic(
+            string fieldName,
+            string referenceCatalog,
+            IEnumerable<AccountAnalyticsSettings?> selectedSettings)
+        {
+            return AccountAnalyticsRules.ShouldShowField(
+                fieldName,
+                selectedSettings,
+                _accountAnalytics.Definitions,
+                referenceCatalog,
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
+        }
+
+        private void SetDetailColumnsVisibility(bool showCurrency, bool showOrganization, bool showEmployee, bool showMaterial)
+        {
+            DetailAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailOrganizationColumn.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
+            DetailEmployeeColumn.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
+            DetailMaterialColumn.Visibility = showMaterial ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            detail[field] = value;
+        }
+
+        private static string ExtractAccountCode(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var separatorIndex = value.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? value[..separatorIndex].Trim()
+                : value.Trim();
+        }
         private async Task LoadData()
         {
             if (_isLoading)
@@ -102,8 +203,9 @@ namespace BIS.ERP.Views
 
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var catalogsByName = allCatalogs.ToDictionary(catalog => catalog.Name, catalog => catalog);
-                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
-                var referenceCache = await BuildReferenceCacheAsync(documentRows, catalogsByName, accountAnalytics);
+                _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _moduleName = await _metadataService.GetAssignedModuleNameAsync(_documentMetadata.Id, _documentMetadata.ObjectType) ?? string.Empty;
+                var referenceCache = await BuildReferenceCacheAsync(documentRows, catalogsByName, _accountAnalytics);
 
                 var rows = documentRows
                     .Select(item => CreateCashOrderRow(item.Document, item.Row, referenceCache))
@@ -115,6 +217,7 @@ namespace BIS.ERP.Views
                 DataGrid.Items.Refresh();
                 StatusText.Text = $"📊 Загружено записей: {rows.Count}";
                 UpdateButtonsState();
+                UpdateSelectedPostingDetails();
             }
             catch (Exception ex)
             {

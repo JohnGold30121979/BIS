@@ -567,28 +567,54 @@ namespace BIS.ERP.Services
             if (catalog == null)
                 return;
 
-            var existingNames = catalog.Fields
-                .Select(field => field.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var existingColumns = catalog.Fields
-                .Select(field => field.DbColumnName)
-                .Where(column => !string.IsNullOrWhiteSpace(column))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var desiredFields = GetEmployeeCatalogFields(catalog.Id);
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(field => field.Order <= 0 ? int.MaxValue : field.Order).First(),
+                    StringComparer.OrdinalIgnoreCase);
+            var existingByName = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.Name))
+                .GroupBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(field => field.Order <= 0 ? int.MaxValue : field.Order).First(),
+                    StringComparer.OrdinalIgnoreCase);
 
-            foreach (var field in GetEmployeeCatalogFields(catalog.Id))
+            foreach (var desired in desiredFields)
             {
-                if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                existingByColumn.TryGetValue(desired.DbColumnName, out var existing);
+                if (existing == null)
+                    existingByName.TryGetValue(desired.Name, out existing);
+
+                if (existing != null)
+                {
+                    existing.Order = desired.Order;
+                    existing.FieldType = desired.FieldType;
+                    existing.Length = desired.Length;
+                    existing.Precision = desired.Precision;
+                    existing.Scale = desired.Scale;
+                    existing.IsRequired = desired.IsRequired;
+                    existing.IsUnique = desired.IsUnique;
+                    existing.ReferenceCatalog = desired.ReferenceCatalog;
+                    existing.DisplayPattern = desired.DisplayPattern;
+                    existing.DisplayFields = desired.DisplayFields;
                     continue;
+                }
 
-                field.Id = Guid.NewGuid();
-                field.MetadataObjectId = catalog.Id;
+                desired.Id = Guid.NewGuid();
+                desired.MetadataObjectId = catalog.Id;
 
-                await _context.MetadataFields.AddAsync(field);
-                await AddColumnToTableAsync(catalog.TableName, field);
+                await _context.MetadataFields.AddAsync(desired);
+                await AddColumnToTableAsync(catalog.TableName, desired);
 
-                catalog.Fields.Add(field);
-                existingNames.Add(field.Name);
-                existingColumns.Add(field.DbColumnName);
+                catalog.Fields.Add(desired);
+                if (!string.IsNullOrWhiteSpace(desired.DbColumnName))
+                    existingByColumn[desired.DbColumnName] = desired;
+                if (!string.IsNullOrWhiteSpace(desired.Name))
+                    existingByName[desired.Name] = desired;
             }
 
             await _context.SaveChangesAsync();

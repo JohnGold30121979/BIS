@@ -1,4 +1,4 @@
-<UserControl x:Class="BIS.ERP.Views.PostingsView"
+﻿<UserControl x:Class="BIS.ERP.Views.PostingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -61,8 +62,41 @@
             </DataGrid.Columns>
         </DataGrid>
 
+        <!-- Детали выбранной проводки -->
+        <GroupBox Grid.Row="3" Header="Дополнительная информация о проводке" Margin="0,8,0,0" Padding="6">
+            <DataGrid x:Name="PostingDetailsGrid"
+                      Height="95"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      RowHeaderWidth="0"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled"
+                      AlternatingRowBackground="#F8F9FA"
+                      BorderBrush="#BDC3C7"
+                      BorderThickness="1">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Документ" Binding="{Binding [Документ]}" Width="100"/>
+                    <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="135"/>
+                    <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="90"/>
+                    <DataGridTextColumn Header="Модуль" Binding="{Binding [Модуль]}" Width="100"/>
+                    <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="95"/>
+                    <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="95"/>
+                    <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма]}" Width="100"/>
+                    <DataGridTextColumn x:Name="DetailAmountCurrencyColumn" Header="Сумма вал." Binding="{Binding [Сумма вал.]}" Width="100" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailCurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="85" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailOrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="180" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailEmployeeColumn" Header="Сотрудник" Binding="{Binding [Сотрудник]}" Width="160" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailMaterialColumn" Header="Материал" Binding="{Binding [Материал]}" Width="180" Visibility="Collapsed"/>
+                    <DataGridTextColumn Header="Статус" Binding="{Binding [Статус]}" Width="95"/>
+                    <DataGridTextColumn Header="Примечание" Binding="{Binding [Примечание]}" Width="220"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
         <!-- Статус -->
-        <StatusBar Grid.Row="3" Margin="0,10,0,0">
+        <StatusBar Grid.Row="4" Margin="0,10,0,0">
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Готово" Foreground="Gray"/>
             </StatusBarItem>

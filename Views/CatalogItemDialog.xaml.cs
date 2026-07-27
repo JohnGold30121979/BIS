@@ -55,7 +55,7 @@ namespace BIS.ERP.Views
                     System.Diagnostics.Debug.WriteLine($"Processing field: {field.Name}, Type: {field.FieldType}");
 
                     var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) };
-                    var label = new TextBlock { Text = field.Name, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 5) };
+                    var label = new TextBlock { Text = GetFieldLabel(field), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 5) };
                     panel.Children.Add(label);
 
                     Control inputControl;
@@ -103,6 +103,58 @@ namespace BIS.ERP.Views
             }
         }
 
+        private string GetFieldLabel(MetadataField field)
+        {
+            if (!IsEmployeesCatalog())
+                return field.Name;
+
+            return field.Name switch
+            {
+                "Должность (справочник)" => "Должность",
+                "Примечание" => "Примечания",
+                _ => field.Name
+            };
+        }
+
+        private void NormalizeCatalogItemDataBeforeSave()
+        {
+            if (!IsEmployeesCatalog())
+                return;
+
+            var personnelNumber = GetItemText("Табельный номер", "personnel_number", "Код", "code");
+            var fullName = GetItemText("ФИО", "full_name", "Наименование", "name");
+
+            _itemData["Код"] = personnelNumber;
+            _itemData["Наименование"] = fullName;
+
+            if (!TryGetTextItem("Статус", out _))
+                _itemData["Статус"] = "Активен";
+
+            NormalizeOptionalEmployeeChoice("Пол");
+            NormalizeOptionalEmployeeChoice("Семейное положение");
+
+            if (_itemData.TryGetValue("Кем выдан", out var issuer) && issuer is string issuerText)
+                _itemData["Кем выдан"] = issuerText.Trim().ToUpperInvariant();
+        }
+
+        private void NormalizeOptionalEmployeeChoice(string fieldName)
+        {
+            if (!_itemData.TryGetValue(fieldName, out var value))
+                return;
+
+            if (value == null || value == DBNull.Value)
+                return;
+
+            var text = value.ToString()?.Trim() ?? string.Empty;
+            if (text.Length == 0 || text.Equals("Не указано", StringComparison.OrdinalIgnoreCase))
+                _itemData[fieldName] = DBNull.Value;
+        }
+
+        private bool TryGetTextItem(string fieldName, out string text)
+        {
+            text = GetItemText(fieldName);
+            return !string.IsNullOrWhiteSpace(text);
+        }
         private void AttachOrganizationNameSync()
         {
             if (!string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase))
@@ -143,16 +195,21 @@ namespace BIS.ERP.Views
                 return null;
 
             if (existingData.TryGetValue(field.Name, out var byName))
-                return byName;
+                return NormalizeExistingValue(byName);
 
             if (!string.IsNullOrWhiteSpace(field.DbColumnName) &&
                 existingData.TryGetValue(field.DbColumnName, out var byColumn))
-                return byColumn;
+                return NormalizeExistingValue(byColumn);
 
             return null;
         }
 
-        // Универсальное создание ComboBox для любого Reference поля       
+        private static object? NormalizeExistingValue(object? value)
+        {
+            return value == null || value == DBNull.Value ? null : value;
+        }
+
+        // Универсальное создание ComboBox для любого Reference поля
         private async Task<Control> CreateReferenceControl(
        MetadataField field,
        Dictionary<string, MetadataObject> catalogsDict,
@@ -482,34 +539,86 @@ namespace BIS.ERP.Views
             _ => value ?? "Active"
         };
 
+        private Control? CreateEmployeeChoiceControl(MetadataField field, Dictionary<string, object> existingData)
+        {
+            if (!IsEmployeesCatalog())
+                return null;
+
+            var choices = field.Name switch
+            {
+                "Пол" => new[]
+                {
+                    new ChoiceItem(string.Empty, "Не указано"),
+                    new ChoiceItem("Мужской", "Мужской"),
+                    new ChoiceItem("Женский", "Женский")
+                },
+                "Семейное положение" => new[]
+                {
+                    new ChoiceItem(string.Empty, "Не указано"),
+                    new ChoiceItem("Не состоит в браке", "Не состоит в браке"),
+                    new ChoiceItem("Состоит в браке", "Состоит в браке"),
+                    new ChoiceItem("Разведен(а)", "Разведен(а)"),
+                    new ChoiceItem("Вдовец/вдова", "Вдовец/вдова")
+                },
+                "Статус" => new[]
+                {
+                    new ChoiceItem("Активен", "Активен"),
+                    new ChoiceItem("Уволен", "Уволен"),
+                    new ChoiceItem("В отпуске", "В отпуске"),
+                    new ChoiceItem("Декрет", "Декрет")
+                },
+                _ => null
+            };
+
+            if (choices == null)
+                return null;
+
+            var comboBox = new ComboBox
+            {
+                Height = 35,
+                MinWidth = 200,
+                Tag = field,
+                ItemsSource = choices
+            };
+
+            var existingValue = GetExistingValue(field, existingData)?.ToString();
+            comboBox.SelectedItem = choices.FirstOrDefault(choice => choice.Matches(existingValue)) ?? choices[0];
+            return comboBox;
+        }
         private Control CreateRegularControl(MetadataField field, Dictionary<string, object> existingData)
         {
+            var employeeChoiceControl = CreateEmployeeChoiceControl(field, existingData);
+            if (employeeChoiceControl != null)
+                return employeeChoiceControl;
+
+            var existingValue = GetExistingValue(field, existingData);
+
             switch (field.FieldType)
             {
                 case "Int":
                     var intBox = new TextBox { Height = 35, Padding = new Thickness(10) };
-                    if (existingData != null && existingData.ContainsKey(field.Name))
-                        intBox.Text = existingData[field.Name]?.ToString();
+                    if (existingValue != null)
+                        intBox.Text = existingValue.ToString();
                     return intBox;
 
                 case "Decimal":
                     var decimalBox = new TextBox { Height = 35, Padding = new Thickness(10) };
-                    if (existingData != null && existingData.ContainsKey(field.Name))
-                        decimalBox.Text = existingData[field.Name]?.ToString();
+                    if (existingValue != null)
+                        decimalBox.Text = existingValue.ToString();
                     return decimalBox;
 
                 case "DateTime":
                     var datePicker = new DatePicker { Height = 35 };
-                    if (existingData != null && existingData.ContainsKey(field.Name))
-                        datePicker.SelectedDate = existingData[field.Name] as DateTime?;
-                    else
-                        datePicker.SelectedDate = DateTime.Today;
+                    if (existingValue is DateTime existingDate)
+                        datePicker.SelectedDate = existingDate;
+                    else if (DateTime.TryParse(existingValue?.ToString(), out var parsedDate))
+                        datePicker.SelectedDate = parsedDate;
                     return datePicker;
 
                 case "Bool":
                     var checkBox = new CheckBox { Content = "Да", Margin = new Thickness(0, 5, 0, 0) };
-                    if (existingData != null && existingData.ContainsKey(field.Name))
-                        checkBox.IsChecked = (bool?)existingData[field.Name];
+                    if (TryGetBool(existingValue, out var isChecked))
+                        checkBox.IsChecked = isChecked;
                     else if (_isNewRecord && ShouldDefaultActiveField(field))
                         checkBox.IsChecked = true;
                     return checkBox;
@@ -524,8 +633,8 @@ namespace BIS.ERP.Views
                         textBox.Background = System.Windows.Media.Brushes.LightGray;
                     }
 
-                    if (existingData != null && existingData.ContainsKey(field.Name))
-                        textBox.Text = existingData[field.Name]?.ToString();
+                    if (existingValue != null)
+                        textBox.Text = existingValue.ToString();
                     return textBox;
             }
         }
@@ -759,6 +868,8 @@ namespace BIS.ERP.Views
                     _itemData[field.Name] = value ?? DBNull.Value;
                 }
 
+                NormalizeCatalogItemDataBeforeSave();
+
                 if (!ValidateChartOfAccountsCatalogLinks())
                     return;
 
@@ -924,6 +1035,90 @@ namespace BIS.ERP.Views
             Close();
         }
 
+        private bool IsEmployeesCatalog()
+        {
+            return string.Equals(_catalog.Name, "Сотрудники (Списочный состав)", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private IEnumerable<MetadataField> GetFieldsInFormOrder()
+        {
+            if (!IsEmployeesCatalog())
+            {
+                foreach (var field in _catalog.Fields
+                             .OrderBy(NormalizeFieldOrder)
+                             .ThenBy(field => field.Name, StringComparer.OrdinalIgnoreCase))
+                    yield return field;
+
+                yield break;
+            }
+
+            var desiredOrder = new[]
+            {
+                "Табельный номер",
+                "ФИО",
+                "Пол",
+                "Семейное положение",
+                "Должность (справочник)",
+                "Подразделение",
+                "Дата рождения",
+                "Дата приема",
+                "Дата увольнения",
+                "Статус",
+                "Телефон",
+                "Email",
+                "ИНН",
+                "Паспорт №/ID",
+                "Кем выдан",
+                "Дата выдачи",
+                "Адрес",
+                "Примечание"
+            };
+
+            var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var fieldsByName = _catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.Name))
+                .GroupBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(NormalizeFieldOrder).ThenBy(field => field.Id).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var fieldName in desiredOrder)
+            {
+                if (!fieldsByName.TryGetValue(fieldName, out var field))
+                    continue;
+
+                emitted.Add(field.Name);
+                yield return field;
+            }
+
+            foreach (var field in _catalog.Fields
+                         .OrderBy(NormalizeFieldOrder)
+                         .ThenBy(field => field.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                if (IsEmployeeHiddenTechnicalField(field) || !emitted.Add(field.Name))
+                    continue;
+
+                yield return field;
+            }
+        }
+
+        private static int NormalizeFieldOrder(MetadataField field)
+        {
+            return field.Order <= 0 ? int.MaxValue : field.Order;
+        }
+
+        private static bool IsEmployeeHiddenTechnicalField(MetadataField field)
+        {
+            return field.Name.Equals("Код", StringComparison.OrdinalIgnoreCase) ||
+                   field.Name.Equals("Наименование", StringComparison.OrdinalIgnoreCase) ||
+                   field.Name.Equals("Должность (текст)", StringComparison.OrdinalIgnoreCase) ||
+                   field.Name.Equals("Активен", StringComparison.OrdinalIgnoreCase) ||
+                   field.DbColumnName.Equals("code", StringComparison.OrdinalIgnoreCase) ||
+                   field.DbColumnName.Equals("name", StringComparison.OrdinalIgnoreCase) ||
+                   field.DbColumnName.Equals("position_text", StringComparison.OrdinalIgnoreCase) ||
+                   field.DbColumnName.Equals("is_active", StringComparison.OrdinalIgnoreCase);
+        }
         private List<MetadataField> GetEditableFields()
         {
             var allowedColumns = GetAllowedCatalogColumns();
@@ -931,7 +1126,7 @@ namespace BIS.ERP.Views
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var result = new List<MetadataField>();
 
-            foreach (var field in _catalog.Fields.OrderBy(field => field.Order))
+            foreach (var field in GetFieldsInFormOrder())
             {
                 if (allowedColumns != null &&
                     (string.IsNullOrWhiteSpace(field.DbColumnName) || !allowedColumns.Contains(field.DbColumnName)))

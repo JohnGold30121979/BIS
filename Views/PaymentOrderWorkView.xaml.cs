@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -16,6 +17,9 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
         private List<PaymentOrderRow> _rows = new();
+        private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
+        private AccountAnalyticsRegistry _accountAnalytics = new();
+        private string _moduleName = string.Empty;
         private bool _isLoading;
 
         public PaymentOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)
@@ -26,6 +30,7 @@ namespace BIS.ERP.Views
 
             TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";
             DescriptionText.Text = documentMetadata.Description;
+            PostingDetailsGrid.ItemsSource = _postingDetails;
 
             Loaded += async (s, e) => await LoadData();
         }
@@ -47,6 +52,7 @@ namespace BIS.ERP.Views
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateButtonsState();
+            UpdateSelectedPostingDetails();
         }
 
         private async void OnRowDoubleClick(object sender, MouseButtonEventArgs e)
@@ -78,6 +84,91 @@ namespace BIS.ERP.Views
             details.ShowDialog();
         }
 
+        private void UpdateSelectedPostingDetails()
+        {
+            _postingDetails.Clear();
+
+            if (DataGrid?.SelectedItem is not PaymentOrderRow row)
+            {
+                SetDetailColumnsVisibility(false, false, false, false);
+                _postingDetails.Add(new Dictionary<string, object>
+                {
+                    ["Документ"] = "Выберите платежное поручение в списке выше"
+                });
+                return;
+            }
+
+            var selectedSettings = new[]
+            {
+                _accountAnalytics.GetSettingsByCode(row.OurAccountName),
+                _accountAnalytics.GetSettingsByCode(row.CorrespondentAccountName)
+            };
+            var showCurrency = ShouldShowPostingAnalytic("Валюта", "Справочник валют", selectedSettings);
+            var showOrganization = ShouldShowPostingAnalytic("Организация", "Организации", selectedSettings);
+            var showEmployee = ShouldShowPostingAnalytic("Сотрудник", "Сотрудники (Списочный состав)", selectedSettings);
+            var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
+            SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
+
+            var detail = new Dictionary<string, object>();
+            SetPostingDetail(detail, "Документ", row.DocNumber);
+            SetPostingDetail(detail, "Тип документа", ResolvePaymentOrderPostingType(row.OrderType));
+            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Модуль", _moduleName);
+            SetPostingDetail(detail, "Дебет", ExtractAccountCode(row.OurAccountName));
+            SetPostingDetail(detail, "Кредит", ExtractAccountCode(row.CorrespondentAccountName));
+            SetPostingDetail(detail, "Сумма", row.Amount.ToString("N2"));
+
+            if (showCurrency)
+            {
+                SetPostingDetail(detail, "Сумма вал.", row.AmountCurrency != 0m ? row.AmountCurrency.ToString("N2") : null);
+                SetPostingDetail(detail, "Валюта", row.CurrencyName);
+            }
+
+            if (showOrganization)
+                SetPostingDetail(detail, "Организация", row.OrganizationName);
+
+            if (showEmployee)
+                SetPostingDetail(detail, "Сотрудник", row.EmployeeName);
+
+            if (showMaterial)
+                SetPostingDetail(detail, "Материал", row.MaterialName);
+
+            var note = string.IsNullOrWhiteSpace(row.Description) ? row.Purpose : row.Description;
+            SetPostingDetail(detail, "Статус", row.IsPosted ? "Проведён" : "Не проведён");
+            SetPostingDetail(detail, "Примечание", note);
+            _postingDetails.Add(detail);
+        }
+
+        private bool ShouldShowPostingAnalytic(
+            string fieldName,
+            string referenceCatalog,
+            IEnumerable<AccountAnalyticsSettings?> selectedSettings)
+        {
+            return AccountAnalyticsRules.ShouldShowField(
+                fieldName,
+                selectedSettings,
+                _accountAnalytics.Definitions,
+                referenceCatalog,
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
+        }
+
+        private void SetDetailColumnsVisibility(bool showCurrency, bool showOrganization, bool showEmployee, bool showMaterial)
+        {
+            DetailAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailOrganizationColumn.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
+            DetailEmployeeColumn.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
+            DetailMaterialColumn.Visibility = showMaterial ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return;
+
+            detail[field] = value;
+        }
         private async Task LoadData()
         {
             if (_isLoading)
@@ -90,16 +181,18 @@ namespace BIS.ERP.Views
                 var data = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
-                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _moduleName = await _metadataService.GetAssignedModuleNameAsync(_documentMetadata.Id, _documentMetadata.ObjectType) ?? string.Empty;
                 var referenceCache = await LoadReferenceCacheAsync(catalogsDict);
 
                 await LoadOurSettlementAccountsFallbackAsync(catalogsDict, referenceCache);
 
-                _rows = data.Select(row => BuildRow(row, referenceCache, accountAnalytics)).ToList();
+                _rows = data.Select(row => BuildRow(row, referenceCache, _accountAnalytics)).ToList();
                 DataGrid.ItemsSource = _rows;
-                UpdateAnalyticColumns(data, accountAnalytics);
+                UpdateAnalyticColumns(data, _accountAnalytics);
                 StatusText.Text = $"📊 Загружено записей: {_rows.Count}";
                 UpdateButtonsState();
+                UpdateSelectedPostingDetails();
             }
             catch (Exception ex)
             {
