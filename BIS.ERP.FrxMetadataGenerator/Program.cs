@@ -14,6 +14,11 @@ var outputFile = args[1];
 
 var variants = new[]
 {
+    new ReportVariant("prb1.frx", "standard.frx.finance.advance-payments.prb1", "Авансовые платежи (FRX FoxPro)", "FoxPro-макет авансовых платежей prb1.frx.", 1050, true, "Авансовые платежи", true, "Portrait", "💰"),
+    new ReportVariant("prb1.frx", "standard.frx.finance.trial-balance.full", "ОСВ полная (FRX FoxPro)", "FoxPro-макет полной оборотно-сальдовой ведомости prb1.frx.", 1041, false, "Проводки", true, "Portrait", "📊"),
+    new ReportVariant("pra1k1.frx", "standard.frx.finance.trial-balance.debit-turnovers", "ОСВ обороты по дебету (FRX FoxPro)", "FoxPro-макет оборотов по дебету счета pra1k1.frx.", 1042, false, "Проводки", true, "Landscape", "📊"),
+    new ReportVariant("pra1k2.frx", "standard.frx.finance.trial-balance.account-summary", "ОСВ сводные обороты по счету (FRX FoxPro)", "FoxPro-макет сводных оборотов по счету pra1k2.frx.", 1043, false, "Проводки", true, "Landscape", "📊"),
+    new ReportVariant("pra1z.frx", "standard.frx.finance.trial-balance.postings", "ОСВ проводки (FRX FoxPro)", "FoxPro-макет проводок по счету pra1z.frx.", 1044, false, "Проводки", true, "Landscape", "📊"),
     new ReportVariant("pr_vzp.frx", "standard.frx.finance.reconciliation.pr-vzp", "Акт сверки (FRX FoxPro)", "Основной FoxPro-макет акта сверки pr_vzp.frx.", 1060, true),
     new ReportVariant("pr_vzp_.frx", "standard.frx.finance.reconciliation.pr-vzp-short", "Акт сверки краткий (FRX FoxPro)", "Краткий FoxPro-макет акта сверки pr_vzp_.frx.", 1061, false),
     new ReportVariant("PR_VZP1.FRX", "standard.frx.finance.reconciliation.pr-vzp1", "Акт сверки вариант 1 (FRX FoxPro)", "Дополнительный FoxPro-макет акта сверки PR_VZP1.FRX.", 1062, false),
@@ -53,13 +58,13 @@ static string BuildDefinition(ReportVariant variant, string compressed)
         $"            Name: \"{Escape(variant.Name)}\",",
         $"            Description: \"{Escape(variant.Description)}\",",
         "            ModuleCode: \"Finance\",",
-        "            SourceName: \"Проводки\",",
+        $"            SourceName: \"{Escape(variant.SourceName)}\",",
         "            SourceObjectType: \"Document\",",
         "            ReportType: \"FoxProLayout\",",
-        "            Icon: \"🤝\",",
+        $"            Icon: \"{Escape(variant.Icon)}\",",
         $"            Order: {variant.Order},",
-        "            PageOrientation: \"Landscape\",",
-        "            IsPrintForm: false,",
+        $"            PageOrientation: \"{Escape(variant.PageOrientation)}\",",
+        $"            IsPrintForm: {(variant.IsPrintForm ? "true" : "false")},",
         $"            IsDefault: {(variant.IsDefault ? "true" : "false")},",
         $"            TemplateCompressedBase64: \"{compressed}\"),"
     });
@@ -81,7 +86,7 @@ foreach (var variant in variants)
 var text = File.ReadAllText(outputFile, Encoding.UTF8);
 text = Regex.Replace(
     text,
-    @"\s*new\(\s*Code:\s*""standard\.frx\.finance\.reconciliation\.[\s\S]*?TemplateCompressedBase64:\s*""[^""]*""\),\r?\n",
+    @"\s*new\(\s*Code:\s*""standard\.frx\.finance\.(?:reconciliation\.[^""\r\n]+|advance-payments\.prb1|trial-balance\.[^""\r\n]+)""[\s\S]*?TemplateCompressedBase64:\s*""[^""]*""\),\r?\n",
     string.Empty);
 
 var insertion = string.Join(Environment.NewLine, blocks) + Environment.NewLine;
@@ -92,7 +97,7 @@ if (!text.Contains(marker))
     throw new InvalidOperationException("Точка вставки перед FRX ОС не найдена.");
 
 File.WriteAllText(outputFile, text.Replace(marker, insertion + marker), new UTF8Encoding(false));
-Console.WriteLine($"Added reconciliation FRX metadata definitions: {blocks.Count}");
+Console.WriteLine($"Added finance FRX metadata definitions: {blocks.Count}");
 return 0;
 
 internal sealed record ReportVariant(
@@ -101,5 +106,8 @@ internal sealed record ReportVariant(
     string Name,
     string Description,
     int Order,
-    bool IsDefault);
-
+    bool IsDefault,
+    string SourceName = "Проводки",
+    bool IsPrintForm = false,
+    string PageOrientation = "Landscape",
+    string Icon = "🤝");

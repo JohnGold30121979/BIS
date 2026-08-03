@@ -32,8 +32,11 @@ namespace BIS.ERP.Views
         private AccountingPeriod? _currentPeriod;
         private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
         private bool _reconciliationVariantsLoaded;
+        private bool _trialBalanceVariantsLoaded;
         private Guid? _selectedOrganizationId;
         private string? _selectedOrganizationName;
+        private string _trialBalanceAccountCode = string.Empty;
+        private string _trialBalanceAccountName = string.Empty;
         private IReadOnlyList<OrganizationSelectionItem> _organizationSelectionItems = Array.Empty<OrganizationSelectionItem>();
 
         public AccountingReportsView(AppDbContext context)
@@ -51,6 +54,7 @@ namespace BIS.ERP.Views
             Loaded += async (_, _) =>
             {
                 await LoadReconciliationReportVariantsAsync();
+                await LoadTrialBalanceReportVariantsAsync();
                 await LoadOrganizationsAsync();
             };
             UpdateReconciliationVariantVisibility();
@@ -75,6 +79,64 @@ namespace BIS.ERP.Views
             _selectedOrganizationId = null;
             _selectedOrganizationName = null;
         }
+
+        private async void OnSelectTrialBalanceAccountClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Загрузка плана счетов...";
+                var accounts = await LoadTrialBalanceAccountSelectionDataAsync();
+                if (accounts.Count == 0)
+                {
+                    MessageBox.Show("План счетов пуст или недоступен.", "План счетов",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var dialog = new AccountSelectionDialog(accounts)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+
+                if (dialog.ShowDialog() != true || dialog.SelectedAccount == null)
+                    return;
+
+                _trialBalanceAccountCode = ReadReportString(dialog.SelectedAccount, "Код", "code", "Code", "Счет", "account_code");
+                _trialBalanceAccountName = ReadReportString(dialog.SelectedAccount, "Наименование", "name", "Name");
+                UpdateTrialBalanceAccountText();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка выбора счета: {ex.Message}", "План счетов",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+                StatusText.Text = "Выберите отчет и период";
+            }
+        }
+
+        private void OnClearTrialBalanceAccountClick(object sender, RoutedEventArgs e)
+        {
+            _trialBalanceAccountCode = string.Empty;
+            _trialBalanceAccountName = string.Empty;
+            UpdateTrialBalanceAccountText();
+        }
+
+        private void UpdateTrialBalanceAccountText()
+        {
+            if (TrialBalanceAccountTextBox == null)
+                return;
+
+            TrialBalanceAccountTextBox.Text = string.IsNullOrWhiteSpace(_trialBalanceAccountCode)
+                ? string.Empty
+                : string.IsNullOrWhiteSpace(_trialBalanceAccountName)
+                    ? _trialBalanceAccountCode
+                    : $"{_trialBalanceAccountCode} - {_trialBalanceAccountName}";
+        }
+
         private async void OnSelectOrganizationClick(object sender, RoutedEventArgs e)
         {
             try
@@ -492,11 +554,22 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildTrialBalanceAsync(DateTime start, DateTime end)
         {
-            var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
+            if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
+                throw new InvalidOperationException("Для оборотно-сальдовой ведомости выберите счет.");
+
+            var variant = GetSelectedTrialBalanceReportVariant();
+            var selectedOrganization = GetSelectedOrganizationScope();
+            var side = GetSelectedTrialBalanceSide();
+            var balances = await BuildTrialBalanceByAccountAsync(start, end, _trialBalanceAccountCode, side, selectedOrganization);
+            balances = balances
+                .Where(HasTurnover)
+                .OrderBy(item => item.AccountCode, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
             var table = new DataTable("Оборотно-сальдовая ведомость");
             table.Columns.Add("Счет", typeof(string));
             table.Columns.Add("Наименование", typeof(string));
-            foreach (var name in new[] { "Сальдо нач. Дт", "Сальдо нач. Кт", "Оборот Дт", "Оборот Кт", "Сальдо кон. Дт", "Сальдо кон. Кт" })
+            foreach (var name in new[] { "Сальдо на начало Дт", "Сальдо на начало Кт", "Оборот Дт", "Оборот Кт", "Сальдо на конец Дт", "Сальдо на конец Кт" })
                 table.Columns.Add(name, typeof(decimal));
 
             foreach (var item in balances)
@@ -504,7 +577,173 @@ namespace BIS.ERP.Views
                     item.TurnoverDebit, item.TurnoverCredit, item.ClosingDebit, item.ClosingCredit);
 
             AddTotalsRow(table, 2);
-            return (table, CreateReport(table, $"Оборотно-сальдовая ведомость за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
+            var sideTitle = side == TrialBalanceAccountSide.Credit ? "кредиту" : "дебету";
+            var organizationSuffix = selectedOrganization == null
+                ? string.Empty
+                : $", организация: {ResolveOrganizationTitle(selectedOrganization.Id, selectedOrganization.Name)}";
+            var reportTitle = $"Оборотно-сальдовая ведомость по {sideTitle} счета {_trialBalanceAccountCode} за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{organizationSuffix}";
+            var report = CreateReport(table, reportTitle, true);
+            report.ReportType = "TrialBalance";
+            report.SubtitleText = variant?.IsStandard == false
+                ? $"Вид ОСВ: {variant.DisplayName}"
+                : $"Счет {_trialBalanceAccountCode}, сторона отбора: {sideTitle}";
+            if (variant?.IsStandard == false)
+                report.FooterText = $"Выбран FRX-макет ОСВ: {variant.DisplayName}.";
+            await ApplyTrialBalanceVariantLayoutAsync(report, variant);
+            return (table, report);
+        }
+
+        private async Task<List<TurnoverBalance>> BuildTrialBalanceByAccountAsync(
+            DateTime start,
+            DateTime end,
+            string accountCode,
+            TrialBalanceAccountSide side,
+            OrganizationSelectionItem? organization)
+        {
+            var periodStart = start.Date;
+            var periodEndExclusive = end.Date.AddDays(1);
+            var postings = (await _postingService.GetAllPostingsAsync(null, periodEndExclusive.AddTicks(-1)))
+                .Where(posting => posting.Date < periodEndExclusive)
+                .Where(posting => MatchesTrialBalanceOrganization(posting, organization))
+                .ToList();
+            var periodPostings = postings
+                .Where(posting => posting.Date >= periodStart && AccountMatchesSelectedSide(posting, accountCode, side))
+                .ToList();
+            var accountNames = await LoadTrialBalanceAccountNamesAsync();
+            var accountCodes = periodPostings
+                .SelectMany(posting => new[] { posting.DebitAccount, posting.CreditAccount })
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return accountCodes.Select(code =>
+            {
+                var openingDebit = postings
+                    .Where(posting => posting.Date < periodStart && SameAccount(posting.DebitAccount, code))
+                    .Sum(posting => posting.Amount);
+                var openingCredit = postings
+                    .Where(posting => posting.Date < periodStart && SameAccount(posting.CreditAccount, code))
+                    .Sum(posting => posting.Amount);
+                var turnoverDebit = periodPostings
+                    .Where(posting => SameAccount(posting.DebitAccount, code))
+                    .Sum(posting => posting.Amount);
+                var turnoverCredit = periodPostings
+                    .Where(posting => SameAccount(posting.CreditAccount, code))
+                    .Sum(posting => posting.Amount);
+                var openingNet = openingDebit - openingCredit;
+                var closingNet = openingNet + turnoverDebit - turnoverCredit;
+
+                return new TurnoverBalance
+                {
+                    AccountCode = code,
+                    AccountName = accountNames.TryGetValue(code, out var accountName) ? accountName : code,
+                    OpeningDebit = Math.Max(openingNet, 0),
+                    OpeningCredit = Math.Max(-openingNet, 0),
+                    TurnoverDebit = turnoverDebit,
+                    TurnoverCredit = turnoverCredit,
+                    ClosingDebit = Math.Max(closingNet, 0),
+                    ClosingCredit = Math.Max(-closingNet, 0)
+                };
+            }).ToList();
+        }
+
+        private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync()
+        {
+            var metadata = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
+            return metadata == null
+                ? new List<Dictionary<string, object>>()
+                : await _metadataService.GetCatalogDataAsync(metadata.Id);
+        }
+
+        private async Task<Dictionary<string, string>> LoadTrialBalanceAccountNamesAsync()
+        {
+            try
+            {
+                var rows = await LoadTrialBalanceAccountSelectionDataAsync();
+                return rows
+                    .Select(row => new
+                    {
+                        Code = ReadReportString(row, "Код", "code", "Code", "Счет", "account_code"),
+                        Name = ReadReportString(row, "Наименование", "name", "Name")
+                    })
+                    .Where(account => !string.IsNullOrWhiteSpace(account.Code))
+                    .GroupBy(account => account.Code, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => string.IsNullOrWhiteSpace(group.First().Name) ? group.Key : group.First().Name,
+                        StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки плана счетов для ОСВ: {ex.Message}");
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private OrganizationSelectionItem? GetSelectedOrganizationScope()
+        {
+            if (!_selectedOrganizationId.HasValue || _selectedOrganizationId.Value == Guid.Empty)
+                return null;
+
+            return _organizationSelectionItems.FirstOrDefault(item => item.Id == _selectedOrganizationId.Value)
+                ?? new OrganizationSelectionItem
+                {
+                    Id = _selectedOrganizationId,
+                    Name = _selectedOrganizationName ?? string.Empty
+                };
+        }
+
+        private TrialBalanceAccountSide GetSelectedTrialBalanceSide()
+        {
+            var side = (TrialBalanceSideCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            return string.Equals(side, "Credit", StringComparison.OrdinalIgnoreCase)
+                ? TrialBalanceAccountSide.Credit
+                : TrialBalanceAccountSide.Debit;
+        }
+
+        private static bool AccountMatchesSelectedSide(PostingViewModel posting, string accountCode, TrialBalanceAccountSide side)
+        {
+            return side == TrialBalanceAccountSide.Credit
+                ? SameAccount(posting.CreditAccount, accountCode)
+                : SameAccount(posting.DebitAccount, accountCode);
+        }
+
+        private static bool MatchesTrialBalanceOrganization(PostingViewModel posting, OrganizationSelectionItem? organization)
+        {
+            if (organization == null || organization.IsAll)
+                return true;
+
+            var postingOrganization = posting.Organization?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(postingOrganization))
+                return false;
+            if (organization.Id.HasValue && organization.Id.Value != Guid.Empty &&
+                postingOrganization.Equals(organization.Id.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var postingName = NormalizeOrganizationLookupValue(postingOrganization);
+            var candidates = new[] { organization.DisplayName, organization.Name, organization.FullName, organization.Code }
+                .Select(NormalizeOrganizationLookupValue)
+                .Where(value => !string.IsNullOrWhiteSpace(value));
+
+            return candidates.Any(candidate =>
+                postingOrganization.Equals(candidate, StringComparison.CurrentCultureIgnoreCase) ||
+                postingName.Equals(candidate, StringComparison.CurrentCultureIgnoreCase));
+        }
+
+        private static string NormalizeOrganizationLookupValue(string? value) =>
+            NormalizeOrganizationName(value)
+                .Replace(" (неактивна)", string.Empty, StringComparison.CurrentCultureIgnoreCase)
+                .Trim();
+
+        private static bool HasTurnover(TurnoverBalance balance) =>
+            balance.TurnoverDebit != 0m || balance.TurnoverCredit != 0m;
+
+        private enum TrialBalanceAccountSide
+        {
+            Debit,
+            Credit
         }
 
         private async Task<(DataTable, Report)> BuildPaymentOrderRegisterAsync(DateTime start, DateTime end)
@@ -682,6 +921,85 @@ namespace BIS.ERP.Views
                 CustomText = mapping.CustomText
             }).ToList();
         }
+        private Task ApplyTrialBalanceVariantLayoutAsync(Report report, TrialBalanceReportVariant? variant)
+        {
+            if (variant?.ReportId == null)
+                return Task.CompletedTask;
+
+            return ApplyReconciliationVariantLayoutAsync(report, new ReconciliationReportVariant
+            {
+                ReportId = variant.ReportId,
+                DisplayName = variant.DisplayName,
+                Description = variant.Description,
+                Code = variant.Code,
+                IsStandard = variant.IsStandard
+            });
+        }
+
+        private async Task LoadTrialBalanceReportVariantsAsync()
+        {
+            if (_trialBalanceVariantsLoaded)
+                return;
+
+            _trialBalanceVariantsLoaded = true;
+            var variants = new List<TrialBalanceReportVariant>
+            {
+                new()
+                {
+                    DisplayName = "Программная ОСВ",
+                    Description = "Расчетный вариант BIS ERP.",
+                    IsStandard = true
+                }
+            };
+            var variantsLoadError = string.Empty;
+
+            try
+            {
+                var reports = await _context.Reports.AsNoTracking()
+                    .Where(report => report.IsActive && EF.Functions.Like(report.Code, "standard.frx.finance.trial-balance.%"))
+                    .OrderBy(report => report.Order)
+                    .ThenBy(report => report.Name)
+                    .Select(report => new
+                    {
+                        report.Id,
+                        report.Name,
+                        report.Description,
+                        report.Code,
+                        report.SourceFormat,
+                        report.ReportType
+                    })
+                    .ToListAsync();
+
+                foreach (var report in reports)
+                {
+                    if (variants.Any(item => item.ReportId == report.Id))
+                        continue;
+
+                    variants.Add(new TrialBalanceReportVariant
+                    {
+                        ReportId = report.Id,
+                        DisplayName = BuildTrialBalanceVariantDisplayName(report.Name, report.SourceFormat, report.ReportType),
+                        Description = report.Description,
+                        Code = report.Code,
+                        IsStandard = false
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                variantsLoadError = $"Макеты ОСВ не загружены: {ex.Message}";
+            }
+
+            TrialBalanceVariantCombo.ItemsSource = variants;
+            TrialBalanceVariantCombo.SelectedIndex = variants.Count > 1 ? 1 : 0;
+            TrialBalanceVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
+                ? variantsLoadError
+                : variants.Count == 1
+                    ? "FRX-варианты ОСВ в метаданных не найдены"
+                    : $"Доступно вариантов: {variants.Count - 1}";
+            UpdateReconciliationVariantVisibility();
+        }
+
         private async Task LoadReconciliationReportVariantsAsync()
         {
             if (_reconciliationVariantsLoaded)
@@ -774,13 +1092,27 @@ namespace BIS.ERP.Views
 
         private void UpdateReconciliationVariantVisibility()
         {
-            if (ReconciliationVariantPanel == null || ReportTypeCombo == null)
+            if (ReportTypeCombo == null)
                 return;
 
-            ReconciliationVariantPanel.Visibility = IsOrganizationReconciliationSelected()
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            if (ReconciliationVariantPanel != null)
+            {
+                ReconciliationVariantPanel.Visibility = IsOrganizationReconciliationSelected()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (TrialBalanceFilterPanel != null)
+            {
+                TrialBalanceFilterPanel.Visibility = IsTrialBalanceSelected()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
         }
+
+        private bool IsTrialBalanceSelected() =>
+            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
+                "TrialBalance", StringComparison.OrdinalIgnoreCase);
 
         private bool IsOrganizationReconciliationSelected() =>
             string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
@@ -788,6 +1120,16 @@ namespace BIS.ERP.Views
 
         private ReconciliationReportVariant? GetSelectedReconciliationReportVariant() =>
             ReconciliationVariantCombo?.SelectedItem as ReconciliationReportVariant;
+
+        private TrialBalanceReportVariant? GetSelectedTrialBalanceReportVariant() =>
+            TrialBalanceVariantCombo?.SelectedItem as TrialBalanceReportVariant;
+
+        private static string BuildTrialBalanceVariantDisplayName(string name, string sourceFormat, string reportType)
+        {
+            var cleanName = CleanTrialBalanceVariantName(name);
+            var sourceLabel = GetReconciliationVariantSourceLabel(sourceFormat, reportType);
+            return string.IsNullOrWhiteSpace(sourceLabel) ? cleanName : $"{cleanName} [{sourceLabel}]";
+        }
 
         private static string BuildReconciliationVariantDisplayName(string name, string sourceFormat, string reportType)
         {
@@ -805,6 +1147,13 @@ namespace BIS.ERP.Views
                 return "Нативный";
             return string.Empty;
         }
+
+        private static string CleanTrialBalanceVariantName(string name) =>
+            (name ?? string.Empty)
+                .Replace("Оборотно-сальдовая ведомость", "ОСВ", StringComparison.OrdinalIgnoreCase)
+                .Replace(" (FRX FoxPro)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace(" (FoxPro report template)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim();
 
         private static string CleanReconciliationVariantName(string name) =>
             (name ?? string.Empty)
@@ -1392,6 +1741,15 @@ namespace BIS.ERP.Views
             public bool IsStandard { get; init; }
         }
 
+        private sealed class TrialBalanceReportVariant
+        {
+            public Guid? ReportId { get; init; }
+            public string DisplayName { get; init; } = string.Empty;
+            public string Description { get; init; } = string.Empty;
+            public string Code { get; init; } = string.Empty;
+            public bool IsStandard { get; init; }
+        }
+
         private sealed class PaymentOrderReportRow
         {
             public DateTime Date { get; init; }
@@ -1937,7 +2295,7 @@ namespace BIS.ERP.Views
             if (!HasFoxProTemplate(_currentReport))
             {
                 MessageBox.Show(
-                    "Для выбранного отчета не подключен FRX-шаблон. Выберите вариант акта сверки с FRX в конфигураторе.",
+                    "Для выбранного отчета не подключен FRX-шаблон. Выберите FRX-вариант отчета или подключите макет в конфигураторе.",
                     "PDF по FRX-макету", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -2009,7 +2367,7 @@ namespace BIS.ERP.Views
                 if (useFoxProExcelLayout && !HasFoxProTemplate(_currentReport))
                 {
                     MessageBox.Show(
-                        "Для выбранного отчета не подключен FRX-шаблон. Выберите вариант акта сверки с FRX в конфигураторе или откройте программный формат.",
+                        "Для выбранного отчета не подключен FRX-шаблон. Выберите FRX-вариант отчета или откройте программный формат.",
                         "FRX FoxPro Excel", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }

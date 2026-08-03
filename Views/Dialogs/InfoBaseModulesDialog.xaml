@@ -42,6 +42,8 @@
                         Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
                 <Button Content="Все рабочие" Width="120" Height="34" Margin="8,0,0,0" Click="OnEnableAllClick"
                         Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
+                <Button Content="Скрыть ОС/материалы" Width="160" Height="34" Margin="8,0,0,0" Click="OnDisableDevelopmentModulesClick"
+                        Background="#FFFFFF" BorderBrush="#BCCCDC" Foreground="#243B53"/>
                 <ProgressBar x:Name="LoadingProgress" Width="170" Height="6" Margin="14,14,0,0"
                              IsIndeterminate="True" Visibility="Collapsed"/>
             </StackPanel>

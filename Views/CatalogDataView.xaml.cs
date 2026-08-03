@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -56,6 +56,7 @@ namespace BIS.ERP.Views
         private bool CanImportDbf => IsChartOfAccountsCatalog || IsPaymentClassificationCatalog;
 
         private bool IsAdvancePaymentsCatalog =>
+            string.Equals(_catalog.Name, "Пары счетов", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)

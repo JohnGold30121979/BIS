@@ -1,4 +1,5 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
+using System.Text.Json;
 
 namespace BIS.ERP.Services;
 
@@ -12,27 +13,63 @@ public partial class MetadataService
     {
         var documentNumber = NormalizeLegacyDocumentNumber(GetStringValue(recordData, "doc_number", "Номер"));
         var postingDate = GetDateValue(recordData, "doc_date", "Дата") ?? DateTime.Today;
-        var acceptedAmount = GetDecimalValue(recordData, "accepted_amount", "Принято к учету");
-        var postingAmount = acceptedAmount > 0 ? acceptedAmount : amount;
         var amountCurrency = GetDecimalValue(recordData, "amount_currency", "Сумма в валюте");
         var exchangeRate = GetDecimalValue(recordData, "exchange_rate", "Курс");
+        var currencyId = GetStringValue(recordData, "currency_id", "Валюта");
+        var organizationId = GetNullableGuid(recordData, "organization_id", "Организация");
+        var employeeId = GetNullableGuid(recordData, "employee_id", "Сотрудник");
+        var linePostings = await ResolveAdvanceExpensePostingLinesAsync(recordData);
+
+        if (linePostings.Count > 0)
+        {
+            var total = linePostings.Sum(line => line.Amount);
+            if (total <= 0)
+                throw new InvalidOperationException("Для авансовых платежей сумма проведения должна быть больше нуля.");
+
+            await EnsureDocumentFieldValueAsync(document.TableName, recordId, recordData, "amount", total);
+            await EnsureDocumentFieldValueAsync(document.TableName, recordId, recordData, "accepted_amount", total);
+
+            var baseDescription = BuildFinanceDocumentDescription("Авансовые платежи", recordData);
+            foreach (var line in linePostings)
+            {
+                var descriptionParts = new[] { baseDescription, line.PairName, line.Description }
+                    .Where(part => !string.IsNullOrWhiteSpace(part));
+                await CreatePosting(
+                    documentNumber,
+                    postingDate,
+                    line.ExpenseAccountCode,
+                    line.CreditAccountCode,
+                    line.Amount,
+                    string.Join("; ", descriptionParts),
+                    "Авансовые платежи",
+                    linePostings.Count == 1 ? amountCurrency : 0m,
+                    currencyId,
+                    organizationId,
+                    employeeId);
+            }
+
+            await UpdateDocumentPostedStatus(document.TableName, recordId);
+            return;
+        }
+
+        var acceptedAmount = GetDecimalValue(recordData, "accepted_amount", "Принято к учету");
+        var postingAmount = acceptedAmount > 0 ? acceptedAmount : amount;
 
         if (postingAmount <= 0 && amountCurrency > 0 && exchangeRate > 0)
             postingAmount = Math.Round(amountCurrency * exchangeRate, 2, MidpointRounding.AwayFromZero);
         if (amountCurrency <= 0 && postingAmount > 0 && exchangeRate > 0)
             amountCurrency = Math.Round(postingAmount / exchangeRate, 2, MidpointRounding.AwayFromZero);
         if (postingAmount <= 0)
-            throw new InvalidOperationException("Для авансового отчета сумма проведения должна быть больше нуля.");
+            throw new InvalidOperationException("Для авансовых платежей сумма проведения должна быть больше нуля.");
 
         var (debitAccount, creditAccount) = await ResolveAdvanceReportAccountsAsync(recordData);
         if (string.IsNullOrWhiteSpace(debitAccount) || string.IsNullOrWhiteSpace(creditAccount))
         {
             throw new InvalidOperationException(
-                "Для авансового отчета укажите счета дебета и кредита или выберите вид авансового расчета с заполненной парой счетов.");
+                "Для авансовых платежей укажите счета или заполните строки затрат с парой счетов и счетом расхода.");
         }
 
-        var description = BuildFinanceDocumentDescription("Авансовый отчет", recordData);
-        var currencyId = GetStringValue(recordData, "currency_id", "Валюта");
+        var description = BuildFinanceDocumentDescription("Авансовые платежи", recordData);
 
         await EnsureDocumentFieldValueAsync(document.TableName, recordId, recordData, "amount", postingAmount);
         await CreatePosting(
@@ -42,9 +79,11 @@ public partial class MetadataService
             creditAccount,
             postingAmount,
             description,
-            "Авансовый отчет",
+            "Авансовые платежи",
             amountCurrency,
-            currencyId);
+            currencyId,
+            organizationId,
+            employeeId);
         await UpdateDocumentPostedStatus(document.TableName, recordId);
     }
 
@@ -108,6 +147,72 @@ public partial class MetadataService
         await UpdateRecordFieldAsync(document.TableName, recordId, "gain_amount", result.GainAmount);
         await UpdateRecordFieldAsync(document.TableName, recordId, "loss_amount", result.LossAmount);
         await UpdateDocumentPostedStatus(document.TableName, recordId);
+    }
+
+    private async Task<List<AdvanceExpensePostingLine>> ResolveAdvanceExpensePostingLinesAsync(
+        Dictionary<string, object> recordData)
+    {
+        var json = GetStringValue(recordData, "expense_lines", "Строки затрат");
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<AdvanceExpensePostingLine>();
+
+        List<AdvanceExpenseLinePayload>? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<List<AdvanceExpenseLinePayload>>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch
+        {
+            return new List<AdvanceExpensePostingLine>();
+        }
+
+        if (payload == null || payload.Count == 0)
+            return new List<AdvanceExpensePostingLine>();
+
+        var advancePaymentRows = await GetAdvancePaymentPairsAsync();
+        var result = new List<AdvanceExpensePostingLine>();
+        for (var index = 0; index < payload.Count; index++)
+        {
+            var line = payload[index];
+            if (line.Amount <= 0)
+                throw new InvalidOperationException($"В строке затрат {index + 1} сумма должна быть больше нуля.");
+
+            var expenseAccount = await ResolveAccountCodeValueAsync(line.ExpenseAccount);
+            if (string.IsNullOrWhiteSpace(expenseAccount))
+                expenseAccount = await ResolveAccountCodeValueAsync(line.DebitAccount);
+
+            var creditAccount = await ResolveAccountCodeValueAsync(line.CreditAccount);
+            var pairRow = advancePaymentRows.FirstOrDefault(row =>
+                line.PairId != Guid.Empty &&
+                string.Equals(GetDictionaryValue(row, "Id"), line.PairId.ToString(), StringComparison.OrdinalIgnoreCase));
+            if (pairRow != null)
+            {
+                if (string.IsNullOrWhiteSpace(creditAccount))
+                    creditAccount = await ResolveAccountCodeValueAsync(GetDictionaryValue(pairRow, "credit_account", "Кредит"));
+                if (string.IsNullOrWhiteSpace(creditAccount))
+                    creditAccount = await ResolveAccountCodeValueAsync(GetDictionaryValue(pairRow, "debit_account", "Дебет"));
+            }
+
+            if (string.IsNullOrWhiteSpace(expenseAccount) || string.IsNullOrWhiteSpace(creditAccount))
+                throw new InvalidOperationException($"В строке затрат {index + 1} не заполнены счет расхода или расчетный счет.");
+
+            var pairName = !string.IsNullOrWhiteSpace(line.PairName)
+                ? line.PairName
+                : pairRow == null
+                    ? string.Empty
+                    : GetDictionaryValue(pairRow, "name", "Вид расчета", "Наименование");
+
+            result.Add(new AdvanceExpensePostingLine(
+                expenseAccount,
+                creditAccount,
+                line.Amount,
+                pairName,
+                line.Description));
+        }
+
+        return result;
     }
 
     private async Task<(string DebitAccount, string CreditAccount)> ResolveAdvanceReportAccountsAsync(
@@ -175,6 +280,22 @@ public partial class MetadataService
 
         return string.Empty;
     }
+
+    private sealed record AdvanceExpensePostingLine(
+        string ExpenseAccountCode,
+        string CreditAccountCode,
+        decimal Amount,
+        string PairName,
+        string Description);
+
+    private sealed class AdvanceExpenseLinePayload
+    {
+        public Guid PairId { get; set; }
+        public string PairName { get; set; } = string.Empty;
+        public string DebitAccount { get; set; } = string.Empty;
+        public string CreditAccount { get; set; } = string.Empty;
+        public string ExpenseAccount { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public string Description { get; set; } = string.Empty;
+    }
 }
-
-

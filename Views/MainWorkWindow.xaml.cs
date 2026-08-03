@@ -69,9 +69,56 @@ namespace BIS.ERP
 
         private static readonly HashSet<string> RemovedDocumentNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Доверенность"
+            "Доверенность",
+            "Платежная ведомость"
         };
 
+
+        private static readonly HashSet<string> FixedAssetsNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Основные средства",
+            "Соответствия счетов ОС",
+            "Группы ОС",
+            "Подгруппы ОС",
+            "Виды ОС",
+            "Методы амортизации ОС",
+            "Статусы ОС",
+            "Налоговые группы ОС",
+            "Параметры контура ОС",
+            "Покупка ОС",
+            "Ввод ОС в эксплуатацию",
+            "Приход из производства ОС",
+            "Переоценка ОС",
+            "Реализация ОС",
+            "Частичная реализация ОС",
+            "Ликвидация ОС",
+            "Укомплектация ОС",
+            "Разукомплектация ОС",
+            "Начисление амортизации",
+            "Списание амортизации",
+            "Консервация ОС",
+            "Расконсервация ОС",
+            "Передача ОС в подотчет",
+            "Смена затратного счета"
+        };
+
+        private static readonly HashSet<string> InventoryNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Виды материалов",
+            "Справочник материалов",
+            "Наименования категорий",
+            "Приход товаров",
+            "Расход товаров",
+            "Внутреннее перемещение ТМЦ",
+            "Приход из производства ТМЦ",
+            "Расход в производство",
+            "Передача ТМЦ в подотчет",
+            "Инвентаризация ТМЦ",
+            "Ведомость наличия материалов",
+            "Перечень материалов",
+            "Журнал прихода товаров",
+            "Журнал расхода товаров"
+        };
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
         public MainWorkWindow(IAuthService authService)
@@ -154,15 +201,32 @@ namespace BIS.ERP
             NavigationItems.Clear();
 
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
-            var catalogs = MetadataService.CollapseDuplicateCatalogsForNavigation(
-                allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты"));
-            var documents = allMetadata
-                .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name))
+            var allModules = await _moduleMetadataService.GetModulesAsync(includeInactive: true);
+            var modules = allModules
+                .Where(module => module.IsActive && !ModuleMetadataService.IsDevelopmentDisabledModuleCode(module.Code))
+                .OrderBy(module => module.Order)
+                .ThenBy(module => module.Name)
                 .ToList();
-            var reports = await _reportService.GetNavigationReportsAsync();
-            var modules = await _moduleMetadataService.GetModulesAsync();
+            var activeModuleCodes = modules.Select(module => module.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var hiddenMetadataIds = allMetadata
+                .Where(item => IsHiddenByUnavailableModule(item, activeModuleCodes))
+                .Select(item => item.Id)
+                .ToHashSet();
+            var catalogs = MetadataService.CollapseDuplicateCatalogsForNavigation(
+                allMetadata.Where(item => item.ObjectType == "Catalog" &&
+                                          item.Name != "Контрагенты" &&
+                                          !hiddenMetadataIds.Contains(item.Id)));
+            var documents = allMetadata
+                .Where(item => item.ObjectType == "Document" &&
+                               !NotReadyFinanceDocuments.Contains(item.Name) &&
+                               !RemovedDocumentNames.Contains(item.Name) &&
+                               !hiddenMetadataIds.Contains(item.Id))
+                .ToList();
+            var reports = (await _reportService.GetNavigationReportsAsync())
+                .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, activeModuleCodes))
+                .ToList();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
-            if (modules.Count == 0 && (await _moduleMetadataService.GetModulesAsync(true)).Count == 0)
+            if (modules.Count == 0 && allModules.Count == 0)
             {
                 await BuildLegacyNavigationTree();
                 return;
@@ -249,7 +313,7 @@ namespace BIS.ERP
 
             var unassignedDocuments = documents.Where(document => !assignmentByObject.ContainsKey(document.Id)).ToList();
             var unassignedReports = reports.Where(report => !assignmentByObject.ContainsKey(report.Id)).ToList();
-            if (unassignedDocuments.Count > 0 || unassignedReports.Count > 0)
+            if (!ModuleMetadataService.HideUnassignedObjectsInNavigationDuringDevelopment && (unassignedDocuments.Count > 0 || unassignedReports.Count > 0))
             {
                 var otherSection = new NavigationItem
                 {
@@ -288,6 +352,45 @@ namespace BIS.ERP
                 ShowNavigationOverview(NavigationItems[0]);
         }
 
+        private static bool IsHiddenByUnavailableModule(MetadataObject metadata, IReadOnlySet<string> activeModuleCodes)
+        {
+            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationObject(metadata.Name, metadata.TableName))
+                return true;
+            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationObject(metadata.Name, metadata.TableName))
+                return true;
+            return false;
+        }
+
+        private static bool IsHiddenByUnavailableModule(Report report, IReadOnlySet<Guid> hiddenMetadataIds, IReadOnlySet<string> activeModuleCodes)
+        {
+            if (report.DataSourceId.HasValue && hiddenMetadataIds.Contains(report.DataSourceId.Value))
+                return true;
+            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationObject(report.Name, string.Empty))
+                return true;
+            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationObject(report.Name, string.Empty))
+                return true;
+            return false;
+        }
+
+        private static bool IsFixedAssetsNavigationObject(string name, string? tableName)
+        {
+            if (FixedAssetsNavigationObjectNames.Contains(name))
+                return true;
+
+            var normalizedTable = tableName ?? string.Empty;
+            return normalizedTable.StartsWith("catalog_asset_", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedTable.StartsWith("doc_asset_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsInventoryNavigationObject(string name, string? tableName)
+        {
+            if (InventoryNavigationObjectNames.Contains(name))
+                return true;
+
+            var normalizedTable = tableName ?? string.Empty;
+            return normalizedTable.Contains("material", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedTable.Contains("inventory", StringComparison.OrdinalIgnoreCase);
+        }
         private static bool IsCashOrderDocument(MetadataObject document)
             => document.Name == "Расходный/Приходный КО" || document.TableName == "doc_cash_orders";
 
@@ -341,7 +444,7 @@ namespace BIS.ERP
             {
                 "Расходный/Приходный КО" => "CashOrder",
                 "Платежное поручение" => "PaymentOrder",
-                "Авансовый отчет" or "Платежная ведомость" => "FinanceDocument",
+                "Авансовый отчет" or "Авансовые платежи" or "Платежная ведомость" => "FinanceDocument",
                 "Проводки" => "PostingsDocument",
                 InvoiceDocumentTypes.SalesIssue or InvoiceDocumentTypes.PurchaseRegistration => "InvoiceDocument",
                 _ => "DynamicDocument"
@@ -386,6 +489,10 @@ namespace BIS.ERP
         private async Task BuildLegacyNavigationTree()
         {
             NavigationItems.Clear();
+            var activeModuleCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ModuleMetadataService.FinanceCode
+            };
 
             // ========== РАЗДЕЛ: ДАННЫЕ ==========
             var dataSection = new NavigationItem
@@ -397,7 +504,7 @@ namespace BIS.ERP
             };
 
             // Справочники
-            var catalogs = await _metadataService.GetCatalogsAsync();
+            var catalogs = (await _metadataService.GetCatalogsAsync()).Where(item => !IsHiddenByUnavailableModule(item, activeModuleCodes)).ToList();
             if (catalogs.Any())
             {
                 var catalogsGroup = new NavigationItem
@@ -442,7 +549,7 @@ namespace BIS.ERP
 
             // Динамические документы
             var documents = (await _metadataService.GetDocumentsAsync())
-                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name))
+                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name) && !IsHiddenByUnavailableModule(item, activeModuleCodes))
                 .ToList();
             if (documents.Any())
             {
@@ -494,8 +601,9 @@ namespace BIS.ERP
                             Order = doc.Order
                         });
                     }
-                    else if (doc.Name == "Авансовый отчет" ||
-                             doc.Name == "Платежная ведомость")
+                    else if ((doc.Name == "Авансовый отчет" ||
+                             doc.Name == "Авансовые платежи" ||
+                             doc.Name == "Платежная ведомость"))
                     {
                         docsGroup.Children.Add(new NavigationItem
                         {
@@ -584,7 +692,7 @@ namespace BIS.ERP
 
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
-            var navigationReports = reports.Where(report => report.IsActive && !report.IsPrintForm).ToList();
+            var navigationReports = reports.Where(report => report.IsActive && !report.IsPrintForm && !IsHiddenByUnavailableModule(report, new HashSet<Guid>(), activeModuleCodes)).ToList();
             if (navigationReports.Any())
             {
                 var reportsSection = new NavigationItem

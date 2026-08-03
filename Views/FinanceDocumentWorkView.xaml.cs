@@ -1,7 +1,8 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
@@ -27,6 +28,7 @@ namespace BIS.ERP.Views
             TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";
             DescriptionText.Text = documentMetadata.Description;
             ConfigureColumns();
+            InitializeReportPeriodDefaults();
 
             Loaded += async (_, _) => await LoadDataAsync();
         }
@@ -40,6 +42,7 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Загрузка данных...";
+                UpdateButtonsState();
 
                 var rows = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
                 var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(_documentMetadata, _metadataService);
@@ -58,6 +61,7 @@ namespace BIS.ERP.Views
             finally
             {
                 _isLoading = false;
+                UpdateButtonsState();
             }
         }
 
@@ -94,27 +98,45 @@ namespace BIS.ERP.Views
             var isPayrollStatement = _documentKind == FinanceDocumentKind.PayrollStatement;
 
             EmployeeColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            AdvancePaymentColumn.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
-            PeriodColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            DebitAccountColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
-            CreditAccountColumn.Visibility = isAdvanceReport || isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
+            AdvancePaymentColumn.Visibility = Visibility.Collapsed;
+            PeriodColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
+            DebitAccountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
+            CreditAccountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             PaymentAccountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             AmountColumn.Visibility = Visibility.Visible;
             PayableAmountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
+            ReportPeriodPanel.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        private void InitializeReportPeriodDefaults()
+        {
+            if (_documentKind != FinanceDocumentKind.AdvanceReport)
+                return;
+
+            var today = DateTime.Today;
+            ReportStartDatePicker.SelectedDate = new DateTime(today.Year, today.Month, 1).AddMonths(-1);
+            ReportEndDatePicker.SelectedDate = today;
+        }
         private void UpdateButtonsState()
         {
             var hasSelection = DataGrid.SelectedItem is FinanceDocumentRow;
-            EditButton.IsEnabled = hasSelection;
-            DeleteButton.IsEnabled = hasSelection;
-            PostButton.IsEnabled = hasSelection;
+            AddButton.IsEnabled = !_isLoading;
+            RefreshButton.IsEnabled = !_isLoading;
+            EditButton.IsEnabled = !_isLoading && hasSelection;
+            DeleteButton.IsEnabled = !_isLoading && hasSelection;
+            PostButton.IsEnabled = !_isLoading && hasSelection;
+            ExportTurnoverExcelButton.IsEnabled = !_isLoading;
+            ReportStartDatePicker.IsEnabled = !_isLoading;
+            ReportEndDatePicker.IsEnabled = !_isLoading;
         }
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateButtonsState();
 
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
+            if (_isLoading)
+                return;
+
             var dialog = new FinanceDocumentDialog(_documentMetadata, _metadataService)
             {
                 Owner = Window.GetWindow(this)
@@ -183,6 +205,45 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnExportTurnoverExcelClick(object sender, RoutedEventArgs e)
+        {
+            if (_isLoading)
+                return;
+
+            var startDate = ReportStartDatePicker.SelectedDate?.Date ?? DateTime.Today.Date;
+            var endDate = ReportEndDatePicker.SelectedDate?.Date ?? DateTime.Today.Date;
+            if (endDate < startDate)
+            {
+                MessageBox.Show("Дата окончания отчета не может быть меньше даты начала.", "Оборотка Excel",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _isLoading = true;
+            try
+            {
+                StatusText.Text = "Формирование оборотной ведомости Excel...";
+                UpdateButtonsState();
+
+                await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var reportService = new AdvancePaymentsTurnoverReportService(context);
+                var filePath = await reportService.ExportExcelAsync(startDate, endDate);
+
+                Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
+                StatusText.Text = $"Открыт отчет Excel: {System.IO.Path.GetFileName(filePath)}";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Ошибка Excel: {ex.Message}";
+                MessageBox.Show($"Ошибка формирования оборотной ведомости Excel: {ex.Message}", "Оборотка Excel",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _isLoading = false;
+                UpdateButtonsState();
+            }
+        }
         private async void OnRefreshClick(object sender, RoutedEventArgs e) => await LoadDataAsync();
 
         private static string ResolveReference(
@@ -367,7 +428,7 @@ namespace BIS.ERP.Views
         {
             return documentName switch
             {
-                "Авансовый отчет" => FinanceDocumentKind.AdvanceReport,
+                "Авансовый отчет" or "Авансовые платежи" => FinanceDocumentKind.AdvanceReport,
                 "Платежная ведомость" => FinanceDocumentKind.PayrollStatement,
                 _ => FinanceDocumentKind.Other
             };

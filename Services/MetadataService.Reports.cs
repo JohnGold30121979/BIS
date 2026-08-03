@@ -22,6 +22,7 @@ public partial class MetadataService
 
         await _context.SaveChangesAsync();
         await MarkReconciliationFrxReportsAsTemplateVariantsAsync();
+        await MarkTrialBalanceFrxReportsAsTemplateVariantsAsync();
     }
 
     private static readonly string[] DeprecatedObjectTreeReportCodes =
@@ -103,6 +104,7 @@ public partial class MetadataService
         await _context.Reports
             .Where(report => reportIds.Contains(report.Id))
             .ExecuteUpdateAsync(setters => setters
+                .SetProperty(report => report.IsActive, true)
                 .SetProperty(report => report.IsPrintForm, true)
                 .SetProperty(report => report.IsDefault, false)
                 .SetProperty(report => report.UpdatedAt, now));
@@ -117,6 +119,35 @@ public partial class MetadataService
         }
     }
 
+
+    private async Task MarkTrialBalanceFrxReportsAsTemplateVariantsAsync()
+    {
+        var reportIds = await _context.Reports
+            .Where(report => EF.Functions.Like(report.Code, "standard.frx.finance.trial-balance.%"))
+            .Select(report => report.Id)
+            .ToListAsync();
+
+        if (reportIds.Count == 0)
+            return;
+
+        var now = DateTime.UtcNow;
+        await _context.Reports
+            .Where(report => reportIds.Contains(report.Id))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(report => report.IsActive, true)
+                .SetProperty(report => report.IsPrintForm, true)
+                .SetProperty(report => report.IsDefault, false)
+                .SetProperty(report => report.UpdatedAt, now));
+
+        var moduleItems = await _context.MetadataModuleItems
+            .Where(item => item.ObjectType == "Report" && reportIds.Contains(item.ObjectId))
+            .ToListAsync();
+        if (moduleItems.Count > 0)
+        {
+            _context.MetadataModuleItems.RemoveRange(moduleItems);
+            await _context.SaveChangesAsync();
+        }
+    }
     private async Task EnsureStandardFrxReportAsync(StandardFrxReportTemplateDefinition definition)
     {
         var source = await _context.MetadataObjects
@@ -152,7 +183,7 @@ public partial class MetadataService
         report.Template = templateJson;
         report.Settings = "{}";
         report.Icon = definition.Icon;
-        report.IsActive = source != null;
+        report.IsActive = source != null || IsStandaloneStandardFrxVariant(definition.Code);
         report.IsPrintForm = definition.IsPrintForm;
         report.IsDefault = definition.IsDefault && source != null;
         report.SourceFormat = "FoxProFRX";
@@ -191,6 +222,11 @@ public partial class MetadataService
 
         await AssignStandardReportToModuleAsync(report.Id, definition.ModuleCode, definition.Order);
     }
+
+    private static bool IsStandaloneStandardFrxVariant(string? code) =>
+        !string.IsNullOrWhiteSpace(code) &&
+        (code.StartsWith("standard.frx.finance.reconciliation.", StringComparison.OrdinalIgnoreCase) ||
+         code.StartsWith("standard.frx.finance.trial-balance.", StringComparison.OrdinalIgnoreCase));
 
     private async Task EnsureStandardReportAsync(StandardReportDefinition definition)
     {
@@ -566,7 +602,7 @@ public partial class MetadataService
             Name: "Журнал авансовых отчетов",
             Description: "Реестр авансовых отчетов с суммами к учету, перерасходом и возвратом.",
             ModuleCode: ModuleMetadataService.FinanceCode,
-            SourceName: "Авансовый отчет",
+            SourceName: "Авансовые платежи",
             SourceObjectType: "Document",
             ReportType: "AdvanceReportRegistry",
             Icon: "🧳",

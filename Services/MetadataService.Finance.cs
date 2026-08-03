@@ -1,10 +1,14 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace BIS.ERP.Services;
 
 public partial class MetadataService
 {
+    private const string AccountPairsCatalogName = "Пары счетов";
+    private const string LegacyAdvancePaymentsCatalogName = "Авансовые платежи";
+    private const string AccountPairsCatalogTableName = "catalog_advance_payments";
+
     #region Finance catalog fields
 
     private List<MetadataField> GetAdvancePaymentFields(Guid metadataObjectId)
@@ -77,7 +81,7 @@ public partial class MetadataService
             var catalogId = Guid.NewGuid();
             var catalog = new MetadataObject
             {
-                Id = catalogId, Name = "Авансовые платежи", TableName = "catalog_advance_payments",
+                Id = catalogId, Name = AccountPairsCatalogName, TableName = AccountPairsCatalogTableName,
                 ObjectType = "Catalog", Description = "Справочник пар счетов для учета авансовых платежей",
                 Icon = "💳", Order = 20, IsSystem = true, MetadataConfigId = config.Id,
                 Fields = GetAdvancePaymentFields(catalogId)
@@ -86,23 +90,22 @@ public partial class MetadataService
             await _context.SaveChangesAsync();
             await CreateTableForCatalogAsync(catalog);
             await AddAdvancePaymentDataToTable(catalog);
-            System.Diagnostics.Debug.WriteLine("Справочник 'Авансовые платежи' создан");
+            System.Diagnostics.Debug.WriteLine($"Справочник '{AccountPairsCatalogName}' создан");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Авансовые платежи': {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
     }
 
     private async Task EnsureAdvancePaymentsCatalogStructureAsync()
     {
-        var catalog = await _context.MetadataObjects
-            .Include(metadata => metadata.Fields)
-            .FirstOrDefaultAsync(metadata => metadata.ObjectType == "Catalog" && metadata.Name == "Авансовые платежи");
+        var catalog = await GetAccountPairsCatalogAsync(includeFields: true);
 
         if (catalog == null)
             return;
 
+        await RenameLegacyAdvancePaymentsCatalogAsync(catalog);
         await MigrateAdvancePaymentsModuleFieldAsync(catalog);
 
         foreach (var field in catalog.Fields)
@@ -253,8 +256,44 @@ public partial class MetadataService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации справочника 'Авансовые платежи': {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
+    }
+
+    private async Task<MetadataObject?> GetAccountPairsCatalogAsync(bool includeFields = false)
+    {
+        IQueryable<MetadataObject> query = _context.MetadataObjects;
+        if (includeFields)
+            query = query.Include(metadata => metadata.Fields);
+
+        return await query
+            .Where(metadata =>
+                metadata.ObjectType == "Catalog" &&
+                (metadata.Name == AccountPairsCatalogName ||
+                 (metadata.Name == LegacyAdvancePaymentsCatalogName &&
+                  metadata.TableName == AccountPairsCatalogTableName)))
+            .OrderByDescending(metadata => metadata.Name == AccountPairsCatalogName)
+            .ThenByDescending(metadata => metadata.TableName == AccountPairsCatalogTableName)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task RenameLegacyAdvancePaymentsCatalogAsync(MetadataObject catalog)
+    {
+        if (!string.Equals(catalog.Name, LegacyAdvancePaymentsCatalogName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var targetNameExists = await _context.MetadataObjects.AnyAsync(metadata =>
+            metadata.Id != catalog.Id &&
+            metadata.ObjectType == "Catalog" &&
+            metadata.Name == AccountPairsCatalogName);
+        if (targetNameExists)
+            return;
+
+        catalog.Name = AccountPairsCatalogName;
+        catalog.TableName = string.IsNullOrWhiteSpace(catalog.TableName)
+            ? AccountPairsCatalogTableName
+            : catalog.TableName;
+        catalog.Description = "Справочник пар счетов для учета авансовых платежей";
     }
 
     private async Task CreateAccountAccessCatalog(MetadataConfiguration config)
@@ -510,7 +549,7 @@ public partial class MetadataService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника 'Авансовые платежи': {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
     }
     private async Task AddAdvancePaymentDataToTable(MetadataObject catalog)
@@ -599,7 +638,7 @@ public partial class MetadataService
 
     public async Task<List<Dictionary<string, object>>> GetAdvancePaymentPairsAsync()
     {
-        var catalog = await _context.MetadataObjects.FirstOrDefaultAsync(m => m.Name == "Авансовые платежи" && m.ObjectType == "Catalog");
+        var catalog = await GetAccountPairsCatalogAsync();
         if (catalog == null) return new List<Dictionary<string, object>>();
 
         var result = new List<Dictionary<string, object>>();

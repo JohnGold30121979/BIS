@@ -707,8 +707,12 @@ namespace BIS.ERP.Views
                 default: // String
                     var textBox = new TextBox { Height = 35, Padding = new Thickness(10) };
 
-                    // Автоматически определяем ReadOnly поля
-                    if (field.Name == "ФИО" || field.Name == "FullName" || field.Name == "full_name")
+                    // ФИО в самом справочнике сотрудников вводится вручную; в остальных местах поле может быть автозаполняемым.
+                    if (!IsEmployeesCatalog() &&
+                        (field.Name.Equals("ФИО", StringComparison.OrdinalIgnoreCase) ||
+                         field.Name.Equals("FullName", StringComparison.OrdinalIgnoreCase) ||
+                         field.Name.Equals("full_name", StringComparison.OrdinalIgnoreCase) ||
+                         field.DbColumnName.Equals("full_name", StringComparison.OrdinalIgnoreCase)))
                     {
                         textBox.IsReadOnly = true;
                         textBox.Background = System.Windows.Media.Brushes.LightGray;
@@ -1272,7 +1276,8 @@ namespace BIS.ERP.Views
                 };
             }
 
-            if (_catalog.Name == "Авансовые платежи")
+            if (string.Equals(_catalog.Name, "Пары счетов", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase))
             {
                 return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {

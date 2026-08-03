@@ -86,6 +86,9 @@ namespace BIS.ERP.Services
                 foreach (var table in package.TableData)
                     await ReplaceTableDataAsync(table);
 
+                // Досоздаем встроенные FRX из текущей сборки после импорта старой/чужой конфигурации.
+                await metadataService.EnsureStandardReportsAsync();
+
                 await transaction.CommitAsync();
             }
             catch

@@ -300,7 +300,9 @@ namespace BIS.ERP.Services
                 await EnsureObjectAsync(name, $"doc_asset_{Slug(name)}", "Document",
                     $"Документ модуля основных средств: {name}", "🏗", FixedAssetDocumentFields(name));
 
-            foreach (var name in new[] { "Платежная ведомость", "Авансовый отчет", "Расчет курсовой разницы" })
+            await RenameMetadataObjectAsync("Авансовый отчет", "Авансовые платежи");
+
+            foreach (var name in new[] { "Авансовые платежи", "Расчет курсовой разницы" })
                 await EnsureObjectAsync(name, $"doc_fin_{Slug(name)}", "Document",
                     $"Документ финансового учета: {name}", "💰", FinanceDocumentFields(name));
 
@@ -620,6 +622,23 @@ namespace BIS.ERP.Services
             await _metadataService.CreateDynamicTableAsync(obj);
         }
 
+        private async Task RenameMetadataObjectAsync(string oldName, string newName)
+        {
+            var oldObject = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == oldName);
+            if (oldObject == null)
+                return;
+
+            var newObjectExists = await _context.MetadataObjects
+                .AnyAsync(item => item.ObjectType == "Document" && item.Name == newName && item.Id != oldObject.Id);
+            if (newObjectExists)
+                return;
+
+            oldObject.Name = newName;
+            oldObject.Description = $"Документ финансового учета: {newName}";
+            await _context.SaveChangesAsync();
+        }
+
         private async Task EnsureGenericPostingRuleAsync(MetadataObject document)
         {
             if (document.PostingRules.Count > 0)
@@ -749,7 +768,7 @@ namespace BIS.ERP.Services
         {
             var fields = name switch
             {
-                "Авансовый отчет" => AdvanceReportFields(),
+                "Авансовый отчет" or "Авансовые платежи" => AdvanceReportFields(),
                 "Платежная ведомость" => PayrollStatementFields(),
                 "Расчет курсовой разницы" => ExchangeRateDifferenceDocumentFields(),
                 _ => StandardDocumentFields()
@@ -762,19 +781,26 @@ namespace BIS.ERP.Services
         private static List<MetadataField> AdvanceReportFields()
         {
             var fields = StandardDocumentFields();
-            RequireDocumentPostingFields(fields);
+            foreach (var field in fields.Where(field => field.DbColumnName == "amount"))
+                field.IsRequired = true;
+
             fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
-            fields.Add(Field(Guid.Empty, "Вид авансового расчета", "advance_payment_id", "Reference", 20, true, "Авансовые платежи"));
-            fields.Add(Field(Guid.Empty, "Дата начала отчета", "report_start_date", "DateTime", 21));
-            fields.Add(Field(Guid.Empty, "Дата окончания отчета", "report_end_date", "DateTime", 22));
-            fields.Add(Field(Guid.Empty, "Документ выдачи", "issue_document_number", "String", 23));
-            fields.Add(Field(Guid.Empty, "Дата выдачи", "issue_document_date", "DateTime", 24));
-            fields.Add(Field(Guid.Empty, "Валюта", "currency_id", "Reference", 25, false, "Справочник валют"));
-            fields.Add(Field(Guid.Empty, "Курс", "exchange_rate", "Decimal", 26));
-            fields.Add(Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 27));
-            fields.Add(Field(Guid.Empty, "Принято к учету", "accepted_amount", "Decimal", 28));
-            fields.Add(Field(Guid.Empty, "Перерасход", "overrun_amount", "Decimal", 29));
-            fields.Add(Field(Guid.Empty, "Остаток к возврату", "return_amount", "Decimal", 30));
+            var expenseLinesField = Field(Guid.Empty, "Строки затрат", "expense_lines", "String", 20);
+            expenseLinesField.Length = 4000;
+            fields.Add(expenseLinesField);
+
+            // Legacy fields remain for existing databases and old records, but the dialog now uses expense_lines.
+            fields.Add(Field(Guid.Empty, "Вид авансового расчета", "advance_payment_id", "Reference", 21, false, "Пары счетов"));
+            fields.Add(Field(Guid.Empty, "Дата начала отчета", "report_start_date", "DateTime", 22));
+            fields.Add(Field(Guid.Empty, "Дата окончания отчета", "report_end_date", "DateTime", 23));
+            fields.Add(Field(Guid.Empty, "Документ выдачи", "issue_document_number", "String", 24));
+            fields.Add(Field(Guid.Empty, "Дата выдачи", "issue_document_date", "DateTime", 25));
+            fields.Add(Field(Guid.Empty, "Валюта", "currency_id", "Reference", 26, false, "Справочник валют"));
+            fields.Add(Field(Guid.Empty, "Курс", "exchange_rate", "Decimal", 27));
+            fields.Add(Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 28));
+            fields.Add(Field(Guid.Empty, "Принято к учету", "accepted_amount", "Decimal", 29));
+            fields.Add(Field(Guid.Empty, "Перерасход", "overrun_amount", "Decimal", 30));
+            fields.Add(Field(Guid.Empty, "Остаток к возврату", "return_amount", "Decimal", 31));
             return fields;
         }
         private static List<MetadataField> PayrollStatementFields()
@@ -1008,6 +1034,8 @@ namespace BIS.ERP.Services
 
         private static string GetSqlType(MetadataField field) => field.FieldType switch
         {
+            "String" when field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase) => "text",
+            "String" => $"varchar({(field.Length > 0 ? field.Length : 500)})",
             "Decimal" => "numeric(18,2)",
             "Int" => "integer",
             "DateTime" => "timestamp",

@@ -641,6 +641,7 @@ namespace BIS.ERP.Services
                 .GroupBy(GetCatalogNavigationKey, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group
                     .OrderByDescending(item => item.TableName.Equals("catalog_esf_xml_tags", StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(item => IsPreferredAccountPairsCatalog(item))
                     .ThenByDescending(item => !string.IsNullOrWhiteSpace(item.TableName))
                     .ThenByDescending(item => item.IsSystem)
                     .ThenBy(item => item.Order)
@@ -649,6 +650,12 @@ namespace BIS.ERP.Services
                 .OrderBy(item => item.Order)
                 .ThenBy(item => item.Name)
                 .ToList();
+        }
+
+        private static bool IsPreferredAccountPairsCatalog(MetadataObject catalog)
+        {
+            return catalog.TableName.Equals(AccountPairsCatalogTableName, StringComparison.OrdinalIgnoreCase) &&
+                   catalog.Name.Equals(AccountPairsCatalogName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string GetCatalogNavigationKey(MetadataObject catalog)
@@ -1001,7 +1008,8 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Должности"))
                     await CreatePositionsCatalog(config);
 
-                if (!existingCatalogs.Contains("Авансовые платежи"))
+                if (!existingCatalogs.Contains(AccountPairsCatalogName) &&
+                    !existingCatalogs.Contains(LegacyAdvancePaymentsCatalogName))
                     await CreateAdvancePaymentsCatalog(config);
                 await EnsureAdvancePaymentsCatalogStructureAsync();
 
@@ -1035,6 +1043,7 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
@@ -1098,6 +1107,7 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
@@ -1216,6 +1226,34 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsureLargeDynamicTextColumnsAsync(MetadataObject metadata)
+        {
+            if (!string.Equals(metadata.ObjectType, "Document", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(metadata.TableName))
+                return;
+
+            var largeTextColumns = metadata.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                                field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase))
+                .Select(field => field.DbColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (largeTextColumns.Count == 0)
+                return;
+
+            var tableName = QuoteIdentifier(metadata.TableName);
+            foreach (var column in largeTextColumns)
+            {
+                var columnName = QuoteIdentifier(column);
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    ALTER TABLE {tableName} ADD COLUMN IF NOT EXISTS {columnName} text;
+                    ALTER TABLE {tableName} ALTER COLUMN {columnName} TYPE text;");
+            }
+
+            foreach (var field in metadata.Fields.Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                                                          field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase)))
+                field.Length = Math.Max(field.Length, 4000);
+        }
         private async Task EnsureSingleCatalogDefaultsAsync(
             MetadataObject metadata,
             IReadOnlyDictionary<string, object> data,
@@ -2216,7 +2254,7 @@ namespace BIS.ERP.Services
                 {
                     await ProcessPaymentOrderAsync(document, recordData, recordId, amount);
                 }
-                else if (document.Name == "Авансовый отчет")
+                else if (document.Name == "Авансовый отчет" || document.Name == "Авансовые платежи")
                 {
                     await ProcessAdvanceReportAsync(document, recordData, recordId, amount);
                 }

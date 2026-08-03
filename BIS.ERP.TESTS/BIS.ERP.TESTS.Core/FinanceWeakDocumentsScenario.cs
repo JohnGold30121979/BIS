@@ -357,11 +357,11 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
                 errors.Add($"{databaseName}: в документе '{document.Name}' нет поля {column}.");
         }
 
-        if (document.Name == "Авансовый отчет" &&
+        if ((document.Name == "Авансовый отчет" || document.Name == "Авансовые платежи") &&
             fieldsByColumn.TryGetValue("advance_payment_id", out var advancePaymentField) &&
-            !string.Equals(advancePaymentField.ReferenceCatalog, "Авансовые платежи", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(advancePaymentField.ReferenceCatalog, "Пары счетов", StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add($"{databaseName}: поле advance_payment_id должно ссылаться на справочник 'Авансовые платежи'.");
+            errors.Add($"{databaseName}: поле advance_payment_id должно ссылаться на справочник 'Пары счетов'.");
         }
 
         if (document.Name == "Расчет курсовой разницы")
