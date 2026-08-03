@@ -126,7 +126,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки метаданных: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка загрузки метаданных: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -136,6 +136,17 @@ namespace BIS.ERP.Views
             }
         }
 
+        private static string GetFullExceptionMessage(Exception exception)
+        {
+            var messages = new List<string>();
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message))
+                    messages.Add(current.Message);
+            }
+
+            return string.Join(Environment.NewLine, messages);
+        }
         private Report? _selectedReport;
         private TreeViewItem? _selectedReportTreeItem;
 
@@ -594,7 +605,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка загрузки шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка загрузки шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -625,7 +636,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка активации шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка активации шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -674,7 +685,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка изменения реквизитов: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка изменения реквизитов: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -718,7 +729,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка выгрузки шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка выгрузки шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -758,7 +769,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка удаления шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка удаления шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -838,7 +849,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка создания: {ex.Message}", "Ошибка",
+                    MessageBox.Show($"Ошибка создания: {GetFullExceptionMessage(ex)}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -893,7 +904,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка создания: {ex.Message}", "Ошибка",
+                    MessageBox.Show($"Ошибка создания: {GetFullExceptionMessage(ex)}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -1529,7 +1540,7 @@ namespace BIS.ERP.Views
             {
                 target.Children.Add(new TextBlock
                 {
-                    Text = $"Ошибка загрузки DBF документов: {ex.Message}",
+                    Text = $"Ошибка загрузки DBF документов: {GetFullExceptionMessage(ex)}",
                     Foreground = Brushes.Red,
                     Margin = new Thickness(10)
                 });
@@ -1781,7 +1792,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -2411,7 +2422,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка: {GetFullExceptionMessage(ex)}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
@@ -2562,7 +2573,7 @@ namespace BIS.ERP.Views
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                        MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
                             MessageBoxButton.OK, MessageBoxImage.Error);
                     }
                 };
@@ -2606,7 +2617,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
+                    MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -2699,7 +2710,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2721,7 +2732,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2785,7 +2796,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка выгрузки конфигурации: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка выгрузки конфигурации: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -2831,7 +2842,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки конфигурации: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка загрузки конфигурации: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -2853,7 +2864,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия патчей: {ex.Message}", "Патчи",
+                MessageBox.Show($"Ошибка открытия патчей: {GetFullExceptionMessage(ex)}", "Патчи",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2867,7 +2878,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия обновлений программы: {ex.Message}", "Обновления программы",
+                MessageBox.Show($"Ошибка открытия обновлений программы: {GetFullExceptionMessage(ex)}", "Обновления программы",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2881,7 +2892,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия анализа FoxPro: {ex.Message}", "Анализ FoxPro",
+                MessageBox.Show($"Ошибка открытия анализа FoxPro: {GetFullExceptionMessage(ex)}", "Анализ FoxPro",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2971,7 +2982,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {

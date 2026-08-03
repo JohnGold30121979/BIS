@@ -82,11 +82,27 @@ namespace BIS.ERP.Services
                 throw new InvalidOperationException("В файле не найдено ни одной записи receipt.");
 
             var updated = 0;
+            var skippedDuplicates = 0;
             var unmatched = new List<string>();
 
             foreach (var receipt in receipts)
             {
                 var imported = ImportedReceipt.FromXml(receipt);
+                
+                // Проверка на дубликат: если exchangeCode уже существует в базе у другого документа, пропускаем
+                if (!string.IsNullOrWhiteSpace(imported.ExchangeCode))
+                {
+                    var existingInvoiceId = await _invoiceService.FindInvoiceIdByExchangeCodeAsync(imported.ExchangeCode);
+                    var resolvedInvoiceId = await ResolveInvoiceIdAsync(imported);
+                    
+                    // Если exchangeCode уже существует и принадлежит другому документу - это дубликат
+                    if (existingInvoiceId.HasValue && resolvedInvoiceId.HasValue && existingInvoiceId.Value != resolvedInvoiceId.Value)
+                    {
+                        skippedDuplicates++;
+                        continue;
+                    }
+                }
+
                 var invoiceId = await ResolveInvoiceIdAsync(imported);
                 if (!invoiceId.HasValue)
                 {
@@ -101,18 +117,15 @@ namespace BIS.ERP.Services
                     continue;
                 }
 
-                var statusDate = imported.InvoiceDate?.Date ?? imported.CreatedDate?.Date;
-                await _invoiceService.UpdateEsfExchangeInfoAsync(
-                    invoice.Id,
-                    string.IsNullOrWhiteSpace(imported.InvoiceNumber) ? invoice.EsfNumber : imported.InvoiceNumber,
-                    string.IsNullOrWhiteSpace(imported.ExchangeCode) ? invoice.ExchangeCode : imported.ExchangeCode,
-                    string.IsNullOrWhiteSpace(imported.DocumentStatusName) ? invoice.TaxStatus : imported.DocumentStatusName,
-                    invoice.ExportedAt ?? imported.CreatedDate ?? DateTime.Now,
-                    statusDate ?? invoice.TaxStatusDate);
-                updated++;
+                // Для ответного файла обновляем только exchangeCode (как в FoxPro)
+                if (!string.IsNullOrWhiteSpace(imported.ExchangeCode) && imported.ExchangeCode != invoice.ExchangeCode)
+                {
+                    await _invoiceService.UpdateEsfExchangeCodeAsync(invoice.Id, imported.ExchangeCode);
+                    updated++;
+                }
             }
 
-            return new InvoiceEsfImportResult(receipts.Count, updated, unmatched);
+            return new InvoiceEsfImportResult(receipts.Count, updated, unmatched, skippedDuplicates);
         }
 
         public async Task<TaxEsfApiSubmitResult> SubmitSelectedInvoicesViaApiAsync(
@@ -162,6 +175,7 @@ namespace BIS.ERP.Services
 
             var (primaryOrganization, organizationsById) = await LoadOrganizationsAsync();
             var referenceMaps = await LoadEsfReferenceMapsAsync();
+            var tagNames = await LoadEsfXmlTagNamesAsync();
             if (primaryOrganization == null)
                 throw new InvalidOperationException(
                     "Не найден справочник 'Организации' с реквизитами предприятия. Заполните первичную организацию.");
@@ -201,17 +215,18 @@ namespace BIS.ERP.Services
                     status,
                     receiptCode,
                     exportedAt,
-                    referenceMaps));
+                    referenceMaps,
+                    tagNames));
                 preparedInvoices.Add(new PreparedExportInvoice(invoice.Id, exchangeCode, status));
             }
 
             XNamespace xsi = "http://www.w3.org/2001/XMLSchema-instance";
             var xml = new XDocument(
                 new XDeclaration("1.0", "UTF-8", "yes"),
-                new XElement("VFPDataSet",
+                new XElement(Tag(tagNames, "VFPDataSet"),
                     new XAttribute(XNamespace.Xmlns + "xsi", xsi),
                     new XAttribute(xsi + "noNamespaceSchemaLocation", "result.xsd"),
-                    new XElement("receipts", receiptElements)));
+                    new XElement(Tag(tagNames, "receipts"), receiptElements)));
 
             var settings = new XmlWriterSettings
             {
@@ -237,7 +252,8 @@ namespace BIS.ERP.Services
             string documentStatus,
             string receiptCode,
             DateTime exportedAt,
-            EsfReferenceMaps referenceMaps)
+            EsfReferenceMaps referenceMaps,
+            EsfXmlTagNames tagNames)
         {
             var createdDate = exportedAt.Date;
             var invoiceDate = new DateTimeOffset(
@@ -247,73 +263,74 @@ namespace BIS.ERP.Services
                 ? invoice.Lines.FirstOrDefault()?.Name ?? string.Empty
                 : invoice.Basis.Trim();
 
-            return new XElement("receipt",
-                Element("exchangeCode", exchangeCode),
-                Element("receiptTypeCode", ResolveReceiptTypeCode()),
-                Element("createdDate", createdDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
-                Element("ownedCrmReceiptCode", receiptCode),
-                Element("correctedReceiptCode", string.Empty),
-                Element("correctionReasonCode", string.Empty),
-                Element("bankAccount", issuer.BankAccount),
-                Element("contractorPin", counterparty.Inn),
-                Element("contractorBankAccount", counterparty.BankAccount),
-                Element("deliveryContractNumber", string.Empty),
-                Element("deliveryContractDate", string.Empty),
-                Element("goodsDeliveryTypeCode", "0"),
-                Element("paymentTypeCode", ResolvePaymentTypeCode(invoice, referenceMaps.PaymentKinds)),
-                Element("invoiceDeliveryTypeCode", ResolveInvoiceDeliveryTypeCode(invoice, referenceMaps.DeliveryKinds)),
-                Element("vatDeliveryTypeCode", ResolveVatDeliveryTypeCode(invoice, referenceMaps.SupplyKinds)),
-                Element("currencyCode", "417"),
-                Element("exchangeRate", "1"),
-                Element("contractorCitizenshipCode", "417"),
-                Element("isPriceWithoutTaxes", "true"),
-                Element("note", note),
-                Element("vatCode", ResolveVatCode(invoice, referenceMaps.Taxes)),
-                Element("isResident", "true"),
-                Element("foreignName", string.IsNullOrWhiteSpace(counterparty.FullName) ? counterparty.Name : counterparty.FullName),
-                Element("sellerBranchPin", string.Empty),
-                Element("isIndustry", "false"),
-                Element("openingBalances", DecimalText(0m)),
-                Element("assessedContributionsAmount", DecimalText(0m)),
-                Element("paidAmount", DecimalText(0m)),
-                Element("penaltiesAmount", DecimalText(0m)),
-                Element("finesAmount", DecimalText(0m)),
-                Element("closingBalances", DecimalText(0m)),
-                Element("amountToBePaid", DecimalText(0m)),
-                Element("personalAccountNumber", "0"),
-                Element("markGoods", "false"),
-                Element("invoiceDate", invoiceDate.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture)),
-                Element("invoiceNumber", invoice.EsfNumber),
-                Element("contractorName", string.IsNullOrWhiteSpace(counterparty.FullName) ? counterparty.Name : counterparty.FullName),
-                Element("contractorBranchName", string.Empty),
-                Element("currencyName", "Сом"),
-                Element("contractorCitizenshipName", "417"),
-                Element("correctedReceiptCreationDate", string.Empty),
-                Element("correctionReasonName", string.Empty),
-                Element("documentStatusName", documentStatus),
-                Element("correctionSeries", string.Empty),
-                Element("type", "10"),
-                Element("costWithoutTaxes", DecimalText(invoice.AmountWithoutTax)),
-                Element("totalCost", DecimalText(invoice.TotalAmount)),
-                new XElement("goods",
+            return new XElement(Tag(tagNames, "receipt"),
+                Element(tagNames, "exchangeCode", exchangeCode),
+                Element(tagNames, "receiptTypeCode", ResolveReceiptTypeCode()),
+                Element(tagNames, "createdDate", createdDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
+                Element(tagNames, "ownedCrmReceiptCode", receiptCode),
+                Element(tagNames, "correctedReceiptCode", string.Empty),
+                Element(tagNames, "correctionReasonCode", string.Empty),
+                Element(tagNames, "bankAccount", issuer.BankAccount),
+                Element(tagNames, "contractorPin", counterparty.Inn),
+                Element(tagNames, "contractorBankAccount", counterparty.BankAccount),
+                Element(tagNames, "deliveryContractNumber", string.Empty),
+                Element(tagNames, "deliveryContractDate", string.Empty),
+                Element(tagNames, "goodsDeliveryTypeCode", "0"),
+                Element(tagNames, "paymentTypeCode", ResolvePaymentTypeCode(invoice, referenceMaps.PaymentKinds)),
+                Element(tagNames, "invoiceDeliveryTypeCode", ResolveInvoiceDeliveryTypeCode(invoice, referenceMaps.DeliveryKinds)),
+                Element(tagNames, "vatDeliveryTypeCode", ResolveVatDeliveryTypeCode(invoice, referenceMaps.SupplyKinds)),
+                Element(tagNames, "currencyCode", "417"),
+                Element(tagNames, "exchangeRate", "1"),
+                Element(tagNames, "contractorCitizenshipCode", "417"),
+                Element(tagNames, "isPriceWithoutTaxes", "true"),
+                Element(tagNames, "note", note),
+                Element(tagNames, "vatCode", ResolveVatCode(invoice, referenceMaps.Taxes)),
+                Element(tagNames, "isResident", "true"),
+                Element(tagNames, "foreignName", string.IsNullOrWhiteSpace(counterparty.FullName) ? counterparty.Name : counterparty.FullName),
+                Element(tagNames, "sellerBranchPin", string.Empty),
+                Element(tagNames, "isIndustry", "false"),
+                Element(tagNames, "openingBalances", DecimalText(0m)),
+                Element(tagNames, "assessedContributionsAmount", DecimalText(0m)),
+                Element(tagNames, "paidAmount", DecimalText(0m)),
+                Element(tagNames, "penaltiesAmount", DecimalText(0m)),
+                Element(tagNames, "finesAmount", DecimalText(0m)),
+                Element(tagNames, "closingBalances", DecimalText(0m)),
+                Element(tagNames, "amountToBePaid", DecimalText(0m)),
+                Element(tagNames, "personalAccountNumber", "0"),
+                Element(tagNames, "markGoods", "false"),
+                Element(tagNames, "invoiceDate", invoiceDate.ToString("yyyy-MM-ddTHH:mm:sszzz", CultureInfo.InvariantCulture)),
+                Element(tagNames, "invoiceNumber", invoice.EsfNumber),
+                Element(tagNames, "contractorName", string.IsNullOrWhiteSpace(counterparty.FullName) ? counterparty.Name : counterparty.FullName),
+                Element(tagNames, "contractorBranchName", string.Empty),
+                Element(tagNames, "currencyName", "Сом"),
+                Element(tagNames, "contractorCitizenshipName", "417"),
+                Element(tagNames, "correctedReceiptCreationDate", string.Empty),
+                Element(tagNames, "correctionReasonName", string.Empty),
+                Element(tagNames, "documentStatusName", documentStatus),
+                Element(tagNames, "correctionSeries", string.Empty),
+                Element(tagNames, "type", "10"),
+                Element(tagNames, "costWithoutTaxes", DecimalText(invoice.AmountWithoutTax)),
+                Element(tagNames, "totalCost", DecimalText(invoice.TotalAmount)),
+                new XElement(Tag(tagNames, "goods"),
                     invoice.Lines.OrderBy(item => item.LineNumber)
-                        .Select(line => BuildGoodElement(line, referenceMaps.Taxes))));
+                        .Select(line => BuildGoodElement(line, referenceMaps.Taxes, tagNames))));
         }
 
         private static XElement BuildGoodElement(
             InvoiceLineRow line,
-            IReadOnlyDictionary<string, EsfCatalogEntry> taxesByCode)
+            IReadOnlyDictionary<string, EsfCatalogEntry> taxesByCode,
+            EsfXmlTagNames tagNames)
         {
             var quantity = line.Quantity <= 0 ? 1m : line.Quantity;
             var price = quantity == 0 ? line.AmountWithoutTax : Math.Round(line.AmountWithoutTax / quantity, 5);
 
-            return new XElement("good",
-                Element("vatAmount", DecimalText(line.VatAmount)),
-                Element("stCode", ResolveSalesTaxCode(line, taxesByCode)),
-                Element("stAmount", DecimalText(line.SalesTaxAmount)),
-                Element("goodsName", line.Name),
-                Element("baseCount", DecimalText(quantity, 5)),
-                Element("price", DecimalText(price, 5)));
+            return new XElement(Tag(tagNames, "good"),
+                Element(tagNames, "vatAmount", DecimalText(line.VatAmount)),
+                Element(tagNames, "stCode", ResolveSalesTaxCode(line, taxesByCode)),
+                Element(tagNames, "stAmount", DecimalText(line.SalesTaxAmount)),
+                Element(tagNames, "goodsName", line.Name),
+                Element(tagNames, "baseCount", DecimalText(quantity, 5)),
+                Element(tagNames, "price", DecimalText(price, 5)));
         }
 
         private async Task<IReadOnlyCollection<InvoiceDocument>> LoadInvoicesAsync(IReadOnlyCollection<Guid> invoiceIds)
@@ -423,6 +440,33 @@ namespace BIS.ERP.Services
                 await LoadCatalogEntriesAsync("Виды поставки"),
                 await LoadCatalogEntriesAsync("Типы поставки"),
                 await LoadCatalogEntriesAsync("Налоги"));
+        }
+
+        private async Task<EsfXmlTagNames> LoadEsfXmlTagNamesAsync()
+        {
+            var result = DefaultEsfXmlTagNames();
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    (item.TableName == "catalog_esf_xml_tags" || item.Name == "Настройки XML ЭСФ"));
+            if (catalog == null)
+                return new EsfXmlTagNames(result);
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            foreach (var row in rows)
+            {
+                if (!GetBoolean(row, "is_active", "Активен"))
+                    continue;
+
+                var key = GetString(row, "code", "Ключ");
+                var tagName = GetString(row, "tag_name", "Имя XML-тега");
+                if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(tagName))
+                    continue;
+
+                result[key.Trim()] = tagName.Trim();
+            }
+
+            return new EsfXmlTagNames(result);
         }
 
         private async Task<Dictionary<string, EsfCatalogEntry>> LoadCatalogEntriesAsync(string catalogName)
@@ -645,8 +689,75 @@ namespace BIS.ERP.Services
                 : string.Empty;
         }
 
-        private static XElement Element(string name, string? value) =>
-            new(name, value ?? string.Empty);
+        private static XElement Element(EsfXmlTagNames tagNames, string key, string? value) =>
+            new(Tag(tagNames, key), value ?? string.Empty);
+
+        private static string Tag(EsfXmlTagNames tagNames, string key) =>
+            tagNames.Names.TryGetValue(key, out var tagName) && !string.IsNullOrWhiteSpace(tagName)
+                ? tagName
+                : key;
+
+        private static Dictionary<string, string> DefaultEsfXmlTagNames() => new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["VFPDataSet"] = "VFPDataSet",
+            ["receipts"] = "receipts",
+            ["receipt"] = "receipt",
+            ["goods"] = "goods",
+            ["good"] = "good",
+            ["exchangeCode"] = "exchangeCode",
+            ["receiptTypeCode"] = "receiptTypeCode",
+            ["createdDate"] = "createdDate",
+            ["ownedCrmReceiptCode"] = "ownedCrmReceiptCode",
+            ["correctedReceiptCode"] = "correctedReceiptCode",
+            ["correctionReasonCode"] = "correctionReasonCode",
+            ["bankAccount"] = "bankAccount",
+            ["contractorPin"] = "contractorPin",
+            ["contractorBankAccount"] = "contractorBankAccount",
+            ["deliveryContractNumber"] = "deliveryContractNumber",
+            ["deliveryContractDate"] = "deliveryContractDate",
+            ["goodsDeliveryTypeCode"] = "goodsDeliveryTypeCode",
+            ["paymentTypeCode"] = "paymentTypeCode",
+            ["invoiceDeliveryTypeCode"] = "invoiceDeliveryTypeCode",
+            ["vatDeliveryTypeCode"] = "vatDeliveryTypeCode",
+            ["currencyCode"] = "currencyCode",
+            ["exchangeRate"] = "exchangeRate",
+            ["contractorCitizenshipCode"] = "contractorCitizenshipCode",
+            ["isPriceWithoutTaxes"] = "isPriceWithoutTaxes",
+            ["note"] = "note",
+            ["vatCode"] = "vatCode",
+            ["isResident"] = "isResident",
+            ["foreignName"] = "foreignName",
+            ["sellerBranchPin"] = "sellerBranchPin",
+            ["isIndustry"] = "isIndustry",
+            ["openingBalances"] = "openingBalances",
+            ["assessedContributionsAmount"] = "assessedContributionsAmount",
+            ["paidAmount"] = "paidAmount",
+            ["penaltiesAmount"] = "penaltiesAmount",
+            ["finesAmount"] = "finesAmount",
+            ["closingBalances"] = "closingBalances",
+            ["amountToBePaid"] = "amountToBePaid",
+            ["personalAccountNumber"] = "personalAccountNumber",
+            ["markGoods"] = "markGoods",
+            ["invoiceDate"] = "invoiceDate",
+            ["invoiceNumber"] = "invoiceNumber",
+            ["contractorName"] = "contractorName",
+            ["contractorBranchName"] = "contractorBranchName",
+            ["currencyName"] = "currencyName",
+            ["contractorCitizenshipName"] = "contractorCitizenshipName",
+            ["correctedReceiptCreationDate"] = "correctedReceiptCreationDate",
+            ["correctionReasonName"] = "correctionReasonName",
+            ["documentStatusName"] = "documentStatusName",
+            ["correctionSeries"] = "correctionSeries",
+            ["type"] = "type",
+            ["costWithoutTaxes"] = "costWithoutTaxes",
+            ["totalCost"] = "totalCost",
+            ["vatAmount"] = "vatAmount",
+            ["stCode"] = "stCode",
+            ["stAmount"] = "stAmount",
+            ["goodsName"] = "goodsName",
+            ["baseCount"] = "baseCount",
+            ["price"] = "price"
+        };
 
         private static string DecimalText(decimal value, int scale = 2) =>
             Math.Round(value, scale).ToString($"F{scale}", CultureInfo.InvariantCulture);
@@ -712,6 +823,8 @@ namespace BIS.ERP.Services
             IReadOnlyDictionary<string, EsfCatalogEntry> DeliveryKinds,
             IReadOnlyDictionary<string, EsfCatalogEntry> SupplyKinds,
             IReadOnlyDictionary<string, EsfCatalogEntry> Taxes);
+
+        private sealed record EsfXmlTagNames(Dictionary<string, string> Names);
 
         private sealed record PreparedExportInvoice(Guid InvoiceId, string ExchangeCode, string Status);
 
@@ -792,6 +905,6 @@ namespace BIS.ERP.Services
     }
 
     public sealed record InvoiceEsfExportResult(int ExportedCount, string OutputPath);
-    public sealed record InvoiceEsfImportResult(int TotalReceipts, int UpdatedCount, IReadOnlyCollection<string> UnmatchedReceipts);
+    public sealed record InvoiceEsfImportResult(int TotalReceipts, int UpdatedCount, IReadOnlyCollection<string> UnmatchedReceipts, int SkippedDuplicates = 0);
     public sealed record TaxEsfApiSubmitResult(string TransportName, string RequestId, DateTime SubmittedAt);
 }

@@ -49,11 +49,36 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@recordId", (object?)recordId ?? DBNull.Value),
                     new NpgsqlParameter("@details", detailsText));
 
-                WriteFileLog(timestamp, action, entityType, entityName, recordId, detailsText);
+                LogFileOnly(action, entityType, entityName, recordId, detailsText, timestamp);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка записи события: {ex.Message}");
+            }
+        }
+
+        public static void LogFileOnly(
+            string action,
+            string entityType,
+            string entityName,
+            Guid? recordId = null,
+            object? details = null,
+            DateTime? timestamp = null)
+        {
+            try
+            {
+                var detailsText = details switch
+                {
+                    null => string.Empty,
+                    string text => text,
+                    _ => JsonSerializer.Serialize(details)
+                };
+
+                WriteFileLog(timestamp ?? DateTime.UtcNow, action, entityType, entityName, recordId, detailsText);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка файлового лога: {ex.Message}");
             }
         }
 

@@ -283,6 +283,7 @@ public sealed class InvoiceEsfSmokeTestScenario : SmokeTestScenarioBase
                 var importResult = await exportService.ImportResponseAsync(responsePath);
                 AssertEqual(salesRuns.Count, importResult.TotalReceipts, "Импорт ЭСФ: количество receipt");
                 AssertEqual(salesRuns.Count, importResult.UpdatedCount, "Импорт ЭСФ: количество обновленных счет-фактур");
+                AssertEqual(0, importResult.SkippedDuplicates, "Импорт ЭСФ: дубликатов быть не должно при первом импорте");
 
                 foreach (var salesRun in salesRuns)
                 {

@@ -261,9 +261,21 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                ShowError($"Ошибка создания: {ex.Message}");
+                ShowError($"Ошибка создания: {GetFullExceptionMessage(ex)}");
                 CreateButton.IsEnabled = true;
             }
+        }
+
+        private static string GetFullExceptionMessage(Exception exception)
+        {
+            var messages = new List<string>();
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message))
+                    messages.Add(current.Message);
+            }
+
+            return string.Join(Environment.NewLine, messages);
         }
         private void OnExpanderExpanded(object sender, RoutedEventArgs e)
         {

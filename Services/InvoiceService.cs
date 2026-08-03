@@ -602,6 +602,31 @@ namespace BIS.ERP.Services
                 });
         }
 
+        public async Task UpdateEsfExchangeCodeAsync(Guid invoiceId, string exchangeCode)
+        {
+            var invoice = await GetInvoiceAsync(invoiceId)
+                ?? throw new InvalidOperationException("Документ не найден.");
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{HeaderTableName}""
+                SET ""exchange_code"" = @exchangeCode,
+                    ""UpdatedAt"" = NOW()
+                WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", invoiceId),
+                new NpgsqlParameter("@exchangeCode", exchangeCode.Trim()));
+
+            await new EventLogService(_context).LogAsync(
+                "UpdateEsfExchangeCode",
+                "Document",
+                DocumentName,
+                invoiceId,
+                new
+                {
+                    Number = invoice.DocNumber,
+                    ExchangeCode = exchangeCode.Trim()
+                });
+        }
+
         public async Task<Guid> SaveInvoiceAsync(InvoiceDocument invoice, Guid? existingId = null)
         {
             RecalculateTotals(invoice);

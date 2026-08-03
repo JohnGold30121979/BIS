@@ -11,10 +11,10 @@ namespace BIS.ERP.Models
         public Guid Id { get; set; } = Guid.NewGuid();
 
         [Required]
-        [MaxLength(200)]
+        [MaxLength(500)]
         public string Name { get; set; } = string.Empty;
 
-        [MaxLength(500)]
+        [MaxLength(2000)]
         public string Description { get; set; } = string.Empty;
 
         [Required]
@@ -30,14 +30,14 @@ namespace BIS.ERP.Models
 
         public string Icon { get; set; } = "📊";
 
-        [MaxLength(100)]
+        [MaxLength(160)]
         public string Code { get; set; } = string.Empty;
 
         public bool IsActive { get; set; } = true;
         public bool IsPrintForm { get; set; }
         public bool IsDefault { get; set; }
 
-        [MaxLength(30)]
+        [MaxLength(80)]
         public string SourceFormat { get; set; } = "Native";
 
         public int TemplateVersion { get; set; } = 1;

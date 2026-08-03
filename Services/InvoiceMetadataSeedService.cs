@@ -23,6 +23,7 @@ namespace BIS.ERP.Services
             await _invoiceService.EnsureSchemaAsync();
 
             var configId = await _context.MetadataConfigurations.Select(item => (Guid?)item.Id).FirstOrDefaultAsync();
+            await EnsureEsfXmlTagCatalogAsync(configId);
             await EnsureDocumentAsync(
                 InvoiceDocumentTypes.SalesIssue,
                 "doc_sales_invoice",
@@ -39,6 +40,69 @@ namespace BIS.ERP.Services
                 configId);
             await EnsureInvoiceReferenceDataAsync();
             await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
+        }
+
+        private async Task EnsureEsfXmlTagCatalogAsync(Guid? configId)
+        {
+            const string catalogName = "Настройки XML ЭСФ";
+            const string tableName = "catalog_esf_xml_tags";
+
+            var catalog = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.TableName == tableName);
+
+            if (catalog == null)
+            {
+                catalog = new MetadataObject
+                {
+                    Name = catalogName,
+                    TableName = tableName,
+                    ObjectType = "Catalog",
+                    Description = "Настройка соответствия внутренних ключей ЭСФ именам XML-тегов.",
+                    Icon = "🏷",
+                    Order = 40,
+                    IsSystem = true,
+                    MetadataConfigId = configId,
+                    Fields = GetEsfXmlTagFields(Guid.NewGuid())
+                };
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await _metadataService.CreateDynamicTableAsync(catalog);
+            }
+            else
+            {
+                catalog.Name = catalogName;
+                catalog.Description = "Настройка соответствия внутренних ключей ЭСФ именам XML-тегов.";
+                catalog.Icon = "🏷";
+                SynchronizeCatalogFields(catalog, GetEsfXmlTagFields(catalog.Id));
+                await _metadataService.CreateDynamicTableAsync(catalog);
+                await _context.SaveChangesAsync();
+            }
+
+            await EnsureEsfXmlTagRowsAsync(tableName);
+        }
+
+        private static void SynchronizeCatalogFields(MetadataObject catalog, IReadOnlyCollection<MetadataField> desiredFields)
+        {
+            foreach (var desired in desiredFields)
+            {
+                var existing = catalog.Fields.FirstOrDefault(field =>
+                    field.DbColumnName.Equals(desired.DbColumnName, StringComparison.OrdinalIgnoreCase));
+                if (existing == null)
+                {
+                    desired.MetadataObjectId = catalog.Id;
+                    catalog.Fields.Add(desired);
+                    continue;
+                }
+
+                existing.Name = desired.Name;
+                existing.FieldType = desired.FieldType;
+                existing.Order = desired.Order;
+                existing.IsRequired = desired.IsRequired;
+                existing.Length = desired.Length;
+                existing.Precision = desired.Precision;
+                existing.Scale = desired.Scale;
+            }
         }
 
         private async Task EnsureDocumentAsync(
@@ -203,6 +267,29 @@ namespace BIS.ERP.Services
                     {
                         ["is_default"] = "1"
                     });
+            }
+        }
+
+        private async Task EnsureEsfXmlTagRowsAsync(string tableName)
+        {
+            var existingColumns = await GetTableColumnsAsync(tableName);
+            foreach (var tag in GetDefaultEsfXmlTags())
+            {
+                var values = new Dictionary<string, object?>
+                {
+                    ["code"] = tag.Key,
+                    ["name"] = tag.Title,
+                    ["tag_name"] = tag.TagName,
+                    ["description"] = tag.Description,
+                    ["sort_order"] = tag.Order,
+                    ["is_active"] = true,
+                    ["UpdatedAt"] = DateTime.UtcNow
+                };
+
+                if (existingColumns.Contains("CreatedAt"))
+                    values["CreatedAt"] = DateTime.UtcNow;
+
+                await UpsertCatalogRowAsync(tableName, existingColumns, values);
             }
         }
 
@@ -578,6 +665,81 @@ namespace BIS.ERP.Services
             Field(metadataObjectId, "Проведён", "is_posted", "Bool", 14, true)
         };
 
+        private static List<MetadataField> GetEsfXmlTagFields(Guid metadataObjectId) => new()
+        {
+            Field(metadataObjectId, "Ключ", "code", "String", 1, true),
+            Field(metadataObjectId, "Наименование", "name", "String", 2, true),
+            Field(metadataObjectId, "Имя XML-тега", "tag_name", "String", 3, true),
+            Field(metadataObjectId, "Описание", "description", "String", 4),
+            Field(metadataObjectId, "Порядок", "sort_order", "Int", 5),
+            Field(metadataObjectId, "Активен", "is_active", "Bool", 6)
+        };
+
+        private static IReadOnlyList<EsfXmlTagSeedRow> GetDefaultEsfXmlTags() => new[]
+        {
+            Tag("VFPDataSet", "Корневой тег", "VFPDataSet", "Корневой элемент файла XML ЭСФ.", 1),
+            Tag("receipts", "Коллекция receipt", "receipts", "Контейнер записей ЭСФ.", 2),
+            Tag("receipt", "Запись receipt", "receipt", "Одна запись ЭСФ.", 3),
+            Tag("goods", "Коллекция good", "goods", "Контейнер строк товаров/услуг.", 4),
+            Tag("good", "Строка good", "good", "Одна строка товара/услуги.", 5),
+            Tag("exchangeCode", "Код обмена", "exchangeCode", "Уникальный GUID обмена с налоговой.", 10),
+            Tag("receiptTypeCode", "Тип квитанции", "receiptTypeCode", "Код типа receipt.", 11),
+            Tag("createdDate", "Дата создания", "createdDate", "Дата создания выгрузки.", 12),
+            Tag("ownedCrmReceiptCode", "Локальный код CRM", "ownedCrmReceiptCode", "Номер документа/бланка в локальной системе.", 13),
+            Tag("correctedReceiptCode", "Исправляемый receipt", "correctedReceiptCode", "Код исправляемой записи.", 14),
+            Tag("correctionReasonCode", "Код причины исправления", "correctionReasonCode", "Причина корректировки.", 15),
+            Tag("bankAccount", "Расчетный счет продавца", "bankAccount", "Банковский счет организации.", 16),
+            Tag("contractorPin", "ПИН контрагента", "contractorPin", "ИНН/ПИН контрагента.", 17),
+            Tag("contractorBankAccount", "Счет контрагента", "contractorBankAccount", "Банковский счет контрагента.", 18),
+            Tag("deliveryContractNumber", "Номер договора", "deliveryContractNumber", "Номер договора поставки.", 19),
+            Tag("deliveryContractDate", "Дата договора", "deliveryContractDate", "Дата договора поставки.", 20),
+            Tag("goodsDeliveryTypeCode", "Код доставки", "goodsDeliveryTypeCode", "Тип доставки товаров.", 21),
+            Tag("paymentTypeCode", "Код оплаты", "paymentTypeCode", "Тип оплаты ЭСФ.", 22),
+            Tag("invoiceDeliveryTypeCode", "Код вида поставки", "invoiceDeliveryTypeCode", "Код вида поставки ЭСФ.", 23),
+            Tag("vatDeliveryTypeCode", "Код типа поставки НДС", "vatDeliveryTypeCode", "Код типа поставки для НДС.", 24),
+            Tag("currencyCode", "Код валюты", "currencyCode", "Код валюты.", 25),
+            Tag("exchangeRate", "Курс", "exchangeRate", "Курс валюты.", 26),
+            Tag("contractorCitizenshipCode", "Код гражданства", "contractorCitizenshipCode", "Код государства контрагента.", 27),
+            Tag("isPriceWithoutTaxes", "Цена без налогов", "isPriceWithoutTaxes", "Признак цены без налогов.", 28),
+            Tag("note", "Примечание", "note", "Описание/основание.", 29),
+            Tag("vatCode", "Код НДС", "vatCode", "Код НДС ЭСФ.", 30),
+            Tag("isResident", "Резидент", "isResident", "Признак резидента.", 31),
+            Tag("foreignName", "Иностранное имя", "foreignName", "Наименование иностранного контрагента.", 32),
+            Tag("sellerBranchPin", "ПИН филиала продавца", "sellerBranchPin", "ПИН филиала продавца.", 33),
+            Tag("isIndustry", "Отраслевой признак", "isIndustry", "Отраслевой признак.", 34),
+            Tag("openingBalances", "Начальное сальдо", "openingBalances", "Начальное сальдо.", 35),
+            Tag("assessedContributionsAmount", "Начислено взносов", "assessedContributionsAmount", "Сумма начисленных взносов.", 36),
+            Tag("paidAmount", "Оплачено", "paidAmount", "Оплаченная сумма.", 37),
+            Tag("penaltiesAmount", "Пени", "penaltiesAmount", "Сумма пени.", 38),
+            Tag("finesAmount", "Штрафы", "finesAmount", "Сумма штрафов.", 39),
+            Tag("closingBalances", "Конечное сальдо", "closingBalances", "Конечное сальдо.", 40),
+            Tag("amountToBePaid", "К оплате", "amountToBePaid", "Сумма к оплате.", 41),
+            Tag("personalAccountNumber", "Лицевой счет", "personalAccountNumber", "Номер лицевого счета.", 42),
+            Tag("markGoods", "Маркированные товары", "markGoods", "Признак маркируемых товаров.", 43),
+            Tag("invoiceDate", "Дата ЭСФ", "invoiceDate", "Дата счета-фактуры.", 44),
+            Tag("invoiceNumber", "Номер ЭСФ", "invoiceNumber", "Номер ЭСФ.", 45),
+            Tag("contractorName", "Контрагент", "contractorName", "Наименование контрагента.", 46),
+            Tag("contractorBranchName", "Филиал контрагента", "contractorBranchName", "Филиал контрагента.", 47),
+            Tag("currencyName", "Валюта", "currencyName", "Наименование валюты.", 48),
+            Tag("contractorCitizenshipName", "Гражданство", "contractorCitizenshipName", "Наименование государства контрагента.", 49),
+            Tag("correctedReceiptCreationDate", "Дата исправляемой записи", "correctedReceiptCreationDate", "Дата создания исправляемой записи.", 50),
+            Tag("correctionReasonName", "Причина исправления", "correctionReasonName", "Наименование причины исправления.", 51),
+            Tag("documentStatusName", "Статус документа", "documentStatusName", "Статус документа в налоговой.", 52),
+            Tag("correctionSeries", "Серия исправления", "correctionSeries", "Серия исправления.", 53),
+            Tag("type", "Тип", "type", "Тип документа.", 54),
+            Tag("costWithoutTaxes", "Сумма без налогов", "costWithoutTaxes", "Итого без налогов.", 55),
+            Tag("totalCost", "Итого", "totalCost", "Итоговая сумма.", 56),
+            Tag("vatAmount", "НДС строки", "vatAmount", "Сумма НДС по строке.", 70),
+            Tag("stCode", "Код НСП строки", "stCode", "Код налога с продаж по строке.", 71),
+            Tag("stAmount", "НСП строки", "stAmount", "Сумма налога с продаж по строке.", 72),
+            Tag("goodsName", "Наименование строки", "goodsName", "Наименование товара/услуги.", 73),
+            Tag("baseCount", "Количество", "baseCount", "Количество товара/услуги.", 74),
+            Tag("price", "Цена", "price", "Цена товара/услуги.", 75)
+        };
+
+        private static EsfXmlTagSeedRow Tag(string key, string title, string tagName, string description, int order) =>
+            new(key, title, tagName, description, order);
+
         private static MetadataField Field(
             Guid metadataObjectId,
             string name,
@@ -635,5 +797,12 @@ namespace BIS.ERP.Services
             bool IsDefaultVat = false,
             bool IsDefaultSalesTax = false,
             bool IsActive = true);
+
+        private sealed record EsfXmlTagSeedRow(
+            string Key,
+            string Title,
+            string TagName,
+            string Description,
+            int Order);
     }
 }

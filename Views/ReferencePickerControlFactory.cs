@@ -105,18 +105,19 @@ namespace BIS.ERP.Views
 
             editButton.Click += async (_, _) =>
             {
-                if (comboBox.SelectedItem is not ReferenceItem selected)
+                var selectedId = GetSelectedItemId(comboBox);
+                if (!selectedId.HasValue || selectedId.Value == Guid.Empty)
                 {
                     MessageBox.Show("Сначала выберите запись справочника.", referenceCatalog.Name,
                         MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
-                var edited = await EditReferenceAsync(metadataService, referenceCatalog, selected.Id, owner);
+                var edited = await EditReferenceAsync(metadataService, referenceCatalog, selectedId.Value, owner);
                 if (edited)
                 {
-                    currentValue = selected.Id.ToString();
-                    await RefreshAsync(selected.Id);
+                    currentValue = selectedId.Value.ToString();
+                    await RefreshAsync(selectedId.Value);
                 }
             };
 
@@ -157,20 +158,21 @@ namespace BIS.ERP.Views
             }));
             contextMenu.Items.Add(CreateMenuItem("Изменить выбранную...", async () =>
             {
-                if (comboBox.SelectedItem is not ReferenceItem selected)
+                var selectedId = GetSelectedItemId(comboBox);
+                if (!selectedId.HasValue || selectedId.Value == Guid.Empty)
                 {
                     MessageBox.Show("Сначала выберите запись справочника.", referenceCatalog.Name,
                         MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
-                if (await EditReferenceAsync(metadataService, referenceCatalog, selected.Id, owner))
+                if (await EditReferenceAsync(metadataService, referenceCatalog, selectedId.Value, owner))
                 {
                     await ReloadExistingComboBoxAsync(
                         comboBox,
                         metadataService,
                         referenceCatalog,
-                        selected.Id,
+                        selectedId.Value,
                         itemsReloaded,
                         firstDisplayField,
                         secondDisplayField);
@@ -213,20 +215,21 @@ namespace BIS.ERP.Views
                 },
                 async () =>
                 {
-                    if (comboBox.SelectedItem is not ReferenceItem selected)
+                    var selectedId = GetSelectedItemId(comboBox);
+                    if (!selectedId.HasValue || selectedId.Value == Guid.Empty)
                     {
                         MessageBox.Show("Сначала выберите запись справочника.", referenceCatalog.Name,
                             MessageBoxButton.OK, MessageBoxImage.Information);
                         return;
                     }
 
-                    if (await EditReferenceAsync(metadataService, referenceCatalog, selected.Id, owner))
+                    if (await EditReferenceAsync(metadataService, referenceCatalog, selectedId.Value, owner))
                     {
                         await ReloadExistingComboBoxAsync(
                             comboBox,
                             metadataService,
                             referenceCatalog,
-                            selected.Id,
+                            selectedId.Value,
                             itemsReloaded,
                             firstDisplayField,
                             secondDisplayField);
@@ -528,6 +531,7 @@ namespace BIS.ERP.Views
             if (string.IsNullOrWhiteSpace(value))
                 return;
 
+            // Try ReferenceItem first
             var selected = comboBox.Items
                 .OfType<ReferenceItem>()
                 .FirstOrDefault(item =>
@@ -535,7 +539,52 @@ namespace BIS.ERP.Views
                     item.LookupKeys.Contains(value.Trim()));
 
             if (selected != null)
+            {
                 comboBox.SelectedItem = selected;
+                return;
+            }
+
+            // Try to match by Id using reflection (works for OrganizationItem and other types)
+            foreach (var item in comboBox.Items)
+            {
+                var idProperty = item.GetType().GetProperty("Id");
+                if (idProperty != null)
+                {
+                    var itemId = idProperty.GetValue(item)?.ToString();
+                    if (itemId != null && itemId.Equals(value, StringComparison.OrdinalIgnoreCase))
+                    {
+                        comboBox.SelectedItem = item;
+                        return;
+                    }
+                }
+            }
+
+            // Fallback: try to use SelectedValue directly
+            comboBox.SelectedValue = value;
+        }
+
+        private static Guid? GetSelectedItemId(ComboBox comboBox)
+        {
+            if (comboBox.SelectedItem is ReferenceItem referenceItem)
+                return referenceItem.Id;
+
+            // Try to get Id from any selected item using reflection
+            if (comboBox.SelectedItem != null)
+            {
+                var idProperty = comboBox.SelectedItem.GetType().GetProperty("Id");
+                if (idProperty != null)
+                {
+                    var idValue = idProperty.GetValue(comboBox.SelectedItem);
+                    if (idValue is Guid guid && guid != Guid.Empty)
+                        return guid;
+                }
+            }
+
+            // Fallback to SelectedValue
+            if (comboBox.SelectedValue != null && Guid.TryParse(comboBox.SelectedValue.ToString(), out var guidValue))
+                return guidValue;
+
+            return null;
         }
 
         private static string? FindFirstDisplayField(MetadataObject catalog)

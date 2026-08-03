@@ -111,19 +111,29 @@ public class InfoBaseManager
         if (!System.Text.RegularExpressions.Regex.IsMatch(dbName, "^[a-zA-Z0-9_]+$"))
             throw new ArgumentException("Имя базы данных может содержать только латинские буквы, цифры и знак подчеркивания.");
 
+        LogInfoBaseCreation(dbName, $"Старт создания инфобазы '{name}'. Сервер: {host}:{port}. Патч: {normalizedPatchVersion}");
         try
         {
+            LogInfoBaseCreation(dbName, "Подключение к системной базе postgres");
             using var connection = new NpgsqlConnection(
                 $"Host={host};Port={port};Database=postgres;Username={username};Password={password}");
             await connection.OpenAsync();
+            LogInfoBaseCreation(dbName, "Подключение к postgres выполнено");
 
+            LogInfoBaseCreation(dbName, $"Создание базы данных '{dbName}'");
             using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", connection);
             await cmd.ExecuteNonQueryAsync();
+            LogInfoBaseCreation(dbName, $"База данных '{dbName}' создана");
 
             var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
             using var dbContext = new AppDbContext(connectionString);
+            LogInfoBaseCreation(dbName, "Создание базовой схемы EF");
             await dbContext.Database.EnsureCreatedAsync();
+            LogInfoBaseCreation(dbName, "Базовая схема EF создана");
+
+            LogInfoBaseCreation(dbName, "Применение runtime-исправлений схемы");
             await new RuntimeSchemaFixService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Runtime-исправления схемы применены");
 
             var infoBase = new InfoBase
             {
@@ -147,25 +157,70 @@ public class InfoBaseManager
 
             // В InfoBaseManager.CreateInfoBaseAsync
             var metadataService = new MetadataService(dbContext);
+            LogInfoBaseCreation(dbName, "Инициализация базовых метаданных");
             await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
-            await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
-            await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
-            await new InvoiceMetadataSeedService(dbContext).EnsureAsync();
-            var printFormService = new PrintFormService(dbContext);
-            await printFormService.SeedCashOrderFormsAsync();
-            await printFormService.SeedInvoiceFormsAsync();
-            await metadataService.EnsureStandardReportsAsync();
-            await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
+            LogInfoBaseCreation(dbName, "Базовые метаданные инициализированы");
 
+            LogInfoBaseCreation(dbName, "Создание предустановленных справочников");
+            await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
+            LogInfoBaseCreation(dbName, "Все предустановленные справочники созданы");
+
+            LogInfoBaseCreation(dbName, "Создание служебных метаданных документации и отчетов");
+            await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Служебные метаданные документации и отчетов созданы");
+
+            LogInfoBaseCreation(dbName, "Создание метаданных счет-фактур");
+            await new InvoiceMetadataSeedService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Метаданные счет-фактур созданы");
+
+            var printFormService = new PrintFormService(dbContext);
+            LogInfoBaseCreation(dbName, "Создание печатных форм кассовых ордеров");
+            await printFormService.SeedCashOrderFormsAsync();
+            LogInfoBaseCreation(dbName, "Печатные формы кассовых ордеров созданы");
+
+            LogInfoBaseCreation(dbName, "Создание печатных форм счет-фактур");
+            await printFormService.SeedInvoiceFormsAsync();
+            LogInfoBaseCreation(dbName, "Печатные формы счет-фактур созданы");
+
+            LogInfoBaseCreation(dbName, "Создание стандартных отчетов");
+            await metadataService.EnsureStandardReportsAsync();
+            LogInfoBaseCreation(dbName, "Стандартные отчеты созданы");
+
+            LogInfoBaseCreation(dbName, $"Фиксация базового патча {normalizedPatchVersion}");
+            await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
+            LogInfoBaseCreation(dbName, $"Базовый патч {normalizedPatchVersion} зафиксирован");
+
+            LogInfoBaseCreation(dbName, "Регистрация инфобазы в master-базе");
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();
+            LogInfoBaseCreation(dbName, $"Инфобаза '{name}' зарегистрирована в master-базе");
 
+            LogInfoBaseCreation(dbName, $"Создание инфобазы '{name}' успешно завершено");
             return infoBase;
         }
         catch (Exception ex)
         {
-            throw new Exception($"Ошибка создания базы данных: {ex.Message}");
+            LogInfoBaseCreation(dbName, $"Ошибка создания инфобазы '{name}': {GetFullExceptionMessage(ex)}");
+            throw new Exception($"Ошибка создания базы данных: {GetFullExceptionMessage(ex)}", ex);
         }
+    }
+
+    private static void LogInfoBaseCreation(string databaseName, string message)
+    {
+        System.Diagnostics.Debug.WriteLine(message);
+        EventLogService.LogFileOnly("InfoBaseCreate", "InfoBase", databaseName, details: message);
+    }
+
+    private static string GetFullExceptionMessage(Exception exception)
+    {
+        var messages = new List<string>();
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message))
+                messages.Add(current.Message);
+        }
+
+        return string.Join(Environment.NewLine, messages);
     }
 
     public async Task<bool> DeleteInfoBaseAsync(Guid id)

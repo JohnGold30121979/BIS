@@ -1290,11 +1290,9 @@ namespace BIS.ERP.Views.Dialogs
             bool IsDefaultSalesTax = false,
             string Code = "");
 
-        private sealed class OrganizationItem
+        private sealed class OrganizationItem : ReferenceItem
         {
-            public Guid Id { get; init; }
-            public string DisplayName { get; init; } = string.Empty;
-            public HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+            public new HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class EditableInvoiceLine : InvoiceLineRow, INotifyPropertyChanged
