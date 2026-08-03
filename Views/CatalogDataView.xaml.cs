@@ -83,7 +83,7 @@ namespace BIS.ERP.Views
 
                 // Загружаем все справочники один раз
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
-                _catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                _catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
                 _dataTable = new DataTable();
                 _dataTable.TableName = _catalog.Name;

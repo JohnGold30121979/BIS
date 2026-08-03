@@ -14,7 +14,7 @@ namespace BIS.ERP.Services
         {
             var result = new Dictionary<string, Dictionary<Guid, string>>(StringComparer.OrdinalIgnoreCase);
             var catalogs = await metadataService.GetCatalogsAsync();
-            var catalogsByName = catalogs.ToDictionary(catalog => catalog.Name, StringComparer.OrdinalIgnoreCase);
+            var catalogsByName = catalogs.GroupBy(catalog => catalog.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
             foreach (var field in metadata.Fields.Where(field =>
                          field.FieldType == "Reference" &&

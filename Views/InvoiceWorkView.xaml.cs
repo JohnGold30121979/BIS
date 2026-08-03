@@ -446,18 +446,22 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Загрузка ответа налоговой...";
                 var result = await _invoiceEsfExchangeService.ImportResponseAsync(openDialog.FileName);
                 await LoadDataAsync();
-
-                StatusText.Text = $"Обновлено ЭСФ: {result.UpdatedCount}";
+                StatusText.Text = result.SkippedDuplicates == 0
+                    ? $"Обновлено ЭСФ: {result.UpdatedCount}"
+                    : $"Обновлено ЭСФ: {result.UpdatedCount}, дублей: {result.SkippedDuplicates}";
+                var skippedText = result.SkippedDuplicates == 0
+                    ? string.Empty
+                    : $"\nПропущено дублей: {result.SkippedDuplicates}";
                 var unmatchedText = result.UnmatchedReceipts.Count == 0
                     ? "\nВсе записи сопоставлены автоматически."
                     : "\nНе сопоставлено: " + result.UnmatchedReceipts.Count + "\n" +
                       string.Join(Environment.NewLine, result.UnmatchedReceipts.Take(10));
 
                 MessageBox.Show(
-                    $"Файл обработан.\nВсего записей: {result.TotalReceipts}\nОбновлено документов: {result.UpdatedCount}{unmatchedText}",
+                    $"Файл обработан.\nВсего записей: {result.TotalReceipts}\nОбновлено документов: {result.UpdatedCount}{skippedText}{unmatchedText}",
                     "Загрузка ответа",
                     MessageBoxButton.OK,
-                    result.UnmatchedReceipts.Count == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                    result.UnmatchedReceipts.Count == 0 && result.SkippedDuplicates == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
             }
             catch (Exception ex)
             {

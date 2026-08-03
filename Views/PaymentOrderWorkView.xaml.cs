@@ -180,7 +180,7 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Загрузка данных...";
                 var data = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                var catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
                 _moduleName = await _metadataService.GetAssignedModuleNameAsync(_documentMetadata.Id, _documentMetadata.ObjectType) ?? string.Empty;
                 var referenceCache = await LoadReferenceCacheAsync(catalogsDict);

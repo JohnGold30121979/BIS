@@ -154,7 +154,8 @@ namespace BIS.ERP
             NavigationItems.Clear();
 
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
-            var catalogs = allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты").ToList();
+            var catalogs = MetadataService.CollapseDuplicateCatalogsForNavigation(
+                allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты"));
             var documents = allMetadata
                 .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name))
                 .ToList();
@@ -236,6 +237,7 @@ namespace BIS.ERP
                         Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
                     };
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
+                    financeTools.Children.Add(new NavigationItem { Id = "EsfExport", Name = "Выгрузка ЭСФ", Icon = "📤", Type = "EsfExport" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
@@ -564,6 +566,13 @@ namespace BIS.ERP
                 Icon = "📊",
                 Type = "Section"
             };
+            accountingSection.Children.Add(new NavigationItem
+            {
+                Id = "EsfExport",
+                Name = "Выгрузка ЭСФ",
+                Icon = "📤",
+                Type = "EsfExport"
+            });
             accountingSection.Children.Add(new NavigationItem
             {
                 Id = "AccountingReports",
@@ -1213,6 +1222,11 @@ namespace BIS.ERP
                     var postingService = new PostingService(journalContext);
                     var journalView = new PostingsJournalView(postingService);
                     _navigation.NavigateTo(journalView);
+                    break;
+
+                case "EsfExport":
+                    var esfExportContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                    _navigation.NavigateTo(new EsfExportWorkView(esfExportContext));
                     break;
 
                 case "MutualSettlements":

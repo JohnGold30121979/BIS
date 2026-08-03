@@ -46,7 +46,7 @@ namespace BIS.ERP.Views
                 System.Diagnostics.Debug.WriteLine($"=== BuildFieldsAsync START for {_catalog.Name} ===");
 
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                var catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
                 _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_catalog.Id, _catalog.ObjectType);
 
@@ -72,6 +72,14 @@ namespace BIS.ERP.Views
                             GetExistingValue(field, existingData),
                             this,
                             moduleCodeOrName: _assignedModuleName);
+                    }
+                    else if (ShouldUseOrganizationBankPicker(field, catalogsDict))
+                    {
+                        inputControl = await CreateOrganizationBankPickerControlAsync(field, catalogsDict, existingData);
+                    }
+                    else if (ShouldUseOrganizationBankAccountPicker(field, catalogsDict))
+                    {
+                        inputControl = await CreateOrganizationBankAccountPickerControlAsync(field, catalogsDict, existingData);
                     }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
                     else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -187,6 +195,79 @@ namespace BIS.ERP.Views
         {
             return AccountAnalyticsRules.IsAccountSelectorField(field) &&
                    _accountAnalytics?.Accounts.Count > 0;
+        }
+
+        private bool ShouldUseOrganizationBankPicker(
+            MetadataField field,
+            IReadOnlyDictionary<string, MetadataObject> catalogsDict)
+        {
+            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
+                   (field.Name.Equals("Банк", StringComparison.OrdinalIgnoreCase) ||
+                    field.DbColumnName.Equals("bank_name", StringComparison.OrdinalIgnoreCase)) &&
+                   catalogsDict.ContainsKey("Банки");
+        }
+
+        private async Task<Control> CreateOrganizationBankPickerControlAsync(
+            MetadataField field,
+            IReadOnlyDictionary<string, MetadataObject> catalogsDict,
+            Dictionary<string, object> existingData)
+        {
+            var bankPickerField = new MetadataField
+            {
+                Id = field.Id,
+                Name = field.Name,
+                DbColumnName = field.DbColumnName,
+                FieldType = "Reference",
+                ReferenceCatalog = "Банки",
+                IsRequired = field.IsRequired,
+                Order = field.Order,
+                MetadataObjectId = field.MetadataObjectId
+            };
+
+            return await ReferencePickerControlFactory.CreateAsync(
+                _metadataService,
+                bankPickerField,
+                catalogsDict["Банки"],
+                GetExistingValue(field, existingData),
+                this);
+        }
+
+
+        private bool ShouldUseOrganizationBankAccountPicker(
+            MetadataField field,
+            IReadOnlyDictionary<string, MetadataObject> catalogsDict)
+        {
+            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
+                   (field.Name.Equals("Расчетный счет", StringComparison.OrdinalIgnoreCase) ||
+                    field.DbColumnName.Equals("bank_account", StringComparison.OrdinalIgnoreCase)) &&
+                   catalogsDict.ContainsKey("Расчетные счета организаций");
+        }
+
+        private async Task<Control> CreateOrganizationBankAccountPickerControlAsync(
+            MetadataField field,
+            IReadOnlyDictionary<string, MetadataObject> catalogsDict,
+            Dictionary<string, object> existingData)
+        {
+            var bankAccountPickerField = new MetadataField
+            {
+                Id = field.Id,
+                Name = field.Name,
+                DbColumnName = field.DbColumnName,
+                FieldType = "Reference",
+                ReferenceCatalog = "Расчетные счета организаций",
+                DisplayPattern = "{Счет}",
+                DisplayFields = "Счет",
+                IsRequired = field.IsRequired,
+                Order = field.Order,
+                MetadataObjectId = field.MetadataObjectId
+            };
+
+            return await ReferencePickerControlFactory.CreateAsync(
+                _metadataService,
+                bankAccountPickerField,
+                catalogsDict["Расчетные счета организаций"],
+                GetExistingValue(field, existingData),
+                this);
         }
 
         private static object? GetExistingValue(MetadataField field, Dictionary<string, object> existingData)
@@ -849,7 +930,9 @@ namespace BIS.ERP.Views
                     }
                     else if (control is ReferencePickerControl referencePicker)
                     {
-                        value = referencePicker.SelectedReferenceItem?.Id.ToString() ?? string.Empty;
+                        value = ShouldStoreReferenceDisplayValue(field)
+                            ? referencePicker.SelectedReferenceItem?.DisplayName ?? referencePicker.ComboBox.Text ?? string.Empty
+                            : referencePicker.SelectedReferenceItem?.Id.ToString() ?? string.Empty;
                     }
                     else if (control is ComboBox comboBox)
                     {
@@ -880,6 +963,15 @@ namespace BIS.ERP.Views
             {
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private bool ShouldStoreReferenceDisplayValue(MetadataField field)
+        {
+            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
+                   (field.Name.Equals("Банк", StringComparison.OrdinalIgnoreCase) ||
+                    field.DbColumnName.Equals("bank_name", StringComparison.OrdinalIgnoreCase) ||
+                    field.Name.Equals("Расчетный счет", StringComparison.OrdinalIgnoreCase) ||
+                    field.DbColumnName.Equals("bank_account", StringComparison.OrdinalIgnoreCase));
         }
 
         private static string NormalizeClosingModuleChoice(string? value) => value?.Trim() switch

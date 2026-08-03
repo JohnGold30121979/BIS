@@ -81,6 +81,8 @@ namespace BIS.ERP.Services
             if (receipts.Count == 0)
                 throw new InvalidOperationException("В файле не найдено ни одной записи receipt.");
 
+            EnsureTaxResponseReceipts(receipts);
+
             var updated = 0;
             var skippedDuplicates = 0;
             var unmatched = new List<string>();
@@ -88,22 +90,24 @@ namespace BIS.ERP.Services
             foreach (var receipt in receipts)
             {
                 var imported = ImportedReceipt.FromXml(receipt);
-                
-                // Проверка на дубликат: если exchangeCode уже существует в базе у другого документа, пропускаем
-                if (!string.IsNullOrWhiteSpace(imported.ExchangeCode))
+                if (string.IsNullOrWhiteSpace(imported.ExchangeCode))
                 {
-                    var existingInvoiceId = await _invoiceService.FindInvoiceIdByExchangeCodeAsync(imported.ExchangeCode);
-                    var resolvedInvoiceId = await ResolveInvoiceIdAsync(imported);
-                    
-                    // Если exchangeCode уже существует и принадлежит другому документу - это дубликат
-                    if (existingInvoiceId.HasValue && resolvedInvoiceId.HasValue && existingInvoiceId.Value != resolvedInvoiceId.Value)
-                    {
-                        skippedDuplicates++;
-                        continue;
-                    }
+                    unmatched.Add(BuildUnmatchedDescription(imported));
+                    continue;
                 }
 
-                var invoiceId = await ResolveInvoiceIdAsync(imported);
+                // Проверка на дубликат: если exchangeCode уже существует в базе у другого документа, пропускаем
+                var existingInvoiceId = await _invoiceService.FindInvoiceIdByExchangeCodeAsync(imported.ExchangeCode);
+                var resolvedInvoiceId = await ResolveInvoiceIdAsync(imported);
+
+                // Если exchangeCode уже существует и принадлежит другому документу - это дубликат
+                if (existingInvoiceId.HasValue && resolvedInvoiceId.HasValue && existingInvoiceId.Value != resolvedInvoiceId.Value)
+                {
+                    skippedDuplicates++;
+                    continue;
+                }
+
+                var invoiceId = resolvedInvoiceId;
                 if (!invoiceId.HasValue)
                 {
                     unmatched.Add(BuildUnmatchedDescription(imported));
@@ -116,9 +120,14 @@ namespace BIS.ERP.Services
                     unmatched.Add(BuildUnmatchedDescription(imported));
                     continue;
                 }
-
                 // Для ответного файла обновляем только exchangeCode (как в FoxPro)
-                if (!string.IsNullOrWhiteSpace(imported.ExchangeCode) && imported.ExchangeCode != invoice.ExchangeCode)
+                if (string.Equals(imported.ExchangeCode, invoice.ExchangeCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    skippedDuplicates++;
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(imported.ExchangeCode))
                 {
                     await _invoiceService.UpdateEsfExchangeCodeAsync(invoice.Id, imported.ExchangeCode);
                     updated++;
@@ -530,6 +539,46 @@ namespace BIS.ERP.Services
 
             return null;
         }
+
+        private static void EnsureTaxResponseReceipts(IReadOnlyCollection<XElement> receipts)
+        {
+            var sourceExportCount = receipts.Count(IsSourceExportReceipt);
+            if (sourceExportCount == 0)
+                return;
+
+            throw new InvalidOperationException(
+                sourceExportCount == receipts.Count
+                    ? "Выбран исходный XML ЭСФ из выгрузки. Для загрузки нужен ответный XML налоговой; исходный файл повторно загружать нельзя."
+                    : "В выбранном файле есть записи исходной выгрузки ЭСФ. Загрузите отдельный ответный XML налоговой без исходных receipt.");
+        }
+
+        private static bool IsSourceExportReceipt(XElement receipt)
+        {
+            var status = ElementValue(receipt, "documentStatusName");
+            var hasNewStatus = string.IsNullOrWhiteSpace(status)
+                || status.Equals("Новый", StringComparison.OrdinalIgnoreCase)
+                || status.Equals("New", StringComparison.OrdinalIgnoreCase);
+
+            if (!hasNewStatus)
+                return false;
+
+            var hasGoods = HasElement(receipt, "goods") || receipt.Descendants().Any(item => item.Name.LocalName.Equals("good", StringComparison.OrdinalIgnoreCase));
+            var hasExportTotals = HasElement(receipt, "costWithoutTaxes") || HasElement(receipt, "totalCost");
+            var hasExportDetails =
+                HasElement(receipt, "receiptTypeCode") &&
+                HasElement(receipt, "bankAccount") &&
+                HasElement(receipt, "contractorPin") &&
+                HasElement(receipt, "paymentTypeCode");
+
+            return hasGoods || hasExportTotals || hasExportDetails;
+        }
+
+        private static bool HasElement(XElement parent, string name) =>
+            parent.Elements().Any(item => item.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        private static string ElementValue(XElement parent, string name) =>
+            parent.Elements().FirstOrDefault(item => item.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value.Trim()
+            ?? string.Empty;
 
         private static IEnumerable<XElement> GetReceiptElements(XDocument document)
         {

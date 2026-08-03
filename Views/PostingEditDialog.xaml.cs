@@ -116,7 +116,7 @@ namespace BIS.ERP.Views
 
             // Загружаем все справочники
             var allCatalogs = await _metadataService.GetCatalogsAsync();
-            var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+            var catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             result.AccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
             result.AssignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_document.Id, _document.ObjectType);
 

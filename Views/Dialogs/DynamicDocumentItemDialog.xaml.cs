@@ -47,7 +47,7 @@ namespace BIS.ERP.Views.Dialogs
         private async Task BuildFormAsync()
         {
             var allCatalogs = await _metadataService.GetCatalogsAsync();
-            var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+            var catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
             _existingData = await LoadExistingDataAsync();
             _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_metadata.Id, _metadata.ObjectType);

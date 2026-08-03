@@ -202,7 +202,7 @@ namespace BIS.ERP.Views
                     .ToList();
 
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var catalogsByName = allCatalogs.ToDictionary(catalog => catalog.Name, catalog => catalog);
+                var catalogsByName = allCatalogs.GroupBy(catalog => catalog.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
                 _moduleName = await _metadataService.GetAssignedModuleNameAsync(_documentMetadata.Id, _documentMetadata.ObjectType) ?? string.Empty;
                 var referenceCache = await BuildReferenceCacheAsync(documentRows, catalogsByName, _accountAnalytics);

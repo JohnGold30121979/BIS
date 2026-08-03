@@ -627,10 +627,40 @@ namespace BIS.ERP.Services
                 .OrderBy(m => m.Order)
                 .ToListAsync();
 
+            catalogs = CollapseDuplicateCatalogsForNavigation(catalogs);
+
             foreach (var catalog in catalogs)
                 await RemoveDuplicateMetadataFieldsAsync(catalog);
 
             return catalogs;
+        }
+
+        public static List<MetadataObject> CollapseDuplicateCatalogsForNavigation(IEnumerable<MetadataObject> catalogs)
+        {
+            return catalogs
+                .GroupBy(GetCatalogNavigationKey, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(item => item.TableName.Equals("catalog_esf_xml_tags", StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(item => !string.IsNullOrWhiteSpace(item.TableName))
+                    .ThenByDescending(item => item.IsSystem)
+                    .ThenBy(item => item.Order)
+                    .ThenBy(item => item.Name)
+                    .First())
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Name)
+                .ToList();
+        }
+
+        private static string GetCatalogNavigationKey(MetadataObject catalog)
+        {
+            if (catalog.TableName.Equals("catalog_esf_xml_tags", StringComparison.OrdinalIgnoreCase) ||
+                catalog.Name.Contains("Настройки XML ЭСФ", StringComparison.OrdinalIgnoreCase))
+                return "catalog:esf_xml_settings";
+
+            if (!string.IsNullOrWhiteSpace(catalog.TableName))
+                return $"table:{catalog.TableName.Trim()}";
+
+            return $"name:{catalog.Name.Trim()}";
         }
 
         public async Task<List<MetadataModule>> GetModulesAsync(bool includeInactive = false)
