@@ -157,15 +157,22 @@ namespace BIS.ERP.Views
 
         private void OnTurnoversClick(object sender, RoutedEventArgs e)
         {
-            var selected = PostingsGrid.SelectedItem as PostingViewModel;
-            if (selected == null)
+            if (_filteredPostings.Count == 0)
             {
-                MessageBox.Show("Выберите проводку для просмотра оборотов по счету", "Информация",
+                MessageBox.Show("В журнале нет проводок для расчета оборотов по счету.", "Обороты по счету",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            // TODO: Открыть диалог оборотов
-            MessageBox.Show($"Обороты по счету {selected.DebitAccount}", "Информация");
+
+            var dialog = new AccountTurnoverSelectionDialog(
+                _filteredPostings,
+                dpStartDate.SelectedDate ?? DateTime.Now,
+                dpEndDate.SelectedDate ?? DateTime.Now,
+                PostingsGrid.SelectedItem as PostingViewModel)
+            {
+                Owner = Window.GetWindow(this)
+            };
+            dialog.ShowDialog();
         }
 
         private void OnSummaryClick(object sender, RoutedEventArgs e)
