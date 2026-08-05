@@ -139,10 +139,7 @@ namespace BIS.ERP.Views
             if (PostingsGrid?.SelectedItem is not Dictionary<string, object> selected)
             {
                 SetDetailColumnsVisibility(false, false, false, false);
-                _postingDetails.Add(new Dictionary<string, object>
-                {
-                    ["Документ"] = "Выберите проводку в списке выше"
-                });
+                _postingDetails.Add(PostingDetailRowFactory.Create(("Документ", "Выберите проводку в списке выше")));
                 return;
             }
 
@@ -160,7 +157,7 @@ namespace BIS.ERP.Views
             var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
             SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
 
-            var detail = new Dictionary<string, object>();
+            var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", posting.DocumentNumber);
             SetPostingDetail(detail, "Тип документа", posting.DocumentType);
             SetPostingDetail(detail, "Дата", posting.Date.ToString("dd.MM.yyyy"));
@@ -212,13 +209,8 @@ namespace BIS.ERP.Views
             DetailMaterialColumn.Visibility = showMaterial ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return;
-
-            detail[field] = value;
-        }
+        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) => 
+            PostingDetailRowFactory.Set(detail, field, value);
 
         private static string FormatAccountCode(string accountValue)
         {

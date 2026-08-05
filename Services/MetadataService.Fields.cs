@@ -721,7 +721,7 @@ public partial class MetadataService
           ReferenceCatalog = "Государства",
           DisplayPattern = "{Наименование}",
           DisplayFields = "Наименование",
-          IsRequired = false,
+          IsRequired = true,
           IsUnique = false,
           Order = 9,
           MetadataObjectId = metadataObjectId

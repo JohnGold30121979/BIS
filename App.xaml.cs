@@ -1,19 +1,23 @@
 using BIS.ERP.Behaviors;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
+using System.Diagnostics;
 using System.Text;
 using System.Windows;
+using System.Windows.Threading;
 
 namespace BIS.ERP
 {
     public partial class App : Application
     {
+        private static bool _systemLoggingConfigured;
         private TrayManager? _trayManager;
         private InfoBaseSelectionWindow? _infoBaseWindow;
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            ConfigureSystemLogging();
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             try
@@ -71,6 +75,7 @@ namespace BIS.ERP
             }
             catch (Exception ex)
             {
+                SystemLogService.Error("Критическая ошибка при запуске приложения.", "App.OnStartup", ex);
                 MessageBox.Show(
                     $"Критическая ошибка при запуске приложения:\n\n{ex.Message}",
                     "Ошибка запуска",
@@ -97,9 +102,62 @@ namespace BIS.ERP
             }
             catch (Exception ex)
             {
+                SystemLogService.Warning("Ошибка инициализации трея. Работа продолжена без трея.", "App.InitializeTrayManager", ex);
                 System.Diagnostics.Debug.WriteLine($"Ошибка инициализации трея: {ex.Message}");
                 // Если трей не инициализировался - продолжаем работу без него
             }
+        }
+
+        private void ConfigureSystemLogging()
+        {
+            if (_systemLoggingConfigured)
+            {
+                return;
+            }
+
+            _systemLoggingConfigured = true;
+
+            DispatcherUnhandledException += OnDispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
+            TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+            AddPresentationTraceListener(PresentationTraceSources.DataBindingSource, "WPF Binding");
+
+            SystemLogService.Info("Приложение запущено. Основной системный лог подключен.", "App");
+        }
+
+        private static void AddPresentationTraceListener(TraceSource source, string listenerName)
+        {
+            if (!source.Listeners.OfType<SystemLogTraceListener>().Any(listener => listener.Name == listenerName))
+            {
+                source.Listeners.Add(new SystemLogTraceListener(listenerName)
+                {
+                    Name = listenerName
+                });
+            }
+
+            source.Switch.Level = SourceLevels.Warning;
+        }
+
+        private static void OnCurrentDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            if (e.ExceptionObject is Exception ex)
+            {
+                SystemLogService.Error("Необработанное исключение домена приложения.", "AppDomain", ex);
+            }
+            else
+            {
+                SystemLogService.Error($"Необработанное исключение домена приложения: {e.ExceptionObject}", "AppDomain");
+            }
+        }
+
+        private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+        {
+            SystemLogService.Error("Необработанное исключение фоновой задачи.", "TaskScheduler", e.Exception);
+        }
+
+        private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            SystemLogService.Error("Необработанное исключение UI-потока.", "Dispatcher", e.Exception);
         }
 
         /// <summary>
@@ -162,6 +220,7 @@ namespace BIS.ERP
             }
             catch (Exception ex)
             {
+                SystemLogService.Warning("Ошибка при освобождении ресурсов приложения.", "App.OnExit", ex);
                 System.Diagnostics.Debug.WriteLine($"Ошибка при освобождении ресурсов: {ex.Message}");
             }
 

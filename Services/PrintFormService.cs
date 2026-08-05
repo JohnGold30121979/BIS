@@ -1334,7 +1334,9 @@ namespace BIS.ERP.Services
                 AmountInWords = RussianMoneyInWords(amount),
                 Basis = GetString(row, "Основание", "basis"),
                 Note = GetString(row, "Примечание", "description"),
-                AmountInCurrency = GetDecimal(row, "Сумма в валюте", "amount_currency", "amount_in_currency")
+                AmountInCurrency = GetDecimal(row, "Сумма в валюте", "amount_currency", "amount_in_currency"),
+                CurrencyName = GetString(row, "Валюта", "currency", "currency_id", "nval1"),
+                ExchangeRate = GetDecimal(row, "Курс", "exchange_rate", "rate", "kurs_v")
             };
             var organizationValue = GetString(row, "Организация", "organization_id");
             if (Guid.TryParse(organizationValue, out var organizationId))
@@ -3002,8 +3004,8 @@ namespace BIS.ERP.Services
                 "amount_in_words" or "msum1" => data.AmountInWords,
                 "basis" or "tex1" => data.Basis,
                 "note" or "description" => data.Note,
-                "currency" or "nval1" => "KGS",
-                "rate" or "kurs_v" => "1,00",
+                "currency" or "nval1" => string.IsNullOrWhiteSpace(data.CurrencyName) ? "KGS" : data.CurrencyName,
+                "rate" or "kurs_v" => data.ExchangeRate == 0m ? "1,00" : data.ExchangeRate.ToString("N2"),
                 _ => TryGetExtraFieldValue(data, fieldName, normalized)
             };
 
@@ -3289,8 +3291,8 @@ namespace BIS.ERP.Services
                 ["fiop1"] = data.Person,
                 ["namep1"] = data.Person,
                 ["kodp1"] = string.Empty,
-                ["kurs_v"] = "1,00",
-                ["nval1"] = "KGS",
+                ["kurs_v"] = data.ExchangeRate == 0m ? "1,00" : $"{data.ExchangeRate:N2}",
+                ["nval1"] = string.IsNullOrWhiteSpace(data.CurrencyName) ? "KGS" : data.CurrencyName,
                 ["nakl1"] = string.Empty,
                 ["dovn1"] = string.Empty,
                 ["dovd1"] = string.Empty,
@@ -4001,6 +4003,8 @@ namespace BIS.ERP.Services
             public string DebitAccount { get; set; } = string.Empty;
             public string CreditAccount { get; set; } = string.Empty;
             public decimal AmountInCurrency { get; set; }
+            public string CurrencyName { get; set; } = string.Empty;
+            public decimal ExchangeRate { get; set; } = 1m;
 
             public decimal Amount { get; init; }
             public string AmountInWords { get; init; } = string.Empty;

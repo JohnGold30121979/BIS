@@ -92,6 +92,7 @@ namespace BIS.ERP.Views
                     }
 
                     await ApplyGeneratedCodeAsync(field, inputControl);
+                    ApplyOrganizationCountryDefault(field, inputControl);
                     ApplyCatalogFieldState(field, inputControl);
 
                     panel.Children.Add(inputControl);
@@ -709,6 +710,7 @@ namespace BIS.ERP.Views
 
                     // ФИО в самом справочнике сотрудников вводится вручную; в остальных местах поле может быть автозаполняемым.
                     if (!IsEmployeesCatalog() &&
+                        !IsOrganizationsCatalog() &&
                         (field.Name.Equals("ФИО", StringComparison.OrdinalIgnoreCase) ||
                          field.Name.Equals("FullName", StringComparison.OrdinalIgnoreCase) ||
                          field.Name.Equals("full_name", StringComparison.OrdinalIgnoreCase) ||
@@ -805,6 +807,9 @@ namespace BIS.ERP.Views
                 .Select(item => item.Text.Length)
                 .DefaultIfEmpty(0)
                 .Max();
+
+            if (IsOrganizationsCatalog())
+                width = 0;
 
             string BuildCode(long number) => width > 0
                 ? number.ToString().PadLeft(width, '0')
@@ -957,6 +962,9 @@ namespace BIS.ERP.Views
 
                 NormalizeCatalogItemDataBeforeSave();
 
+                if (!ValidateOrganizationCountry())
+                    return;
+
                 if (!ValidateChartOfAccountsCatalogLinks())
                     return;
 
@@ -1081,6 +1089,57 @@ namespace BIS.ERP.Views
             var firstDigit = accountCode?.Trim().FirstOrDefault(char.IsDigit);
             return firstDigit >= '6' && firstDigit <= '9';
         }
+        private void ApplyOrganizationCountryDefault(MetadataField field, Control inputControl)
+        {
+            if (!_isNewRecord || !IsOrganizationsCatalog() || !IsOrganizationCountryField(field))
+                return;
+
+            if (inputControl is not ReferencePickerControl picker || picker.ComboBox.SelectedItem != null)
+                return;
+
+            var country = picker.ComboBox.Items
+                .OfType<ReferenceItem>()
+                .FirstOrDefault(IsDefaultOrganizationCountry);
+
+            if (country != null)
+                picker.SelectedReferenceItem = country;
+        }
+
+        private bool ValidateOrganizationCountry()
+        {
+            if (!IsOrganizationsCatalog())
+                return true;
+
+            var field = GetEditableFields().FirstOrDefault(IsOrganizationCountryField);
+            if (field == null)
+                return true;
+
+            var value = GetItemValue(field.Name) ?? GetItemValue(field.DbColumnName);
+            if (value != null && value != DBNull.Value && !string.IsNullOrWhiteSpace(value.ToString()))
+                return true;
+
+            MessageBox.Show("Заполните обязательное поле \"Государство\".", "Организации",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            if (_controls.TryGetValue(field.Name, out var control))
+                control.Focus();
+
+            return false;
+        }
+
+        private static bool IsOrganizationCountryField(MetadataField field)
+        {
+            return field.Name.Equals("Государство", StringComparison.OrdinalIgnoreCase) ||
+                   field.DbColumnName.Equals("country_id", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsDefaultOrganizationCountry(ReferenceItem item)
+        {
+            return item.LookupKeys.Any(key =>
+                key.Equals("KG", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("Кыргызстан", StringComparison.OrdinalIgnoreCase) ||
+                key.StartsWith("Киргиз", StringComparison.OrdinalIgnoreCase));
+        }
 
         private string GetItemText(params string[] keys)
         {
@@ -1134,6 +1193,11 @@ namespace BIS.ERP.Views
         private bool IsEmployeesCatalog()
         {
             return string.Equals(_catalog.Name, "Сотрудники (Списочный состав)", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsOrganizationsCatalog()
+        {
+            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase);
         }
 
         private IEnumerable<MetadataField> GetFieldsInFormOrder()

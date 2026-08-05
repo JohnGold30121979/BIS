@@ -785,8 +785,19 @@ namespace BIS.ERP.Services
 
             foreach (var field in GetOrganizationFields(catalog.Id))
             {
-                if (existingNames.Contains(field.Name) || existingColumns.Contains(field.DbColumnName))
+                var existingField = catalog.Fields.FirstOrDefault(existing =>
+                    existing.Name.Equals(field.Name, StringComparison.OrdinalIgnoreCase) ||
+                    existing.DbColumnName.Equals(field.DbColumnName, StringComparison.OrdinalIgnoreCase));
+
+                if (existingField != null)
+                {
+                    existingField.IsRequired = field.IsRequired;
+                    existingField.ReferenceCatalog = field.ReferenceCatalog;
+                    existingField.DisplayPattern = field.DisplayPattern;
+                    existingField.DisplayFields = field.DisplayFields;
+                    existingField.Order = field.Order;
                     continue;
+                }
 
                 field.Id = Guid.NewGuid();
                 field.MetadataObjectId = catalog.Id;

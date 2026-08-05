@@ -476,6 +476,7 @@ namespace BIS.ERP
             if (_authService.IsAdmin)
             {
                 adminSection.Children.Add(new NavigationItem { Id = "Settings", Name = "Настройки системы", Icon = "⚙", Type = "Settings" });
+                adminSection.Children.Add(new NavigationItem { Id = "SystemLogs", Name = "Просмотр логов", Icon = "📄", Type = "SystemLogs" });
             }
             if (UserAccessService.CanManageUsers(_authService.CurrentUser))
             {
@@ -759,6 +760,13 @@ namespace BIS.ERP
                     Name = "Настройки системы",
                     Icon = "⚙️",
                     Type = "Settings"
+                });
+                adminSection.Children.Add(new NavigationItem
+                {
+                    Id = "SystemLogs",
+                    Name = "Просмотр логов",
+                    Icon = "📄",
+                    Type = "SystemLogs"
                 });
             }
             if (UserAccessService.CanManageUsers(_authService.CurrentUser))
@@ -1406,6 +1414,10 @@ namespace BIS.ERP
                     OpenSettingsWindow();
                     break;
 
+                case "SystemLogs":
+                    _navigation.NavigateTo(new SystemLogViewerView());
+                    break;
+
                 case "UserAccessManagement":
                     var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
                     _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser));
@@ -1488,7 +1500,7 @@ namespace BIS.ERP
                 "PostingsJournal" => "Журнал",
                 "AccountingReports" => "Отчетность",
                 "MutualSettlements" => "Отчет",
-                "Profile" or "Settings" or "UserAccessManagement" or "SwitchMode" or "Logout" or "AboutSystem" => "Сервисная команда",
+                "Profile" or "Settings" or "SystemLogs" or "UserAccessManagement" or "SwitchMode" or "Logout" or "AboutSystem" => "Сервисная команда",
                 _ => item.Type
             };
         }
@@ -1836,6 +1848,7 @@ namespace BIS.ERP
         }
     }
 }
+
 
 
 

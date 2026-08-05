@@ -19,6 +19,8 @@ var variants = new[]
     new ReportVariant("pra1k1.frx", "standard.frx.finance.trial-balance.debit-turnovers", "ОСВ обороты по дебету (FRX FoxPro)", "FoxPro-макет оборотов по дебету счета pra1k1.frx.", 1042, false, "Проводки", true, "Landscape", "📊"),
     new ReportVariant("pra1k2.frx", "standard.frx.finance.trial-balance.account-summary", "ОСВ сводные обороты по счету (FRX FoxPro)", "FoxPro-макет сводных оборотов по счету pra1k2.frx.", 1043, false, "Проводки", true, "Landscape", "📊"),
     new ReportVariant("pra1z.frx", "standard.frx.finance.trial-balance.postings", "ОСВ проводки (FRX FoxPro)", "FoxPro-макет проводок по счету pra1z.frx.", 1044, false, "Проводки", true, "Landscape", "📊"),
+    new ReportVariant("pr_kasp.frx", "standard.frx.finance.cash.cash-book", "Кассовая книга (FRX FoxPro)", "FoxPro-макет кассовой книги pr_kasp.frx.", 1045, false, "Расходный/Приходный КО", false, "Portrait", "📒"),
+    new ReportVariant("pra2.frx", "standard.frx.finance.cash.receipts-expenses-register", "Реестр приходов/расходов (FRX FoxPro)", "FoxPro-макет реестра приходов/расходов pra2.frx.", 1046, false, "Расходный/Приходный КО", false, "Portrait", "📋"),
     new ReportVariant("pr_vzp.frx", "standard.frx.finance.reconciliation.pr-vzp", "Акт сверки (FRX FoxPro)", "Основной FoxPro-макет акта сверки pr_vzp.frx.", 1060, true),
     new ReportVariant("pr_vzp_.frx", "standard.frx.finance.reconciliation.pr-vzp-short", "Акт сверки краткий (FRX FoxPro)", "Краткий FoxPro-макет акта сверки pr_vzp_.frx.", 1061, false),
     new ReportVariant("PR_VZP1.FRX", "standard.frx.finance.reconciliation.pr-vzp1", "Акт сверки вариант 1 (FRX FoxPro)", "Дополнительный FoxPro-макет акта сверки PR_VZP1.FRX.", 1062, false),
@@ -86,7 +88,7 @@ foreach (var variant in variants)
 var text = File.ReadAllText(outputFile, Encoding.UTF8);
 text = Regex.Replace(
     text,
-    @"\s*new\(\s*Code:\s*""standard\.frx\.finance\.(?:reconciliation\.[^""\r\n]+|advance-payments\.prb1|trial-balance\.[^""\r\n]+)""[\s\S]*?TemplateCompressedBase64:\s*""[^""]*""\),\r?\n",
+    @"\s*new\(\s*Code:\s*""standard\.frx\.finance\.(?:reconciliation\.[^""\r\n]+|advance-payments\.prb1|trial-balance\.[^""\r\n]+|cash\.[^""\r\n]+)""[\s\S]*?TemplateCompressedBase64:\s*""[^""]*""\),\r?\n",
     string.Empty);
 
 var insertion = string.Join(Environment.NewLine, blocks) + Environment.NewLine;

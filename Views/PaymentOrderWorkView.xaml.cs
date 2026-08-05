@@ -91,10 +91,7 @@ namespace BIS.ERP.Views
             if (DataGrid?.SelectedItem is not PaymentOrderRow row)
             {
                 SetDetailColumnsVisibility(false, false, false, false);
-                _postingDetails.Add(new Dictionary<string, object>
-                {
-                    ["Документ"] = "Выберите платежное поручение в списке выше"
-                });
+                _postingDetails.Add(PostingDetailRowFactory.Create(("Документ", "Выберите платежное поручение в списке выше")));
                 return;
             }
 
@@ -109,7 +106,7 @@ namespace BIS.ERP.Views
             var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
             SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
 
-            var detail = new Dictionary<string, object>();
+            var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", row.DocNumber);
             SetPostingDetail(detail, "Тип документа", ResolvePaymentOrderPostingType(row.OrderType));
             SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd.MM.yyyy"));
@@ -162,13 +159,8 @@ namespace BIS.ERP.Views
             DetailMaterialColumn.Visibility = showMaterial ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return;
-
-            detail[field] = value;
-        }
+        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) => 
+            PostingDetailRowFactory.Set(detail, field, value);
         private async Task LoadData()
         {
             if (_isLoading)

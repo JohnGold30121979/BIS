@@ -53,6 +53,7 @@ namespace BIS.ERP.Services
             }
             catch (Exception ex)
             {
+                SystemLogService.Warning("Ошибка записи события в журнал событий.", "EventLogService.LogAsync", ex);
                 System.Diagnostics.Debug.WriteLine($"Ошибка записи события: {ex.Message}");
             }
         }
@@ -78,6 +79,7 @@ namespace BIS.ERP.Services
             }
             catch (Exception ex)
             {
+                SystemLogService.Warning("Ошибка записи файлового журнала событий.", "EventLogService.LogFileOnly", ex);
                 System.Diagnostics.Debug.WriteLine($"Ошибка файлового лога: {ex.Message}");
             }
         }
@@ -116,3 +118,4 @@ namespace BIS.ERP.Services
         }
     }
 }
+

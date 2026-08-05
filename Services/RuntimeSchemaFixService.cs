@@ -1,4 +1,4 @@
-using BIS.ERP.Data;
+﻿using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace BIS.ERP.Services
@@ -102,7 +102,6 @@ namespace BIS.ERP.Services
                     IF to_regclass('public.""MetadataModuleItems""') IS NOT NULL THEN
                         ALTER TABLE ""MetadataModuleItems"" ALTER COLUMN ""ObjectType"" TYPE varchar(80);
                     END IF;
-
                     CREATE TABLE IF NOT EXISTS ""FoxProReportFieldRules"" (
                         ""Id"" uuid NOT NULL,
                         ""ProfileCode"" varchar(120) NOT NULL DEFAULT '',
@@ -163,6 +162,8 @@ namespace BIS.ERP.Services
                         ALTER TABLE catalog_cash_desks ALTER COLUMN code TYPE varchar(80);
                     END IF;
                 END $$;");
+
+            await new CashDayClosureService(_context).EnsureSchemaAsync();
 
             lock (SyncLock)
             {

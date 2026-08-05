@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -825,14 +825,11 @@ namespace BIS.ERP.Views
             var posting = BuildAdvancePostingPreview(selectedRow);
             if (posting == null)
             {
-                _advancePostingDetails.Add(new Dictionary<string, object>
-                {
-                    ["Документ"] = "Выберите строку затрат выше"
-                });
+                _advancePostingDetails.Add(PostingDetailRowFactory.Create(("Документ", "Выберите строку затрат выше")));
                 return;
             }
 
-            var detail = new Dictionary<string, object>();
+            var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", posting.DocumentNumber);
             SetPostingDetail(detail, "Тип документа", posting.DocumentType);
             SetPostingDetail(detail, "Дата", posting.Date.ToString("dd.MM.yyyy"));
@@ -907,13 +904,8 @@ namespace BIS.ERP.Views
                    string.IsNullOrWhiteSpace(row.Description);
         }
 
-        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return;
-
-            detail[field] = value;
-        }
+        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) => 
+            PostingDetailRowFactory.Set(detail, field, value);
 
         private static string FormatAccountCode(string accountValue)
         {

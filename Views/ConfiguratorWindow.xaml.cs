@@ -348,6 +348,15 @@ namespace BIS.ERP.Views
                 new UserAccessManagementView(_context, BuildUserAccessNavigationItems(), ServiceLocator.AuthService.CurrentUser)));
         }
 
+        private void ShowSystemLogsViewer()
+        {
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Просмотр логов";
+            EditorDescription.Text = "Основной системный лог и служебные файлы журнала приложения";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new SystemLogViewerView()));
+        }
+
         private IEnumerable<BIS.ERP.NavigationItem> BuildUserAccessNavigationItems()
         {
             var items = new List<BIS.ERP.NavigationItem>();
@@ -438,6 +447,8 @@ namespace BIS.ERP.Views
         private void OnAccountingSetupClick(object sender, RoutedEventArgs e) => ShowAccountingSetupEditor();
 
         private void OnUsersClick(object sender, RoutedEventArgs e) => ShowUsersEditor();
+
+        private void OnSystemLogsClick(object sender, RoutedEventArgs e) => ShowSystemLogsViewer();
 
         private async void OnRegulatedTemplatesClick(object sender, RoutedEventArgs e) =>
             await ShowRegulatedTemplatesEditorAsync();
@@ -2992,3 +3003,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+

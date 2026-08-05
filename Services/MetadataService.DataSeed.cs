@@ -504,12 +504,12 @@ namespace BIS.ERP.Services
             var insertSql = $@"
                 INSERT INTO ""{catalog.TableName}""
                 (""Id"", ""code"", ""name"", ""is_primary"", ""full_name"", ""legal_form"", ""inn"", ""okpo"",
-                 ""registration_number"", ""legal_address"", ""actual_address"", ""phone"", ""email"",
+                 ""registration_number"", ""country_id"", ""legal_address"", ""actual_address"", ""phone"", ""email"",
                  ""bank_name"", ""bank_account"", ""bic"", ""director"", ""chief_accountant"",
                  ""group_code"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
                 VALUES (
                     '{Guid.NewGuid()}',
-                    '0001',
+                    '1',
                     'Основное предприятие',
                     true,
                     'Основное предприятие',
@@ -517,6 +517,15 @@ namespace BIS.ERP.Services
                     '',
                     '',
                     '',
+                    (
+                        SELECT ""Id""
+                        FROM ""catalog_countries""
+                        WHERE ""code"" = 'KG'
+                           OR ""name"" = 'Кыргызстан'
+                           OR ""name"" ILIKE 'Киргиз%'
+                        ORDER BY CASE WHEN ""code"" = 'KG' THEN 0 ELSE 1 END
+                        LIMIT 1
+                    ),
                     '',
                     '',
                     '',
@@ -568,6 +577,103 @@ namespace BIS.ERP.Services
                     ""UpdatedAt"" = NOW()";
 
                 await _context.Database.ExecuteSqlRawAsync(primarySql);
+
+
+                var defaultsSql = $@"
+
+                    DO $$
+
+                    BEGIN
+
+                        IF EXISTS (
+
+                            SELECT 1
+
+                            FROM information_schema.columns
+
+                            WHERE table_name = '{catalog.TableName}'
+
+                              AND column_name = 'country_id'
+
+                        ) THEN
+
+                            UPDATE ""{catalog.TableName}""
+
+                            SET ""country_id"" = (
+
+                                    SELECT ""Id""
+
+                                    FROM ""catalog_countries""
+
+                                    WHERE ""code"" = 'KG'
+
+                                       OR ""name"" = 'Кыргызстан'
+
+                                       OR ""name"" ILIKE 'Киргиз%'
+
+                                    ORDER BY CASE WHEN ""code"" = 'KG' THEN 0 ELSE 1 END
+
+                                    LIMIT 1
+
+                                ),
+
+                                ""UpdatedAt"" = NOW()
+
+                            WHERE ""country_id"" IS NULL
+
+                              AND EXISTS (
+
+                                    SELECT 1
+
+                                    FROM ""catalog_countries""
+
+                                    WHERE ""code"" = 'KG'
+
+                                       OR ""name"" = 'Кыргызстан'
+
+                                       OR ""name"" ILIKE 'Киргиз%'
+
+                                );
+
+                        END IF;
+
+
+                        IF EXISTS (
+
+                            SELECT 1
+
+                            FROM information_schema.columns
+
+                            WHERE table_name = '{catalog.TableName}'
+
+                              AND column_name = 'code'
+
+                        ) THEN
+
+                            UPDATE ""{catalog.TableName}""
+
+                            SET ""code"" = '1',
+
+                                ""UpdatedAt"" = NOW()
+
+                            WHERE ""code"" = '0001'
+
+                              AND NOT EXISTS (
+
+                                    SELECT 1
+
+                                    FROM ""{catalog.TableName}""
+
+                                    WHERE ""code"" = '1'
+
+                                );
+
+                        END IF;
+
+                    END $$;";
+
+
+                await _context.Database.ExecuteSqlRawAsync(defaultsSql);
             }
             catch (Exception ex)
             {
