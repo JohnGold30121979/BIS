@@ -93,7 +93,7 @@
     </Style>
     <Style TargetType="Button">
         <Setter Property="Padding" Value="14,7"/>
-        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="MinHeight" Value="26"/>
         <Setter Property="Background" Value="{DynamicResource AppButtonBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource AppButtonForegroundBrush}"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
@@ -118,7 +118,9 @@
                             <Border x:Name="ButtonOverlay"
                                     Background="Transparent"
                                     CornerRadius="{DynamicResource AppButtonCornerRadius}"
-                                    Opacity="0"/>
+                                    Opacity="1">
+                                
+                            </Border>
                             <ContentPresenter x:Name="ButtonContent"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"

@@ -25,7 +25,21 @@ namespace BIS.ERP.Models
         public bool IsPosted { get; set; }
         public string IsPostedDisplay => IsPosted ? "Да" : "Нет";
         public bool IsEsfExported => ExportedAt.HasValue || !string.IsNullOrWhiteSpace(ExchangeCode);
-        public string TaxStatusDisplay => string.IsNullOrWhiteSpace(TaxStatus) ? "Не выгружен" : TaxStatus;
+        public string TaxStatusDisplay
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(TaxStatus))
+                    return "Не выгружен";
+                
+                var normalized = TaxStatus.Trim();
+                if (normalized.Equals("Новый", StringComparison.OrdinalIgnoreCase) ||
+                    normalized.Equals("New", StringComparison.OrdinalIgnoreCase))
+                    return "Не выгружен";
+                
+                return normalized;
+            }
+        }
     }
 
     public class InvoiceLineRow

@@ -84,7 +84,8 @@ namespace BIS.ERP.Views
             var selected = SelectedInvoice;
             var hasSelection = selected != null;
             EditButton.IsEnabled = hasSelection;
-            DeleteButton.IsEnabled = hasSelection && selected?.IsPosted == false;
+            ViewButton.IsEnabled = hasSelection;
+            DeleteButton.IsEnabled = hasSelection; // && selected?.IsPosted == false;
             AllPostingsButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
             ExportEsfButton.IsEnabled = _isSalesMode;
@@ -156,7 +157,6 @@ namespace BIS.ERP.Views
             IEnumerable<InvoiceListRow> query = _allInvoices;
 
             query = ApplyColumnFilter(query, DateFilterBox.Text, invoice => invoice.DocDate.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture));
-            query = ApplyColumnFilter(query, ModuleFilterBox.Text, invoice => invoice.ModuleCode);
             query = ApplyColumnFilter(query, DocumentFilterBox.Text, invoice => invoice.DocNumber);
             query = ApplyColumnFilter(query, AmountFilterBox.Text, invoice => FormatAmount(invoice.TotalAmount));
             query = ApplyColumnFilter(query, EsfNumberFilterBox.Text, invoice => invoice.EsfNumber);
@@ -249,6 +249,13 @@ namespace BIS.ERP.Views
             var selected = SelectedInvoice;
             if (selected != null)
                 await OpenInvoiceDialogAsync(selected.Id, isReadOnly: false);
+        }
+
+        private async void OnViewClick(object sender, RoutedEventArgs e)
+        {
+            var selected = SelectedInvoice;
+            if (selected != null)
+                await OpenInvoiceDialogAsync(selected.Id, isReadOnly: true);
         }
 
         private async void OnInvoiceDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)

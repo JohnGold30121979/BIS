@@ -1,11 +1,15 @@
 <Window x:Class="BIS.ERP.Views.Dialogs.InvoiceEditDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Счет-фактура" Height="680" Width="980"
-        MinHeight="540" MinWidth="700"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        WindowState="Normal" SizeToContent="Manual"
-        UseLayoutRounding="True" SnapsToDevicePixels="True">
+        Title="Счет-фактура" 
+        MinHeight="540"
+        MinWidth="700"
+        WindowStartupLocation="CenterOwner" 
+        ResizeMode="CanResize"
+        WindowState="Normal" 
+        SizeToContent="Manual"
+        UseLayoutRounding="True" 
+        SnapsToDevicePixels="True">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
     </Window.Resources>
@@ -39,25 +43,25 @@
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Номер"/>
+                <TextBlock Text="Номер" FontWeight="Bold"/>
                 <TextBox x:Name="NumberBox" Height="28"/>
             </StackPanel>
             <StackPanel Grid.Row="0" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Дата"/>
+                <TextBlock Text="Дата" FontWeight="Bold"/>
                 <DatePicker x:Name="DatePicker" Height="28" SelectedDateChanged="OnCurrencySelectionChanged"/>
             </StackPanel>
 
             <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Организация"/>
+                <TextBlock Text="Организация" FontWeight="Bold"/>
                 <ComboBox x:Name="OrganizationCombo" Height="28" DisplayMemberPath="DisplayName"/>
             </StackPanel>
             <StackPanel Grid.Row="1" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Номер ЭСФ"/>
+                <TextBlock Text="Номер ЭСФ" FontWeight="Bold"/>
                 <TextBox x:Name="EsfNumberBox" Height="28"/>
             </StackPanel>
 
             <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock x:Name="HeaderAccountLabel" Text="Счет расчетов"/>
+                <TextBlock x:Name="HeaderAccountLabel" Text="Счет расчетов" FontWeight="Bold"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -66,29 +70,29 @@
                     <TextBox x:Name="AccountBox" Height="28" IsReadOnly="True"/>
                     <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="?" Width="34" Height="28" Margin="4,0,0,0"
                             Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
-                            Click="OnSelectAccountClick"/>
+                            Click="OnSelectAccountClick" FontWeight="Bold" FontFamily="Calibri"/>
                 </Grid>
             </StackPanel>
             <StackPanel Grid.Row="2" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Основание"/>
+                <TextBlock Text="Основание" FontWeight="Bold"/>
                 <TextBox x:Name="BasisBox" Height="28"/>
             </StackPanel>
 
             <StackPanel Grid.Row="3" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Серия и № бланка"/>
+                <TextBlock Text="Серия и № бланка" FontWeight="Bold"/>
                 <TextBox x:Name="TaxBlankNumberBox" Height="28"/>
             </StackPanel>
             <StackPanel Grid.Row="3" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Модуль"/>
+                <TextBlock Text="Модуль" FontWeight="Bold"/>
                 <TextBox x:Name="ModuleCodeBox" Height="28"/>
             </StackPanel>
 
             <StackPanel Grid.Row="4" Grid.Column="0" Margin="0,0,10,8">
-                <TextBlock Text="Вид оплаты"/>
+                <TextBlock Text="Вид оплаты" FontWeight="Bold"/>
                 <ComboBox x:Name="PaymentKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
             </StackPanel>
             <StackPanel Grid.Row="4" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Вид поставки ЭСФ"/>
+                <TextBlock Text="Вид поставки ЭСФ" FontWeight="Bold"/>
                 <ComboBox x:Name="DeliveryKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
             </StackPanel>
 
@@ -99,14 +103,14 @@
                           SelectionChanged="OnHeaderVatTaxChanged"/>
             </StackPanel>
             <StackPanel Grid.Row="5" Grid.Column="1" Margin="10,0,0,8">
-                <TextBlock Text="Налог с продаж"/>
+                <TextBlock Text="Налог с продаж" FontWeight="Bold"/>
                 <ComboBox x:Name="HeaderSalesTaxCombo" Height="28"
                           ItemsSource="{Binding SalesTaxItems}" DisplayMemberPath="DisplayName" SelectedValuePath="Value"
                           SelectionChanged="OnHeaderSalesTaxChanged"/>
             </StackPanel>
 
             <StackPanel Grid.Row="6" Grid.Column="0" Margin="0,0,10,0">
-                <TextBlock Text="Тип поставки ЭСФ"/>
+                <TextBlock Text="Тип поставки ЭСФ" FontWeight="Bold"/>
                 <ComboBox x:Name="SupplyKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
             </StackPanel>
 
@@ -132,12 +136,24 @@
             </Grid>
         </Grid>
 
-        <DataGrid x:Name="LinesGrid" Grid.Row="2" MinHeight="140" AutoGenerateColumns="False"
+        <DataGrid x:Name="LinesGrid" RowHeight="28" Grid.Row="2" MinHeight="150" AutoGenerateColumns="False"
                   CanUserAddRows="False"
+                  ScrollViewer.CanContentScroll="True"
                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                  SelectionChanged="OnLineSelectionChanged">
+                  ScrollViewer.VerticalScrollBarVisibility="Auto"
+                  SelectionMode="Single"
+                  SelectionChanged="OnLineSelectionChanged"
+                  GridLinesVisibility="None">
+            <DataGrid.Resources>
+                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#E0E0E0"/>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="BorderThickness" Value="0"/>
+                    <Setter Property="Margin" Value="0,0,0,1"/>
+                    <Setter Property="SnapsToDevicePixels" Value="True"/>
+                </Style>
+            </DataGrid.Resources>
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="2.4*" MinWidth="220"/>
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="145" MinWidth="145"/>
                 <DataGridTemplateColumn x:Name="LineAccountColumn" Header="Счет операции" Width="230" MinWidth="190">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>

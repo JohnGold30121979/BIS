@@ -363,7 +363,10 @@ namespace BIS.ERP.Services
             if (metadata == null)
                 return DateTime.Today.ToString("yyMM") + "0001";
 
-            return await _metadataService.GetNextDocumentNumberAsync(metadata);
+            // Используем GetCurrentDocumentNumberAsync (peek без увеличения счетчика),
+            // чтобы счетчик не расходовался при отмене ввода в диалоговом окне.
+            // Счетчик увеличивается в SaveInvoiceAsync после успешного сохранения.
+            return await _metadataService.GetCurrentDocumentNumberAsync(metadata);
         }
 
         public async Task<Guid?> FindInvoiceIdAsync(string documentNumber, DateTime? documentDate = null)
@@ -674,6 +677,13 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@currencyId", (object?)invoice.CurrencyId ?? DBNull.Value),
                         new NpgsqlParameter("@exchangeRate", invoice.ExchangeRate),
                         new NpgsqlParameter("@amountCurrency", invoice.AmountCurrency));
+
+                    // Увеличиваем счетчик номеров ТОЛЬКО после успешного сохранения нового документа.
+                    // Это предотвращает "потерю" номеров при отмене ввода в диалоговом окне.
+                    var documentMetadata = await _context.MetadataObjects.AsNoTracking()
+                        .FirstOrDefaultAsync(item => item.Name == DocumentName && item.ObjectType == "Document");
+                    if (documentMetadata != null)
+                        await _metadataService.IncrementDocumentNumberAsync(documentMetadata);
                 }
                 else
                 {

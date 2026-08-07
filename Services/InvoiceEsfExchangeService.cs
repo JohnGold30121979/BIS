@@ -214,7 +214,7 @@ namespace BIS.ERP.Services
                 var exchangeCode = string.IsNullOrWhiteSpace(invoice.ExchangeCode)
                     ? Guid.NewGuid().ToString().ToUpperInvariant()
                     : invoice.ExchangeCode.Trim();
-                var status = string.IsNullOrWhiteSpace(invoice.TaxStatus) ? "Новый" : invoice.TaxStatus.Trim();
+                var status = string.IsNullOrWhiteSpace(invoice.TaxStatus) ? "Выгружен" : invoice.TaxStatus.Trim();
 
                 receiptElements.Add(BuildReceiptElement(
                     invoice,

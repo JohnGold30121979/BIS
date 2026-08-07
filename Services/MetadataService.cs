@@ -4216,6 +4216,114 @@ namespace BIS.ERP.Services
             return GetNextDocumentNumberByKeyAsync(document.Name, GetDocumentNumberingKey(document), document);
         }
 
+        /// <summary>
+        /// Возвращает текущий номер документа БЕЗ увеличения счетчика.
+        /// Используется для отображения предлагаемого номера в диалоге,
+        /// чтобы счетчик не расходовался при отмене ввода.
+        /// </summary>
+        public async Task<string> GetCurrentDocumentNumberAsync(MetadataObject document)
+        {
+            await EnsureDocumentNumberConfigurationAsync(document);
+
+            var numberingKey = GetDocumentNumberingKey(document);
+            var documentName = document.Name;
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                SELECT current_number
+                FROM doc_numbering
+                WHERE document_type = @documentType1
+                   OR document_type = @documentType2
+                LIMIT 1";
+
+            var documentTypeParameter1 = command.CreateParameter();
+            documentTypeParameter1.ParameterName = "@documentType1";
+            documentTypeParameter1.Value = numberingKey;
+            command.Parameters.Add(documentTypeParameter1);
+
+            var documentTypeParameter2 = command.CreateParameter();
+            documentTypeParameter2.ParameterName = "@documentType2";
+            documentTypeParameter2.Value = $"doc:{documentName}";
+            command.Parameters.Add(documentTypeParameter2);
+
+            var connectionOpened = false;
+            try
+            {
+                await _context.Database.OpenConnectionAsync();
+                connectionOpened = true;
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    var currentNumber = reader.GetInt32(0);
+                    await reader.CloseAsync();
+
+                    // Номер для документа = текущий - 1 (потому что в БД хранится следующий)
+                    var documentNumber = currentNumber > 1 ? currentNumber - 1 : 1;
+                    return documentNumber.ToString();
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            return GenerateFallbackDocumentNumber();
+        }
+
+        /// <summary>
+        /// Увеличивает счетчик номеров документа.
+        /// Вызывается ТОЛЬКО после успешного сохранения нового документа,
+        /// чтобы не расходовать номера при отмене ввода.
+        /// </summary>
+        public async Task IncrementDocumentNumberAsync(MetadataObject document)
+        {
+            await EnsureDocumentNumberConfigurationAsync(document);
+
+            var numberingKey = GetDocumentNumberingKey(document);
+            var documentName = document.Name;
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                UPDATE doc_numbering
+                SET current_number = CASE
+                        WHEN current_number >= @maxNumber THEN 1
+                        ELSE current_number + 1
+                    END,
+                    UpdatedAt = NOW()
+                WHERE document_type = @documentType1
+                   OR document_type = @documentType2";
+
+            var documentTypeParameter1 = command.CreateParameter();
+            documentTypeParameter1.ParameterName = "@documentType1";
+            documentTypeParameter1.Value = numberingKey;
+            command.Parameters.Add(documentTypeParameter1);
+
+            var documentTypeParameter2 = command.CreateParameter();
+            documentTypeParameter2.ParameterName = "@documentType2";
+            documentTypeParameter2.Value = $"doc:{documentName}";
+            command.Parameters.Add(documentTypeParameter2);
+
+            var maxNumberParam = command.CreateParameter();
+            maxNumberParam.ParameterName = "@maxNumber";
+            maxNumberParam.Value = MaxDocumentNumberUsedForCounter;
+            command.Parameters.Add(maxNumberParam);
+
+            var connectionOpened = false;
+            try
+            {
+                await _context.Database.OpenConnectionAsync();
+                connectionOpened = true;
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
         private async Task<string> GetNextDocumentNumberByKeyAsync(
             string documentName,
             string numberingKey,
@@ -4230,15 +4338,22 @@ namespace BIS.ERP.Services
 
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = @"
-                SELECT current_number
+                SELECT current_number, document_type
                 FROM doc_numbering
-                WHERE document_type = @documentType
+                WHERE document_type = @documentType1
+                   OR document_type = @documentType2
                 LIMIT 1";
 
-                var documentTypeParameter = command.CreateParameter();
-                documentTypeParameter.ParameterName = "@documentType";
-                documentTypeParameter.Value = numberingKey;
-                command.Parameters.Add(documentTypeParameter);
+                var documentTypeParameter1 = command.CreateParameter();
+                documentTypeParameter1.ParameterName = "@documentType1";
+                documentTypeParameter1.Value = numberingKey;
+                command.Parameters.Add(documentTypeParameter1);
+
+                var documentTypeParameter2 = command.CreateParameter();
+                documentTypeParameter2.ParameterName = "@documentType2";
+                // Also try with doc: prefix for backward compatibility
+                documentTypeParameter2.Value = $"doc:{documentName}";
+                command.Parameters.Add(documentTypeParameter2);
 
                 var connectionOpened = false;
 
@@ -4251,10 +4366,33 @@ namespace BIS.ERP.Services
                     if (await reader.ReadAsync())
                     {
                         var currentNumber = reader.GetInt32(0);
-                        if (currentNumber > 0 && currentNumber <= MaxDocumentNumberUsedForCounter)
-                            return currentNumber.ToString();
-
-                        return "1";
+                        var actualDocumentType = reader.GetString(1);
+                        
+                        // Номер для документа = текущий - 1 (потому что в БД хранится следующий)
+                        var documentNumber = currentNumber > 1 ? currentNumber - 1 : 1;
+                        var nextNumber = currentNumber + 1;
+                        
+                        // Increment the counter in the database
+                        await reader.CloseAsync();
+                        var updateCommand = _context.Database.GetDbConnection().CreateCommand();
+                        updateCommand.CommandText = @"
+                            UPDATE doc_numbering
+                            SET current_number = @nextNumber, UpdatedAt = NOW()
+                            WHERE document_type = @documentType";
+                        
+                        var nextNumberParam = updateCommand.CreateParameter();
+                        nextNumberParam.ParameterName = "@nextNumber";
+                        nextNumberParam.Value = nextNumber > MaxDocumentNumberUsedForCounter ? 1 : nextNumber;
+                        updateCommand.Parameters.Add(nextNumberParam);
+                        
+                        var documentTypeParam = updateCommand.CreateParameter();
+                        documentTypeParam.ParameterName = "@documentType";
+                        documentTypeParam.Value = actualDocumentType;
+                        updateCommand.Parameters.Add(documentTypeParam);
+                        
+                        await updateCommand.ExecuteNonQueryAsync();
+                        
+                        return documentNumber.ToString();
                     }
                 }
                 finally
@@ -4324,7 +4462,7 @@ namespace BIS.ERP.Services
         {
             await CreateDocumentNumberingTableAsync();
 
-            var nextNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
+            var suggestedNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
             var numberingKey = GetDocumentNumberingKey(document);
 
             const string insertSql = @"
@@ -4335,18 +4473,21 @@ namespace BIS.ERP.Services
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
                 new NpgsqlParameter("@documentType", numberingKey),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
 
+            // Только увеличиваем счетчик, никогда не уменьшаем!
+            // GetSuggestedNextDocumentNumberAsync сканирует таблицу документов и может вернуть меньше,
+            // чем уже записано в счетчике. Это привело бы к "затиранию" и сбросу нумерации.
             const string updateSql = @"
                 UPDATE doc_numbering
                 SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
-                  AND (COALESCE(prefix, '') <> '' OR current_number <> @currentNumber)";
+                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
                 new NpgsqlParameter("@documentType", numberingKey),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
         }
 
         private async Task EnsureLegacyDocumentNumberConfigurationAsync(
@@ -4368,7 +4509,7 @@ namespace BIS.ERP.Services
             if (document == null)
                 return;
 
-            var nextNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
+            var suggestedNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4378,18 +4519,19 @@ namespace BIS.ERP.Services
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
                 new NpgsqlParameter("@documentType", documentName),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
 
+            // Только увеличиваем счетчик, никогда не уменьшаем!
             const string updateSql = @"
                 UPDATE doc_numbering
                 SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
-                  AND (COALESCE(prefix, '') <> '' OR current_number <> @currentNumber)";
+                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
                 new NpgsqlParameter("@documentType", documentName),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
         }
 
         private async Task DeleteDocumentNumberingConfigurationAsync(MetadataObject document)
@@ -4440,7 +4582,7 @@ namespace BIS.ERP.Services
             string orderKind,
             string numberingKey)
         {
-            var nextNumber = await GetSuggestedNextCashOrderDocumentNumberAsync(cashOrderDocument, orderKind);
+            var suggestedNumber = await GetSuggestedNextCashOrderDocumentNumberAsync(cashOrderDocument, orderKind);
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4450,18 +4592,19 @@ namespace BIS.ERP.Services
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
                 new NpgsqlParameter("@documentType", numberingKey),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
 
+            // Только увеличиваем счетчик, никогда не уменьшаем!
             const string updateSql = @"
                 UPDATE doc_numbering
                 SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
-                  AND (COALESCE(prefix, '') <> '' OR current_number <> @currentNumber)";
+                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
                 new NpgsqlParameter("@documentType", numberingKey),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
         }
 
         private async Task<int> GetSuggestedNextCashOrderDocumentNumberAsync(MetadataObject document, string orderKind)
@@ -4662,7 +4805,7 @@ namespace BIS.ERP.Services
             if (IsCashOrderDocument(document))
                 return CashOrderPaymentDocumentType;
 
-            return GetDocumentNumberingKey(document.Id);
+            return document.Name;
         }
 
         private static string GetDocumentNumberingKey(Guid documentId)

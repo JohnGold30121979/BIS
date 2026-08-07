@@ -25,6 +25,8 @@
                     Background="#27AE60" Foreground="White" Click="OnAddClick"/>
             <Button x:Name="EditButton" Content="✏️ Редактировать" Width="130" Height="35" Margin="0,0,10,5"
                     Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
+            <Button x:Name="ViewButton" Content="👁️ Просмотр документа" Width="150" Height="35" Margin="0,0,10,5"
+                    Background="#95A5A6" Foreground="White" IsEnabled="False" Click="OnViewClick"/>
             <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="35" Margin="0,0,10,5"
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
             <Button x:Name="AllPostingsButton" Content="📒 Все проводки" Width="130" Height="35" Margin="0,0,10,5"
@@ -61,14 +63,7 @@
                         </StackPanel>
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
-                <DataGridTextColumn x:Name="ModuleColumn" Binding="{Binding ModuleCode}" Width="115">
-                    <DataGridTextColumn.Header>
-                        <StackPanel>
-                            <TextBlock Text="Модуль"/>
-                            <TextBox x:Name="ModuleFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
-                        </StackPanel>
-                    </DataGridTextColumn.Header>
-                </DataGridTextColumn>
+                <DataGridTextColumn x:Name="ModuleColumn" Header="Модуль" Binding="{Binding ModuleCode}" Width="115"/>
                 <DataGridTextColumn Binding="{Binding DocNumber}" Width="120">
                     <DataGridTextColumn.Header>
                         <StackPanel>
@@ -85,7 +80,6 @@
                         </StackPanel>
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
-                <DataGridTextColumn x:Name="EsfStatusColumn" Header="Статус ЭСФ" Binding="{Binding TaxStatusDisplay}" Width="125"/>
                 <DataGridTextColumn x:Name="EsfNumberColumn" Binding="{Binding EsfNumber}" Width="155">
                     <DataGridTextColumn.Header>
                         <StackPanel>
@@ -111,6 +105,7 @@
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
                 <DataGridTextColumn x:Name="BasisColumn" Header="Основание" Binding="{Binding Basis}" Width="220"/>
+                <DataGridTextColumn x:Name="EsfStatusColumn" Header="Статус документа" Binding="{Binding TaxStatusDisplay}" Width="125"/>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -120,7 +115,7 @@
                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
                   AlternatingRowBackground="#F8F8F8">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="*" MinWidth="240"/>
+                <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="150"/>
                 <DataGridTextColumn x:Name="LineUnitColumn" Header="ЕдИз" Binding="{Binding UnitName}" Width="80" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="LineQuantityColumn" Header="Кол-во" Binding="{Binding Quantity, StringFormat=N3}" Width="90" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="LineAccountColumn" Header="Счет" Binding="{Binding AccountName}" Width="220"/>
