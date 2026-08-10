@@ -1,7 +1,7 @@
 <Window x:Class="BIS.ERP.Views.CashOrderDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Кассовый ордер" Height="720" Width="760"
+        Title="Кассовый ордер" Height="567" Width="760"
         MinHeight="600" MinWidth="620" ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner">
 
