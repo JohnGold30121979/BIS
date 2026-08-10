@@ -1,4 +1,4 @@
-<UserControl x:Class="BIS.ERP.Views.PostingsJournalView"
+﻿<UserControl x:Class="BIS.ERP.Views.PostingsJournalView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -33,7 +33,7 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- Период -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="5">
+                <WrapPanel Grid.Column="0" Orientation="Horizontal" Margin="5">
                     <TextBlock Text="Период:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="Bold"/>
                     <DatePicker x:Name="dpStartDate" Width="120"/>
                     <TextBlock Text="—" VerticalAlignment="Center" Margin="5,0"/>
@@ -43,13 +43,26 @@
                               Padding="15,8" Margin="5"/>
                                         <Button Content="📊 Обороты по счету" Click="OnTurnoversClick" 
                            Background="#9B59B6" Foreground="White" Padding="15,8" Margin="5"/>
-                    <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
+                    <Button Content="🧾 Первичный документ" Click="OnOpenSourceDocumentClick"
+                            Background="#16A085" Foreground="White" Padding="15,8" Margin="5"
+                            ToolTip="Открыть первичный документ выбранной проводки на изменение"/>
+                                        <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
+                    <TextBlock Text="Отчет:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <ComboBox x:Name="JournalReportKindComboBox" Width="155" Height="30" SelectedIndex="0" Margin="0,0,5,0">
+                        <ComboBoxItem Content="Полная" Tag="Full"/>
+                        <ComboBoxItem Content="Краткая" Tag="Brief"/>
+                        <ComboBoxItem Content="Итоги по статьям" Tag="ByArticle"/>
+                        <ComboBoxItem Content="Итоги по субсчетам" Tag="BySubaccount"/>
+                    </ComboBox>
+                    <Button Content="Показать/печать" Click="OnOpenJournalReportClick"
+                            Background="#1E7D4D" Foreground="White" Padding="15,8" Margin="5"
+                            ToolTip="Открыть Excel-отчет по текущему журналу для просмотра и печати"/>
                     <TextBlock Text="Показать поля:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
                     <CheckBox x:Name="ShowOrganizationColumnCheckBox" Content="Организация" IsChecked="False"
                               VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
                     <CheckBox x:Name="ShowEmployeeColumnCheckBox" Content="Сотрудник" IsChecked="False"
                               VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
-                </StackPanel>
+                </WrapPanel>
               
             </Grid>
         </Border>

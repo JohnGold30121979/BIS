@@ -1,6 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -9,6 +11,7 @@ using System.Windows.Input;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
+using ClosedXML.Excel;
 
 namespace BIS.ERP.Views
 {
@@ -175,6 +178,369 @@ namespace BIS.ERP.Views
             dialog.ShowDialog();
         }
 
+        private async void OnOpenJournalReportClick(object sender, RoutedEventArgs e)
+        {
+            if (_filteredPostings.Count == 0)
+            {
+                MessageBox.Show("В журнале нет проводок для формирования отчета.", "Журнал проводок",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var rows = _filteredPostings.ToList();
+            var kind = GetSelectedJournalReportKind();
+            var startDate = dpStartDate.SelectedDate ?? rows.Min(row => row.Date);
+            var endDate = dpEndDate.SelectedDate ?? rows.Max(row => row.Date);
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                StatusText.Text = "Формирование Excel-отчета журнала проводок...";
+
+                var path = BuildTemporaryExcelPath($"BIS_Журнал_проводок_{kind}");
+                await Task.Run(() => ExportJournalReportExcel(path, kind, rows, startDate, endDate));
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+
+                StatusText.Text = "Excel-отчет журнала проводок открыт";
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Ошибка формирования Excel-отчета журнала проводок.", "PostingsJournalView.OnOpenJournalReportClick", ex);
+                StatusText.Text = $"Ошибка отчета: {ex.Message}";
+                MessageBox.Show($"Ошибка формирования отчета: {ex.Message}", "Журнал проводок",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        private JournalReportKind GetSelectedJournalReportKind()
+        {
+            return (JournalReportKindComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+            {
+                "Brief" => JournalReportKind.Brief,
+                "ByArticle" => JournalReportKind.ByArticle,
+                "BySubaccount" => JournalReportKind.BySubaccount,
+                _ => JournalReportKind.Full
+            };
+        }
+
+        private void ExportJournalReportExcel(
+            string path,
+            JournalReportKind kind,
+            IReadOnlyList<PostingViewModel> rows,
+            DateTime startDate,
+            DateTime endDate)
+        {
+            using var workbook = new XLWorkbook();
+            var sheet = workbook.Worksheets.Add(SafeSheetName(GetJournalReportKindTitle(kind)));
+
+            var row = 1;
+            sheet.Cell(row, 1).Value = "Журнал проводок";
+            sheet.Range(row, 1, row, 8).Merge().Style.Font.SetBold().Font.SetFontSize(14);
+            row++;
+            sheet.Cell(row, 1).Value = $"Период: {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            sheet.Range(row, 1, row, 8).Merge();
+            row++;
+            sheet.Cell(row, 1).Value = $"Вид отчета: {GetJournalReportKindTitle(kind)}";
+            sheet.Range(row, 1, row, 8).Merge();
+            row += 2;
+
+            row = kind switch
+            {
+                JournalReportKind.Brief => WriteBriefJournalReport(sheet, row, rows),
+                JournalReportKind.ByArticle => WriteJournalByArticleReport(sheet, row, rows),
+                JournalReportKind.BySubaccount => WriteJournalBySubaccountReport(sheet, row, rows),
+                _ => WriteFullJournalReport(sheet, row, rows)
+            };
+
+            row++;
+            WriteJournalTotals(sheet, row, kind, rows);
+
+            var usedRange = sheet.RangeUsed();
+            if (usedRange != null)
+            {
+                usedRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+                usedRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+                usedRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            }
+
+            sheet.SheetView.FreezeRows(5);
+            sheet.Columns().AdjustToContents();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            workbook.SaveAs(path);
+        }
+
+        private static int WriteFullJournalReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
+        {
+            WriteJournalHeader(sheet, row,
+                "Дата", "Документ", "Тип", "Модуль", "Дебет", "Кредит", "Сумма", "Сумма вал.",
+                "Валюта", "Организация", "Сотрудник", "Содержание");
+            row++;
+
+            foreach (var posting in rows.OrderBy(item => item.Date).ThenBy(item => item.DocumentNumber))
+            {
+                sheet.Cell(row, 1).Value = posting.Date;
+                sheet.Cell(row, 1).Style.DateFormat.Format = "dd.MM.yyyy";
+                sheet.Cell(row, 2).Value = posting.DocumentNumber;
+                sheet.Cell(row, 3).Value = posting.DocumentType;
+                sheet.Cell(row, 4).Value = posting.ModuleName;
+                sheet.Cell(row, 5).Value = posting.DebitAccount;
+                sheet.Cell(row, 6).Value = posting.CreditAccount;
+                sheet.Cell(row, 7).Value = posting.Amount;
+                sheet.Cell(row, 8).Value = posting.AmountCurrency;
+                sheet.Cell(row, 9).Value = posting.Currency;
+                sheet.Cell(row, 10).Value = posting.Organization;
+                sheet.Cell(row, 11).Value = posting.Employee;
+                sheet.Cell(row, 12).Value = posting.Note;
+                row++;
+            }
+
+            sheet.Range(1, 7, Math.Max(row, 1), 8).Style.NumberFormat.Format = "#,##0.00";
+            return row;
+        }
+
+        private static int WriteBriefJournalReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
+        {
+            WriteJournalHeader(sheet, row,
+                "Дата", "Документ", "Тип", "Модуль", "Дебет", "Кредит", "Кол-во", "Сумма", "Сумма вал.", "Содержание");
+            row++;
+
+            var groups = rows
+                .GroupBy(posting => new
+                {
+                    Date = posting.Date.Date,
+                    posting.DocumentNumber,
+                    posting.DocumentType,
+                    posting.ModuleName,
+                    posting.DebitAccount,
+                    posting.CreditAccount,
+                    Note = posting.Note ?? string.Empty
+                })
+                .OrderBy(group => group.Key.Date)
+                .ThenBy(group => group.Key.DocumentNumber);
+
+            foreach (var group in groups)
+            {
+                sheet.Cell(row, 1).Value = group.Key.Date;
+                sheet.Cell(row, 1).Style.DateFormat.Format = "dd.MM.yyyy";
+                sheet.Cell(row, 2).Value = group.Key.DocumentNumber;
+                sheet.Cell(row, 3).Value = group.Key.DocumentType;
+                sheet.Cell(row, 4).Value = group.Key.ModuleName;
+                sheet.Cell(row, 5).Value = group.Key.DebitAccount;
+                sheet.Cell(row, 6).Value = group.Key.CreditAccount;
+                sheet.Cell(row, 7).Value = group.Count();
+                sheet.Cell(row, 8).Value = group.Sum(item => item.Amount);
+                sheet.Cell(row, 9).Value = group.Sum(item => item.AmountCurrency);
+                sheet.Cell(row, 10).Value = group.Key.Note;
+                row++;
+            }
+
+            sheet.Range(1, 8, Math.Max(row, 1), 9).Style.NumberFormat.Format = "#,##0.00";
+            return row;
+        }
+
+        private static int WriteJournalByArticleReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
+        {
+            WriteJournalHeader(sheet, row, "Статья / содержание", "Кол-во", "Оборот сом", "Оборот вал.");
+            row++;
+
+            var groups = rows
+                .GroupBy(posting => string.IsNullOrWhiteSpace(posting.Note) ? "(без статьи)" : posting.Note.Trim())
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in groups)
+            {
+                sheet.Cell(row, 1).Value = group.Key;
+                sheet.Cell(row, 2).Value = group.Count();
+                sheet.Cell(row, 3).Value = group.Sum(item => item.Amount);
+                sheet.Cell(row, 4).Value = group.Sum(item => item.AmountCurrency);
+                row++;
+            }
+
+            sheet.Range(1, 3, Math.Max(row, 1), 4).Style.NumberFormat.Format = "#,##0.00";
+            return row;
+        }
+
+        private static int WriteJournalBySubaccountReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
+        {
+            WriteJournalHeader(sheet, row, "Субсчет", "Наименование", "Кол-во", "Дебет оборот", "Кредит оборот");
+            row++;
+
+            var debitRows = rows.Select(posting => new
+            {
+                Code = posting.DebitAccount,
+                Name = posting.DebitAccountName,
+                DebitAmount = posting.Amount,
+                CreditAmount = 0m
+            });
+            var creditRows = rows.Select(posting => new
+            {
+                Code = posting.CreditAccount,
+                Name = posting.CreditAccountName,
+                DebitAmount = 0m,
+                CreditAmount = posting.Amount
+            });
+
+            var groups = debitRows
+                .Concat(creditRows)
+                .Where(item => !string.IsNullOrWhiteSpace(item.Code))
+                .GroupBy(item => item.Code, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in groups)
+            {
+                var name = group.Select(item => item.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+                sheet.Cell(row, 1).Value = group.Key;
+                sheet.Cell(row, 2).Value = name;
+                sheet.Cell(row, 3).Value = group.Count();
+                sheet.Cell(row, 4).Value = group.Sum(item => item.DebitAmount);
+                sheet.Cell(row, 5).Value = group.Sum(item => item.CreditAmount);
+                row++;
+            }
+
+            sheet.Range(1, 4, Math.Max(row, 1), 5).Style.NumberFormat.Format = "#,##0.00";
+            return row;
+        }
+
+        private static void WriteJournalTotals(IXLWorksheet sheet, int row, JournalReportKind kind, IReadOnlyList<PostingViewModel> rows)
+        {
+            sheet.Cell(row, 1).Value = "Итого";
+            sheet.Cell(row, 1).Style.Font.SetBold();
+
+            switch (kind)
+            {
+                case JournalReportKind.Brief:
+                    sheet.Cell(row, 8).Value = rows.Sum(item => item.Amount);
+                    sheet.Cell(row, 9).Value = rows.Sum(item => item.AmountCurrency);
+                    sheet.Range(row, 8, row, 9).Style.NumberFormat.Format = "#,##0.00";
+                    sheet.Range(row, 1, row, 9).Style.Font.SetBold();
+                    break;
+                case JournalReportKind.ByArticle:
+                    sheet.Cell(row, 3).Value = rows.Sum(item => item.Amount);
+                    sheet.Cell(row, 4).Value = rows.Sum(item => item.AmountCurrency);
+                    sheet.Range(row, 3, row, 4).Style.NumberFormat.Format = "#,##0.00";
+                    sheet.Range(row, 1, row, 4).Style.Font.SetBold();
+                    break;
+                case JournalReportKind.BySubaccount:
+                    sheet.Cell(row, 4).Value = rows.Sum(item => item.Amount);
+                    sheet.Cell(row, 5).Value = rows.Sum(item => item.Amount);
+                    sheet.Range(row, 4, row, 5).Style.NumberFormat.Format = "#,##0.00";
+                    sheet.Range(row, 1, row, 5).Style.Font.SetBold();
+                    break;
+                default:
+                    sheet.Cell(row, 7).Value = rows.Sum(item => item.Amount);
+                    sheet.Cell(row, 8).Value = rows.Sum(item => item.AmountCurrency);
+                    sheet.Range(row, 7, row, 8).Style.NumberFormat.Format = "#,##0.00";
+                    sheet.Range(row, 1, row, 8).Style.Font.SetBold();
+                    break;
+            }
+        }
+
+        private static void WriteJournalHeader(IXLWorksheet sheet, int row, params string[] headers)
+        {
+            for (var index = 0; index < headers.Length; index++)
+            {
+                var cell = sheet.Cell(row, index + 1);
+                cell.Value = headers[index];
+                cell.Style.Font.SetBold();
+                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#DDEAF6");
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            }
+        }
+
+        private static string GetJournalReportKindTitle(JournalReportKind kind) => kind switch
+        {
+            JournalReportKind.Brief => "Краткая",
+            JournalReportKind.ByArticle => "Итоги по статьям",
+            JournalReportKind.BySubaccount => "Итоги по субсчетам",
+            _ => "Полная"
+        };
+
+        private static string BuildTemporaryExcelPath(string baseName)
+        {
+            foreach (var invalid in Path.GetInvalidFileNameChars())
+                baseName = baseName.Replace(invalid, '_');
+
+            var directory = Path.Combine(Path.GetTempPath(), "BIS ERP", "Reports");
+            return Path.Combine(directory, $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx");
+        }
+
+        private static string SafeSheetName(string name)
+        {
+            var safeName = name;
+            foreach (var invalid in new[] { ':', '\\', '/', '?', '*', '[', ']' })
+                safeName = safeName.Replace(invalid, ' ');
+
+            safeName = safeName.Trim();
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "Журнал";
+
+            return safeName.Length > 31 ? safeName[..31] : safeName;
+        }
+
+        private enum JournalReportKind
+        {
+            Full,
+            Brief,
+            ByArticle,
+            BySubaccount
+        }
+        private async void OnOpenSourceDocumentClick(object sender, RoutedEventArgs e)
+        {
+            if (PostingsGrid.SelectedItem is not PostingViewModel selected)
+            {
+                MessageBox.Show("Выберите проводку, по которой нужно открыть первичный документ.", "Первичный документ",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                var owner = Window.GetWindow(this);
+                if (await PostingSourceDocumentOpener.TryOpenAsync(selected, null, owner, isReadOnly: false))
+                {
+                    await LoadPostingsAsync();
+                    return;
+                }
+
+                if (selected.Id == Guid.Empty)
+                {
+                    MessageBox.Show("Первичный документ по выбранной проводке не найден.", "Первичный документ",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var metadataService = new MetadataService(context);
+                var postingDocument = (await metadataService.GetDocumentsAsync())
+                    .FirstOrDefault(document =>
+                        document.Name.Equals("Проводки", StringComparison.OrdinalIgnoreCase) ||
+                        document.TableName.Equals("doc_postings", StringComparison.OrdinalIgnoreCase));
+
+                if (postingDocument == null)
+                {
+                    MessageBox.Show("Метаданные документа «Проводки» не найдены.", "Первичный документ",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new PostingEditDialog(postingDocument, metadataService, selected.Id)
+                {
+                    Owner = owner
+                };
+                dialog.ShowDialog();
+                await LoadPostingsAsync();
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Ошибка открытия первичного документа из журнала проводок.", "PostingsJournalView.OnOpenSourceDocumentClick", ex);
+                MessageBox.Show($"Ошибка открытия первичного документа: {ex.Message}", "Первичный документ",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
         private void OnSummaryClick(object sender, RoutedEventArgs e)
         {
             // TODO: Открыть диалог сводных оборотов
