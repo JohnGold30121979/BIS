@@ -40,6 +40,7 @@ namespace BIS.ERP.Views
             DialogTitle.Text = $"Добавление: {document.Name}";
             DatePicker.SelectedDate = DateTime.Today;
             TypeCombo.SelectedIndex = 0;
+            SetDescriptionVisibility(false);
 
             this.ContentRendered += async (s, e) => await InitializeAsync();
         }
@@ -51,6 +52,7 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _editId = editId;
             DialogTitle.Text = $"Редактирование: {document.Name}";
+            SetDescriptionVisibility(false);
 
             this.ContentRendered += async (s, e) => await InitializeAsync(editId);
         }
@@ -283,6 +285,9 @@ namespace BIS.ERP.Views
                     if (record.ContainsKey("Курс")) ExchangeRateBox.Text = record["Курс"].ToString();
                     if (record.ContainsKey("Назначение платежа")) PurposeBox.Text = record["Назначение платежа"].ToString();
                     if (record.ContainsKey("Примечание")) DescriptionBox.Text = record["Примечание"].ToString();
+                    var hasDescription = !string.IsNullOrWhiteSpace(DescriptionBox.Text);
+                    ShowDescriptionCheckBox.IsChecked = hasDescription;
+                    SetDescriptionVisibility(hasDescription);
                     if (TryGetRecordValue(record, out var ourAccountValue, "Наш счет", "our_account_id", "Дебет", "debit_account"))
                         ApplySelectedOurAccount(ourAccountValue);
                     if (TryGetRecordValue(record, out var accountValue, "Корр. счет", "correspondent_account", "Кредит", "credit_account"))
@@ -526,9 +531,6 @@ namespace BIS.ERP.Views
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
                 SetFieldValueIfExists(itemData, "Кредит",
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
-                SetFieldValueIfExists(itemData, "Классификация платежа",
-                    _selectedPaymentClassificationId != Guid.Empty ? _selectedPaymentClassificationId : string.Empty);
-
                 if (_editId.HasValue)
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
                 else
@@ -547,6 +549,22 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void OnShowDescriptionChanged(object sender, RoutedEventArgs e)
+        {
+            var isVisible = ShowDescriptionCheckBox?.IsChecked == true;
+            SetDescriptionVisibility(isVisible);
+            if (!isVisible && DescriptionBox != null)
+                DescriptionBox.Text = string.Empty;
+        }
+
+        private void SetDescriptionVisibility(bool isVisible)
+        {
+            var visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (DescriptionLabel != null)
+                DescriptionLabel.Visibility = visibility;
+            if (DescriptionBox != null)
+                DescriptionBox.Visibility = visibility;
+        }
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
             DialogResult = false;

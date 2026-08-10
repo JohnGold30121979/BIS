@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="BIS.ERP.Views.PaymentOrderWorkView"
+<UserControl x:Class="BIS.ERP.Views.PaymentOrderWorkView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -22,7 +22,7 @@
         </StackPanel>
 
         <!-- Панель инструментов -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+        <WrapPanel Grid.Row="1" Margin="0,0,0,10">
             <Button x:Name="AddButton" Content="➕ Добавить" Width="100" Height="35" Margin="0,0,10,0"
                     Background="#27AE60" Foreground="White" Click="OnAddClick"/>
             <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="35" Margin="0,0,10,0"
@@ -31,9 +31,11 @@
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
             <Button x:Name="PostButton" Content="✅ Провести" Width="155" Height="35" Margin="0,0,10,0"
                     Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
+            <Button x:Name="PrintButton" Content="Просмотр" Width="110" Height="35" Margin="0,0,10,0"
+                    Background="#2C3E50" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
             <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="100" Height="35"
                     Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
-        </StackPanel>
+        </WrapPanel>
 
         <!-- Таблица -->
         <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 
@@ -53,7 +55,6 @@
                 <DataGridTextColumn x:Name="ExchangeRateColumn" Header="Курс" Binding="{Binding ExchangeRate}" Width="90" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding EmployeeName}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="MaterialColumn" Header="Материал" Binding="{Binding MaterialName}" Width="180" Visibility="Collapsed"/>
-                <DataGridTextColumn Header="Классификация платежа" Binding="{Binding PaymentClassificationName}" Width="220"/>
                 <DataGridTextColumn Header="Назначение" Binding="{Binding Purpose}" Width="200"/>
                 <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150"/>

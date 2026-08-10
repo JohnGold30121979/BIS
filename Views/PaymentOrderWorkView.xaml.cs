@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -9,6 +10,8 @@ using System.Windows.Input;
 using System.Windows.Media;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
+using Microsoft.EntityFrameworkCore;
 
 namespace BIS.ERP.Views
 {
@@ -45,6 +48,7 @@ namespace BIS.ERP.Views
             EditButton.IsEnabled = canEdit;
             DeleteButton.IsEnabled = hasSelection;
             PostButton.IsEnabled = hasSelection;
+            PrintButton.IsEnabled = hasSelection;
             PostButton.Content = isPosted ? "↩ Отменить проведение" : "✅ Провести";
             PostButton.Background = isPosted ? Brushes.DarkOrange : Brushes.MediumPurple;
         }
@@ -69,15 +73,24 @@ namespace BIS.ERP.Views
 
             var documentType = ResolvePaymentOrderPostingType(row.OrderType);
             var postings = await _metadataService.GetPostingsByDocumentAsync(documentType, row.DocNumber, row.DocDate);
-            var posting = postings.FirstOrDefault();
-            if (posting == null)
+            if (postings.Count == 0)
             {
                 MessageBox.Show("Связанная проводка в журнале не найдена.", "Проводки",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            var details = new PostingDetailsDialog(posting)
+            if (postings.Count > 1)
+            {
+                var allPostingsDialog = new DocumentPostingsDialog(documentType, row.DocNumber, postings)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+                allPostingsDialog.ShowDialog();
+                return;
+            }
+
+            var details = new PostingDetailsDialog(postings[0])
             {
                 Owner = Window.GetWindow(this)
             };
@@ -277,6 +290,7 @@ namespace BIS.ERP.Views
             var result = new PaymentOrderRow
             {
                 Id = Guid.TryParse(ReadString(row, "Id"), out var id) ? id : Guid.NewGuid(),
+                OrganizationId = ReadGuid(row, "Организация", "organization_id"),
                 DocNumber = MetadataService.NormalizeLegacyDocumentNumber(ReadString(row, "Номер", "doc_number", "number")),
                 DocDate = ReadDate(row, DateTime.Now, "Дата", "doc_date", "date"),
                 OrderType = ReadString(row, "Тип", "order_type"),
@@ -386,7 +400,7 @@ namespace BIS.ERP.Views
                 : Visibility.Collapsed;
         }
 
-        private static string ReadString(Dictionary<string, object> row, params string[] keys)
+        private static string ReadString(Dictionary<string, object>? row, params string[] keys)
         {
             return GetFirstValue(row, keys);
         }
@@ -442,8 +456,11 @@ namespace BIS.ERP.Views
             return fallback;
         }
 
-        private static string GetFirstValue(Dictionary<string, object> row, params string[] keys)
+        private static string GetFirstValue(Dictionary<string, object>? row, params string[] keys)
         {
+            if (row == null)
+                return string.Empty;
+
             foreach (var key in keys)
             {
                 if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
@@ -570,12 +587,295 @@ namespace BIS.ERP.Views
             }
         }
 
-        private async void OnRefreshClick(object sender, RoutedEventArgs e) => await LoadData();
+        private async void OnPrintClick(object sender, RoutedEventArgs e)
+        {
+            if (DataGrid.SelectedItem is not PaymentOrderRow selected)
+                return;
+
+            try
+            {
+                StatusText.Text = "Формирование платежного поручения...";
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                await new MetadataService(context).EnsureStandardReportsAsync();
+
+                var report = await context.Reports
+                    .AsNoTracking()
+                    .Include(item => item.ElementMappings)
+                    .FirstOrDefaultAsync(item => item.Code == "standard.frx.finance.payment-order.pr-pl23" && item.IsActive && item.IsPrintForm);
+
+                if (report == null)
+                {
+                    MessageBox.Show("FRX-отчет pr_pl23 для платежного поручения не загружен в конфигурацию.",
+                        "Платежное поручение", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    StatusText.Text = "FRX-отчет не найден";
+                    return;
+                }
+
+                var dataTable = await BuildPaymentOrderPrintTableAsync(selected, context);
+                var pdf = new PrintFormService(context).ExportReportTemplatePreview(dataTable, report);
+                var previewWindow = new PdfPreviewWindow(pdf)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+                previewWindow.ShowDialog();
+                StatusText.Text = "Предпросмотр сформирован";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Ошибка печати: {ex.Message}";
+                MessageBox.Show($"Ошибка предпросмотра платежного поручения: {ex.Message}",
+                    "Платежное поручение", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task<DataTable> BuildPaymentOrderPrintTableAsync(PaymentOrderRow row, BIS.ERP.Data.AppDbContext context)
+        {
+            var table = new DataTable("Платежное поручение");
+            void AddColumn(string name, Type? type = null)
+            {
+                if (!table.Columns.Contains(name))
+                    table.Columns.Add(name, type ?? typeof(string));
+            }
+
+            var columns = new[]
+            {
+                "Номер", "Дата", "Тип", "Сторона А", "Сторона Б",
+                "side_a_name", "side_a_inn", "side_a_bank", "side_a_bic", "side_a_account",
+                "side_b_name", "side_b_inn", "side_b_bank", "side_b_bic", "side_b_account",
+                "payer_name", "payer_inn", "payer_bank", "payer_bic", "payer_account",
+                "receiver_name", "receiver_inn", "receiver_bank", "receiver_bic", "receiver_account",
+                "namep1", "namep2", "inn1", "inn2", "mc_bank", "md_bank", "mc_mfo", "md_mfo",
+                "mt_adr1", "mt_adr2", "rschc", "rschd", "rschk", "dok1", "dat1", "KODPL_1",
+                "sch1", "sum1", "sum2", "MSUM1", "NA1", "LL", "Назначение платежа", "Примечание",
+                "Дебет", "Кредит", "Сумма", "Модуль", "DATE()", "_PAGENO"
+            };
+            foreach (var column in columns)
+                AddColumn(column, column is "Дата" or "DATE()" ? typeof(DateTime) : typeof(string));
+
+            var printMetadataService = new MetadataService(context);
+            var (ownParty, counterpartyParty) = await LoadPaymentOrderPartiesAsync(
+                printMetadataService,
+                row.OrganizationId,
+                row.OrganizationName);
+
+            var isIncoming = row.OrderType.Contains("Вход", StringComparison.OrdinalIgnoreCase);
+            var payerParty = isIncoming ? counterpartyParty : ownParty;
+            var receiverParty = isIncoming ? ownParty : counterpartyParty;
+            ApplyPaymentOrderFallbacks(row, payerParty, receiverParty);
+
+            var debit = ExtractAccountCode(row.OurAccountName);
+            var credit = ExtractAccountCode(row.CorrespondentAccountName);
+
+            var dataRow = table.NewRow();
+            dataRow["Номер"] = row.DocNumber;
+            dataRow["Дата"] = row.DocDate;
+            dataRow["Тип"] = row.OrderType;
+            dataRow["Сторона А"] = payerParty.Name;
+            dataRow["Сторона Б"] = receiverParty.Name;
+            FillPartyColumns(dataRow, "side_a", payerParty);
+            FillPartyColumns(dataRow, "side_b", receiverParty);
+            FillPartyColumns(dataRow, "payer", payerParty);
+            FillPartyColumns(dataRow, "receiver", receiverParty);
+
+            // FoxPro pr_pl23: namep2/rschc/mc_bank - плательщик, namep1/rschd/rschk/md_bank - получатель.
+            dataRow["namep2"] = payerParty.Name;
+            dataRow["inn2"] = payerParty.Inn;
+            dataRow["rschc"] = payerParty.AccountNumber;
+            dataRow["mc_bank"] = payerParty.BankName;
+            dataRow["mc_mfo"] = payerParty.BankBic;
+            dataRow["mt_adr1"] = payerParty.BankAddress;
+            dataRow["namep1"] = receiverParty.Name;
+            dataRow["inn1"] = receiverParty.Inn;
+            dataRow["rschd"] = receiverParty.AccountNumber;
+            dataRow["rschk"] = receiverParty.AccountNumber;
+            dataRow["md_bank"] = receiverParty.BankName;
+            dataRow["md_mfo"] = receiverParty.BankBic;
+            dataRow["mt_adr2"] = receiverParty.BankAddress;
+            dataRow["dok1"] = row.DocNumber;
+            dataRow["dat1"] = row.DocDate.ToString("dd.MM.yyyy");
+            dataRow["KODPL_1"] = string.Empty;
+            dataRow["sch1"] = debit;
+            dataRow["sum1"] = row.Amount.ToString("0.##");
+            dataRow["sum2"] = row.Amount.ToString("0.##");
+            dataRow["MSUM1"] = $"{row.Amount:N2} сом";
+            dataRow["NA1"] = row.Purpose;
+            dataRow["LL"] = row.Description;
+            dataRow["Назначение платежа"] = row.Purpose;
+            dataRow["Примечание"] = row.Description;
+            dataRow["Дебет"] = debit;
+            dataRow["Кредит"] = credit;
+            dataRow["Сумма"] = row.Amount.ToString("0.##");
+            dataRow["Модуль"] = _moduleName;
+            dataRow["DATE()"] = DateTime.Today;
+            dataRow["_PAGENO"] = "1";
+            table.Rows.Add(dataRow);
+            return table;
+        }
+
+        private async Task<(PaymentOrderPrintParty Own, PaymentOrderPrintParty Counterparty)> LoadPaymentOrderPartiesAsync(
+            MetadataService metadataService,
+            Guid? counterpartyId,
+            string counterpartyFallback)
+        {
+            var catalogs = (await metadataService.GetCatalogsAsync())
+                .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            var organizations = await GetCatalogRowsAsync(metadataService, catalogs, "Организации");
+            var bankAccounts = await GetCatalogRowsAsync(metadataService, catalogs, "Расчетные счета организаций");
+            var banks = await GetCatalogRowsAsync(metadataService, catalogs, "Банки");
+
+            var ownOrganization = organizations.FirstOrDefault(item => ReadBool(item, "Первичная организация", "is_primary"))
+                ?? organizations.FirstOrDefault();
+            var counterpartyOrganization = FindOrganization(organizations, counterpartyId, counterpartyFallback);
+
+            return (
+                BuildPrintParty(ownOrganization, bankAccounts, banks, "Наша организация"),
+                BuildPrintParty(counterpartyOrganization, bankAccounts, banks,
+                    string.IsNullOrWhiteSpace(counterpartyFallback) ? "Контрагент" : counterpartyFallback));
+        }
+
+        private static async Task<List<Dictionary<string, object>>> GetCatalogRowsAsync(
+            MetadataService metadataService,
+            Dictionary<string, MetadataObject> catalogs,
+            string catalogName)
+        {
+            return catalogs.TryGetValue(catalogName, out var catalog)
+                ? await metadataService.GetCatalogDataAsync(catalog.Id)
+                : new List<Dictionary<string, object>>();
+        }
+
+        private static Dictionary<string, object>? FindOrganization(
+            IEnumerable<Dictionary<string, object>> organizations,
+            Guid? organizationId,
+            string displayName)
+        {
+            if (organizationId.HasValue)
+            {
+                var byId = organizations.FirstOrDefault(item => ReadGuid(item, "Id") == organizationId.Value);
+                if (byId != null)
+                    return byId;
+            }
+
+            var normalized = displayName.Trim();
+            var code = normalized.Split(" - ", StringSplitOptions.None).FirstOrDefault()?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(code))
+            {
+                var byCode = organizations.FirstOrDefault(item =>
+                    string.Equals(ReadString(item, "Код", "code"), code, StringComparison.OrdinalIgnoreCase));
+                if (byCode != null)
+                    return byCode;
+            }
+
+            return organizations.FirstOrDefault(item =>
+                ContainsDisplayPart(normalized, ReadString(item, "Полное наименование", "full_name")) ||
+                ContainsDisplayPart(normalized, ReadString(item, "Наименование", "name")));
+        }
+
+        private static PaymentOrderPrintParty BuildPrintParty(
+            Dictionary<string, object>? organization,
+            List<Dictionary<string, object>> bankAccounts,
+            List<Dictionary<string, object>> banks,
+            string fallbackName)
+        {
+            var organizationId = ReadGuid(organization, "Id");
+            var party = new PaymentOrderPrintParty
+            {
+                Name = FirstNonEmpty(
+                    ReadString(organization, "Полное наименование", "full_name"),
+                    ReadString(organization, "Наименование", "name"),
+                    fallbackName),
+                Inn = ReadString(organization, "ИНН", "inn"),
+                BankName = ReadString(organization, "Банк", "bank_name"),
+                AccountNumber = ReadString(organization, "Расчетный счет", "bank_account"),
+                BankBic = ReadString(organization, "БИК", "bic")
+            };
+
+            var settlementAccount = organizationId.HasValue
+                ? bankAccounts
+                    .Where(item => ReadGuid(item, "Организация", "organization_id") == organizationId.Value)
+                    .OrderByDescending(item => ReadBool(item, "Активен", "is_active"))
+                    .ThenByDescending(item => ReadBool(item, "Основной счет", "is_main"))
+                    .FirstOrDefault()
+                : null;
+
+            if (settlementAccount != null)
+            {
+                party.AccountNumber = FirstNonEmpty(ReadString(settlementAccount, "Счет", "account_number"), party.AccountNumber);
+                party.BankBic = FirstNonEmpty(ReadString(settlementAccount, "БИК", "bic"), party.BankBic);
+
+                var bankId = ReadGuid(settlementAccount, "Банк", "bank_id");
+                var bank = bankId.HasValue
+                    ? banks.FirstOrDefault(item => ReadGuid(item, "Id") == bankId.Value)
+                    : null;
+                if (bank != null)
+                {
+                    party.BankName = FirstNonEmpty(ReadString(bank, "Наименование банка", "name"), party.BankName);
+                    party.BankBic = FirstNonEmpty(ReadString(bank, "БИК", "bic"), party.BankBic);
+                    party.BankAddress = ReadString(bank, "Адрес", "address");
+                }
+            }
+
+            return party;
+        }
+
+        private static void ApplyPaymentOrderFallbacks(
+            PaymentOrderRow row,
+            PaymentOrderPrintParty payerParty,
+            PaymentOrderPrintParty receiverParty)
+        {
+            if (!string.IsNullOrWhiteSpace(row.BankName) && string.IsNullOrWhiteSpace(payerParty.BankName))
+                payerParty.BankName = row.BankName;
+
+            payerParty.AccountNumber = FirstNonEmpty(payerParty.AccountNumber, ExtractAccountCode(row.OurAccountName));
+            receiverParty.AccountNumber = FirstNonEmpty(receiverParty.AccountNumber, ExtractAccountCode(row.CorrespondentAccountName));
+        }
+
+        private static void FillPartyColumns(DataRow dataRow, string prefix, PaymentOrderPrintParty party)
+        {
+            dataRow[$"{prefix}_name"] = party.Name;
+            dataRow[$"{prefix}_inn"] = party.Inn;
+            dataRow[$"{prefix}_bank"] = party.BankName;
+            dataRow[$"{prefix}_bic"] = party.BankBic;
+            dataRow[$"{prefix}_account"] = party.AccountNumber;
+        }
+
+        private static bool ContainsDisplayPart(string displayName, string value)
+        {
+            return !string.IsNullOrWhiteSpace(displayName) &&
+                   !string.IsNullOrWhiteSpace(value) &&
+                   displayName.Contains(value, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FirstNonEmpty(params string[] values)
+        {
+            return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+        }
+
+        private static Guid? ReadGuid(Dictionary<string, object>? row, params string[] keys)
+        {
+            if (row == null)
+                return null;
+
+            var value = GetFirstValue(row, keys);
+            return Guid.TryParse(value, out var id) ? id : null;
+        }        private async void OnRefreshClick(object sender, RoutedEventArgs e) => await LoadData();
+    }
+
+    internal sealed class PaymentOrderPrintParty
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Inn { get; set; } = string.Empty;
+        public string BankName { get; set; } = string.Empty;
+        public string BankBic { get; set; } = string.Empty;
+        public string BankAddress { get; set; } = string.Empty;
+        public string AccountNumber { get; set; } = string.Empty;
     }
 
     public class PaymentOrderRow
     {
         public Guid Id { get; set; }
+        public Guid? OrganizationId { get; set; }
         public string DocNumber { get; set; } = string.Empty;
         public DateTime DocDate { get; set; }
         public string OrderType { get; set; } = string.Empty;

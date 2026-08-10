@@ -1079,6 +1079,9 @@ namespace BIS.ERP.Services
 
             var recordId = Guid.Parse(newId.ToString());
 
+            if (ShouldIncrementDocumentNumberAfterCreate(metadata, data))
+                await IncrementDocumentNumberAfterCreateAsync(metadata, data);
+
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
             if (IsPostingsDocument(metadata))
@@ -4199,7 +4202,7 @@ namespace BIS.ERP.Services
 
         public Task<string> GetNextCashOrderDocumentNumberAsync(string orderKind)
         {
-            return GetNextDocumentNumberByKeyAsync(CashOrderDocumentName, GetCashOrderNumberingKey(orderKind));
+            return GetNextCashOrderDocumentNumberByKindAsync(orderKind);
         }
 
         public async Task<string> GetNextDocumentNumberAsync(string documentName)
@@ -4280,10 +4283,26 @@ namespace BIS.ERP.Services
         public async Task IncrementDocumentNumberAsync(MetadataObject document)
         {
             await EnsureDocumentNumberConfigurationAsync(document);
+            await IncrementDocumentNumberByKeyAsync(GetDocumentNumberingKey(document), document.Name);
+        }
 
-            var numberingKey = GetDocumentNumberingKey(document);
-            var documentName = document.Name;
+        private async Task IncrementDocumentNumberAfterCreateAsync(
+            MetadataObject document,
+            IReadOnlyDictionary<string, object> data)
+        {
+            if (IsCashOrderDocument(document))
+            {
+                await EnsureCashOrderDocumentNumberConfigurationsAsync();
+                await IncrementDocumentNumberByKeyAsync(GetCashOrderNumberingKey(GetCashOrderKindFromData(data)));
+                return;
+            }
 
+            await EnsureDocumentNumberConfigurationAsync(document);
+            await IncrementDocumentNumberByKeyAsync(GetDocumentNumberingKey(document), document.Name);
+        }
+
+        private async Task IncrementDocumentNumberByKeyAsync(string numberingKey, string? documentName = null)
+        {
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = @"
                 UPDATE doc_numbering
@@ -4302,7 +4321,9 @@ namespace BIS.ERP.Services
 
             var documentTypeParameter2 = command.CreateParameter();
             documentTypeParameter2.ParameterName = "@documentType2";
-            documentTypeParameter2.Value = $"doc:{documentName}";
+            documentTypeParameter2.Value = string.IsNullOrWhiteSpace(documentName)
+                ? $"__unused_{Guid.NewGuid():N}"
+                : $"doc:{documentName}";
             command.Parameters.Add(documentTypeParameter2);
 
             var maxNumberParam = command.CreateParameter();
@@ -4366,33 +4387,7 @@ namespace BIS.ERP.Services
                     if (await reader.ReadAsync())
                     {
                         var currentNumber = reader.GetInt32(0);
-                        var actualDocumentType = reader.GetString(1);
-                        
-                        // Номер для документа = текущий - 1 (потому что в БД хранится следующий)
-                        var documentNumber = currentNumber > 1 ? currentNumber - 1 : 1;
-                        var nextNumber = currentNumber + 1;
-                        
-                        // Increment the counter in the database
-                        await reader.CloseAsync();
-                        var updateCommand = _context.Database.GetDbConnection().CreateCommand();
-                        updateCommand.CommandText = @"
-                            UPDATE doc_numbering
-                            SET current_number = @nextNumber, UpdatedAt = NOW()
-                            WHERE document_type = @documentType";
-                        
-                        var nextNumberParam = updateCommand.CreateParameter();
-                        nextNumberParam.ParameterName = "@nextNumber";
-                        nextNumberParam.Value = nextNumber > MaxDocumentNumberUsedForCounter ? 1 : nextNumber;
-                        updateCommand.Parameters.Add(nextNumberParam);
-                        
-                        var documentTypeParam = updateCommand.CreateParameter();
-                        documentTypeParam.ParameterName = "@documentType";
-                        documentTypeParam.Value = actualDocumentType;
-                        updateCommand.Parameters.Add(documentTypeParam);
-                        
-                        await updateCommand.ExecuteNonQueryAsync();
-                        
-                        return documentNumber.ToString();
+                        return Math.Max(1, currentNumber).ToString();
                     }
                 }
                 finally
@@ -4408,6 +4403,43 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Ошибка получения номера документа: {ex.Message}");
+                return GenerateFallbackDocumentNumber();
+            }
+        }
+
+        private async Task<string> GetNextCashOrderDocumentNumberByKindAsync(string orderKind)
+        {
+            try
+            {
+                await CreateDocumentNumberingTableAsync();
+
+                var documents = await LoadDocumentMetadataAsync();
+                var cashOrderDocument = documents.FirstOrDefault(IsCashOrderDocument);
+                if (cashOrderDocument == null)
+                    return await GetNextDocumentNumberByKeyAsync(CashOrderDocumentName, GetCashOrderNumberingKey(orderKind));
+
+                var normalizedOrderKind = NormalizeCashOrderKind(orderKind);
+                var numberingKey = GetCashOrderNumberingKey(normalizedOrderKind);
+                var suggestedNumber = await GetSuggestedNextCashOrderDocumentNumberAsync(cashOrderDocument, normalizedOrderKind);
+
+                const string syncSql = @"
+                    INSERT INTO doc_numbering (document_type, current_number, prefix)
+                    VALUES (@documentType, @currentNumber, '')
+                    ON CONFLICT (document_type) DO UPDATE
+                    SET current_number = @currentNumber,
+                        prefix = '',
+                        UpdatedAt = NOW()";
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    syncSql,
+                    new NpgsqlParameter("@documentType", numberingKey),
+                    new NpgsqlParameter("@currentNumber", suggestedNumber));
+
+                return suggestedNumber.ToString();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка получения номера кассового ордера: {ex.Message}");
                 return GenerateFallbackDocumentNumber();
             }
         }
@@ -4833,6 +4865,35 @@ namespace BIS.ERP.Services
                    metadata.Name.Equals("Кассы", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool ShouldIncrementDocumentNumberAfterCreate(
+            MetadataObject metadata,
+            IReadOnlyDictionary<string, object> data)
+        {
+            if (!IsManagedDocument(metadata) || IsInvoiceDocument(metadata))
+                return false;
+
+            var number = NormalizeLegacyDocumentNumber(ReadDocumentNumberFromData(data));
+            return !string.IsNullOrWhiteSpace(number);
+        }
+
+        private static string ReadDocumentNumberFromData(IReadOnlyDictionary<string, object> data)
+        {
+            foreach (var key in new[] { "Номер", "Номер документа", "doc_number", "number" })
+            {
+                if (data.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsInvoiceDocument(MetadataObject metadata)
+        {
+            return metadata.ObjectType == "Document" &&
+                   (InvoiceDocumentTypes.IsSales(metadata.Name) ||
+                    InvoiceDocumentTypes.IsPurchase(metadata.Name) ||
+                    metadata.TableName.Equals("doc_invoices", StringComparison.OrdinalIgnoreCase));
+        }
         private static MetadataField? FindDocumentNumberField(MetadataObject metadata)
         {
             return metadata.Fields.FirstOrDefault(field =>
@@ -4890,6 +4951,4 @@ namespace BIS.ERP.Services
 
     }
 }
-
-
 

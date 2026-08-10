@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -7,6 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -33,6 +35,7 @@ namespace BIS.ERP.Views
         private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private string _moduleName = string.Empty;
+        private CashTurnoverSummary _currentCashTurnover = CashTurnoverSummary.Empty;
         private bool _isLoading;
 
         public CashOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)
@@ -216,7 +219,7 @@ namespace BIS.ERP.Views
                     .ThenByDescending(row => row.CreatedAt)
                     .ToList();
 
-                ApplyFilters();
+                await ApplyFiltersAsync();
             }
             catch (Exception ex)
             {
@@ -272,7 +275,7 @@ namespace BIS.ERP.Views
             };
         }
 
-        private void ApplyFilters()
+        private async Task ApplyFiltersAsync()
         {
             var rows = _allRows.AsEnumerable();
             var startDate = PeriodStartDatePicker.SelectedDate?.Date;
@@ -287,11 +290,13 @@ namespace BIS.ERP.Views
                 rows = rows.Where(row => RowMatchesCashDesk(row, selectedCashDesk));
 
             var filteredRows = rows.ToList();
+                        await ApplyCashDayStatusAsync(filteredRows, startDate, endDate);
             DataGrid.ItemsSource = filteredRows;
             DataGrid.Items.Refresh();
             StatusText.Text = $"📊 Показано записей: {filteredRows.Count} из {_allRows.Count}";
             UpdateButtonsState();
             UpdateSelectedPostingDetails();
+            await UpdateCashTurnoverSummaryAsync(startDate, endDate);
         }
 
         private static bool RowMatchesCashDesk(CashOrderRow row, CashDeskItem cashDesk)
@@ -303,6 +308,244 @@ namespace BIS.ERP.Views
                    row.CashDeskName.Equals(cashDesk.DisplayNameWithAccount, StringComparison.OrdinalIgnoreCase);
         }
 
+
+        private async Task ApplyCashDayStatusAsync(List<CashOrderRow> rows, DateTime? startDate, DateTime? endDate)
+        {
+            ResetCashDayStatus(rows, "Открыт", false);
+
+            if (rows.Count == 0)
+                return;
+
+            var periodStart = startDate ?? rows.Min(row => row.DocDate.Date);
+            var periodEnd = endDate ?? rows.Max(row => row.DocDate.Date);
+            if (periodStart > periodEnd)
+            {
+                ResetCashDayStatus(rows, "Период?", false);
+                return;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var cashDayService = new CashDayClosureService(context);
+
+                if (CashDeskFilterCombo.SelectedItem is CashDeskItem selectedCashDesk && selectedCashDesk.Id != Guid.Empty)
+                {
+                    var closedDates = await cashDayService.GetClosedDatesAsync(selectedCashDesk.Id, periodStart, periodEnd);
+                    ApplyClosedDates(rows, closedDates);
+                    return;
+                }
+
+                var rowsByCashDesk = rows
+                    .Select(row => (Row: row, CashDeskId: Guid.TryParse(row.CashDeskId, out var id) ? id : Guid.Empty))
+                    .Where(item => item.CashDeskId != Guid.Empty)
+                    .GroupBy(item => item.CashDeskId);
+
+                foreach (var group in rowsByCashDesk)
+                {
+                    var closedDates = await cashDayService.GetClosedDatesAsync(group.Key, periodStart, periodEnd);
+                    ApplyClosedDates(group.Select(item => item.Row), closedDates);
+                }
+            }
+            catch (Exception ex)
+            {
+                ResetCashDayStatus(rows, "Неизвестно", false);
+                SystemLogService.Error("Ошибка загрузки статусов кассовых дней.", "CashOrderWorkView.ApplyCashDayStatusAsync", ex);
+            }
+        }
+
+        private static void ResetCashDayStatus(IEnumerable<CashOrderRow> rows, string status, bool isClosed)
+        {
+            foreach (var row in rows)
+            {
+                row.CashDayStatusDisplay = status;
+                row.IsCashDayClosed = isClosed;
+            }
+        }
+
+        private static void ApplyClosedDates(IEnumerable<CashOrderRow> rows, IEnumerable<DateTime> closedDates)
+        {
+            var closedSet = closedDates.Select(date => date.Date).ToHashSet();
+            foreach (var row in rows)
+            {
+                row.IsCashDayClosed = closedSet.Contains(row.DocDate.Date);
+                row.CashDayStatusDisplay = row.IsCashDayClosed ? "Закрыт" : "Открыт";
+            }
+        }
+        private async Task UpdateCashTurnoverSummaryAsync(DateTime? startDate, DateTime? endDate)
+        {
+            var periodStart = startDate ?? DateTime.Today;
+            var periodEnd = endDate ?? periodStart;
+
+            if (CashDeskFilterCombo.SelectedItem is not CashDeskItem selectedCashDesk ||
+                selectedCashDesk.Id == Guid.Empty ||
+                string.IsNullOrWhiteSpace(selectedCashDesk.AccountCode))
+            {
+                _currentCashTurnover = await CalculateAllCashTurnoverSummaryAsync(periodStart, periodEnd);
+                DisplayCashTurnoverSummary(_currentCashTurnover, "Остатки по всем кассам");
+                return;
+            }
+            if (periodStart > periodEnd)
+            {
+                _currentCashTurnover = CashTurnoverSummary.ForPeriod(periodStart, periodEnd, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
+                DisplayCashTurnoverSummary(_currentCashTurnover, "Остатки по кассе: исправьте период");
+                return;
+            }
+
+            try
+            {
+                _currentCashTurnover = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, periodStart, periodEnd);
+                DisplayCashTurnoverSummary(_currentCashTurnover);
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Ошибка расчета остатков и оборотов по кассе.", "CashOrderWorkView.CashTurnover", ex);
+                _currentCashTurnover = CashTurnoverSummary.ForPeriod(periodStart, periodEnd, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
+                DisplayCashTurnoverSummary(_currentCashTurnover, "Ошибка расчета остатков по кассе. Подробности в системном логе.");
+            }
+        }
+
+        private void DisplayCashTurnoverSummary(CashTurnoverSummary summary, string? hint = null)
+        {
+            CashTurnoverHintText.Text = hint ?? $"Остатки по кассе {summary.CashDeskName} (счет {summary.AccountCode})";
+            CashTurnoverDateText.Text = summary.StartDate.Date == summary.EndDate.Date
+                ? summary.StartDate.ToString("dd.MM.yyyy")
+                : $"{summary.StartDate:dd.MM.yyyy}-{summary.EndDate:dd.MM.yyyy}";
+            CashOpeningDebitText.Text = FormatCashAmount(summary.OpeningDebit);
+            CashOpeningCreditText.Text = FormatCashAmount(summary.OpeningCredit);
+            CashDebitTurnoverText.Text = FormatCashAmount(summary.DebitTurnover);
+            CashCreditTurnoverText.Text = FormatCashAmount(summary.CreditTurnover);
+            CashClosingDebitText.Text = FormatCashAmount(summary.ClosingDebit);
+            CashClosingCreditText.Text = FormatCashAmount(summary.ClosingCredit);
+        }
+
+        private async Task<CashTurnoverSummary> BuildCashTurnoverSummaryForReportAsync(DateTime startDate, DateTime endDate)
+        {
+            if (CashDeskFilterCombo.SelectedItem is CashDeskItem cashDesk &&
+                cashDesk.Id != Guid.Empty &&
+                !string.IsNullOrWhiteSpace(cashDesk.AccountCode))
+            {
+                return await CalculateCashTurnoverSummaryAsync(cashDesk, startDate, endDate);
+            }
+
+            return await CalculateAllCashTurnoverSummaryAsync(startDate, endDate);
+        }
+
+        private async Task<CashTurnoverSummary> CalculateAllCashTurnoverSummaryAsync(DateTime startDate, DateTime endDate)
+        {
+            var cashAccounts = _cashDeskFilterItems
+                .Where(item => item.Id != Guid.Empty && !string.IsNullOrWhiteSpace(item.AccountCode))
+                .Select(item => ExtractAccountCode(item.AccountCode))
+                .Where(accountCode => !string.IsNullOrWhiteSpace(accountCode))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (cashAccounts.Count == 0)
+                return CashTurnoverSummary.ForPeriod(startDate, endDate, "Все кассы", string.Empty);
+
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var postingService = new PostingService(context);
+            var postings = await postingService.GetAllPostingsAsync(null, endDate.Date);
+            var summaries = cashAccounts
+                .Select(accountCode => CalculateCashTurnoverSummary("Все кассы", accountCode, startDate.Date, endDate.Date, postings))
+                .ToList();
+
+            var openingNet = summaries.Sum(item => item.OpeningDebit - item.OpeningCredit);
+            var closingNet = summaries.Sum(item => item.ClosingDebit - item.ClosingCredit);
+
+            return new CashTurnoverSummary
+            {
+                CashDeskName = "Все кассы",
+                AccountCode = string.Join(", ", cashAccounts),
+                StartDate = startDate.Date,
+                EndDate = endDate.Date,
+                OpeningDebit = DebitSide(openingNet),
+                OpeningCredit = CreditSide(openingNet),
+                DebitTurnover = summaries.Sum(item => item.DebitTurnover),
+                CreditTurnover = summaries.Sum(item => item.CreditTurnover),
+                ClosingDebit = DebitSide(closingNet),
+                ClosingCredit = CreditSide(closingNet)
+            };
+        }
+
+        private async Task<CashTurnoverSummary> CalculateCashTurnoverSummaryAsync(CashDeskItem cashDesk, DateTime startDate, DateTime endDate)
+        {
+            var accountCode = ExtractAccountCode(cashDesk.AccountCode);
+            if (string.IsNullOrWhiteSpace(accountCode))
+                return CashTurnoverSummary.ForPeriod(startDate, endDate, cashDesk.DisplayNameWithAccount, string.Empty);
+
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var postingService = new PostingService(context);
+            var postings = await postingService.GetAllPostingsAsync(null, endDate.Date);
+            return CalculateCashTurnoverSummary(cashDesk.DisplayNameWithAccount, accountCode, startDate.Date, endDate.Date, postings);
+        }
+
+        private static CashTurnoverSummary CalculateCashTurnoverSummary(
+            string cashDeskName,
+            string accountCode,
+            DateTime startDate,
+            DateTime endDate,
+            IEnumerable<PostingViewModel> postings)
+        {
+            var cashPostings = postings
+                .Where(posting => PostingTouchesAccount(posting, accountCode))
+                .ToList();
+
+            var openingDebit = cashPostings
+                .Where(posting => posting.Date.Date < startDate && AccountCodeEquals(posting.DebitAccount, accountCode))
+                .Sum(posting => posting.Amount);
+            var openingCredit = cashPostings
+                .Where(posting => posting.Date.Date < startDate && AccountCodeEquals(posting.CreditAccount, accountCode))
+                .Sum(posting => posting.Amount);
+            var debitTurnover = cashPostings
+                .Where(posting => posting.Date.Date >= startDate && posting.Date.Date <= endDate && AccountCodeEquals(posting.DebitAccount, accountCode))
+                .Sum(posting => posting.Amount);
+            var creditTurnover = cashPostings
+                .Where(posting => posting.Date.Date >= startDate && posting.Date.Date <= endDate && AccountCodeEquals(posting.CreditAccount, accountCode))
+                .Sum(posting => posting.Amount);
+
+            var openingNet = openingDebit - openingCredit;
+            var closingNet = openingNet + debitTurnover - creditTurnover;
+
+            return new CashTurnoverSummary
+            {
+                CashDeskName = cashDeskName,
+                AccountCode = accountCode,
+                StartDate = startDate,
+                EndDate = endDate,
+                OpeningDebit = DebitSide(openingNet),
+                OpeningCredit = CreditSide(openingNet),
+                DebitTurnover = debitTurnover,
+                CreditTurnover = creditTurnover,
+                ClosingDebit = DebitSide(closingNet),
+                ClosingCredit = CreditSide(closingNet)
+            };
+        }
+
+        private static IReadOnlyList<KeyValuePair<string, string>> BuildCashTurnoverSummaryFields(CashTurnoverSummary summary)
+        {
+            return new[]
+            {
+                new KeyValuePair<string, string>("ДН", FormatCashAmount(summary.OpeningDebit)),
+                new KeyValuePair<string, string>("КН", FormatCashAmount(summary.OpeningCredit)),
+                new KeyValuePair<string, string>("Дт оборот", FormatCashAmount(summary.DebitTurnover)),
+                new KeyValuePair<string, string>("Кт оборот", FormatCashAmount(summary.CreditTurnover)),
+                new KeyValuePair<string, string>("ДК", FormatCashAmount(summary.ClosingDebit)),
+                new KeyValuePair<string, string>("КК", FormatCashAmount(summary.ClosingCredit))
+            };
+        }
+
+        private static bool PostingTouchesAccount(PostingViewModel posting, string accountCode) =>
+            AccountCodeEquals(posting.DebitAccount, accountCode) || AccountCodeEquals(posting.CreditAccount, accountCode);
+
+        private static bool AccountCodeEquals(string? value, string accountCode) =>
+            string.Equals(ExtractAccountCode(value ?? string.Empty), accountCode, StringComparison.OrdinalIgnoreCase);
+
+        private static decimal DebitSide(decimal netAmount) => netAmount > 0 ? netAmount : 0m;
+
+        private static decimal CreditSide(decimal netAmount) => netAmount < 0 ? -netAmount : 0m;
+
+        private static string FormatCashAmount(decimal amount) => amount.ToString("N2");
         private async void OnCashPostingsClick(object sender, RoutedEventArgs e)
         {
             if (CashDeskFilterCombo.SelectedItem is not CashDeskItem selectedCashDesk || selectedCashDesk.Id == Guid.Empty)
@@ -331,22 +574,14 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Загрузка проводок по кассе...";
-                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                var postingService = new PostingService(context);
-                var postings = await postingService.GetAllPostingsAsync(startDate, endDate);
-                var accountCode = ExtractAccountCode(selectedCashDesk.AccountCode);
-                var cashPostings = postings
-                    .Where(posting =>
-                        ExtractAccountCode(posting.DebitAccount).Equals(accountCode, StringComparison.OrdinalIgnoreCase) ||
-                        ExtractAccountCode(posting.CreditAccount).Equals(accountCode, StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(posting => posting.Date)
-                    .ThenBy(posting => posting.DocumentNumber)
-                    .ToList();
+                var cashPostings = await LoadCashPostingsAsync(selectedCashDesk, startDate, endDate);
+                var turnoverSummary = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, startDate, endDate);
 
                 var dialog = new DocumentPostingsDialog(
                     "Проводки по кассе",
                     $"{selectedCashDesk.DisplayNameWithAccount} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
-                    cashPostings)
+                    cashPostings,
+                    BuildCashTurnoverSummaryFields(turnoverSummary))
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -361,13 +596,14 @@ namespace BIS.ERP.Views
             }
         }
 
-        private void OnFilterChanged(object sender, EventArgs e)
+        private async void OnFilterChanged(object sender, EventArgs e)
         {
             if (_isLoading || DataGrid == null)
                 return;
 
-            ApplyFilters();
+            await ApplyFiltersAsync();
         }
+
         private async Task<Dictionary<string, Dictionary<Guid, string>>> BuildReferenceCacheAsync(
             IReadOnlyCollection<(MetadataObject Document, Dictionary<string, object> Row)> documentRows,
             Dictionary<string, MetadataObject> catalogsByName,
@@ -780,12 +1016,63 @@ namespace BIS.ERP.Views
             var allPostings = await postingService.GetAllPostingsAsync(startDate.Date, endDate.Date);
             var accountCode = ExtractAccountCode(cashDesk.AccountCode);
 
-            return allPostings
+            var cashPostings = allPostings
                 .Where(posting => string.Equals(ExtractAccountCode(posting.DebitAccount), accountCode, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(ExtractAccountCode(posting.CreditAccount), accountCode, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(posting => posting.Date)
                 .ThenBy(posting => posting.DocumentNumber)
                 .ToList();
+
+            FillCashPostingContent(cashPostings);
+            return cashPostings;
+        }
+
+
+        private void FillCashPostingContent(IEnumerable<PostingViewModel> postings)
+        {
+            var cashRowsByKey = _allRows
+                .GroupBy(row => BuildCashPostingKey(row.PostingDocumentType, row.DocNumber, row.DocDate))
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var posting in postings)
+            {
+                if (!IsWeakCashPostingNote(posting.Note) ||
+                    !cashRowsByKey.TryGetValue(BuildCashPostingKey(posting.DocumentType, posting.DocumentNumber, posting.Date), out var row))
+                {
+                    continue;
+                }
+
+                posting.Note = BuildCashPostingContent(row);
+            }
+        }
+
+        private static string BuildCashPostingKey(string documentType, string documentNumber, DateTime date) =>
+            $"{documentType}|{MetadataService.NormalizeLegacyDocumentNumber(documentNumber)}|{date:yyyyMMdd}";
+
+        private static string BuildCashPostingContent(CashOrderRow row)
+        {
+            if (!string.IsNullOrWhiteSpace(row.Basis))
+                return row.Basis;
+
+            if (!string.IsNullOrWhiteSpace(row.Description))
+                return row.Description;
+
+            return $"{row.OrderTypeDisplay} КО № {row.DocNumber}";
+        }
+
+        private static bool IsWeakCashPostingNote(string? note)
+        {
+            if (string.IsNullOrWhiteSpace(note))
+                return true;
+
+            var trimmed = note.Trim();
+            var colonIndex = trimmed.IndexOf(':');
+            if (colonIndex < 0)
+                return false;
+
+            var prefix = trimmed[..colonIndex].Trim();
+            return prefix.StartsWith("Строка", StringComparison.OrdinalIgnoreCase) ||
+                   prefix.StartsWith("Row", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string CurrentUserName() =>
@@ -904,7 +1191,18 @@ namespace BIS.ERP.Views
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var cashDayService = new CashDayClosureService(context);
-                await cashDayService.CloseDayAsync(cashDesk.Id, cashDesk.DisplayNameWithAccount, cashDate, CurrentUserName());
+                var turnoverSummary = await CalculateCashTurnoverSummaryAsync(cashDesk, cashDate, cashDate);
+                await cashDayService.CloseDayAsync(
+                    cashDesk.Id,
+                    cashDesk.DisplayNameWithAccount,
+                    cashDate,
+                    CurrentUserName(),
+                    turnoverSummary.OpeningDebit,
+                    turnoverSummary.OpeningCredit,
+                    turnoverSummary.DebitTurnover,
+                    turnoverSummary.CreditTurnover,
+                    turnoverSummary.ClosingDebit,
+                    turnoverSummary.ClosingCredit);
 
                 StatusText.Text = $"Кассовый день {cashDate:dd.MM.yyyy} закрыт";
                 MessageBox.Show("Кассовый день закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
@@ -968,7 +1266,8 @@ namespace BIS.ERP.Views
                 var postings = await LoadCashPostingsAsync(cashDesk, startDate, endDate);
                 var closedPostings = postings.Where(posting => closedDateSet.Contains(posting.Date.Date)).ToList();
 
-                var dialog = new DocumentPostingsDialog("Обороты по закрытым дням", $"{cashDesk.DisplayNameWithAccount} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}", closedPostings)
+                var turnoverSummary = await CalculateCashTurnoverSummaryAsync(cashDesk, startDate, endDate);
+                var dialog = new DocumentPostingsDialog("Обороты по закрытым дням", $"{cashDesk.DisplayNameWithAccount} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}", closedPostings, BuildCashTurnoverSummaryFields(turnoverSummary))
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -990,7 +1289,8 @@ namespace BIS.ERP.Views
             try
             {
                 var postings = await LoadCashPostingsAsync(cashDesk, cashDate, cashDate);
-                var dialog = new DocumentPostingsDialog("Обороты за день", $"{cashDesk.DisplayNameWithAccount} за {cashDate:dd.MM.yyyy}", postings)
+                var turnoverSummary = await CalculateCashTurnoverSummaryAsync(cashDesk, cashDate, cashDate);
+                var dialog = new DocumentPostingsDialog("Обороты за день", $"{cashDesk.DisplayNameWithAccount} за {cashDate:dd.MM.yyyy}", postings, BuildCashTurnoverSummaryFields(turnoverSummary))
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -1005,14 +1305,427 @@ namespace BIS.ERP.Views
 
         private async void OnCashBookClick(object sender, RoutedEventArgs e)
         {
-            await PreviewCashFrxReportAsync(CashBookReportCode, "Кассовая книга");
+            await OpenCashBookExcelAsync();
         }
 
         private async void OnReceiptExpenseRegisterClick(object sender, RoutedEventArgs e)
         {
-            await PreviewCashFrxReportAsync(ReceiptExpenseRegisterReportCode, "Реестр приходов/расходов");
+            await OpenReceiptExpenseRegisterExcelAsync();
         }
 
+        private async Task OpenCashBookExcelAsync()
+        {
+            const string caption = "Кассовая книга";
+            try
+            {
+                var rows = GetCurrentFilteredRows()
+                    .OrderBy(row => row.DocDate)
+                    .ThenBy(row => TryParseDocumentNumber(row.DocNumber, out var number) ? number : int.MaxValue)
+                    .ThenBy(row => row.DocNumber, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (rows.Count == 0)
+                {
+                    MessageBox.Show("Нет строк для формирования кассовой книги.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var startDate = PeriodStartDatePicker.SelectedDate ?? rows.Min(row => row.DocDate).Date;
+                var endDate = PeriodEndDatePicker.SelectedDate ?? rows.Max(row => row.DocDate).Date;
+                var cashDeskName = CashDeskFilterCombo.SelectedItem is CashDeskItem cashDesk
+                    ? cashDesk.DisplayNameWithAccount
+                    : "Все кассы";
+
+                var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
+
+                CashBookButton.IsEnabled = false;
+                Cursor = Cursors.Wait;
+                StatusText.Text = "Формирование Excel кассовой книги по макету конфигуратора...";
+                SystemLogService.Info(
+                    $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
+                    "CashOrderWorkView.CashBook");
+
+                await OpenConfiguredCashReportExcelAsync(
+                    CashBookReportCode,
+                    caption,
+                    BuildCashBookReportDataTable(rows, startDate, endDate, cashDeskName, turnoverSummary),
+                    startDate,
+                    endDate,
+                    cashDeskName,
+                    "cash_book",
+                    "CashOrderWorkView.CashBook");
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка кассовой книги";
+                SystemLogService.Error("Ошибка формирования кассовой книги.", "CashOrderWorkView.CashBook", ex);
+                MessageBox.Show($"Ошибка формирования кассовой книги: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                CashBookButton.IsEnabled = true;
+                Cursor = null;
+            }
+        }
+
+        private static string BuildCashBookText(CashOrderRow row)
+        {
+            var party = row.IsReceipt
+                ? FirstNotEmpty(row.OrganizationName, row.EmployeeName, row.CashDeskName)
+                : FirstNotEmpty(row.EmployeeName, row.OrganizationName, row.CashDeskName);
+            var text = FirstNotEmpty(row.Basis, row.Description, row.OrderTypeDisplay);
+            return string.IsNullOrWhiteSpace(party)
+                ? text
+                : $"{party}    {text}";
+        }
+
+        private async Task OpenReceiptExpenseRegisterExcelAsync()
+        {
+            const string caption = "Реестр приходов/расходов";
+            try
+            {
+                var rows = GetCurrentFilteredRows()
+                    .OrderBy(row => row.DocDate)
+                    .ThenBy(row => TryParseDocumentNumber(row.DocNumber, out var number) ? number : int.MaxValue)
+                    .ThenBy(row => row.DocNumber, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (rows.Count == 0)
+                {
+                    MessageBox.Show("Нет строк для формирования реестра.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var startDate = PeriodStartDatePicker.SelectedDate ?? rows.Min(row => row.DocDate).Date;
+                var endDate = PeriodEndDatePicker.SelectedDate ?? rows.Max(row => row.DocDate).Date;
+                var cashDeskName = CashDeskFilterCombo.SelectedItem is CashDeskItem cashDesk
+                    ? cashDesk.DisplayNameWithAccount
+                    : "Все кассы";
+
+                var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
+
+                ReceiptExpenseRegisterButton.IsEnabled = false;
+                Cursor = Cursors.Wait;
+                StatusText.Text = "Формирование Excel-реестра приходов/расходов по макету конфигуратора...";
+                SystemLogService.Info(
+                    $"Старт формирования реестра приходов/расходов. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
+                    "CashOrderWorkView.ReceiptExpenseRegister");
+
+                await OpenConfiguredCashReportExcelAsync(
+                    ReceiptExpenseRegisterReportCode,
+                    caption,
+                    BuildReceiptExpenseRegisterReportDataTable(rows, startDate, endDate, cashDeskName, turnoverSummary),
+                    startDate,
+                    endDate,
+                    cashDeskName,
+                    "reestr_pko_rko",
+                    "CashOrderWorkView.ReceiptExpenseRegister");
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка реестра приходов/расходов";
+                SystemLogService.Error("Ошибка формирования реестра приходов/расходов.", "CashOrderWorkView.ReceiptExpenseRegister", ex);
+                MessageBox.Show($"Ошибка формирования реестра приходов/расходов: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ReceiptExpenseRegisterButton.IsEnabled = true;
+                Cursor = null;
+            }
+        }
+
+        private static string BuildCashReportExcelPath(string baseName)
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "BIS.ERP", "cash_reports");
+            Directory.CreateDirectory(directory);
+            return Path.Combine(directory, $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx");
+        }
+
+        private static string BuildReceiptExpenseRegisterName(CashOrderRow row)
+        {
+            var party = row.IsReceipt
+                ? FirstNotEmpty(row.OrganizationName, row.EmployeeName, row.CashDeskName)
+                : FirstNotEmpty(row.EmployeeName, row.OrganizationName, row.CashDeskName);
+            return string.IsNullOrWhiteSpace(party)
+                ? row.OrderTypeDisplay
+                : $"{row.OrderTypeDisplay}: {party}";
+        }
+
+
+        private async Task OpenConfiguredCashReportExcelAsync(
+            string reportCode,
+            string caption,
+            DataTable dataTable,
+            DateTime startDate,
+            DateTime endDate,
+            string cashDeskName,
+            string outputBaseName,
+            string logSource)
+        {
+            using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            await new MetadataService(context).EnsureStandardReportsAsync();
+
+            var report = await context.Reports
+                .AsNoTracking()
+                .Include(item => item.ElementMappings)
+                .FirstOrDefaultAsync(item => item.Code == reportCode);
+
+            if (report == null)
+                throw new InvalidOperationException($"Отчет \"{caption}\" не загружен в конфигурацию.");
+            if (!report.IsActive)
+                throw new InvalidOperationException($"Отчет \"{caption}\" отключен в конфигураторе.");
+
+            report.SubtitleText = $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            var ruleService = new FoxProReportFieldRuleService(context);
+            await ruleService.SeedDefaultRulesAsync();
+            var rules = await ruleService.GetRulesAsync(includeInactive: false);
+            var dataSnapshot = dataTable.Copy();
+            var printFormService = new PrintFormService(context);
+            var excelBytes = await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, report, rules));
+
+            var outputPath = BuildCashReportExcelPath(outputBaseName);
+            await File.WriteAllBytesAsync(outputPath, excelBytes);
+            Process.Start(new ProcessStartInfo(outputPath) { UseShellExecute = true });
+
+            StatusText.Text = $"{caption} открыт в Excel: {dataTable.Rows.Count} строк";
+            SystemLogService.Info($"{caption} открыт по настраиваемому макету: {outputPath}", logSource);
+        }
+
+        private DataTable BuildCashBookReportDataTable(
+            IEnumerable<CashOrderRow> rows,
+            DateTime startDate,
+            DateTime endDate,
+            string cashDeskName,
+            CashTurnoverSummary turnoverSummary)
+        {
+            var table = new DataTable("ved2");
+            AddCashReportCommonColumns(table);
+            AddCashOrderColumn(table, "d_xls", typeof(DateTime));
+            AddCashOrderColumn(table, "ved2.d_xls", typeof(DateTime));
+            AddCashOrderColumn(table, "ved2.dok", typeof(string));
+            AddCashOrderColumn(table, "ved2.name_kod", typeof(string));
+            AddCashOrderColumn(table, "ved2.deb", typeof(decimal));
+            AddCashOrderColumn(table, "ved2.cred", typeof(decimal));
+            AddCashOrderColumn(table, "name_kod", typeof(string));
+            AddCashOrderColumn(table, "deb", typeof(decimal));
+            AddCashOrderColumn(table, "cred", typeof(decimal));
+
+            foreach (var row in rows)
+            {
+                var receiptAmount = row.IsReceipt ? row.Amount : 0m;
+                var paymentAmount = row.IsReceipt ? 0m : row.Amount;
+                var dataRow = table.NewRow();
+                FillCashReportCommonValues(dataRow, row, startDate, endDate, cashDeskName, turnoverSummary);
+                SetCashOrderValue(dataRow, "d_xls", row.DocDate);
+                SetCashOrderValue(dataRow, "ved2.d_xls", row.DocDate);
+                SetCashOrderValue(dataRow, "ved2.dok", row.DocNumber);
+                SetCashOrderValue(dataRow, "ved2.name_kod", BuildCashBookText(row));
+                SetCashOrderValue(dataRow, "ved2.deb", receiptAmount);
+                SetCashOrderValue(dataRow, "ved2.cred", paymentAmount);
+                SetCashOrderValue(dataRow, "name_kod", BuildCashBookText(row));
+                SetCashOrderValue(dataRow, "deb", receiptAmount);
+                SetCashOrderValue(dataRow, "cred", paymentAmount);
+                table.Rows.Add(dataRow);
+            }
+
+            return table;
+        }
+
+        private DataTable BuildReceiptExpenseRegisterReportDataTable(
+            IEnumerable<CashOrderRow> rows,
+            DateTime startDate,
+            DateTime endDate,
+            string cashDeskName,
+            CashTurnoverSummary turnoverSummary)
+        {
+            var table = new DataTable("pr_ras2");
+            AddCashReportCommonColumns(table);
+            AddCashOrderColumn(table, "d_xls", typeof(DateTime));
+            AddCashOrderColumn(table, "d_nuch", typeof(string));
+            AddCashOrderColumn(table, "dovf", typeof(string));
+            AddCashOrderColumn(table, "tex", typeof(string));
+            AddCashOrderColumn(table, "deb", typeof(string));
+            AddCashOrderColumn(table, "sum", typeof(decimal));
+            AddCashOrderColumn(table, "pr_ras2.d_xls", typeof(DateTime));
+            AddCashOrderColumn(table, "pr_ras2.dok", typeof(string));
+            AddCashOrderColumn(table, "pr_ras2.d_nuch", typeof(string));
+            AddCashOrderColumn(table, "pr_ras2.dovf", typeof(string));
+            AddCashOrderColumn(table, "pr_ras2.tex", typeof(string));
+            AddCashOrderColumn(table, "pr_ras2.deb", typeof(string));
+            AddCashOrderColumn(table, "pr_ras2.sum", typeof(decimal));
+
+            foreach (var row in rows)
+            {
+                var correspondentAccount = ExtractAccountCode(ResolveCorrespondentAccount(row));
+                var party = row.IsReceipt
+                    ? FirstNotEmpty(row.OrganizationName, row.EmployeeName, row.CashDeskName)
+                    : FirstNotEmpty(row.EmployeeName, row.OrganizationName, row.CashDeskName);
+                var basis = FirstNotEmpty(row.Basis, row.Description, row.OrderTypeDisplay);
+                var dataRow = table.NewRow();
+                FillCashReportCommonValues(dataRow, row, startDate, endDate, cashDeskName, turnoverSummary);
+                SetCashOrderValue(dataRow, "d_xls", row.DocDate);
+                SetCashOrderValue(dataRow, "d_nuch", row.DocNumber);
+                SetCashOrderValue(dataRow, "dovf", party);
+                SetCashOrderValue(dataRow, "tex", basis);
+                SetCashOrderValue(dataRow, "deb", correspondentAccount);
+                SetCashOrderValue(dataRow, "sum", row.Amount);
+                SetCashOrderValue(dataRow, "pr_ras2.d_xls", row.DocDate);
+                SetCashOrderValue(dataRow, "pr_ras2.dok", row.DocNumber);
+                SetCashOrderValue(dataRow, "pr_ras2.d_nuch", row.DocNumber);
+                SetCashOrderValue(dataRow, "pr_ras2.dovf", party);
+                SetCashOrderValue(dataRow, "pr_ras2.tex", basis);
+                SetCashOrderValue(dataRow, "pr_ras2.deb", correspondentAccount);
+                SetCashOrderValue(dataRow, "pr_ras2.sum", row.Amount);
+                table.Rows.Add(dataRow);
+            }
+
+            return table;
+        }
+
+        private static void AddCashReportCommonColumns(DataTable table)
+        {
+            AddCashOrderColumn(table, "Id", typeof(Guid));
+            AddCashOrderColumn(table, "report_name", typeof(string));
+            AddCashOrderColumn(table, "title", typeof(string));
+            AddCashOrderColumn(table, "subtitle", typeof(string));
+            AddCashOrderColumn(table, "period_start", typeof(DateTime));
+            AddCashOrderColumn(table, "period_end", typeof(DateTime));
+            AddCashOrderColumn(table, "cash_desk", typeof(string));
+            AddCashOrderColumn(table, "Дата", typeof(DateTime));
+            AddCashOrderColumn(table, "date", typeof(DateTime));
+            AddCashOrderColumn(table, "doc_date", typeof(DateTime));
+            AddCashOrderColumn(table, "document_date", typeof(DateTime));
+            AddCashOrderColumn(table, "Документ", typeof(string));
+            AddCashOrderColumn(table, "document_number", typeof(string));
+            AddCashOrderColumn(table, "dok", typeof(string));
+            AddCashOrderColumn(table, "Тип", typeof(string));
+            AddCashOrderColumn(table, "order_type", typeof(string));
+            AddCashOrderColumn(table, "debit", typeof(string));
+            AddCashOrderColumn(table, "credit", typeof(string));
+            AddCashOrderColumn(table, "debit_account", typeof(string));
+            AddCashOrderColumn(table, "credit_account", typeof(string));
+            AddCashOrderColumn(table, "schet", typeof(string));
+            AddCashOrderColumn(table, "korsch", typeof(string));
+            AddCashOrderColumn(table, "kor_sch", typeof(string));
+            AddCashOrderColumn(table, "debit_amount", typeof(decimal));
+            AddCashOrderColumn(table, "credit_amount", typeof(decimal));
+            AddCashOrderColumn(table, "amount", typeof(decimal));
+            AddCashOrderColumn(table, "amount_currency", typeof(decimal));
+            AddCashOrderColumn(table, "currency", typeof(string));
+            AddCashOrderColumn(table, "nval1", typeof(string));
+            AddCashOrderColumn(table, "basis", typeof(string));
+            AddCashOrderColumn(table, "description", typeof(string));
+            AddCashOrderColumn(table, "operation_text", typeof(string));
+            AddCashOrderColumn(table, "cash_account", typeof(string));
+            AddCashOrderColumn(table, "correspondent_account", typeof(string));
+            AddCashOrderColumn(table, "module", typeof(string));
+            AddCashOrderColumn(table, "ДН", typeof(decimal));
+            AddCashOrderColumn(table, "КН", typeof(decimal));
+            AddCashOrderColumn(table, "ДК", typeof(decimal));
+            AddCashOrderColumn(table, "КК", typeof(decimal));
+            AddCashOrderColumn(table, "deb_beg", typeof(decimal));
+            AddCashOrderColumn(table, "cred_beg", typeof(decimal));
+            AddCashOrderColumn(table, "debsum", typeof(decimal));
+            AddCashOrderColumn(table, "credsum", typeof(decimal));
+            AddCashOrderColumn(table, "deb_end", typeof(decimal));
+            AddCashOrderColumn(table, "cred_end", typeof(decimal));
+            AddCashOrderColumn(table, "opening_debit", typeof(decimal));
+            AddCashOrderColumn(table, "opening_credit", typeof(decimal));
+            AddCashOrderColumn(table, "debit_turnover", typeof(decimal));
+            AddCashOrderColumn(table, "credit_turnover", typeof(decimal));
+            AddCashOrderColumn(table, "closing_debit", typeof(decimal));
+            AddCashOrderColumn(table, "closing_credit", typeof(decimal));
+            AddCashOrderColumn(table, "ost_n", typeof(decimal));
+            AddCashOrderColumn(table, "ost_k", typeof(decimal));
+            AddCashOrderColumn(table, "balance_start", typeof(decimal));
+            AddCashOrderColumn(table, "balance_end", typeof(decimal));
+        }
+
+        private void FillCashReportCommonValues(
+            DataRow dataRow,
+            CashOrderRow row,
+            DateTime startDate,
+            DateTime endDate,
+            string cashDeskName,
+            CashTurnoverSummary turnoverSummary)
+        {
+            var debitAccount = ExtractAccountCode(row.DebitAccount);
+            var creditAccount = ExtractAccountCode(row.CreditAccount);
+            var correspondentAccount = ExtractAccountCode(ResolveCorrespondentAccount(row));
+            var receiptAmount = row.IsReceipt ? row.Amount : 0m;
+            var paymentAmount = row.IsReceipt ? 0m : row.Amount;
+            var basis = FirstNotEmpty(row.Basis, row.Description, row.OrderTypeDisplay);
+
+            SetCashOrderValue(dataRow, "Id", row.Id);
+            SetCashOrderValue(dataRow, "report_name", "Расходный/Приходный КО");
+            SetCashOrderValue(dataRow, "title", "Расходный/Приходный КО");
+            SetCashOrderValue(dataRow, "subtitle", $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}");
+            SetCashOrderValue(dataRow, "period_start", startDate);
+            SetCashOrderValue(dataRow, "period_end", endDate);
+            SetCashOrderValue(dataRow, "cash_desk", cashDeskName);
+            SetCashOrderValue(dataRow, "Дата", row.DocDate);
+            SetCashOrderValue(dataRow, "date", row.DocDate);
+            SetCashOrderValue(dataRow, "doc_date", row.DocDate);
+            SetCashOrderValue(dataRow, "document_date", row.DocDate);
+            SetCashOrderValue(dataRow, "Документ", row.DocNumber);
+            SetCashOrderValue(dataRow, "document_number", row.DocNumber);
+            SetCashOrderValue(dataRow, "dok", row.DocNumber);
+            SetCashOrderValue(dataRow, "Тип", row.OrderTypeDisplay);
+            SetCashOrderValue(dataRow, "order_type", row.OrderTypeDisplay);
+            SetCashOrderValue(dataRow, "debit", debitAccount);
+            SetCashOrderValue(dataRow, "credit", creditAccount);
+            SetCashOrderValue(dataRow, "debit_account", debitAccount);
+            SetCashOrderValue(dataRow, "credit_account", creditAccount);
+            SetCashOrderValue(dataRow, "schet", debitAccount);
+            SetCashOrderValue(dataRow, "korsch", creditAccount);
+            SetCashOrderValue(dataRow, "kor_sch", creditAccount);
+            SetCashOrderValue(dataRow, "debit_amount", receiptAmount);
+            SetCashOrderValue(dataRow, "credit_amount", paymentAmount);
+            SetCashOrderValue(dataRow, "amount", row.Amount);
+            SetCashOrderValue(dataRow, "amount_currency", row.AmountInCurrency == 0 ? row.Amount : row.AmountInCurrency);
+            SetCashOrderValue(dataRow, "currency", row.CurrencyName);
+            SetCashOrderValue(dataRow, "nval1", string.IsNullOrWhiteSpace(row.CurrencyName) ? "KGS" : row.CurrencyName);
+            SetCashOrderValue(dataRow, "basis", basis);
+            SetCashOrderValue(dataRow, "description", row.Description);
+            SetCashOrderValue(dataRow, "operation_text", row.IsReceipt ? BuildCashBookText(row) : BuildReceiptExpenseRegisterName(row));
+            SetCashOrderValue(dataRow, "cash_account", row.IsReceipt ? debitAccount : creditAccount);
+            SetCashOrderValue(dataRow, "correspondent_account", correspondentAccount);
+            SetCashOrderValue(dataRow, "module", _moduleName);
+            SetCashOrderValue(dataRow, "ДН", turnoverSummary.OpeningDebit);
+            SetCashOrderValue(dataRow, "КН", turnoverSummary.OpeningCredit);
+            SetCashOrderValue(dataRow, "ДК", turnoverSummary.ClosingDebit);
+            SetCashOrderValue(dataRow, "КК", turnoverSummary.ClosingCredit);
+            SetCashOrderValue(dataRow, "deb_beg", turnoverSummary.OpeningDebit);
+            SetCashOrderValue(dataRow, "cred_beg", turnoverSummary.OpeningCredit);
+            SetCashOrderValue(dataRow, "debsum", turnoverSummary.DebitTurnover);
+            SetCashOrderValue(dataRow, "credsum", turnoverSummary.CreditTurnover);
+            SetCashOrderValue(dataRow, "deb_end", turnoverSummary.ClosingDebit);
+            SetCashOrderValue(dataRow, "cred_end", turnoverSummary.ClosingCredit);
+            SetCashOrderValue(dataRow, "opening_debit", turnoverSummary.OpeningDebit);
+            SetCashOrderValue(dataRow, "opening_credit", turnoverSummary.OpeningCredit);
+            SetCashOrderValue(dataRow, "debit_turnover", turnoverSummary.DebitTurnover);
+            SetCashOrderValue(dataRow, "credit_turnover", turnoverSummary.CreditTurnover);
+            SetCashOrderValue(dataRow, "closing_debit", turnoverSummary.ClosingDebit);
+            SetCashOrderValue(dataRow, "closing_credit", turnoverSummary.ClosingCredit);
+            SetCashOrderValue(dataRow, "ost_n", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
+            SetCashOrderValue(dataRow, "ost_k", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
+            SetCashOrderValue(dataRow, "balance_start", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
+            SetCashOrderValue(dataRow, "balance_end", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
+        }
+        private static string FirstNotEmpty(params string[] values)
+        {
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private static bool TryParseDocumentNumber(string? value, out int number)
+        {
+            var digits = new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+            return int.TryParse(digits, out number);
+        }
         private async Task PreviewCashFrxReportAsync(string reportCode, string caption)
         {
             try
@@ -1104,6 +1817,26 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "description", typeof(string));
             AddCashOrderColumn(table, "Модуль", typeof(string));
             AddCashOrderColumn(table, "module", typeof(string));
+            AddCashOrderColumn(table, "ДН", typeof(decimal));
+            AddCashOrderColumn(table, "КН", typeof(decimal));
+            AddCashOrderColumn(table, "ДК", typeof(decimal));
+            AddCashOrderColumn(table, "КК", typeof(decimal));
+            AddCashOrderColumn(table, "deb_beg", typeof(decimal));
+            AddCashOrderColumn(table, "cred_beg", typeof(decimal));
+            AddCashOrderColumn(table, "debsum", typeof(decimal));
+            AddCashOrderColumn(table, "credsum", typeof(decimal));
+            AddCashOrderColumn(table, "deb_end", typeof(decimal));
+            AddCashOrderColumn(table, "cred_end", typeof(decimal));
+            AddCashOrderColumn(table, "opening_debit", typeof(decimal));
+            AddCashOrderColumn(table, "opening_credit", typeof(decimal));
+            AddCashOrderColumn(table, "debit_turnover", typeof(decimal));
+            AddCashOrderColumn(table, "credit_turnover", typeof(decimal));
+            AddCashOrderColumn(table, "closing_debit", typeof(decimal));
+            AddCashOrderColumn(table, "closing_credit", typeof(decimal));
+            AddCashOrderColumn(table, "ost_n", typeof(decimal));
+            AddCashOrderColumn(table, "ost_k", typeof(decimal));
+            AddCashOrderColumn(table, "balance_start", typeof(decimal));
+            AddCashOrderColumn(table, "balance_end", typeof(decimal));
 
             foreach (var row in rows)
             {
@@ -1143,6 +1876,7 @@ namespace BIS.ERP.Views
 
             return table;
         }
+
 
         private static void AddCashOrderColumn(DataTable table, string name, Type type)
         {
@@ -1293,6 +2027,8 @@ namespace BIS.ERP.Views
             : "Расход: Дт корр. счет / Кт касса";
         public string DocNumber { get; set; } = string.Empty;
         public DateTime DocDate { get; set; }
+        public bool IsCashDayClosed { get; set; }
+        public string CashDayStatusDisplay { get; set; } = "Открыт";
         public string CashDeskName { get; set; } = string.Empty;
         public string OrganizationName { get; set; } = string.Empty;
         public string CurrencyName { get; set; } = string.Empty;
@@ -1311,5 +2047,38 @@ namespace BIS.ERP.Views
         public decimal AmountInCurrency { get; set; }
         public string CashDeskId { get; set; } = string.Empty;
     }
+    public class CashTurnoverSummary
+    {
+        public static CashTurnoverSummary Empty => ForPeriod(DateTime.Today, DateTime.Today, string.Empty, string.Empty);
+
+        public string CashDeskName { get; set; } = string.Empty;
+        public string AccountCode { get; set; } = string.Empty;
+        public DateTime StartDate { get; set; } = DateTime.Today;
+        public DateTime EndDate { get; set; } = DateTime.Today;
+        public decimal OpeningDebit { get; set; }
+        public decimal OpeningCredit { get; set; }
+        public decimal DebitTurnover { get; set; }
+        public decimal CreditTurnover { get; set; }
+        public decimal ClosingDebit { get; set; }
+        public decimal ClosingCredit { get; set; }
+
+        public static CashTurnoverSummary ForPeriod(DateTime startDate, DateTime endDate, string cashDeskName, string accountCode)
+        {
+            return new CashTurnoverSummary
+            {
+                StartDate = startDate.Date,
+                EndDate = endDate.Date,
+                CashDeskName = cashDeskName,
+                AccountCode = accountCode
+            };
+        }
+    }
 }
+
+
+
+
+
+
+
 

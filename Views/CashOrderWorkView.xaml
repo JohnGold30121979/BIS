@@ -39,6 +39,27 @@
                 <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="32" Margin="10,0,0,0"
                         Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
             </WrapPanel>
+                        <Border Margin="0,0,0,8" Padding="10,7" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
+                <StackPanel>
+                    <TextBlock x:Name="CashTurnoverHintText" Text="Остатки по кассе: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#2C3E50" Margin="0,0,0,5"/>
+                    <WrapPanel>
+                        <TextBlock Text="Дата/период:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashTurnoverDateText" Text="-" MinWidth="105" Margin="0,0,14,0"/>
+                        <TextBlock Text="ДН:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashOpeningDebitText" Text="0,00" MinWidth="85" TextAlignment="Right" Margin="0,0,14,0"/>
+                        <TextBlock Text="КН:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashOpeningCreditText" Text="0,00" MinWidth="85" TextAlignment="Right" Margin="0,0,14,0"/>
+                        <TextBlock Text="Дт оборот:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashDebitTurnoverText" Text="0,00" MinWidth="90" TextAlignment="Right" Margin="0,0,14,0"/>
+                        <TextBlock Text="Кт оборот:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashCreditTurnoverText" Text="0,00" MinWidth="90" TextAlignment="Right" Margin="0,0,14,0"/>
+                        <TextBlock Text="ДК:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashClosingDebitText" Text="0,00" MinWidth="85" TextAlignment="Right" Margin="0,0,14,0"/>
+                        <TextBlock Text="КК:" FontWeight="Bold" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="CashClosingCreditText" Text="0,00" MinWidth="85" TextAlignment="Right"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
             <WrapPanel>
                 <Button x:Name="AddPaymentButton" Content="➖ Расходный КО" Width="130" Height="35" Margin="0,0,10,0"
                         Background="#E67E22" Foreground="White" Click="OnAddPaymentClick"/>
@@ -56,8 +77,8 @@
                           ToolTip="Если выключено, сразу открывается активная форма по умолчанию. Если включено, можно выбрать вариант печатной формы."/>
             </WrapPanel>
             <WrapPanel Margin="0,6,0,0">
-                <Button x:Name="CloseCashDayButton" Content="Закрыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#7F8C8D" Foreground="White" Click="OnCloseCashDayClick"/>
-                <Button x:Name="OpenCashDayButton" Content="Открыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#95A5A6" Foreground="White" Click="OnOpenCashDayClick"/>
+                <Button x:Name="CloseCashDayButton" Content="Закрыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#D35400" Foreground="White" Click="OnCloseCashDayClick"/>
+                <Button x:Name="OpenCashDayButton" Content="Открыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#27AE60" Foreground="White" Click="OnOpenCashDayClick"/>
                 <Button x:Name="ClosedDaysTurnoversButton" Content="Обороты по закрытым дням" Width="180" Height="32" Margin="0,0,8,0" Background="#2C3E50" Foreground="White" Click="OnClosedDaysTurnoversClick"/>
                 <Button x:Name="CashBookButton" Content="Кассовая книга" Width="125" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
                 <Button x:Name="DayTurnoversButton" Content="Обороты за день" Width="135" Height="32" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnDayTurnoversClick"/>
@@ -82,6 +103,19 @@
                 </Style>
             </DataGrid.RowStyle>
             <DataGrid.Columns>
+                <DataGridTextColumn Header="День" Binding="{Binding CashDayStatusDisplay}" Width="85">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter Property="Foreground" Value="#27AE60"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCashDayClosed}" Value="True">
+                                    <Setter Property="Foreground" Value="#C0392B"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
                 <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
@@ -143,3 +177,4 @@
         </StatusBar>
     </Grid>
 </UserControl>
+

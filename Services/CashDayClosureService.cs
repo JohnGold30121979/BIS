@@ -7,7 +7,6 @@ namespace BIS.ERP.Services
 {
     public sealed class CashDayClosureService
     {
-        private const string TableDescription = "Закрытие и открытие кассовых дней по кассам";
         private readonly AppDbContext _context;
 
         public CashDayClosureService(AppDbContext context)
@@ -37,6 +36,12 @@ namespace BIS.ERP.Services
                         "ClosedAt" timestamp with time zone NOT NULL DEFAULT NOW(),
                         "OpenedAt" timestamp with time zone NULL,
                         "UpdatedAt" timestamp with time zone NOT NULL DEFAULT NOW(),
+                        "OpeningDebit" numeric(18,2) NOT NULL DEFAULT 0,
+                        "OpeningCredit" numeric(18,2) NOT NULL DEFAULT 0,
+                        "DebitTurnover" numeric(18,2) NOT NULL DEFAULT 0,
+                        "CreditTurnover" numeric(18,2) NOT NULL DEFAULT 0,
+                        "ClosingDebit" numeric(18,2) NOT NULL DEFAULT 0,
+                        "ClosingCredit" numeric(18,2) NOT NULL DEFAULT 0,
                         "Description" text NOT NULL DEFAULT 'Закрытие/открытие кассовых дней по кассам',
                         CONSTRAINT "PK_CashDayClosures" PRIMARY KEY ("Id")
                     )
@@ -47,6 +52,12 @@ namespace BIS.ERP.Services
 
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "Description" text NOT NULL DEFAULT 'Закрытие/открытие кассовых дней по кассам'""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "UpdatedAt" timestamp with time zone NOT NULL DEFAULT NOW()""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "OpeningDebit" numeric(18,2) NOT NULL DEFAULT 0""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "OpeningCredit" numeric(18,2) NOT NULL DEFAULT 0""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "DebitTurnover" numeric(18,2) NOT NULL DEFAULT 0""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "CreditTurnover" numeric(18,2) NOT NULL DEFAULT 0""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "ClosingDebit" numeric(18,2) NOT NULL DEFAULT 0""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "ClosingCredit" numeric(18,2) NOT NULL DEFAULT 0""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ALTER COLUMN "CashDeskName" TYPE character varying(300)""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ALTER COLUMN "ClosedBy" TYPE character varying(120)""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ALTER COLUMN "OpenedBy" TYPE character varying(120)""");
@@ -56,7 +67,13 @@ namespace BIS.ERP.Services
                         ON "CashDayClosures" ("CashDeskId", "CloseDate")
                     """);
 
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON TABLE "CashDayClosures" IS 'Служебная таблица: закрытие и открытие кассовых дней по кассам'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON TABLE "CashDayClosures" IS 'Служебная таблица: закрытие и открытие кассовых дней по кассам, включая начальные и конечные остатки'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."OpeningDebit" IS 'Дебетовый остаток на начало кассового дня (ДН)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."OpeningCredit" IS 'Кредитовый остаток на начало кассового дня (КН)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."DebitTurnover" IS 'Дебетовый оборот за кассовый день'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."CreditTurnover" IS 'Кредитовый оборот за кассовый день'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."ClosingDebit" IS 'Дебетовый остаток на конец кассового дня (ДК)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."ClosingCredit" IS 'Кредитовый остаток на конец кассового дня (КК)'""");
                 await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."Description" IS 'Описание операции закрытия/открытия кассового дня'""");
             }
             catch (Exception ex)
@@ -147,6 +164,7 @@ namespace BIS.ERP.Services
                     await connection.CloseAsync();
             }
         }
+
         private static string QuoteIdentifier(string identifier)
         {
             return "\"" + identifier.Replace("\"", "\"\"") + "\"";
@@ -164,7 +182,17 @@ namespace BIS.ERP.Services
             return await RelationExistsAsync("public.\"CashDayClosures\"");
         }
 
-        public async Task CloseDayAsync(Guid cashDeskId, string cashDeskName, DateTime closeDate, string closedBy)
+        public async Task CloseDayAsync(
+            Guid cashDeskId,
+            string cashDeskName,
+            DateTime closeDate,
+            string closedBy,
+            decimal openingDebit = 0m,
+            decimal openingCredit = 0m,
+            decimal debitTurnover = 0m,
+            decimal creditTurnover = 0m,
+            decimal closingDebit = 0m,
+            decimal closingCredit = 0m)
         {
             await EnsureExistsAsync();
             var description = $"Закрытие кассового дня {closeDate:dd.MM.yyyy}";
@@ -174,9 +202,11 @@ namespace BIS.ERP.Services
             {
                 await _context.Database.ExecuteSqlRawAsync("""
                     INSERT INTO "CashDayClosures"
-                        ("Id", "CashDeskId", "CashDeskName", "CloseDate", "IsClosed", "ClosedBy", "ClosedAt", "UpdatedAt", "Description")
+                        ("Id", "CashDeskId", "CashDeskName", "CloseDate", "IsClosed", "ClosedBy", "ClosedAt", "UpdatedAt",
+                         "OpeningDebit", "OpeningCredit", "DebitTurnover", "CreditTurnover", "ClosingDebit", "ClosingCredit", "Description")
                     VALUES
-                        (@id, @cashDeskId, @cashDeskName, @closeDate, true, @closedBy, NOW(), NOW(), @description)
+                        (@id, @cashDeskId, @cashDeskName, @closeDate, true, @closedBy, NOW(), NOW(),
+                         @openingDebit, @openingCredit, @debitTurnover, @creditTurnover, @closingDebit, @closingCredit, @description)
                     ON CONFLICT ("CashDeskId", "CloseDate")
                     DO UPDATE SET
                         "CashDeskName" = EXCLUDED."CashDeskName",
@@ -186,6 +216,12 @@ namespace BIS.ERP.Services
                         "OpenedBy" = '',
                         "OpenedAt" = NULL,
                         "UpdatedAt" = NOW(),
+                        "OpeningDebit" = EXCLUDED."OpeningDebit",
+                        "OpeningCredit" = EXCLUDED."OpeningCredit",
+                        "DebitTurnover" = EXCLUDED."DebitTurnover",
+                        "CreditTurnover" = EXCLUDED."CreditTurnover",
+                        "ClosingDebit" = EXCLUDED."ClosingDebit",
+                        "ClosingCredit" = EXCLUDED."ClosingCredit",
                         "Description" = EXCLUDED."Description"
                     """,
                     new NpgsqlParameter("@id", Guid.NewGuid()),
@@ -193,6 +229,12 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@cashDeskName", cashDeskName ?? string.Empty),
                     new NpgsqlParameter("@closeDate", closeDateUtc),
                     new NpgsqlParameter("@closedBy", closedBy ?? string.Empty),
+                    new NpgsqlParameter("@openingDebit", openingDebit),
+                    new NpgsqlParameter("@openingCredit", openingCredit),
+                    new NpgsqlParameter("@debitTurnover", debitTurnover),
+                    new NpgsqlParameter("@creditTurnover", creditTurnover),
+                    new NpgsqlParameter("@closingDebit", closingDebit),
+                    new NpgsqlParameter("@closingCredit", closingCredit),
                     new NpgsqlParameter("@description", description));
             }
             catch (Exception ex)
@@ -260,5 +302,3 @@ namespace BIS.ERP.Services
         }
     }
 }
-
-

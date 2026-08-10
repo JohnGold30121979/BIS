@@ -1832,6 +1832,8 @@ namespace BIS.ERP.Services
             var landscape = pageWidth >= pageHeight || string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
             var maxColumns = landscape ? 88 : 66;
             var maxRows = landscape ? 58 : 82;
+            if (ShouldPackTabularFrxTemplate(layoutTemplate, report, dataTable))
+                maxRows = Math.Max(maxRows, Math.Min(2000, 45 + (dataTable?.Rows.Count ?? 0) * 3));
             var columnScale = (maxColumns - 1d) / pageWidth;
             var rowScale = (maxRows - 1d) / pageHeight;
 
@@ -1879,9 +1881,13 @@ namespace BIS.ERP.Services
             if (!IsFoxProTemplate(layoutTemplate, report))
                 return layoutTemplate;
 
-            return ShouldPackReconciliationFrxTemplate(layoutTemplate, report, dataTable)
-                ? BuildPackedReconciliationFrxTemplate(layoutTemplate, report, data, mappings, dataTable!, rules)
-                : BuildPackedStaticFrxTemplate(layoutTemplate, report, data, mappings);
+            if (ShouldPackReconciliationFrxTemplate(layoutTemplate, report, dataTable))
+                return BuildPackedReconciliationFrxTemplate(layoutTemplate, report, data, mappings, dataTable!, rules);
+
+            if (ShouldPackTabularFrxTemplate(layoutTemplate, report, dataTable))
+                return BuildPackedTabularFrxTemplate(layoutTemplate, report, data, mappings, dataTable!, rules);
+
+            return BuildPackedStaticFrxTemplate(layoutTemplate, report, data, mappings);
         }
 
         private static bool IsFoxProTemplate(PrintFormTemplate template, Report report) =>
@@ -1908,6 +1914,91 @@ namespace BIS.ERP.Services
                 .Any(value => value.StartsWith("АКТ СВЕРКИ", StringComparison.OrdinalIgnoreCase));
         }
 
+        private static bool ShouldPackTabularFrxTemplate(PrintFormTemplate template, Report report, DataTable? dataTable)
+        {
+            if (dataTable == null || dataTable.Rows.Count == 0)
+                return false;
+            if (!IsFoxProTemplate(template, report) || IsReconciliationActReport(dataTable, report))
+                return false;
+
+            return dataTable.TableName.Equals("ved2", StringComparison.OrdinalIgnoreCase) ||
+                   dataTable.TableName.Equals("pr_ras2", StringComparison.OrdinalIgnoreCase) ||
+                   ContainsIgnoreCase(report.Code, "finance.cash.cash-book") ||
+                   ContainsIgnoreCase(report.Code, "finance.cash.receipts-expenses-register") ||
+                   ContainsIgnoreCase(report.Name, "кассовая книга") ||
+                   ContainsIgnoreCase(report.Name, "реестр приход");
+        }
+
+        private static PrintFormTemplate BuildPackedTabularFrxTemplate(
+            PrintFormTemplate template,
+            Report report,
+            CashOrderPrintData summaryData,
+            IReadOnlyCollection<ReportElementMapping> mappings,
+            DataTable dataTable,
+            IReadOnlyCollection<FoxProReportFieldRule> rules)
+        {
+            var bands = BuildEffectiveBands(template);
+            if (bands.Count == 0 || template.Elements.Count == 0)
+                return template;
+
+            var rows = dataTable.Rows.Cast<DataRow>().ToList();
+            var mappingByOrder = mappings
+                .GroupBy(item => item.ElementOrder)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+            var elementsByBand = bands.ToDictionary(
+                band => band,
+                band => template.Elements
+                    .Where(element => ReferenceEquals(FindBandForElement(element, bands), band))
+                    .OrderBy(element => element.Top)
+                    .ThenBy(element => element.Left)
+                    .ThenBy(element => element.Order)
+                    .ToList());
+            var detailBands = bands.Where(IsDetailBand).ToHashSet();
+            if (detailBands.Count == 0)
+                return BuildPackedStaticFrxTemplate(template, report, summaryData, mappings);
+
+            var packedElements = new List<PrintFormElement>();
+            var packedBands = new List<PrintFormBand>();
+            var currentTop = Math.Clamp(template.PageHeight * 0.018, 60, 240);
+            var nextOrder = 1;
+            PrintFormBand? previousBand = null;
+
+            foreach (var band in bands)
+            {
+                if (!elementsByBand.TryGetValue(band, out var bandElements) || bandElements.Count == 0)
+                    continue;
+
+                if (detailBands.Contains(band))
+                {
+                    foreach (var row in rows)
+                    {
+                        var rowData = BuildReportPreviewDataForRow(dataTable, report, row, rules, summaryData);
+                        AppendPackedBand(template, report, band, bandElements, rowData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                        previousBand = band;
+                    }
+                    continue;
+                }
+
+                AppendPackedBand(template, report, band, bandElements, summaryData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                previousBand = band;
+            }
+
+            if (packedElements.Count == 0)
+                return template;
+
+            var bottomMargin = Math.Clamp(template.PageHeight * 0.025, 100, 320);
+            return new PrintFormTemplate
+            {
+                SourceFormat = template.SourceFormat,
+                OriginalFileName = template.OriginalFileName,
+                RecognitionProfileCode = template.RecognitionProfileCode,
+                LayoutNormalized = true,
+                PageWidth = template.PageWidth,
+                PageHeight = Math.Max(1000, packedElements.Max(element => element.Top + Math.Max(element.Height, 1)) + bottomMargin),
+                Bands = packedBands,
+                Elements = packedElements
+            };
+        }
         private static PrintFormTemplate BuildPackedReconciliationFrxTemplate(
             PrintFormTemplate template,
             Report report,
@@ -3456,7 +3547,7 @@ namespace BIS.ERP.Services
                 return false;
             if (Regex.IsMatch(text, @"(?i)\b(?:substr|subs|alltrim|alltr|trim|iif|str|dtoc|ctod|day|month|year|transform|tran)\s*\("))
                 return true;
-            if (Regex.IsMatch(text, @"(?i)\b(?:fact|curFACTSW|irfactsw|ved|ved2|ved3|ved4|db_cr|db_crs|dbcr|dbcrs|ksprorg|avt_p)[._][A-Za-z0-9_]+\b"))
+            if (Regex.IsMatch(text, @"(?i)\b(?:fact|curFACTSW|irfactsw|ved|ved2|ved3|ved4|db_cr|db_crs|dbcr|dbcrs|ksprorg|avt_p|pr_ras|pr_ras2|prras|prras2)[._][A-Za-z0-9_]+\b"))
                 return true;
             if (Regex.IsMatch(text, @"^[A-Z]{1,4}_[A-Z0-9_]+$"))
                 return true;
@@ -3633,7 +3724,7 @@ namespace BIS.ERP.Services
             return string.Join(" ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
         }
 
-       
+
         // Парсинг FRX-файла (макет FoxPro) с использованием FrxParser
         public async Task<string> ParseFrxFileAsync(byte[] fileData, string fileName)
         {
