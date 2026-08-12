@@ -1902,12 +1902,10 @@ namespace BIS.ERP.Views
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var printFormService = new PrintFormService(context);
                 await printFormService.SeedCashOrderFormsAsync();
-                var formPrefix = selectedRow.IsReceipt ? "cash.receipt." : "cash.payment.";
-                var forms = (await printFormService.GetPrintFormsAsync(_documentMetadata.Id, includeInactive: false))
-                    .Where(form => form.Code.StartsWith(formPrefix, StringComparison.OrdinalIgnoreCase))
-                    .OrderByDescending(form => form.IsDefault)
-                    .ThenBy(form => form.Name)
-                    .ToList();
+                var forms = await printFormService.GetCashOrderPrintFormsAsync(
+                    _documentMetadata.Id,
+                    selectedRow.IsReceipt,
+                    includeInactive: false);
 
                 if (forms.Count == 0)
                 {

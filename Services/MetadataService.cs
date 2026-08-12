@@ -2234,9 +2234,20 @@ namespace BIS.ERP.Services
                 }
 
                 // 3. Проверяем, не проведён ли уже документ
+                var isAdvanceDocument = document.Name == "Авансовый отчет" || document.Name == "Авансовые платежи";
                 if (recordData.ContainsKey("is_posted") && recordData["is_posted"] is bool isPosted && isPosted)
                 {
-                    throw new Exception("Документ уже проведён!");
+                    if (isAdvanceDocument)
+                    {
+                        await DeleteDocumentPostingsAsync(document, recordData);
+                        recordData["is_posted"] = false;
+                        if (recordData.ContainsKey("Проведен"))
+                            recordData["Проведен"] = false;
+                    }
+                    else
+                    {
+                        throw new Exception("Документ уже проведён!");
+                    }
                 }
 
                 // 4. Получаем сумму
@@ -2257,7 +2268,7 @@ namespace BIS.ERP.Services
                 {
                     await ProcessPaymentOrderAsync(document, recordData, recordId, amount);
                 }
-                else if (document.Name == "Авансовый отчет" || document.Name == "Авансовые платежи")
+                else if (isAdvanceDocument)
                 {
                     await ProcessAdvanceReportAsync(document, recordData, recordId, amount);
                 }

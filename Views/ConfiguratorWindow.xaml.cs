@@ -123,9 +123,15 @@ namespace BIS.ERP.Views
                 _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
                 BuildMetadataTree();
                 ShowMetadataOverview();
+                await LogConfiguratorEventAsync(
+                    "ConfiguratorLoad",
+                    "Configurator",
+                    currentInfoBase?.Name ?? "Инфобаза не выбрана",
+                    details: new { Catalogs = _catalogs.Count, Documents = _documents.Count, Reports = _reports.Count });
             }
             catch (Exception ex)
             {
+                await LogConfiguratorErrorAsync("ConfiguratorLoad", "Configurator", Title, ex);
                 MessageBox.Show($"Ошибка загрузки метаданных: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -146,6 +152,54 @@ namespace BIS.ERP.Views
             }
 
             return string.Join(Environment.NewLine, messages);
+        }
+
+        private async Task LogConfiguratorEventAsync(
+            string action,
+            string entityType,
+            string entityName,
+            Guid? recordId = null,
+            object? details = null)
+        {
+            try
+            {
+                SystemLogService.Info($"{action}: {entityType} \"{entityName}\"", "Configurator");
+                if (_context != null)
+                {
+                    await new EventLogService(_context).LogAsync(action, entityType, entityName, recordId, details);
+                }
+            }
+            catch (Exception logException)
+            {
+                SystemLogService.Warning("Ошибка записи события конфигуратора.", "Configurator.LogEvent", logException);
+            }
+        }
+
+        private async Task LogConfiguratorErrorAsync(
+            string action,
+            string entityType,
+            string entityName,
+            Exception exception,
+            Guid? recordId = null,
+            object? details = null)
+        {
+            try
+            {
+                SystemLogService.Error($"{action}: {entityType} \"{entityName}\"", "Configurator", exception);
+                if (_context != null)
+                {
+                    await new EventLogService(_context).LogAsync(
+                        $"{action}Error",
+                        entityType,
+                        entityName,
+                        recordId,
+                        new { Error = GetFullExceptionMessage(exception), Details = details });
+                }
+            }
+            catch (Exception logException)
+            {
+                SystemLogService.Warning("Ошибка записи ошибки конфигуратора.", "Configurator.LogError", logException);
+            }
         }
         private Report? _selectedReport;
         private TreeViewItem? _selectedReportTreeItem;
@@ -1791,18 +1845,39 @@ namespace BIS.ERP.Views
                 MessageBoxImage.Warning);
 
             if (result != MessageBoxResult.Yes)
+            {
+                await LogConfiguratorEventAsync(
+                    "ReportDeleteCancel",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
                 return;
+            }
 
             try
             {
                 Mouse.OverrideCursor = Cursors.Wait;
                 await _reportService.DeleteReportAsync(report.Id);
+                await LogConfiguratorEventAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
                 await RefreshReportsTreeAndListAsync();
                 MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
+                await LogConfiguratorErrorAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    ex,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
                 MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -2611,30 +2686,51 @@ namespace BIS.ERP.Views
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
 
-            if (result == MessageBoxResult.Yes)
+            if (result != MessageBoxResult.Yes)
             {
-                try
-                {
-                    Mouse.OverrideCursor = Cursors.Wait;
-                    await _reportService.DeleteReportAsync(report.Id);
-                    await LoadMetadata();
-                    PropertiesPanel.Children.Clear();
-                    EditorTitle.Text = "📊 Отчет удален";
-                    EditorDescription.Text = "";
-                    _selectedReport = null;
-                    DeleteReportMenuItem.IsEnabled = false;
-                    MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    Mouse.OverrideCursor = null;
-                }
+                await LogConfiguratorEventAsync(
+                    "ReportDeleteCancel",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                return;
+            }
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                await _reportService.DeleteReportAsync(report.Id);
+                await LogConfiguratorEventAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                await LoadMetadata();
+                PropertiesPanel.Children.Clear();
+                EditorTitle.Text = "📊 Отчет удален";
+                EditorDescription.Text = "";
+                _selectedReport = null;
+                DeleteReportMenuItem.IsEnabled = false;
+                MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                await LogConfiguratorErrorAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    ex,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
             }
         }
 

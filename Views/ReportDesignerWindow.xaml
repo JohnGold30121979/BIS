@@ -140,20 +140,27 @@
 
             <!-- Вкладка: Поля -->
             <TabItem Header="📊 Поля">
-                <Grid>
+                <Grid Margin="8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="280"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="320" MinWidth="240"/>
+                        <ColumnDefinition Width="*" MinWidth="500"/>
                     </Grid.ColumnDefinitions>
 
                     <!-- Доступные поля -->
                     <Border Grid.Column="0" Background="#F0F4F8" Margin="0,0,10,0">
-                        <StackPanel Margin="10">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
                             <TextBlock Text="📋 Доступные поля" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
-                            <ListBox x:Name="AvailableFields" Height="500"
+                            <ListBox x:Name="AvailableFields" Grid.Row="1"
                                      ItemsSource="{Binding AvailableSourceFields}"
                                      MouseDoubleClick="OnFieldDoubleClick"
-                                     SelectionMode="Extended">
+                                     SelectionMode="Extended"
+                                     HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Border Padding="8" Margin="0,1" Background="White" CornerRadius="5">
@@ -168,27 +175,35 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                        </StackPanel>
+                        </Grid>
                     </Border>
 
                     <!-- Поля отчета -->
                     <Border Grid.Column="1" Background="White">
-                        <StackPanel Margin="10">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
                             <TextBlock Text="📋 Поля отчета" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
-                            <DataGrid x:Name="ReportFieldsGrid" AutoGenerateColumns="False"
+                            <DataGrid x:Name="ReportFieldsGrid" Grid.Row="1" AutoGenerateColumns="False"
                                       CanUserAddRows="False" CanUserDeleteRows="False"
-                                      RowHeight="40" MaxHeight="450">
+                                      RowHeight="32" MinRowHeight="28"
+                                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Имя поля" Binding="{Binding FieldName}" Width="120" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Отображаемое имя" Binding="{Binding DisplayName}" Width="150"/>
-                                    <DataGridComboBoxColumn Header="Тип агрегации" Width="120"/>
-                                    <DataGridTextColumn Header="Ширина" Binding="{Binding Width}" Width="80"/>
-                                    <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="80"/>
-                                    <DataGridComboBoxColumn Header="Выравнивание" Width="100"/>
-                                    <DataGridTemplateColumn Header="Удалить" Width="50">
+                                    <DataGridTextColumn Header="Имя поля" Binding="{Binding FieldName}" Width="1.2*" MinWidth="120" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Отображаемое имя" Binding="{Binding DisplayName}" Width="1.5*" MinWidth="150"/>
+                                    <DataGridComboBoxColumn Header="Тип агрегации" Width="140"/>
+                                    <DataGridTextColumn Header="Ширина" Binding="{Binding Width}" Width="90"/>
+                                    <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="90"/>
+                                    <DataGridComboBoxColumn Header="Выравнивание" Width="130"/>
+                                    <DataGridTemplateColumn Header="Удалить" Width="70">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <Button Content="❌" Width="30" Height="30"
+                                                <Button Content="❌" Width="30" Height="26"
                                                         Background="Transparent" Click="OnRemoveFieldClick"
                                                         Cursor="Hand"/>
                                             </DataTemplate>
@@ -197,17 +212,16 @@
                                 </DataGrid.Columns>
                             </DataGrid>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                                 <Button x:Name="MoveUpButton" Content="⬆ Вверх" Width="80" Height="30" Margin="0,0,5,0"
                                         Background="#3498DB" Foreground="White" Click="OnMoveUpClick"/>
                                 <Button x:Name="MoveDownButton" Content="⬇ Вниз" Width="80" Height="30"
                                         Background="#3498DB" Foreground="White" Click="OnMoveDownClick"/>
                             </StackPanel>
-                        </StackPanel>
+                        </Grid>
                     </Border>
                 </Grid>
             </TabItem>
-
             <!-- Вкладка: Соответствия полей (только для FRX) -->
             <TabItem Header="🔗 FRX поля" x:Name="FrXFieldsTab">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -320,6 +334,12 @@
                                 <ComboBoxItem Content="Header"/>
                                 <ComboBoxItem Content="Body"/>
                                 <ComboBoxItem Content="Footer"/>
+                                <ComboBoxItem Content="PageHeader"/>
+                                <ComboBoxItem Content="GroupHeader"/>
+                                <ComboBoxItem Content="Detail"/>
+                                <ComboBoxItem Content="GroupFooter"/>
+                                <ComboBoxItem Content="PageFooter"/>
+                                <ComboBoxItem Content="Summary"/>
                             </ComboBox>
 
                             <WrapPanel Margin="0,0,0,10">
@@ -358,6 +378,12 @@
                                                 <sys:String>Header</sys:String>
                                                 <sys:String>Body</sys:String>
                                                 <sys:String>Footer</sys:String>
+                                                <sys:String>PageHeader</sys:String>
+                                                <sys:String>GroupHeader</sys:String>
+                                                <sys:String>Detail</sys:String>
+                                                <sys:String>GroupFooter</sys:String>
+                                                <sys:String>PageFooter</sys:String>
+                                                <sys:String>Summary</sys:String>
                                             </x:Array>
                                         </DataGridComboBoxColumn.ItemsSource>
                                     </DataGridComboBoxColumn>
@@ -611,7 +637,7 @@
                           Content="✓ Чередовать цвета строк" Margin="5" IsChecked="True"/>
 
                             <CheckBox x:Name="ShowGridLinesCheck" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" 
-                          Content="✓ Показывать линии сетки" Margin="5" IsChecked="True"/>
+                          Content="✓ Показывать линии сетки" Margin="5" IsChecked="True" ToolTip="Для нативных PDF/Excel отчетов включает линии ячеек. В FRX линии задаются элементами Line/Box макета."/>
 
                             <CheckBox x:Name="ShowGrandTotalCheck" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="4" 
                           Content="✓ Показывать общий итог" Margin="5" IsChecked="True"/>

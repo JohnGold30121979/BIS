@@ -20,11 +20,13 @@ namespace BIS.ERP.Views
     public partial class ReportDesignerWindow
     {
         private const double NativeDesignerBaseScale = 0.28;
+        private const string NativeDesignerPageAreaBandType = "__DesignerPageArea";
         private double _nativeZoomMultiplier = 1.0;
         private double NativeDesignerScale => NativeDesignerBaseScale * _nativeZoomMultiplier;
         private readonly ObservableCollection<NativeReportElementViewModel> _nativeElements = new();
         private PrintFormTemplate _nativeTemplate = PrintFormService.CreateBlankNativeTemplate();
         private NativeReportElementViewModel? _selectedNativeElement;
+        private bool _suspendNativePropertyUpdates;
         private NativeReportElementViewModel? _draggedNativeElement;
         private NativeReportElementViewModel? _rotatingNativeLine;
         private NativeReportElementViewModel? _resizedNativeElement;
@@ -48,6 +50,8 @@ namespace BIS.ERP.Views
             };
             NativeAlignmentCombo.SelectedIndex = 0;
             NativeDesignerTab.AddHandler(Selector.SelectedEvent, new RoutedEventHandler(OnNativeDesignerTabSelected));
+            FrXFieldsTab.AddHandler(Selector.SelectedEvent, new RoutedEventHandler(OnFrxFieldsTabSelected));
+            AttachNativePropertyChangeHandlers();
             LoadNativeTemplate(PrintFormService.CreateBlankNativeTemplate());
             NativeZoomSlider.Value = 5;
             NativeZoomLabel.Text = "5%";
@@ -166,6 +170,13 @@ namespace BIS.ERP.Views
             LoadDeferredNativeTemplateIfNeeded();
         }
 
+        private void OnFrxFieldsTabSelected(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            SyncNativeTemplateToTemplateBoxIfNeeded();
+            SyncFrxElementMappingsFromNativeTemplate();
+        }
+
         private void LoadDeferredNativeTemplateIfNeeded()
         {
             if (string.IsNullOrWhiteSpace(_deferredNativeTemplateJson))
@@ -190,6 +201,7 @@ namespace BIS.ERP.Views
             _nativeTemplate = template;
             if (string.IsNullOrWhiteSpace(_nativeTemplate.SourceFormat))
                 _nativeTemplate.SourceFormat = "Native";
+            EnsureNativeTemplateBands();
 
             _suspendNativeRender = true;
             NativeElementsGrid.ItemsSource = null;
@@ -197,7 +209,11 @@ namespace BIS.ERP.Views
             {
                 _nativeElements.Clear();
                 foreach (var element in _nativeTemplate.Elements.OrderBy(item => item.Order))
-                    _nativeElements.Add(NativeReportElementViewModel.FromElement(element));
+                {
+                    var viewModel = NativeReportElementViewModel.FromElement(element);
+                    EnsureNativeElementBand(viewModel);
+                    _nativeElements.Add(viewModel);
+                }
             }
             finally
             {
@@ -240,7 +256,7 @@ namespace BIS.ERP.Views
 
         private void SyncNativeTemplateToTemplateBoxIfNeeded()
         {
-            if (IsPrintFormCheck.IsChecked != true)
+            if (!ShouldSyncNativeTemplate())
                 return;
             if (!string.IsNullOrWhiteSpace(_deferredNativeTemplateJson))
                 return;
@@ -248,6 +264,9 @@ namespace BIS.ERP.Views
             _nativeTemplate.SourceFormat = GetSelectedReportType() == "FoxProLayout"
                 ? "FoxProFRX"
                 : "Native";
+            EnsureNativeTemplateBands();
+            foreach (var element in _nativeElements)
+                EnsureNativeElementBand(element);
             _nativeTemplate.Elements = _nativeElements
                 .OrderBy(item => item.Order)
                 .Select(item => item.ToElement())
@@ -270,6 +289,103 @@ namespace BIS.ERP.Views
             });
         }
 
+        private bool ShouldSyncNativeTemplate() =>
+            IsPrintFormCheck.IsChecked == true ||
+            string.Equals(GetSelectedReportType(), "FoxProLayout", StringComparison.OrdinalIgnoreCase);
+
+        private void SyncFrxElementMappingsFromNativeTemplate()
+        {
+            if (!string.Equals(GetSelectedReportType(), "FoxProLayout", StringComparison.OrdinalIgnoreCase) &&
+                _frxElementMappings.Count == 0)
+                return;
+
+            if (_nativeElements.Count == 0)
+            {
+                FrXFieldsTab.IsEnabled = true;
+                UpdateMappingPreview();
+                return;
+            }
+
+            var savedMappings = _frxElementMappings.ToList();
+            var savedByOrder = savedMappings
+                .GroupBy(item => item.ElementOrder)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+            var savedBySource = savedMappings
+                .GroupBy(GetMappingIdentity, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First(), StringComparer.OrdinalIgnoreCase);
+
+            ElementMappingGrid.ItemsSource = null;
+            try
+            {
+                _frxElementMappings.Clear();
+                var order = 0;
+                foreach (var element in _nativeElements.OrderBy(item => item.Order))
+                {
+                    if (!IsMappableNativeElement(element))
+                        continue;
+
+                    var elementText = GetNativeMappingText(element);
+                    var sourceKey = GetMappingIdentity(element.Type, elementText, element.Expression);
+                    savedByOrder.TryGetValue(element.Order, out var savedByExactOrder);
+                    savedBySource.TryGetValue(sourceKey, out var savedBySameSource);
+                    var saved = savedByExactOrder ?? savedBySameSource;
+
+                    _frxElementMappings.Add(new FrXElementMappingViewModel
+                    {
+                        Id = saved?.Id ?? Guid.NewGuid(),
+                        ElementOrder = element.Order,
+                        ElementType = element.Type,
+                        ElementText = elementText,
+                        ElementExpression = element.Expression,
+                        BandType = element.BandType,
+                        Left = element.Left,
+                        Top = element.Top,
+                        Width = element.Width,
+                        Height = element.Height,
+                        FontName = element.FontName,
+                        FontSize = element.FontSize,
+                        Bold = element.Bold,
+                        Italic = element.Italic,
+                        Alignment = element.Alignment,
+                        Order = order++,
+                        MappedFieldName = saved?.MappedFieldName ?? string.Empty,
+                        MappedDisplayName = saved?.MappedDisplayName ?? string.Empty,
+                        DataSource = saved?.DataSource ?? string.Empty,
+                        FormatString = saved?.FormatString ?? string.Empty,
+                        IsVisible = saved?.IsVisible ?? true,
+                        CustomText = saved?.CustomText ?? string.Empty
+                    });
+                }
+            }
+            finally
+            {
+                ElementMappingGrid.ItemsSource = _frxElementMappings;
+            }
+
+            ApplyFoxProRulesToEmptyMappings();
+            UpdateMappingPreview();
+            FrXFieldsTab.IsEnabled = true;
+        }
+
+        private static bool IsMappableNativeElement(NativeReportElementViewModel element)
+        {
+            if (element.Type is "Line" or "Box" or "Picture")
+                return false;
+
+            var text = GetNativeMappingText(element);
+            return !string.IsNullOrWhiteSpace(text) && text != "+" && text != "-";
+        }
+
+        private static string GetNativeMappingText(NativeReportElementViewModel element) =>
+            string.IsNullOrWhiteSpace(element.Expression)
+                ? PrintFormService.CleanFoxText(element.Text)
+                : element.Expression;
+
+        private static string GetMappingIdentity(FrXElementMappingViewModel mapping) =>
+            GetMappingIdentity(mapping.ElementType, mapping.ElementText, mapping.ElementExpression);
+
+        private static string GetMappingIdentity(string elementType, string elementText, string elementExpression) =>
+            $"{elementType}|{(string.IsNullOrWhiteSpace(elementExpression) ? elementText : elementExpression)}".Trim().ToUpperInvariant();
         private List<ReportElementMapping> BuildReportElementMappings(Guid reportId)
         {
             if (GetSelectedReportType() != "FoxProLayout")
@@ -317,8 +433,12 @@ namespace BIS.ERP.Views
                 return;
 
             NativeDesignerCanvas.Children.Clear();
+            EnsureNativeTemplateBands();
+            foreach (var element in _nativeElements)
+                EnsureNativeElementBand(element);
+
             NativeDesignerCanvas.Width = Math.Max(600, _nativeTemplate.PageWidth * NativeDesignerScale);
-            NativeDesignerCanvas.Height = Math.Max(800, _nativeTemplate.PageHeight * NativeDesignerScale);
+            NativeDesignerCanvas.Height = Math.Max(800, GetNativeDesignerPageHeight() * NativeDesignerScale);
 
             RenderNativeBands();
             foreach (var element in _nativeElements.OrderBy(item => item.Order))
@@ -327,18 +447,21 @@ namespace BIS.ERP.Views
 
         private void RenderNativeBands()
         {
-            foreach (var band in _nativeTemplate.Bands.OrderBy(item => item.Order))
+            foreach (var band in GetDesignerNativeBands())
             {
+                var isPageArea = IsDesignerNativePageAreaBand(band);
                 var border = new Border
                 {
-                    BorderBrush = Brushes.LightSteelBlue,
-                    BorderThickness = new Thickness(0, 0, 0, 1),
-                    Background = new SolidColorBrush(Color.FromArgb(24, 52, 152, 219)),
+                    BorderBrush = isPageArea ? Brushes.Gainsboro : Brushes.LightSteelBlue,
+                    BorderThickness = new Thickness(0, 0, 0, isPageArea ? 0.5 : 1),
+                    Background = isPageArea
+                        ? new SolidColorBrush(Color.FromArgb(10, 180, 190, 200))
+                        : new SolidColorBrush(Color.FromArgb(24, 52, 152, 219)),
                     Width = NativeDesignerCanvas.Width,
                     Height = Math.Max(18, band.Height * NativeDesignerScale),
                     Child = new TextBlock
                     {
-                        Text = band.Type,
+                        Text = isPageArea ? "Свободная область страницы" : band.Type,
                         Foreground = Brushes.SlateGray,
                         FontSize = 11,
                         Margin = new Thickness(6, 2, 0, 0)
@@ -349,7 +472,6 @@ namespace BIS.ERP.Views
                 NativeDesignerCanvas.Children.Add(border);
             }
         }
-
         private void RenderNativeElement(NativeReportElementViewModel element)
         {
             FrameworkElement visual;
@@ -618,7 +740,7 @@ namespace BIS.ERP.Views
         {
             var endpointX = canvasPoint.X / NativeDesignerScale;
             var endpointY = canvasPoint.Y / NativeDesignerScale;
-            var band = GetNativeBand(element.BandType);
+            var band = GetNativeLayoutBand(element, element.Top);
             endpointX = Clamp(endpointX, 0, _nativeTemplate.PageWidth);
             endpointY = Clamp(endpointY, band.Top, band.Top + band.Height);
 
@@ -633,7 +755,7 @@ namespace BIS.ERP.Views
             double left,
             double top)
         {
-            var band = GetNativeBand(element.BandType);
+            var band = GetNativeLayoutBand(element, top);
             var bandTop = band.Top;
             var bandBottom = band.Top + band.Height;
 
@@ -655,7 +777,7 @@ namespace BIS.ERP.Views
             double width,
             double height)
         {
-            var band = GetNativeBand(element.BandType);
+            var band = GetNativeLayoutBand(element, element.Top);
             var maxWidth = Math.Max(1, _nativeTemplate.PageWidth - element.Left);
             var maxHeight = Math.Max(1, band.Top + band.Height - element.Top);
             return (Clamp(width, 10, maxWidth), Clamp(height, 8, maxHeight));
@@ -675,20 +797,227 @@ namespace BIS.ERP.Views
             element.Top = top;
         }
 
-        private PrintFormBand GetNativeBand(string bandType)
+        private void EnsureNativeTemplateBands()
         {
-            var band = _nativeTemplate.Bands.FirstOrDefault(item =>
-                item.Type.Equals(bandType, StringComparison.OrdinalIgnoreCase));
-            if (band != null)
-                return band;
+            _nativeTemplate.Bands ??= new List<PrintFormBand>();
+            _nativeTemplate.Elements ??= new List<PrintFormElement>();
+            if (_nativeTemplate.PageWidth <= 0)
+                _nativeTemplate.PageWidth = 2100;
+            if (_nativeTemplate.PageHeight <= 0)
+                _nativeTemplate.PageHeight = 2970;
 
-            var fallback = _nativeTemplate.Bands.FirstOrDefault(item =>
-                item.Type.Equals("Body", StringComparison.OrdinalIgnoreCase));
-            if (fallback != null)
-                return fallback;
+            if (_nativeTemplate.Bands.Count == 0)
+            {
+                var top = _nativeTemplate.Elements.Count == 0 ? 0 : _nativeTemplate.Elements.Min(element => element.Top);
+                var bottom = _nativeTemplate.Elements.Count == 0
+                    ? _nativeTemplate.PageHeight
+                    : _nativeTemplate.Elements.Max(element => element.Top + Math.Max(element.Height, 1));
+                _nativeTemplate.Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "Detail", Top = top, Height = Math.Max(1, bottom - top), Order = 0 }
+                };
+            }
 
-            return new PrintFormBand { Type = "Body", Top = 0, Height = _nativeTemplate.PageHeight, Order = 0 };
+            foreach (var band in _nativeTemplate.Bands)
+            {
+                if (string.IsNullOrWhiteSpace(band.Type))
+                    band.Type = band.Order switch
+                    {
+                        0 => "Header",
+                        1 => "Body",
+                        _ => "Footer"
+                    };
+                if (band.Height <= 0)
+                    band.Height = 40;
+            }
         }
+
+        private IReadOnlyList<PrintFormBand> GetEffectiveNativeBands()
+        {
+            EnsureNativeTemplateBands();
+
+            var bands = _nativeTemplate.Bands
+                .OrderBy(band => band.Top)
+                .ThenBy(band => band.Order)
+                .Select(CloneNativeBand)
+                .ToList();
+            if (bands.Count == 0)
+                return Array.Empty<PrintFormBand>();
+
+            if (bands.All(band => Math.Abs(band.Top) < 0.001))
+            {
+                double top = 0;
+                foreach (var band in bands.OrderBy(band => band.Order))
+                {
+                    band.Top = top;
+                    top += Math.Max(1, band.Height);
+                }
+            }
+
+            return bands.OrderBy(band => band.Top).ThenBy(band => band.Order).ToList();
+        }
+
+        private IReadOnlyList<PrintFormBand> GetDesignerNativeBands()
+        {
+            var sourceBands = GetEffectiveNativeBands();
+            var pageHeight = GetNativeDesignerPageHeight();
+            var result = new List<PrintFormBand>();
+            var cursor = 0d;
+            var gapOrder = -100000;
+
+            foreach (var band in sourceBands.OrderBy(item => item.Top).ThenBy(item => item.Order))
+            {
+                var bandTop = Math.Max(0, band.Top);
+                if (bandTop > cursor + 2)
+                    AddDesignerNativeGapBand(result, cursor, bandTop - cursor, gapOrder++);
+
+                result.Add(band);
+                cursor = Math.Max(cursor, bandTop + Math.Max(band.Height, 1));
+            }
+
+            if (pageHeight > cursor + 2)
+                AddDesignerNativeGapBand(result, cursor, pageHeight - cursor, gapOrder++);
+
+            if (result.Count == 0)
+                AddDesignerNativeGapBand(result, 0, pageHeight, gapOrder);
+
+            return result.OrderBy(band => band.Top).ThenBy(band => band.Order).ToList();
+        }
+
+        private static void AddDesignerNativeGapBand(List<PrintFormBand> bands, double top, double height, int order)
+        {
+            bands.Add(new PrintFormBand
+            {
+                Type = NativeDesignerPageAreaBandType,
+                Top = Math.Max(0, top),
+                Height = Math.Max(1, height),
+                Order = order
+            });
+        }
+
+        private double GetNativeDesignerPageHeight()
+        {
+            var pageHeight = Math.Max(1000, _nativeTemplate.PageHeight);
+            if (_nativeTemplate.Bands.Count > 0)
+                pageHeight = Math.Max(pageHeight, _nativeTemplate.Bands.Max(band => band.Top + Math.Max(band.Height, 1)));
+            if (_nativeTemplate.Elements.Count > 0)
+                pageHeight = Math.Max(pageHeight, _nativeTemplate.Elements.Max(element => element.Top + Math.Max(element.Height, 1)) + 80);
+            if (_nativeElements.Count > 0)
+                pageHeight = Math.Max(pageHeight, _nativeElements.Max(element => element.Top + Math.Max(element.Height, 1)) + 80);
+
+            return pageHeight;
+        }
+
+        private PrintFormBand GetNativeLayoutBand(NativeReportElementViewModel element, double top) =>
+            FindNativeBandForElement(top, element.BandType, GetDesignerNativeBands());
+
+        private static bool IsDesignerNativePageAreaBand(PrintFormBand band) =>
+            string.Equals(band.Type, NativeDesignerPageAreaBandType, StringComparison.OrdinalIgnoreCase);
+        private void EnsureNativeElementBand(NativeReportElementViewModel element)
+        {
+            var exactBand = FindNativeBandByExactType(element.BandType, _nativeTemplate.Bands);
+            if (exactBand != null)
+                return;
+
+            var band = GetNativeBand(element);
+            if (!string.Equals(element.BandType, band.Type, StringComparison.OrdinalIgnoreCase))
+                element.BandType = band.Type;
+        }
+
+        private PrintFormBand GetNativeBand(NativeReportElementViewModel element) =>
+            FindNativeBandForElement(element.Top, element.BandType, GetEffectiveNativeBands());
+
+        private PrintFormBand GetNativeBand(string? bandType, double? elementTop = null)
+        {
+            var bands = GetEffectiveNativeBands();
+            if (elementTop.HasValue)
+                return FindNativeBandForElement(elementTop.Value, bandType, bands);
+
+            return FindNativeBandByExactType(bandType, bands)
+                ?? FindNativeBandByAlias(bandType, bands)
+                ?? FindNativeBandByExactType("Body", bands)
+                ?? FindNativeBandByExactType("Detail", bands)
+                ?? bands.FirstOrDefault()
+                ?? new PrintFormBand { Type = "Body", Top = 0, Height = _nativeTemplate.PageHeight, Order = 0 };
+        }
+
+        private PrintFormBand FindNativeBandForElement(double top, string? bandType, IReadOnlyList<PrintFormBand> bands)
+        {
+            const double tolerance = 2d;
+            if (bands.Count == 0)
+                return new PrintFormBand { Type = "Body", Top = 0, Height = _nativeTemplate.PageHeight, Order = 0 };
+
+            var byCoordinate = bands
+                .Where(band => top >= band.Top - tolerance && top <= band.Top + Math.Max(band.Height, 1) + tolerance)
+                .OrderBy(band => Math.Abs(top - band.Top))
+                .FirstOrDefault();
+            if (byCoordinate != null)
+                return byCoordinate;
+
+            var previous = bands.LastOrDefault(band => top >= band.Top - tolerance);
+            if (previous != null)
+                return previous;
+
+            return FindNativeBandByExactType(bandType, bands)
+                ?? FindNativeBandByAlias(bandType, bands)
+                ?? bands[0];
+        }
+
+        private PrintFormBand? FindNativeBandByExactType(string? bandType, IEnumerable<PrintFormBand>? bands = null)
+        {
+            if (string.IsNullOrWhiteSpace(bandType))
+                return null;
+
+            return (bands ?? _nativeTemplate.Bands).FirstOrDefault(item =>
+                item.Type.Equals(bandType, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private PrintFormBand? FindNativeBandByAlias(string? bandType, IEnumerable<PrintFormBand>? bands = null)
+        {
+            var aliases = GetNativeBandAliases(bandType);
+            foreach (var alias in aliases)
+            {
+                var band = FindNativeBandByExactType(alias, bands);
+                if (band != null)
+                    return band;
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<string> GetNativeBandAliases(string? bandType)
+        {
+            var normalized = NormalizeNativeBandType(bandType);
+            return normalized switch
+            {
+                "Header" => new[] { "Header", "PageHeader", "Title", "ReportHeader" },
+                "Body" => new[] { "Body", "Detail", "GroupHeader", "GroupFooter", "ColumnHeader", "ColumnFooter" },
+                "Footer" => new[] { "Footer", "Summary", "PageFooter", "ReportFooter" },
+                _ => Array.Empty<string>()
+            };
+        }
+
+        private static string NormalizeNativeBandType(string? bandType)
+        {
+            var value = (bandType ?? string.Empty).Trim().ToUpperInvariant();
+            if (value.Length == 0)
+                return string.Empty;
+            if (value.Contains("PAGEHEADER") || value is "HEADER" or "TITLE" or "REPORTHEADER")
+                return "Header";
+            if (value.Contains("PAGEFOOTER") || value.Contains("SUMMARY") || value is "FOOTER" or "REPORTFOOTER")
+                return "Footer";
+            if (value.Contains("DETAIL") || value.Contains("GROUP") || value.Contains("COLUMN") || value is "BODY")
+                return "Body";
+            return string.Empty;
+        }
+
+        private static PrintFormBand CloneNativeBand(PrintFormBand band) => new()
+        {
+            Type = band.Type,
+            Top = band.Top,
+            Height = band.Height,
+            Order = band.Order
+        };
 
         private static double Clamp(double value, double min, double max)
         {
@@ -726,34 +1055,79 @@ namespace BIS.ERP.Views
 
         private void FillNativeElementProperties(NativeReportElementViewModel? element)
         {
-            if (element == null)
+            _suspendNativePropertyUpdates = true;
+            try
             {
-                NativeTextBox.Text = string.Empty;
-                NativeFieldCombo.SelectedValue = null;
-                NativeLeftBox.Text = string.Empty;
-                NativeTopBox.Text = string.Empty;
-                NativeWidthBox.Text = string.Empty;
-                NativeHeightBox.Text = string.Empty;
-                NativeFontBox.Text = string.Empty;
-                NativeFontSizeBox.Text = string.Empty;
-                NativeBoldCheck.IsChecked = false;
-                NativeItalicCheck.IsChecked = false;
-                return;
-            }
+                if (element == null)
+                {
+                    NativeTextBox.Text = string.Empty;
+                    NativeFieldCombo.SelectedValue = null;
+                    NativeLeftBox.Text = string.Empty;
+                    NativeTopBox.Text = string.Empty;
+                    NativeWidthBox.Text = string.Empty;
+                    NativeHeightBox.Text = string.Empty;
+                    NativeFontBox.Text = string.Empty;
+                    NativeFontSizeBox.Text = string.Empty;
+                    NativeBoldCheck.IsChecked = false;
+                    NativeItalicCheck.IsChecked = false;
+                    return;
+                }
 
-            NativeTextBox.Text = element.Text;
-            NativeFieldCombo.SelectedValue = element.Expression;
-            NativeLeftBox.Text = FormatNumber(element.Left);
-            NativeTopBox.Text = FormatNumber(element.Top);
-            NativeWidthBox.Text = FormatNumber(element.Width);
-            NativeHeightBox.Text = FormatNumber(element.Height);
-            NativeFontBox.Text = element.FontName;
-            NativeFontSizeBox.Text = FormatNumber(element.FontSize);
-            NativeAlignmentCombo.SelectedItem = NativeAlignmentCombo.Items
-                .Cast<ComboBoxItem>()
-                .FirstOrDefault(item => item.Content?.ToString() == element.Alignment) ?? NativeAlignmentCombo.Items[0];
-            NativeBoldCheck.IsChecked = element.Bold;
-            NativeItalicCheck.IsChecked = element.Italic;
+                NativeTextBox.Text = element.Text;
+                NativeFieldCombo.SelectedValue = element.Expression;
+                NativeLeftBox.Text = FormatNumber(element.Left);
+                NativeTopBox.Text = FormatNumber(element.Top);
+                NativeWidthBox.Text = FormatNumber(element.Width);
+                NativeHeightBox.Text = FormatNumber(element.Height);
+                NativeFontBox.Text = element.FontName;
+                NativeFontSizeBox.Text = FormatNumber(element.FontSize);
+                NativeAlignmentCombo.SelectedItem = NativeAlignmentCombo.Items
+                    .Cast<ComboBoxItem>()
+                    .FirstOrDefault(item => item.Content?.ToString() == element.Alignment) ?? NativeAlignmentCombo.Items[0];
+                NativeBoldCheck.IsChecked = element.Bold;
+                NativeItalicCheck.IsChecked = element.Italic;
+            }
+            finally
+            {
+                _suspendNativePropertyUpdates = false;
+            }
+        }
+
+        private void AttachNativePropertyChangeHandlers()
+        {
+            NativeTextBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeFieldCombo.SelectionChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeLeftBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeTopBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeWidthBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeHeightBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeFontBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeFontSizeBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeAlignmentCombo.SelectionChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeBoldCheck.Checked += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeBoldCheck.Unchecked += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeItalicCheck.Checked += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeItalicCheck.Unchecked += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+        }
+
+        private void UpdateSelectedNativeElementFromPropertyControls()
+        {
+            if (_suspendNativePropertyUpdates || _selectedNativeElement == null)
+                return;
+
+            _selectedNativeElement.Text = NativeTextBox.Text;
+            _selectedNativeElement.Expression = NativeFieldCombo.SelectedValue?.ToString() ?? string.Empty;
+            _selectedNativeElement.Left = ParseNumber(NativeLeftBox.Text, _selectedNativeElement.Left);
+            _selectedNativeElement.Top = ParseNumber(NativeTopBox.Text, _selectedNativeElement.Top);
+            _selectedNativeElement.Width = Math.Max(1, ParseNumber(NativeWidthBox.Text, _selectedNativeElement.Width));
+            _selectedNativeElement.Height = Math.Max(1, ParseNumber(NativeHeightBox.Text, _selectedNativeElement.Height));
+            _selectedNativeElement.FontName = string.IsNullOrWhiteSpace(NativeFontBox.Text) ? "Arial" : NativeFontBox.Text;
+            _selectedNativeElement.FontSize = Math.Max(1, ParseNumber(NativeFontSizeBox.Text, _selectedNativeElement.FontSize));
+            _selectedNativeElement.Alignment = (NativeAlignmentCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Left";
+            _selectedNativeElement.Bold = NativeBoldCheck.IsChecked == true;
+            _selectedNativeElement.Italic = NativeItalicCheck.IsChecked == true;
+            EnsureNativeElementBand(_selectedNativeElement);
+            NativeElementsGrid.Items.Refresh();
         }
 
         private void OnApplyNativeElementPropertiesClick(object sender, RoutedEventArgs e)
@@ -787,6 +1161,7 @@ namespace BIS.ERP.Views
             _selectedNativeElement.Alignment = (NativeAlignmentCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Left";
             _selectedNativeElement.Bold = NativeBoldCheck.IsChecked == true;
             _selectedNativeElement.Italic = NativeItalicCheck.IsChecked == true;
+            EnsureNativeElementBand(_selectedNativeElement);
             ClampNativeElement(_selectedNativeElement);
             FillNativeElementProperties(_selectedNativeElement);
             RenderNativeDesigner();
@@ -871,14 +1246,15 @@ namespace BIS.ERP.Views
             double? customWidth = null,
             double? customHeight = null)
         {
-            var band = (NativeBandCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Body";
-            var top = _nativeTemplate.Bands.FirstOrDefault(item => item.Type == band)?.Top ?? 260;
+            var selectedBand = (NativeBandCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Body";
+            var band = GetNativeBand(selectedBand);
+            var top = band.Top;
             var element = new NativeReportElementViewModel
             {
                 Type = type,
                 Text = text,
                 Expression = expression,
-                BandType = band,
+                BandType = band.Type,
                 Left = 120,
                 Top = top + 50,
                 Width = customWidth ?? width,
@@ -896,6 +1272,7 @@ namespace BIS.ERP.Views
         {
             LoadNativeTemplate(PrintFormService.CreateBlankNativeTemplate());
             SyncNativeTemplateToTemplateBoxIfNeeded();
+            SyncFrxElementMappingsFromNativeTemplate();
         }
 
         private void OnNativeElementCellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
@@ -904,6 +1281,7 @@ namespace BIS.ERP.Views
             {
                 if (e.Row.Item is NativeReportElementViewModel element)
                 {
+                    EnsureNativeElementBand(element);
                     ClampNativeElement(element);
                     if (ReferenceEquals(element, _selectedNativeElement))
                         FillNativeElementProperties(element);

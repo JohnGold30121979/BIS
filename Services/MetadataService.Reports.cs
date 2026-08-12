@@ -14,10 +14,15 @@ public partial class MetadataService
         await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
         _context.ChangeTracker.Clear();
         await DeleteDeprecatedObjectTreeReportsAsync();
+        var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
 
-        foreach (var definition in BuildStandardReportDefinitions().Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code)))
+        foreach (var definition in BuildStandardReportDefinitions()
+                     .Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code))
+                     .Where(definition => !deletedReportCodes.Contains(definition.Code)))
             await EnsureStandardReportAsync(definition);
-        foreach (var definition in StandardFrxReportTemplates.GetDefinitions().Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code)))
+        foreach (var definition in StandardFrxReportTemplates.GetDefinitions()
+                     .Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code))
+                     .Where(definition => !deletedReportCodes.Contains(definition.Code)))
             await EnsureStandardFrxReportAsync(definition);
 
         await _context.SaveChangesAsync();
@@ -159,6 +164,7 @@ public partial class MetadataService
 
         var report = await _context.Reports
             .FirstOrDefaultAsync(item => item.Code == definition.Code);
+        var isNewReport = report == null;
         if (report == null)
         {
             report = new Report
@@ -168,48 +174,72 @@ public partial class MetadataService
             };
             await _context.Reports.AddAsync(report);
         }
-        else
-        {
-            await DeleteStandardReportDetailsAsync(report.Id);
-        }
 
         var templateJson = DecodeStandardFrxTemplate(definition.TemplateCompressedBase64);
+        var shouldSeedTemplate = isNewReport || string.IsNullOrWhiteSpace(report.Template);
+
         report.Code = definition.Code;
-        report.Name = definition.Name;
-        report.Description = definition.Description;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
+            report.Name = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
+            report.Description = definition.Description;
         report.DataSourceType = definition.SourceObjectType;
         report.DataSourceId = source?.Id;
         report.ReportType = definition.ReportType;
-        report.Template = templateJson;
-        report.Settings = "{}";
-        report.Icon = definition.Icon;
-        report.IsActive = source != null || IsStandaloneStandardFrxVariant(definition.Code);
+        if (shouldSeedTemplate)
+            report.Template = templateJson;
+        report.Settings = string.IsNullOrWhiteSpace(report.Settings) ? "{}" : report.Settings;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.Icon))
+            report.Icon = definition.Icon;
+        if (isNewReport)
+            report.IsActive = source != null || IsStandaloneStandardFrxVariant(definition.Code);
         report.IsPrintForm = definition.IsPrintForm;
-        report.IsDefault = definition.IsDefault && source != null;
+        if (isNewReport)
+            report.IsDefault = definition.IsDefault && source != null;
         report.SourceFormat = "FoxProFRX";
-        report.TemplateVersion = 1;
-        report.Order = definition.Order;
+        report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
+        if (isNewReport)
+            report.Order = definition.Order;
         report.UpdatedAt = DateTime.UtcNow;
-        report.PageTitle = definition.Name;
-        report.PageOrientation = definition.PageOrientation;
-        report.PageWidth = definition.PageOrientation == "Landscape" ? 297 : 210;
-        report.PageHeight = definition.PageOrientation == "Landscape" ? 210 : 297;
-        report.LeftMargin = 10;
-        report.RightMargin = 10;
-        report.TopMargin = 12;
-        report.BottomMargin = 12;
-        report.FontName = "Segoe UI";
-        report.FontSize = 9;
-        report.ShowHeader = false;
-        report.ShowFooter = false;
-        report.ShowPageNumbers = false;
-        report.ShowGridLines = false;
-        report.TitleText = definition.Name;
-        report.SubtitleText = definition.Description;
-        report.HeaderTitle = definition.Name;
-        report.HeaderSubtitle = definition.Description;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.PageTitle))
+            report.PageTitle = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.PageOrientation))
+            report.PageOrientation = definition.PageOrientation;
+        if (isNewReport || report.PageWidth <= 0)
+            report.PageWidth = report.PageOrientation == "Landscape" ? 297 : 210;
+        if (isNewReport || report.PageHeight <= 0)
+            report.PageHeight = report.PageOrientation == "Landscape" ? 210 : 297;
+        if (isNewReport || report.LeftMargin <= 0)
+            report.LeftMargin = 10;
+        if (isNewReport || report.RightMargin <= 0)
+            report.RightMargin = 10;
+        if (isNewReport || report.TopMargin <= 0)
+            report.TopMargin = 12;
+        if (isNewReport || report.BottomMargin <= 0)
+            report.BottomMargin = 12;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.FontName))
+            report.FontName = "Segoe UI";
+        if (isNewReport || report.FontSize <= 0)
+            report.FontSize = 9;
+        if (isNewReport)
+        {
+            report.ShowHeader = false;
+            report.ShowFooter = false;
+            report.ShowPageNumbers = false;
+            report.ShowGridLines = false;
+        }
+        if (isNewReport || string.IsNullOrWhiteSpace(report.TitleText))
+            report.TitleText = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.SubtitleText))
+            report.SubtitleText = definition.Description;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.HeaderTitle))
+            report.HeaderTitle = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.HeaderSubtitle))
+            report.HeaderSubtitle = definition.Description;
+        var hasFields = await _context.ReportFields.AnyAsync(item => item.ReportId == report.Id);
+        if (!hasFields)
+            await AddStandardFrxReportFieldsAsync(report.Id, report.Template);
 
-        await AddStandardFrxReportFieldsAsync(report.Id, templateJson);
         await _context.SaveChangesAsync();
 
         if (report.IsPrintForm && report.IsDefault && report.DataSourceId.HasValue)
@@ -238,6 +268,7 @@ public partial class MetadataService
                 metadata.ObjectType == definition.SourceObjectType);
 
         var report = await FindExistingStandardReportAsync(definition);
+        var isNewReport = report == null;
 
         if (report == null)
         {
@@ -248,50 +279,77 @@ public partial class MetadataService
             };
             await _context.Reports.AddAsync(report);
         }
-        else
-        {
-            await DeleteStandardReportDetailsAsync(report.Id);
-        }
 
         report.Code = definition.Code;
-        report.Name = definition.Name;
-        report.Description = definition.Description;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
+            report.Name = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
+            report.Description = definition.Description;
         report.DataSourceType = definition.SourceObjectType;
         report.DataSourceId = source?.Id;
         report.ReportType = definition.ReportType;
-        report.Template = string.Empty;
-        report.Settings = "{}";
-        report.Icon = definition.Icon;
-        // Native standard reports stay in metadata, but are hidden until page-perfect output is implemented.
-        report.IsActive = false;
-        report.IsPrintForm = false;
-        report.IsDefault = false;
+        if (isNewReport)
+        {
+            report.Template = string.Empty;
+            report.Settings = "{}";
+        }
+        else if (string.IsNullOrWhiteSpace(report.Settings))
+        {
+            report.Settings = "{}";
+        }
+        if (isNewReport || string.IsNullOrWhiteSpace(report.Icon))
+            report.Icon = definition.Icon;
+        if (isNewReport)
+        {
+            // Native standard reports stay in metadata, but are hidden until page-perfect output is implemented.
+            report.IsActive = false;
+            report.IsPrintForm = false;
+            report.IsDefault = false;
+        }
         report.SourceFormat = "Native";
-        report.TemplateVersion = 1;
-        report.Order = definition.Order;
+        report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
+        if (isNewReport)
+            report.Order = definition.Order;
         report.UpdatedAt = DateTime.UtcNow;
-        report.PageTitle = definition.Name;
-        report.PageOrientation = definition.PageOrientation;
-        report.PageWidth = definition.PageOrientation == "Landscape" ? 297 : 210;
-        report.PageHeight = definition.PageOrientation == "Landscape" ? 210 : 297;
-        report.LeftMargin = 10;
-        report.RightMargin = 10;
-        report.TopMargin = 12;
-        report.BottomMargin = 12;
-        report.FontName = "Segoe UI";
-        report.FontSize = 9;
-        report.ShowHeader = true;
-        report.ShowFooter = true;
-        report.ShowPageNumbers = true;
-        report.ShowGridLines = true;
-        report.TitleText = definition.Name;
-        report.SubtitleText = definition.Description;
-        report.HeaderTitle = definition.Name;
-        report.HeaderSubtitle = definition.Description;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.PageTitle))
+            report.PageTitle = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.PageOrientation))
+            report.PageOrientation = definition.PageOrientation;
+        if (isNewReport || report.PageWidth <= 0)
+            report.PageWidth = report.PageOrientation == "Landscape" ? 297 : 210;
+        if (isNewReport || report.PageHeight <= 0)
+            report.PageHeight = report.PageOrientation == "Landscape" ? 210 : 297;
+        if (isNewReport || report.LeftMargin <= 0)
+            report.LeftMargin = 10;
+        if (isNewReport || report.RightMargin <= 0)
+            report.RightMargin = 10;
+        if (isNewReport || report.TopMargin <= 0)
+            report.TopMargin = 12;
+        if (isNewReport || report.BottomMargin <= 0)
+            report.BottomMargin = 12;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.FontName))
+            report.FontName = "Segoe UI";
+        if (isNewReport || report.FontSize <= 0)
+            report.FontSize = 9;
+        if (isNewReport)
+        {
+            report.ShowHeader = true;
+            report.ShowFooter = true;
+            report.ShowPageNumbers = true;
+            report.ShowGridLines = true;
+        }
+        if (isNewReport || string.IsNullOrWhiteSpace(report.TitleText))
+            report.TitleText = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.SubtitleText))
+            report.SubtitleText = definition.Description;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.HeaderTitle))
+            report.HeaderTitle = definition.Name;
+        if (isNewReport || string.IsNullOrWhiteSpace(report.HeaderSubtitle))
+            report.HeaderSubtitle = definition.Description;
 
-        if (source != null)
+        var hasFields = await _context.ReportFields.AnyAsync(item => item.ReportId == report.Id);
+        if (source != null && !hasFields)
             await AddStandardReportFieldsAsync(report.Id, source, definition.Fields);
-
         await _context.SaveChangesAsync();
         await AssignStandardReportToModuleAsync(report.Id, definition.ModuleCode, definition.Order);
     }

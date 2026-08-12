@@ -11,6 +11,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
@@ -59,12 +60,45 @@
                 <DataGridTextColumn x:Name="AmountColumn" Header="Сумма" Binding="{Binding Amount}" Width="105"/>
                 <DataGridTextColumn x:Name="PayableAmountColumn" Header="К выплате" Binding="{Binding PayableAmount}" Width="105"/>
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="220"/>
-                <DataGridTextColumn Header="Проведен" Binding="{Binding IsPostedDisplay}" Width="90"/>
+                <DataGridTextColumn x:Name="PostedColumn" Header="Проведен" Binding="{Binding IsPostedDisplay}" Width="90"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
             </DataGrid.Columns>
         </DataGrid>
 
-        <StatusBar Grid.Row="3" Margin="0,10,0,0">
+        <GroupBox x:Name="PostingDetailsPanel" Grid.Row="3" Header="Дополнительная информация о проводке" Padding="6" Margin="0,10,0,0" Visibility="Collapsed">
+            <DataGrid x:Name="PostingDetailsGrid"
+                      Height="96"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="True"
+                      HeadersVisibility="Column"
+                      RowHeaderWidth="0"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Disabled"
+                      AlternatingRowBackground="#F8F9FA"
+                      BorderBrush="#BDC3C7"
+                      BorderThickness="1"
+                      MouseDoubleClick="PostingDetailsGrid_MouseDoubleClick">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Документ" Binding="{Binding [Документ]}" Width="90"/>
+                    <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="135"/>
+                    <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="90"/>
+                    <DataGridTextColumn Header="Модуль" Binding="{Binding [Модуль]}" Width="95"/>
+                    <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="95"/>
+                    <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="95"/>
+                    <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма]}" Width="95"/>
+                    <DataGridTextColumn x:Name="DetailAmountCurrencyColumn" Header="Сумма вал." Binding="{Binding [Сумма вал.]}" Width="95" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailCurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="100" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailOrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="160" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailEmployeeColumn" Header="Сотрудник" Binding="{Binding [Сотрудник]}" Width="160" Visibility="Collapsed"/>
+                    <DataGridTextColumn Header="Статус" Binding="{Binding [Статус]}" Width="95"/>
+                    <DataGridTextColumn Header="Примечание" Binding="{Binding [Примечание]}" Width="220"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+
+        <StatusBar Grid.Row="4" Margin="0,10,0,0">
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Готово" Foreground="#667085"/>
             </StatusBarItem>

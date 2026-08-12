@@ -23,6 +23,15 @@ namespace BIS.ERP.Services
         private readonly AppDbContext _context;
         private static readonly object SchemaSyncLock = new();
         private static readonly HashSet<string> EnsuredSchemaKeys = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly string[] CashOrderPrintFormCodes =
+        {
+            "cash.receipt.foxpro",
+            "cash.receipt.native",
+            "cash.payment.foxpro",
+            "cash.payment.native",
+            "standard.frx.finance.cash-receipt-order",
+            "standard.frx.finance.cash-payment-order"
+        };
 
         public PrintFormService(AppDbContext context)
         {
@@ -115,6 +124,7 @@ namespace BIS.ERP.Services
         public async Task SeedCashOrderFormsAsync()
         {
             await EnsureSchemaAsync();
+            var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
             var cashOrder = await _context.MetadataObjects.AsNoTracking()
                 .Include(metadata => metadata.Fields)
                 .FirstOrDefaultAsync(item => item.ObjectType == "Document" &&
@@ -139,7 +149,11 @@ namespace BIS.ERP.Services
                 bool isDefault,
                 string template)
             {
+                if (deletedReportCodes.Contains(code))
+                    return;
+
                 var report = existingReports.FirstOrDefault(item => item.Code == code);
+                var isNewReport = report == null;
                 if (report == null)
                 {
                     report = new Report
@@ -151,25 +165,36 @@ namespace BIS.ERP.Services
                     _context.Reports.Add(report);
                 }
 
-                report.Name = name;
-                report.TitleText = titleText;
-                report.Description = description;
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
+                    report.Name = name;
+                if (isNewReport || string.IsNullOrWhiteSpace(report.TitleText))
+                    report.TitleText = titleText;
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
+                    report.Description = description;
                 report.DataSourceType = "Document";
                 report.DataSourceId = cashOrder.Id;
                 report.ReportType = reportType;
                 report.IsPrintForm = true;
-                report.IsActive = true;
-                report.IsDefault = isDefault;
+                if (isNewReport)
+                {
+                    report.IsActive = true;
+                    report.IsDefault = isDefault;
+                }
                 report.SourceFormat = sourceFormat;
-                report.TemplateVersion = 1;
-                report.Icon = "🖨";
-                report.Order = order;
-                report.PageOrientation = pageOrientation;
-                report.ShowGridLines = false;
-                report.ShowHeader = false;
-                report.ShowFooter = false;
-                report.ShowPageNumbers = false;
-                report.Template = template;
+                report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Icon))
+                    report.Icon = "🖨";
+                if (isNewReport)
+                {
+                    report.Order = order;
+                    report.PageOrientation = pageOrientation;
+                    report.ShowGridLines = false;
+                    report.ShowHeader = false;
+                    report.ShowFooter = false;
+                    report.ShowPageNumbers = false;
+                }
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Template))
+                    report.Template = template;
                 report.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -227,6 +252,7 @@ namespace BIS.ERP.Services
         public async Task SeedInvoiceFormsAsync()
         {
             await EnsureSchemaAsync();
+            var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
             var documents = await _context.MetadataObjects.AsNoTracking()
                 .Include(m => m.Fields)
                 .Where(item => item.ObjectType == "Document" &&
@@ -237,6 +263,8 @@ namespace BIS.ERP.Services
             {
                 var isSales = InvoiceDocumentTypes.IsSales(document.Name);
                 var code = isSales ? "invoice.sales.foxpro" : "invoice.purchase.foxpro";
+                if (deletedReportCodes.Contains(code))
+                    continue;
                 if (await _context.Reports.AnyAsync(item => item.Code == code))
                     continue;
 
@@ -619,6 +647,65 @@ namespace BIS.ERP.Services
                 query = query.Where(item => item.IsActive);
             return await query.OrderByDescending(item => item.IsDefault).ThenBy(item => item.Order).ThenBy(item => item.Name).ToListAsync();
         }
+        public async Task<List<Report>> GetCashOrderPrintFormsAsync(Guid metadataId, bool isReceipt, bool includeInactive = true)
+        {
+            await EnsureSchemaAsync();
+            var query = _context.Reports.AsNoTracking()
+                .Include(item => item.ElementMappings)
+                .Where(item => item.IsPrintForm &&
+                    (item.DataSourceId == metadataId ||
+                     CashOrderPrintFormCodes.Contains(item.Code) ||
+                     item.Code.StartsWith("cash.receipt.") ||
+                     item.Code.StartsWith("cash.payment.")));
+
+            if (!includeInactive)
+                query = query.Where(item => item.IsActive);
+
+            var forms = await query.ToListAsync();
+            foreach (var form in forms.Where(IsKnownCashOrderPrintForm))
+            {
+                form.DataSourceType = "Document";
+                form.DataSourceId = metadataId;
+            }
+
+            return forms
+                .Where(form => IsCashOrderPrintFormForType(form, isReceipt))
+                .OrderByDescending(form => form.IsDefault)
+                .ThenBy(form => form.Order)
+                .ThenBy(form => form.Name)
+                .ToList();
+        }
+
+        private static bool IsKnownCashOrderPrintForm(Report report)
+        {
+            var code = report.Code ?? string.Empty;
+            return CashOrderPrintFormCodes.Contains(code) ||
+                code.StartsWith("cash.receipt.", StringComparison.OrdinalIgnoreCase) ||
+                code.StartsWith("cash.payment.", StringComparison.OrdinalIgnoreCase);
+        }
+        private static bool IsCashOrderPrintFormForType(Report report, bool isReceipt)
+        {
+            var code = report.Code ?? string.Empty;
+            var name = report.Name ?? string.Empty;
+            var text = $"{code} {name}";
+
+            if (ContainsIgnoreCase(text, "кассовая книга") ||
+                ContainsIgnoreCase(text, "реестр приход") ||
+                ContainsIgnoreCase(text, "оборот"))
+                return false;
+
+            var isReceiptForm =
+                ContainsIgnoreCase(code, "cash.receipt") ||
+                ContainsIgnoreCase(code, "cash-receipt") ||
+                ContainsIgnoreCase(name, "приход");
+            var isPaymentForm =
+                ContainsIgnoreCase(code, "cash.payment") ||
+                ContainsIgnoreCase(code, "cash-payment") ||
+                ContainsIgnoreCase(name, "расход");
+
+            return isReceipt ? isReceiptForm && !isPaymentForm : isPaymentForm && !isReceiptForm;
+        }
+
 
         public async Task SetAvailabilityAsync(Guid reportId, bool isActive)
         {
@@ -1791,9 +1878,11 @@ namespace BIS.ERP.Services
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
             var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
             var svg = BuildTemplateSvg(layoutTemplate, report, data, mappings ?? Array.Empty<ReportElementMapping>(), true);
+            var useLandscapePage = layoutTemplate.PageWidth >= layoutTemplate.PageHeight ||
+                string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
             return QuestPDF.Fluent.Document.Create(document => document.Page(page =>
             {
-                page.Size(report.PageOrientation == "Landscape" ? PageSizes.A4.Landscape() : PageSizes.A4);
+                page.Size(useLandscapePage ? PageSizes.A4.Landscape() : PageSizes.A4);
                 page.Margin(8, Unit.Millimetre);
                 page.Content().Svg(svg).FitArea();
             })).GeneratePdf();

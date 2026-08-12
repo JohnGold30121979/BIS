@@ -1,8 +1,8 @@
 <Window x:Class="BIS.ERP.Views.PaymentOrderDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Платежное поручение" Height="462" Width="760"
-        MinHeight="540" MinWidth="650" ResizeMode="CanResize"
+        Title="Платежное поручение" Height="397" Width="760"
+        MinHeight="480" MinWidth="650" ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

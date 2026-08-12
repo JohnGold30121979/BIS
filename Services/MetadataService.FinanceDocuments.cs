@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using System.Text.Json;
 
 namespace BIS.ERP.Services;
@@ -36,14 +36,14 @@ public partial class MetadataService
                     .Where(part => !string.IsNullOrWhiteSpace(part));
                 await CreatePosting(
                     documentNumber,
-                    postingDate,
+                    line.PostingDate ?? postingDate,
                     line.ExpenseAccountCode,
                     line.CreditAccountCode,
                     line.Amount,
                     string.Join("; ", descriptionParts),
                     "Авансовые платежи",
-                    linePostings.Count == 1 ? amountCurrency : 0m,
-                    currencyId,
+                    line.AmountCurrency,
+                    line.CurrencyId ?? currencyId,
                     organizationId,
                     employeeId);
             }
@@ -176,7 +176,10 @@ public partial class MetadataService
         for (var index = 0; index < payload.Count; index++)
         {
             var line = payload[index];
-            if (line.Amount <= 0)
+            var lineAmount = line.Amount;
+            if (lineAmount <= 0 && line.AmountCurrency > 0 && line.ExchangeRate > 0)
+                lineAmount = Math.Round(line.AmountCurrency * line.ExchangeRate, 2, MidpointRounding.AwayFromZero);
+            if (lineAmount <= 0)
                 throw new InvalidOperationException($"В строке затрат {index + 1} сумма должна быть больше нуля.");
 
             var expenseAccount = await ResolveAccountCodeValueAsync(line.ExpenseAccount);
@@ -207,9 +210,13 @@ public partial class MetadataService
             result.Add(new AdvanceExpensePostingLine(
                 expenseAccount,
                 creditAccount,
-                line.Amount,
+                lineAmount,
                 pairName,
-                line.Description));
+                line.Description,
+                line.LineDate?.Date,
+                line.AmountCurrency,
+                line.CurrencyId == Guid.Empty ? null : line.CurrencyId.ToString(),
+                line.ExchangeRate));
         }
 
         return result;
@@ -286,15 +293,23 @@ public partial class MetadataService
         string CreditAccountCode,
         decimal Amount,
         string PairName,
-        string Description);
+        string Description,
+        DateTime? PostingDate,
+        decimal AmountCurrency,
+        string? CurrencyId,
+        decimal ExchangeRate);
 
     private sealed class AdvanceExpenseLinePayload
     {
+        public DateTime? LineDate { get; set; }
         public Guid PairId { get; set; }
         public string PairName { get; set; } = string.Empty;
         public string DebitAccount { get; set; } = string.Empty;
         public string CreditAccount { get; set; } = string.Empty;
         public string ExpenseAccount { get; set; } = string.Empty;
+        public Guid CurrencyId { get; set; }
+        public decimal AmountCurrency { get; set; }
+        public decimal ExchangeRate { get; set; }
         public decimal Amount { get; set; }
         public string Description { get; set; } = string.Empty;
     }

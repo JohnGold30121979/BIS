@@ -567,8 +567,11 @@ namespace BIS.ERP.Views
                     };
                 }
 
+                CommitDesignerGridEdits();
+
                 SyncNativeTemplateToTemplateBoxIfNeeded();
 
+                SyncFrxElementMappingsFromNativeTemplate();
                 // Заполняем данные
                 _currentReport.Name = ReportNameBox.Text;
                 _currentReport.Description = ReportDescBox.Text;
@@ -585,6 +588,7 @@ namespace BIS.ERP.Views
                 _currentReport.IsDefault = IsDefaultCheck.IsChecked ?? false;
                 _currentReport.SourceFormat = _currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native";
                 _currentReport.Template = TemplateTextBox?.Text ?? "";
+                _currentReport.TemplateVersion = Math.Max(_currentReport.TemplateVersion, 2);
                 _currentReport.Icon = "📊";
                 _currentReport.UpdatedAt = DateTime.UtcNow;
 
@@ -733,8 +737,11 @@ namespace BIS.ERP.Views
                 return null;
             }
 
+            CommitDesignerGridEdits();
+
             SyncNativeTemplateToTemplateBoxIfNeeded();
 
+            SyncFrxElementMappingsFromNativeTemplate();
             var report = new Report
             {
                 Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? "Новый отчет" : ReportNameBox.Text.Trim(),

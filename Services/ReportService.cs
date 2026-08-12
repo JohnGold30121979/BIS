@@ -525,6 +525,7 @@ namespace BIS.ERP.Services
         {
             using var workbook = new XLWorkbook();
             var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
+            worksheet.ShowGridLines = report.ShowGridLines;
 
             // Заголовок отчета
             var titleRow = worksheet.Cell(1, 1);
@@ -537,7 +538,7 @@ namespace BIS.ERP.Services
 
             // Таблица данных
             var table = worksheet.Cell(4, 1).InsertTable(dataTable);
-            table.Theme = XLTableTheme.TableStyleMedium2;
+            table.Theme = report.ShowGridLines ? XLTableTheme.TableStyleMedium2 : XLTableTheme.None;
 
             // Автоширина колонок
             worksheet.Columns().AdjustToContents();
@@ -746,7 +747,7 @@ namespace BIS.ERP.Services
             var html = new StringBuilder();
 
             // Простые настройки           
-            bool showGridLines = true;          
+            bool showGridLines = report.ShowGridLines;          
 
             html.AppendLine("<!DOCTYPE html>");
             html.AppendLine("<html>");
@@ -1301,11 +1302,21 @@ namespace BIS.ERP.Services
             target.Settings = source.Settings;
         }
         // Удаление отчета
-        // Удаление отчета
         public async Task DeleteReportAsync(Guid reportId)
         {
+            var report = await _context.Reports
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == reportId);
+            if (report == null)
+                throw new InvalidOperationException($"Отчет с ID {reportId} не найден");
+
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
+            await new StandardReportDeletionService(_context).MarkDeletedAsync(report.Code, report.Name);
+
+            await _context.MetadataModuleItems
+                .Where(item => item.ObjectType == "Report" && item.ObjectId == reportId)
+                .ExecuteDeleteAsync();
             await _context.ReportFields
                 .Where(item => item.ReportId == reportId)
                 .ExecuteDeleteAsync();
@@ -1321,9 +1332,11 @@ namespace BIS.ERP.Services
             await _context.Set<ReportHeaderFooter>()
                 .Where(item => item.ReportId == reportId)
                 .ExecuteDeleteAsync();
-            await _context.Reports
+            var deletedReports = await _context.Reports
                 .Where(item => item.Id == reportId)
                 .ExecuteDeleteAsync();
+            if (deletedReports == 0)
+                throw new InvalidOperationException($"Отчет \"{report.Name}\" уже удален или не найден");
 
             await transaction.CommitAsync();
         }

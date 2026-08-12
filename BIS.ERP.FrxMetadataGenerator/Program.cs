@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using BIS.ERP.Services;
@@ -14,7 +14,7 @@ var outputFile = args[1];
 
 var variants = new[]
 {
-    new ReportVariant("prb1.frx", "standard.frx.finance.advance-payments.prb1", "Авансовые платежи (FRX FoxPro)", "FoxPro-макет авансовых платежей prb1.frx.", 1050, true, "Авансовые платежи", true, "Portrait", "💰"),
+    new ReportVariant("pr_av1.frx", "standard.frx.finance.advance-payments.pr-av1", "Авансовые платежи pr_av1 (FRX FoxPro)", "FoxPro-макет авансовых платежей pr_av1.frx.", 1050, true, "Авансовые платежи", true, "Portrait", "💰"),
     new ReportVariant("prb1.frx", "standard.frx.finance.trial-balance.full", "ОСВ полная (FRX FoxPro)", "FoxPro-макет полной оборотно-сальдовой ведомости prb1.frx.", 1041, false, "Проводки", true, "Portrait", "📊"),
     new ReportVariant("pra1k1.frx", "standard.frx.finance.trial-balance.debit-turnovers", "ОСВ обороты по дебету (FRX FoxPro)", "FoxPro-макет оборотов по дебету счета pra1k1.frx.", 1042, false, "Проводки", true, "Landscape", "📊"),
     new ReportVariant("pra1k2.frx", "standard.frx.finance.trial-balance.account-summary", "ОСВ сводные обороты по счету (FRX FoxPro)", "FoxPro-макет сводных оборотов по счету pra1k2.frx.", 1043, false, "Проводки", true, "Landscape", "📊"),
@@ -89,7 +89,7 @@ foreach (var variant in variants)
 var text = File.ReadAllText(outputFile, Encoding.UTF8);
 text = Regex.Replace(
     text,
-    @"\s*new\(\s*Code:\s*""standard\.frx\.finance\.(?:reconciliation\.[^""\r\n]+|advance-payments\.prb1|trial-balance\.[^""\r\n]+|cash\.[^""\r\n]+|payment-order\.[^""\r\n]+)""[\s\S]*?TemplateCompressedBase64:\s*""[^""]*""\),\r?\n",
+    @"\s*new\(\s*Code:\s*""standard\.frx\.finance\.(?:reconciliation\.[^""\r\n]+|advance-payments\.[^""\r\n]+|trial-balance\.[^""\r\n]+|cash\.[^""\r\n]+|payment-order\.[^""\r\n]+)""[\s\S]*?TemplateCompressedBase64:\s*""[^""]*""\),\r?\n",
     string.Empty);
 
 var insertion = string.Join(Environment.NewLine, blocks) + Environment.NewLine;
