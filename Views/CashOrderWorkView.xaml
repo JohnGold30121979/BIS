@@ -23,23 +23,26 @@
 
         <!-- Панель фильтров и действий -->
         <StackPanel Grid.Row="1" Margin="0,0,0,10">
-            <WrapPanel Margin="0,0,0,8">
-                <TextBlock Text="Период:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="Bold"/>
-                <DatePicker x:Name="PeriodStartDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
-                <TextBlock Text="—" VerticalAlignment="Center" Margin="5,0"/>
-                <DatePicker x:Name="PeriodEndDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
-                <TextBlock Text="Касса:" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="Bold"/>
-                <ComboBox x:Name="CashDeskFilterCombo"
-                          Width="260"
-                          Height="30"
-                          DisplayMemberPath="DisplayNameWithAccount"
-                          SelectionChanged="OnFilterChanged"/>
-                <Button x:Name="CashPostingsButton" Content="Проводки по кассе" Width="145" Height="32" Margin="10,0,0,0"
-                        Background="#16A085" Foreground="White" Click="OnCashPostingsClick"/>
-                <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="32" Margin="10,0,0,0"
-                        Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
-            </WrapPanel>
-                        <Border Margin="0,0,0,8" Padding="10,7" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
+            <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F8FBFE" CornerRadius="5">
+                <WrapPanel>
+                    <TextBlock Text="Поиск и отбор:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
+                    <TextBlock Text="Период с:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <DatePicker x:Name="PeriodStartDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
+                    <TextBlock Text="по:" VerticalAlignment="Center" Margin="10,0,6,0"/>
+                    <DatePicker x:Name="PeriodEndDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
+                    <TextBlock Text="Касса:" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="Bold"/>
+                    <ComboBox x:Name="CashDeskFilterCombo"
+                              Width="260"
+                              Height="30"
+                              DisplayMemberPath="DisplayNameWithAccount"
+                              SelectionChanged="OnFilterChanged"/>
+                    <Button x:Name="CashPostingsButton" Content="Проводки по кассе" Width="145" Height="32" Margin="10,0,0,0"
+                            Background="#16A085" Foreground="White" Click="OnCashPostingsClick"/>
+                    <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="32" Margin="10,0,0,0"
+                            Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
+                </WrapPanel>
+            </Border>
+            <Border Margin="0,0,0,8" Padding="10,7" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
                 <StackPanel>
                     <TextBlock x:Name="CashTurnoverHintText" Text="Остатки по кассе: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#2C3E50" Margin="0,0,0,5"/>
                     <WrapPanel>
@@ -60,30 +63,43 @@
                     </WrapPanel>
                 </StackPanel>
             </Border>
-            <WrapPanel>
-                <Button x:Name="AddPaymentButton" Content="➖ Расходный КО" Width="130" Height="35" Margin="0,0,10,0"
-                        Background="#E67E22" Foreground="White" Click="OnAddPaymentClick"/>
-                <Button x:Name="AddReceiptButton" Content="➕ Приходный КО" Width="130" Height="35" Margin="0,0,10,0"
-                        Background="#27AE60" Foreground="White" Click="OnAddReceiptClick"/>
-                <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="35" Margin="0,0,10,0"
-                        Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
-                <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="35" Margin="0,0,10,0"
-                        Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
-                <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
-                        Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
-                <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
-                        Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
-                <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,5"
-                          ToolTip="Если выключено, сразу открывается активная форма по умолчанию. Если включено, можно выбрать вариант печатной формы."/>
-            </WrapPanel>
-            <WrapPanel Margin="0,6,0,0">
-                <Button x:Name="CloseCashDayButton" Content="Закрыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#D35400" Foreground="White" Click="OnCloseCashDayClick"/>
-                <Button x:Name="OpenCashDayButton" Content="Открыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#27AE60" Foreground="White" Click="OnOpenCashDayClick"/>
-                <Button x:Name="ClosedDaysTurnoversButton" Content="Обороты по закрытым дням" Width="180" Height="32" Margin="0,0,8,0" Background="#2C3E50" Foreground="White" Click="OnClosedDaysTurnoversClick"/>
-                <Button x:Name="CashBookButton" Content="Кассовая книга" Width="125" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
-                <Button x:Name="DayTurnoversButton" Content="Обороты за день" Width="135" Height="32" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnDayTurnoversClick"/>
-                <Button x:Name="ReceiptExpenseRegisterButton" Content="Реестр приходов/расходов" Width="185" Height="32" Margin="0,0,8,0" Background="#34495E" Foreground="White" Click="OnReceiptExpenseRegisterClick"/>
-            </WrapPanel>
+            <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFFFFF" CornerRadius="5">
+                <WrapPanel>
+                    <TextBlock Text="Документы:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
+                    <Button x:Name="AddPaymentButton" Content="➖ Расходный КО" Width="130" Height="35" Margin="0,0,10,0"
+                            Background="#E67E22" Foreground="White" Click="OnAddPaymentClick"/>
+                    <Button x:Name="AddReceiptButton" Content="➕ Приходный КО" Width="130" Height="35" Margin="0,0,10,0"
+                            Background="#27AE60" Foreground="White" Click="OnAddReceiptClick"/>
+                    <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="35" Margin="0,0,10,0"
+                            Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
+                    <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="35" Margin="0,0,10,0"
+                            Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
+                    <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
+                            Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
+                    <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
+                            Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
+                    <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,5"
+                              ToolTip="Если выключено, сразу открывается активная форма по умолчанию. Если включено, можно выбрать вариант печатной формы."/>
+                </WrapPanel>
+            </Border>
+            <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFF8EC" CornerRadius="5">
+                <WrapPanel>
+                    <TextBlock Text="Работа с кассовым днем:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
+                    <TextBlock Text="Дата:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <DatePicker x:Name="CashDayDatePicker" Width="120" ToolTip="Дата кассового дня для закрытия, открытия и оборотов за день"/>
+                    <Button x:Name="CloseCashDayButton" Content="Закрыть день" Width="115" Height="32" Margin="10,0,8,0" Background="#D35400" Foreground="White" Click="OnCloseCashDayClick"/>
+                    <Button x:Name="OpenCashDayButton" Content="Открыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#27AE60" Foreground="White" Click="OnOpenCashDayClick"/>
+                    <Button x:Name="DayTurnoversButton" Content="Обороты за день" Width="135" Height="32" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnDayTurnoversClick"/>
+                    <Button x:Name="ClosedDaysTurnoversButton" Content="Обороты по закрытым дням" Width="180" Height="32" Margin="0,0,8,0" Background="#2C3E50" Foreground="White" Click="OnClosedDaysTurnoversClick"/>
+                </WrapPanel>
+            </Border>
+            <Border Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F8FBFE" CornerRadius="5">
+                <WrapPanel>
+                    <TextBlock Text="Отчеты по кассе:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
+                    <Button x:Name="CashBookButton" Content="Кассовая книга" Width="125" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
+                    <Button x:Name="ReceiptExpenseRegisterButton" Content="Реестр приходов/расходов" Width="185" Height="32" Margin="0,0,8,0" Background="#34495E" Foreground="White" Click="OnReceiptExpenseRegisterClick"/>
+                </WrapPanel>
+            </Border>
         </StackPanel>
 
         <!-- Таблица -->
@@ -109,6 +125,9 @@
                             <Setter Property="FontWeight" Value="SemiBold"/>
                             <Setter Property="Foreground" Value="#27AE60"/>
                             <Style.Triggers>
+                                <DataTrigger Binding="{Binding CashDayStatusDisplay}" Value="Не открыт">
+                                    <Setter Property="Foreground" Value="#7F8C8D"/>
+                                </DataTrigger>
                                 <DataTrigger Binding="{Binding IsCashDayClosed}" Value="True">
                                     <Setter Property="Foreground" Value="#C0392B"/>
                                 </DataTrigger>
@@ -177,4 +196,5 @@
         </StatusBar>
     </Grid>
 </UserControl>
+
 

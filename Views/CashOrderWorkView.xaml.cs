@@ -46,6 +46,7 @@ namespace BIS.ERP.Views
             var today = DateTime.Today;
             PeriodStartDatePicker.SelectedDate = new DateTime(today.Year, today.Month, 1);
             PeriodEndDatePicker.SelectedDate = today;
+            CashDayDatePicker.SelectedDate = today;
             PostingDetailsGrid.ItemsSource = _postingDetails;
             InitializeHeader(documentMetadata.Icon, CashOrderDocumentName, documentMetadata.Description);
         }
@@ -311,7 +312,7 @@ namespace BIS.ERP.Views
 
         private async Task ApplyCashDayStatusAsync(List<CashOrderRow> rows, DateTime? startDate, DateTime? endDate)
         {
-            ResetCashDayStatus(rows, "Открыт", false);
+            ResetCashDayStatus(rows, "Не открыт", false);
 
             if (rows.Count == 0)
                 return;
@@ -332,7 +333,8 @@ namespace BIS.ERP.Views
                 if (CashDeskFilterCombo.SelectedItem is CashDeskItem selectedCashDesk && selectedCashDesk.Id != Guid.Empty)
                 {
                     var closedDates = await cashDayService.GetClosedDatesAsync(selectedCashDesk.Id, periodStart, periodEnd);
-                    ApplyClosedDates(rows, closedDates);
+                    var openDates = await cashDayService.GetOpenDatesAsync(selectedCashDesk.Id, periodStart, periodEnd);
+                    ApplyCashDayDates(rows, openDates, closedDates);
                     return;
                 }
 
@@ -344,7 +346,8 @@ namespace BIS.ERP.Views
                 foreach (var group in rowsByCashDesk)
                 {
                     var closedDates = await cashDayService.GetClosedDatesAsync(group.Key, periodStart, periodEnd);
-                    ApplyClosedDates(group.Select(item => item.Row), closedDates);
+                    var openDates = await cashDayService.GetOpenDatesAsync(group.Key, periodStart, periodEnd);
+                    ApplyCashDayDates(group.Select(item => item.Row), openDates, closedDates);
                 }
             }
             catch (Exception ex)
@@ -363,15 +366,23 @@ namespace BIS.ERP.Views
             }
         }
 
-        private static void ApplyClosedDates(IEnumerable<CashOrderRow> rows, IEnumerable<DateTime> closedDates)
+        private static void ApplyCashDayDates(
+            IEnumerable<CashOrderRow> rows,
+            IEnumerable<DateTime> openDates,
+            IEnumerable<DateTime> closedDates)
         {
+            var openSet = openDates.Select(date => date.Date).ToHashSet();
             var closedSet = closedDates.Select(date => date.Date).ToHashSet();
             foreach (var row in rows)
             {
-                row.IsCashDayClosed = closedSet.Contains(row.DocDate.Date);
-                row.CashDayStatusDisplay = row.IsCashDayClosed ? "Закрыт" : "Открыт";
+                var rowDate = row.DocDate.Date;
+                row.IsCashDayClosed = closedSet.Contains(rowDate);
+                row.CashDayStatusDisplay = row.IsCashDayClosed
+                    ? "Закрыт"
+                    : openSet.Contains(rowDate) ? "Открыт" : "Не открыт";
             }
         }
+
         private async Task UpdateCashTurnoverSummaryAsync(DateTime? startDate, DateTime? endDate)
         {
             var periodStart = startDate ?? DateTime.Today;
@@ -884,6 +895,9 @@ namespace BIS.ERP.Views
                 return;
             }
 
+            if (!await EnsureCashDayAllowsDocumentAsync(selectedRow, "Редактирование кассового ордера"))
+                return;
+
             try
             {
                 var dialog = new CashOrderDialog(_documentMetadata, _metadataService, selectedRow.Id)
@@ -915,6 +929,9 @@ namespace BIS.ERP.Views
                 return;
             }
 
+            if (!await EnsureCashDayAllowsDocumentAsync(selectedRow, "Удаление кассового ордера"))
+                return;
+
             var result = MessageBox.Show("Удалить выбранный документ?", "Подтверждение",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result != MessageBoxResult.Yes)
@@ -942,6 +959,12 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
+
+            if (!await EnsureCashDayAllowsDocumentAsync(
+                    selectedRow,
+                    selectedRow.IsPosted ? "Отмена проведения кассового ордера" : "Проведение кассового ордера",
+                    offerOpenDay: !selectedRow.IsPosted))
+                return;
 
             var actionText = selectedRow.IsPosted ? "Отменить проведение выбранного документа?" : "Провести выбранный документ?";
             var result = MessageBox.Show(actionText, "Подтверждение",
@@ -1007,6 +1030,69 @@ namespace BIS.ERP.Views
             }
 
             return true;
+        }
+
+        private async Task<bool> EnsureCashDayAllowsDocumentAsync(CashOrderRow row, string caption, bool offerOpenDay = true)
+        {
+            if (!Guid.TryParse(row.CashDeskId, out var cashDeskId) || cashDeskId == Guid.Empty)
+            {
+                MessageBox.Show("У документа не определена касса. Операция с кассовым днем невозможна.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var cashDayService = new CashDayClosureService(context);
+
+                if (await cashDayService.IsDayClosedAsync(cashDeskId, row.DocDate))
+                {
+                    var closedMessage = offerOpenDay
+                        ? $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" закрыт. Создание, изменение и проведение проводок в закрытом дне запрещены."
+                        : $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" закрыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".";
+                    MessageBox.Show(closedMessage,
+                        caption,
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return false;
+                }
+
+                if (await cashDayService.IsDayOpenAsync(cashDeskId, row.DocDate))
+                    return true;
+
+                if (!offerOpenDay)
+                {
+                    MessageBox.Show(
+                        $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" не открыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".",
+                        caption,
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return false;
+                }
+
+                var answer = MessageBox.Show(
+                    $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" не открыт. Открыть новый день для работы?",
+                    caption,
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (answer != MessageBoxResult.Yes)
+                    return false;
+
+                await cashDayService.OpenDayAsync(cashDeskId, row.DocDate, CurrentUserName());
+                await LoadData();
+                StatusText.Text = $"Кассовый день {row.DocDate:dd.MM.yyyy} открыт";
+                return true;
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(ex.Message, caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка проверки кассового дня: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
         }
 
         private async Task<List<PostingViewModel>> LoadCashPostingsAsync(CashDeskItem cashDesk, DateTime startDate, DateTime endDate)
@@ -1179,7 +1265,7 @@ namespace BIS.ERP.Views
             if (!TryGetSelectedConcreteCashDesk(caption, out var cashDesk))
                 return;
 
-            var cashDate = (PeriodEndDatePicker.SelectedDate ?? DateTime.Today).Date;
+            var cashDate = (CashDayDatePicker.SelectedDate ?? DateTime.Today).Date;
             var confirm = MessageBox.Show($"Закрыть кассовый день {cashDate:dd.MM.yyyy} по кассе \"{cashDesk.DisplayNameWithAccount}\"?",
                 caption,
                 MessageBoxButton.YesNo,
@@ -1191,6 +1277,18 @@ namespace BIS.ERP.Views
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var cashDayService = new CashDayClosureService(context);
+                if (await cashDayService.IsDayClosedAsync(cashDesk.Id, cashDate))
+                {
+                    MessageBox.Show("Этот кассовый день уже закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (!await cashDayService.IsDayOpenAsync(cashDesk.Id, cashDate))
+                {
+                    MessageBox.Show("Кассовый день не открыт. Перед закрытием сначала откройте день.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
                 var turnoverSummary = await CalculateCashTurnoverSummaryAsync(cashDesk, cashDate, cashDate);
                 await cashDayService.CloseDayAsync(
                     cashDesk.Id,
@@ -1204,6 +1302,7 @@ namespace BIS.ERP.Views
                     turnoverSummary.ClosingDebit,
                     turnoverSummary.ClosingCredit);
 
+                await LoadData();
                 StatusText.Text = $"Кассовый день {cashDate:dd.MM.yyyy} закрыт";
                 MessageBox.Show("Кассовый день закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -1222,7 +1321,7 @@ namespace BIS.ERP.Views
             if (!await ConfirmAdminPasswordAsync(caption))
                 return;
 
-            var cashDate = (PeriodEndDatePicker.SelectedDate ?? DateTime.Today).Date;
+            var cashDate = (CashDayDatePicker.SelectedDate ?? DateTime.Today).Date;
             try
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
@@ -1235,6 +1334,7 @@ namespace BIS.ERP.Views
                     return;
                 }
 
+                await LoadData();
                 StatusText.Text = $"Кассовый день {cashDate:dd.MM.yyyy} открыт";
                 MessageBox.Show("Кассовый день открыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
@@ -1262,30 +1362,63 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var closedDateSet = closedDates.Select(date => date.Date).ToHashSet();
-                var postings = await LoadCashPostingsAsync(cashDesk, startDate, endDate);
-                var closedPostings = postings.Where(posting => closedDateSet.Contains(posting.Date.Date)).ToList();
+                var rows = await BuildClosedDayTurnoverRowsAsync(cashDesk, closedDates, endDate);
+                var cashDeskName = string.IsNullOrWhiteSpace(cashDesk.DisplayName)
+                    ? cashDesk.DisplayNameWithAccount
+                    : cashDesk.DisplayName;
 
-                var turnoverSummary = await CalculateCashTurnoverSummaryAsync(cashDesk, startDate, endDate);
-                var dialog = new DocumentPostingsDialog("Обороты по закрытым дням", $"{cashDesk.DisplayNameWithAccount} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}", closedPostings, BuildCashTurnoverSummaryFields(turnoverSummary))
+                var dialog = new CashClosedDaysTurnoversDialog(
+                    caption,
+                    $"{cashDeskName} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
+                    rows)
                 {
                     Owner = Window.GetWindow(this)
                 };
                 dialog.ShowDialog();
-                StatusText.Text = $"Закрытых дней: {closedDates.Count}, проводок: {closedPostings.Count}";
+                StatusText.Text = $"Закрытых дней: {rows.Count}";
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка расчета оборотов по закрытым дням: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private async Task<List<CashClosedDayTurnoverRow>> BuildClosedDayTurnoverRowsAsync(
+            CashDeskItem cashDesk,
+            IEnumerable<DateTime> closedDates,
+            DateTime endDate)
+        {
+            var accountCode = ExtractAccountCode(cashDesk.AccountCode);
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var postingService = new PostingService(context);
+            var postings = await postingService.GetAllPostingsAsync(null, endDate.Date);
+
+            return closedDates
+                .Select(date => date.Date)
+                .Distinct()
+                .OrderBy(date => date)
+                .Select(date =>
+                {
+                    var summary = CalculateCashTurnoverSummary(cashDesk.DisplayName, accountCode, date, date, postings);
+                    return new CashClosedDayTurnoverRow
+                    {
+                        Date = date,
+                        OpeningBalance = summary.OpeningDebit - summary.OpeningCredit,
+                        DebitTurnover = summary.DebitTurnover,
+                        CreditTurnover = summary.CreditTurnover,
+                        ClosingBalance = summary.ClosingDebit - summary.ClosingCredit
+                    };
+                })
+                .ToList();
+        }
+
         private async void OnDayTurnoversClick(object sender, RoutedEventArgs e)
         {
             const string caption = "Обороты за день";
             if (!TryGetSelectedConcreteCashDesk(caption, out var cashDesk))
                 return;
 
-            var cashDate = (PeriodEndDatePicker.SelectedDate ?? DateTime.Today).Date;
+            var cashDate = (CashDayDatePicker.SelectedDate ?? DateTime.Today).Date;
             try
             {
                 var postings = await LoadCashPostingsAsync(cashDesk, cashDate, cashDate);
@@ -2045,7 +2178,7 @@ namespace BIS.ERP.Views
         public string DocNumber { get; set; } = string.Empty;
         public DateTime DocDate { get; set; }
         public bool IsCashDayClosed { get; set; }
-        public string CashDayStatusDisplay { get; set; } = "Открыт";
+        public string CashDayStatusDisplay { get; set; } = "Не открыт";
         public string CashDeskName { get; set; } = string.Empty;
         public string OrganizationName { get; set; } = string.Empty;
         public string CurrencyName { get; set; } = string.Empty;
@@ -2091,7 +2224,6 @@ namespace BIS.ERP.Views
         }
     }
 }
-
 
 
 

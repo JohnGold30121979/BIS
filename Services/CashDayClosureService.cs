@@ -252,20 +252,28 @@ namespace BIS.ERP.Services
             await EnsureExistsAsync();
             var description = $"Открытие кассового дня {closeDate:dd.MM.yyyy}";
             var closeDateUtc = DateTime.SpecifyKind(closeDate.Date, DateTimeKind.Utc);
+            var openDates = await GetOpenDayDatesAsync(cashDeskId);
+            var anotherOpenDate = openDates.FirstOrDefault(date => date.Date != closeDate.Date);
+
+            if (anotherOpenDate != default)
+                throw new InvalidOperationException($"По выбранной кассе уже открыт кассовый день {anotherOpenDate:dd.MM.yyyy}. Сначала закройте его.");
 
             try
             {
                 return await _context.Database.ExecuteSqlRawAsync("""
-                    UPDATE "CashDayClosures"
-                    SET "IsClosed" = false,
-                        "OpenedBy" = @openedBy,
+                    INSERT INTO "CashDayClosures"
+                        ("Id", "CashDeskId", "CashDeskName", "CloseDate", "IsClosed", "OpenedBy", "OpenedAt", "UpdatedAt", "Description")
+                    VALUES
+                        (@id, @cashDeskId, '', @closeDate, false, @openedBy, NOW(), NOW(), @description)
+                    ON CONFLICT ("CashDeskId", "CloseDate")
+                    DO UPDATE SET
+                        "IsClosed" = false,
+                        "OpenedBy" = EXCLUDED."OpenedBy",
                         "OpenedAt" = NOW(),
                         "UpdatedAt" = NOW(),
-                        "Description" = @description
-                    WHERE "CashDeskId" = @cashDeskId
-                      AND "CloseDate" = @closeDate
-                      AND "IsClosed" = true
+                        "Description" = EXCLUDED."Description"
                     """,
+                    new NpgsqlParameter("@id", Guid.NewGuid()),
                     new NpgsqlParameter("@openedBy", openedBy ?? string.Empty),
                     new NpgsqlParameter("@description", description),
                     new NpgsqlParameter("@cashDeskId", cashDeskId),
@@ -279,6 +287,88 @@ namespace BIS.ERP.Services
                     ex);
                 throw;
             }
+        }
+
+        public async Task EnsureDayCanAcceptDocumentsAsync(Guid cashDeskId, string cashDeskName, DateTime cashDate)
+        {
+            await EnsureExistsAsync();
+
+            if (await IsDayClosedAsync(cashDeskId, cashDate))
+                throw new InvalidOperationException($"Кассовый день {cashDate:dd.MM.yyyy} по кассе \"{cashDeskName}\" закрыт. Создание, изменение и проведение проводок в закрытом дне запрещены.");
+
+            if (!await IsDayOpenAsync(cashDeskId, cashDate))
+                throw new InvalidOperationException($"Кассовый день {cashDate:dd.MM.yyyy} по кассе \"{cashDeskName}\" не открыт. Откройте день перед созданием или проведением документов.");
+        }
+
+        public async Task<bool> IsDayClosedAsync(Guid cashDeskId, DateTime cashDate)
+        {
+            await EnsureExistsAsync();
+            var cashDateUtc = DateTime.SpecifyKind(cashDate.Date, DateTimeKind.Utc);
+
+            return await ExecuteScalarBoolAsync("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM "CashDayClosures"
+                    WHERE "CashDeskId" = @cashDeskId
+                      AND "CloseDate" = @cashDate
+                      AND "IsClosed" = true
+                )
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId),
+                new NpgsqlParameter("@cashDate", cashDateUtc));
+        }
+
+        public async Task<bool> IsDayOpenAsync(Guid cashDeskId, DateTime cashDate)
+        {
+            await EnsureExistsAsync();
+            var cashDateUtc = DateTime.SpecifyKind(cashDate.Date, DateTimeKind.Utc);
+
+            return await ExecuteScalarBoolAsync("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM "CashDayClosures"
+                    WHERE "CashDeskId" = @cashDeskId
+                      AND "CloseDate" = @cashDate
+                      AND "IsClosed" = false
+                )
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId),
+                new NpgsqlParameter("@cashDate", cashDateUtc));
+        }
+
+        public async Task<List<DateTime>> GetOpenDayDatesAsync(Guid cashDeskId)
+        {
+            await EnsureExistsAsync();
+
+            var dates = await _context.Database.SqlQuery<DateTime>($"""
+                SELECT "CloseDate"::timestamp AS "Value"
+                FROM "CashDayClosures"
+                WHERE "CashDeskId" = {cashDeskId}
+                  AND "IsClosed" = false
+                ORDER BY "CloseDate"
+                """).ToListAsync();
+
+            return dates.Select(d => DateTime.SpecifyKind(d, DateTimeKind.Utc)).ToList();
+        }
+
+        public async Task<List<DateTime>> GetOpenDatesAsync(Guid cashDeskId, DateTime startDate, DateTime endDate)
+        {
+            await EnsureExistsAsync();
+
+            var startDateUtc = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
+            var endDateUtc = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
+
+            var dates = await _context.Database.SqlQuery<DateTime>($"""
+                SELECT "CloseDate"::timestamp AS "Value"
+                FROM "CashDayClosures"
+                WHERE "CashDeskId" = {cashDeskId}
+                  AND "CloseDate" >= {startDateUtc}
+                  AND "CloseDate" <= {endDateUtc}
+                  AND "IsClosed" = false
+                ORDER BY "CloseDate"
+                """).ToListAsync();
+
+            return dates.Select(d => DateTime.SpecifyKind(d, DateTimeKind.Utc)).ToList();
         }
 
         public async Task<List<DateTime>> GetClosedDatesAsync(Guid cashDeskId, DateTime startDate, DateTime endDate)
@@ -302,3 +392,4 @@ namespace BIS.ERP.Services
         }
     }
 }
+

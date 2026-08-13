@@ -643,6 +643,10 @@ namespace BIS.ERP.Views
                     return;
                 }
 
+                var documentDate = (DatePicker.SelectedDate ?? DateTime.Today).Date;
+                if (!await EnsureCashDayAllowsSaveAsync(_selectedCashDeskId, CashDeskCombo.Text, documentDate))
+                    return;
+
                 // Получаем корреспондирующий счет
                 string corrAccountId = _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId.ToString() : string.Empty;
                 string corrAccountCode = _selectedCorrAccountCode;
@@ -671,7 +675,7 @@ namespace BIS.ERP.Views
                 var itemData = new Dictionary<string, object>
                 {
                     ["Номер"] = documentNumber,
-                    ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
+                    ["Дата"] = documentDate,
                     ["Тип КО"] = _orderKind,
                     ["Сумма"] = amount,
                     ["Основание"] = BasisBox.Text,
@@ -726,6 +730,60 @@ namespace BIS.ERP.Views
                 this.Cursor = null;
             }
         }
+
+        private async Task<bool> EnsureCashDayAllowsSaveAsync(Guid cashDeskId, string cashDeskName, DateTime documentDate)
+        {
+            const string caption = "Проверка кассового дня";
+            if (cashDeskId == Guid.Empty)
+            {
+                MessageBox.Show("Выберите кассу.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                CashDeskCombo.Focus();
+                return false;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var cashDayService = new CashDayClosureService(context);
+
+                if (await cashDayService.IsDayClosedAsync(cashDeskId, documentDate))
+                {
+                    MessageBox.Show($"Кассовый день {documentDate:dd.MM.yyyy} по кассе \"{cashDeskName}\" закрыт. Создание и изменение документов в закрытом дне запрещены.",
+                        caption,
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return false;
+                }
+
+                if (await cashDayService.IsDayOpenAsync(cashDeskId, documentDate))
+                    return true;
+
+                var answer = MessageBox.Show(
+                    $"Кассовый день {documentDate:dd.MM.yyyy} по кассе \"{cashDeskName}\" не открыт. Открыть новый день для работы?",
+                    caption,
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (answer != MessageBoxResult.Yes)
+                    return false;
+
+                await cashDayService.OpenDayAsync(cashDeskId, documentDate, CurrentUserNameForAudit());
+                MessageBox.Show("Кассовый день открыт. Можно продолжить сохранение документа.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                return true;
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show(ex.Message, caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка проверки кассового дня: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
+        }
+
+        private static string CurrentUserNameForAudit() =>
+            string.IsNullOrWhiteSpace(Environment.UserName) ? "user" : Environment.UserName;
 
         private bool IsCurrencyEnabledForAccount(string accountCode)
         {
@@ -1258,6 +1316,8 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
+
+
 
 
 
