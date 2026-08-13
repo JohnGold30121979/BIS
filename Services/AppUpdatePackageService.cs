@@ -51,6 +51,7 @@ namespace BIS.ERP.Services
 
         public async Task<AppUpdateManifest> CreateManifestForFolderAsync(string sourceFolder)
         {
+            sourceFolder = ResolveApplicationPayloadFolder(sourceFolder);
             if (!Directory.Exists(sourceFolder))
                 throw new DirectoryNotFoundException(sourceFolder);
 
@@ -72,6 +73,7 @@ namespace BIS.ERP.Services
             string destinationFile,
             AppUpdateManifest? defaultManifest = null)
         {
+            sourceFolder = ResolveApplicationPayloadFolder(sourceFolder);
             if (!Directory.Exists(sourceFolder))
                 throw new DirectoryNotFoundException(sourceFolder);
 
@@ -85,6 +87,9 @@ namespace BIS.ERP.Services
 
             var destinationFullPath = Path.GetFullPath(destinationFile);
             manifest.Files = await BuildFileManifestAsync(sourceFolder, destinationFullPath, manifestPath);
+            if (manifest.Files.Count == 0)
+                throw new InvalidOperationException($"В обновлении нет файлов. Проверьте папку публикации программы: {sourceFolder}");
+
             ValidateManifest(manifest, allowEmptyFiles: false);
 
             await using var memory = new MemoryStream();
@@ -450,6 +455,62 @@ namespace BIS.ERP.Services
                 .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(part => int.TryParse(part, out var value) ? value : 0)
                 .ToList();
+        }
+
+        private static string ResolveApplicationPayloadFolder(string sourceFolder)
+        {
+            var requestedFolder = Path.GetFullPath(sourceFolder);
+            if (LooksLikeApplicationPayload(requestedFolder))
+                return requestedFolder;
+
+            foreach (var candidate in GetApplicationPayloadCandidates(requestedFolder))
+            {
+                if (LooksLikeApplicationPayload(candidate))
+                    return candidate;
+            }
+
+            var currentAppFolder = AppContext.BaseDirectory;
+            if (!HasPackageFiles(requestedFolder) && LooksLikeApplicationPayload(currentAppFolder))
+                return Path.GetFullPath(currentAppFolder);
+
+            return requestedFolder;
+        }
+
+        private static IEnumerable<string> GetApplicationPayloadCandidates(string sourceFolder)
+        {
+            yield return Path.Combine(sourceFolder, "publish");
+            yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows", "publish");
+            yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows");
+            yield return Path.Combine(sourceFolder, "bin", "Debug", "net8.0-windows", "publish");
+            yield return Path.Combine(sourceFolder, "bin", "Debug", "net8.0-windows");
+        }
+
+        private static bool LooksLikeApplicationPayload(string folder)
+        {
+            return Directory.Exists(folder) &&
+                (File.Exists(Path.Combine(folder, "BIS.ERP.exe")) ||
+                 File.Exists(Path.Combine(folder, "BIS.ERP.dll")));
+        }
+
+        private static bool HasPackageFiles(string folder)
+        {
+            if (!Directory.Exists(folder))
+                return false;
+
+            return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                .Any(path =>
+                {
+                    var fileName = Path.GetFileName(path);
+                    if (fileName.Equals("manifest.json", StringComparison.OrdinalIgnoreCase))
+                        return false;
+                    if (fileName.EndsWith(".bisapp", StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    var relativePath = Path.GetRelativePath(folder, path).Replace('\\', '/');
+                    return !relativePath.StartsWith(".", StringComparison.Ordinal) &&
+                        !relativePath.Contains("/.git/", StringComparison.OrdinalIgnoreCase) &&
+                        !relativePath.Contains("/.vs/", StringComparison.OrdinalIgnoreCase);
+                });
         }
 
         private static async Task<List<AppUpdateFile>> BuildFileManifestAsync(

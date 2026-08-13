@@ -2172,6 +2172,16 @@ namespace BIS.ERP.Services
             sql.AppendLine(");");
 
             await _context.Database.ExecuteSqlRawAsync(sql.ToString());
+
+            foreach (var field in obj.Fields.OrderBy(f => f.Order))
+            {
+                if (string.IsNullOrWhiteSpace(field.DbColumnName))
+                    continue;
+
+                var sqlType = GetSqlTypeForField(field);
+                await _context.Database.ExecuteSqlRawAsync(
+                    $"ALTER TABLE \"{obj.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {sqlType};");
+            }
         }
 
         public async Task UpdateDynamicTableAsync(MetadataObject obj)
@@ -4996,4 +5006,3 @@ namespace BIS.ERP.Services
 
     }
 }
-

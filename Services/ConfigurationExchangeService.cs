@@ -83,6 +83,8 @@ namespace BIS.ERP.Services
                 foreach (var obj in package.MetadataObjects.Where(item => !string.IsNullOrWhiteSpace(item.TableName)))
                     await metadataService.CreateDynamicTableAsync(obj);
 
+                await EnsureBuiltInSchemasBeforeDataImportAsync();
+
                 foreach (var table in package.TableData)
                     await ReplaceTableDataAsync(table);
 
@@ -98,6 +100,15 @@ namespace BIS.ERP.Services
             }
 
             return package;
+        }
+
+        private async Task EnsureBuiltInSchemasBeforeDataImportAsync()
+        {
+            await new InvoiceService(_context).EnsureSchemaAsync();
+            await new PrintFormService(_context).EnsureSchemaAsync();
+            await new ModuleMetadataService(_context).EnsureSchemaAsync();
+            await new RegulatedReportTemplateService(_context).EnsureSchemaAsync();
+            await new CashDayClosureService(_context).EnsureSchemaAsync();
         }
 
         private async Task<ConfigurationPackage> BuildPackageAsync()
@@ -453,3 +464,4 @@ namespace BIS.ERP.Services
         }
     }
 }
+
