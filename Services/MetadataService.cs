@@ -1,4 +1,4 @@
-using BIS.ERP.Data;
+﻿using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -945,6 +945,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Расчетные счета организаций"))
                     await CreateBankAccountsCatalog(config);
+                await EnsureBankAccountsCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("План счетов"))
                     await CreateChartOfAccountsCatalog(config);
@@ -1048,6 +1049,7 @@ namespace BIS.ERP.Services
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
+            ApplyCreateRecordDefaults(metadata, data);
 
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
@@ -1169,6 +1171,38 @@ namespace BIS.ERP.Services
                 new { Number = GetDocumentNumberFromData(data) });
         }
 
+        private static void ApplyCreateRecordDefaults(MetadataObject metadata, Dictionary<string, object> data)
+        {
+            if (!IsBankAccountsCatalog(metadata))
+                return;
+
+            SetDefaultIfMissing(data, metadata, "current_balance", 0m);
+            SetDefaultIfMissing(data, metadata, "is_main", false);
+            SetDefaultIfMissing(data, metadata, "is_active", true);
+        }
+
+        private static void SetDefaultIfMissing(
+            Dictionary<string, object> data,
+            MetadataObject metadata,
+            string dbColumnName,
+            object value)
+        {
+            var field = metadata.Fields
+                .OrderBy(item => item.Order)
+                .FirstOrDefault(item => string.Equals(item.DbColumnName, dbColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (field == null || data.ContainsKey(field.Name))
+                return;
+
+            data[field.Name] = value;
+        }
+
+        private static bool IsBankAccountsCatalog(MetadataObject metadata)
+        {
+            return string.Equals(metadata.ObjectType, "Catalog", StringComparison.OrdinalIgnoreCase) &&
+                   (string.Equals(metadata.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(metadata.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase));
+        }
         private static List<MetadataField> SelectFieldsForWrite(
             MetadataObject metadata,
             Dictionary<string, object> data)

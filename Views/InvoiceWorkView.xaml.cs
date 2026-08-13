@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -350,13 +350,16 @@ namespace BIS.ERP.Views
                 if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
                     return;
 
-                StatusText.Text = "Формирование PDF...";
-                var pdf = await printFormService.ExportInvoiceDocumentAsync(selectionDialog.SelectedReport, selected.Id);
-                StatusText.Text = "PDF сформирован";
-
-                var previewWindow = new PdfPreviewWindow(pdf) { Owner = Window.GetWindow(this) };
-                previewWindow.ShowDialog();
-                StatusText.Text = "Готово";
+                var selectedReport = selectionDialog.SelectedReport;
+                var selectedFormat = selectionDialog.SelectedFormat;
+                StatusText.Text = selectedFormat == PrintFormOutputFormat.Excel
+                    ? "Формирование Excel..."
+                    : "Формирование PDF...";
+                var output = selectedFormat == PrintFormOutputFormat.Excel
+                    ? await printFormService.ExportInvoiceDocumentExcelAsync(selectedReport, selected.Id)
+                    : await printFormService.ExportInvoiceDocumentAsync(selectedReport, selected.Id);
+                var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
+                StatusText.Text = $"Открыт файл печатной формы: {outputPath}";
             }
             catch (Exception ex)
             {

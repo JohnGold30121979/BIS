@@ -1,4 +1,4 @@
-<Window x:Class="BIS.ERP.Views.ConfiguratorWindow"
+﻿<Window x:Class="BIS.ERP.Views.ConfiguratorWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="BIS ERP - Конфигуратор"
@@ -28,13 +28,11 @@
             <MenuItem Header="Создать">
                 <MenuItem Header="Модуль" Click="OnModulesClick"/>
                 <MenuItem Header="📚 Справочник" Click="OnCreateCatalogClick"/>               
-                <MenuItem Header="📊 Отчет" Click="OnCreateReportClick"/>
                 <MenuItem Header="Создать Динамически">
                     <MenuItem Header="📚 Справочник" Click="OnCreateDynamicCatalogClick"/>
                     <MenuItem Header="📄 Документ" Click="OnCreateDynamicDocumentClick"/>
                     <Separator/>
-                    <MenuItem Header="📊 Отчет" Click="OnCreateReportClick"/>
-                </MenuItem>
+                    </MenuItem>
             </MenuItem>
             <MenuItem Header="Правка">             
                 <Separator/>
@@ -205,7 +203,7 @@
                                         <Separator/>
                                         <MenuItem Header="📋 Сделать доступным / отключить" Click="OnToggleReportAvailabilityClick"/>
                                         <Separator/>
-                                        <MenuItem Header="💻 Предпросмотр в окне" Click="OnPreviewReportClick"/>
+                                        <MenuItem Header="💻 Предпросмотр" Click="OnPreviewReportClick"/>
                                         <Separator/>
                                         <MenuItem Header="🗑️ Удалить отчет" Click="OnDeleteReportClick" Foreground="#E74C3C"/>
                                     </ContextMenu>
@@ -216,6 +214,9 @@
                                 <Button x:Name="AddCatalogButton" Content="➕ Справочник"
                                         Background="#27AE60" Foreground="White" Height="35"
                                         Click="OnCreateCatalogClick"/>
+                                <Button x:Name="AddReportButton" Content="📊 Отчет"
+                                        Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
+                                        Click="OnCreateReportClick"/>
                                 <Button Content="Модули и разделы" Background="#2980B9" Foreground="White"
                                         Height="35" Margin="0,5,0,0" Click="OnModulesClick"/>
                                 <Button x:Name="AccountingSetupButton" Content="⚙ Настройка учета"
@@ -224,10 +225,7 @@
                                 <Button x:Name="UsersButton" Content="🔐 Пользователи и права"
                                         Background="#2E86C1" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnUsersClick"/>
-                                <Button x:Name="AddReportButton" Content="📊 Отчет"
-                                        Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
-                                        Click="OnCreateReportClick"/>
-                                <Button x:Name="ImportFrxButton" Content="📁 Импорт FRX"
+<Button x:Name="ImportFrxButton" Content="📁 Импорт FRX"
                                         Background="#9B59B6" Foreground="White" Height="35" Margin="0,5,0,0"
                                         Click="OnImportFrxClick"/>
                                 <Button x:Name="RegulatedTemplatesButton" Content="🧾 Шаблоны отчетов"

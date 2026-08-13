@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
@@ -19,11 +19,13 @@ namespace BIS.ERP.Views
     {
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
+        private const string PaymentOrderPrintReportCode = "standard.frx.finance.payment-order.pr-pl23";
         private List<PaymentOrderRow> _rows = new();
         private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private string _moduleName = string.Empty;
         private bool _isLoading;
+        private bool _isPrinting;
 
         public PaymentOrderWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
@@ -48,7 +50,7 @@ namespace BIS.ERP.Views
             EditButton.IsEnabled = canEdit;
             DeleteButton.IsEnabled = hasSelection;
             PostButton.IsEnabled = hasSelection;
-            PrintButton.IsEnabled = hasSelection;
+            PrintButton.IsEnabled = hasSelection && !_isPrinting;
             PostButton.Content = isPosted ? "↩ Отменить проведение" : "✅ Провести";
             PostButton.Background = isPosted ? Brushes.DarkOrange : Brushes.MediumPurple;
         }
@@ -589,36 +591,60 @@ namespace BIS.ERP.Views
 
         private async void OnPrintClick(object sender, RoutedEventArgs e)
         {
-            if (DataGrid.SelectedItem is not PaymentOrderRow selected)
+            if (_isPrinting || DataGrid.SelectedItem is not PaymentOrderRow selected)
                 return;
 
+            _isPrinting = true;
+            UpdateButtonsState();
             try
             {
-                StatusText.Text = "Формирование платежного поручения...";
-                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                await new MetadataService(context).EnsureStandardReportsAsync();
+                StatusText.Text = "Подготовка печатных форм платежного поручения...";
+                using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                await new MetadataService(context).EnsurePaymentOrderPrintFormAsync();
 
-                var report = await context.Reports
-                    .AsNoTracking()
-                    .Include(item => item.ElementMappings)
-                    .FirstOrDefaultAsync(item => item.Code == "standard.frx.finance.payment-order.pr-pl23" && item.IsActive && item.IsPrintForm);
-
-                if (report == null)
+                var printFormService = new PrintFormService(context);
+                await printFormService.SeedPaymentOrderFormsAsync();
+                var forms = await printFormService.GetPrintFormsAsync(_documentMetadata.Id, includeInactive: false);
+                if (forms.Count == 0)
                 {
-                    MessageBox.Show("FRX-отчет pr_pl23 для платежного поручения не загружен в конфигурацию.",
+                    MessageBox.Show("Для платежного поручения нет доступных печатных форм.",
                         "Платежное поручение", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    StatusText.Text = "FRX-отчет не найден";
+                    StatusText.Text = "Печатные формы не найдены";
                     return;
                 }
 
-                var dataTable = await BuildPaymentOrderPrintTableAsync(selected, context);
-                var pdf = new PrintFormService(context).ExportReportTemplatePreview(dataTable, report);
-                var previewWindow = new PdfPreviewWindow(pdf)
+                Report selectedReport;
+                var selectedFormat = PrintFormOutputFormat.Pdf;
+                if (ChoosePrintFormCheckBox.IsChecked == true)
                 {
-                    Owner = Window.GetWindow(this)
-                };
-                previewWindow.ShowDialog();
-                StatusText.Text = "Предпросмотр сформирован";
+                    var selectionDialog = new PrintFormSelectionDialog(forms)
+                    {
+                        Owner = Window.GetWindow(this)
+                    };
+                    if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
+                    {
+                        StatusText.Text = "Печать отменена";
+                        return;
+                    }
+
+                    selectedReport = selectionDialog.SelectedReport;
+                    selectedFormat = selectionDialog.SelectedFormat;
+                }
+                else
+                {
+                    selectedReport = SelectPaymentOrderPrintForm(forms);
+                }
+
+                StatusText.Text = selectedFormat == PrintFormOutputFormat.Excel
+                    ? "Формирование Excel платежного поручения..."
+                    : "Формирование PDF платежного поручения...";
+
+                var output = selectedFormat == PrintFormOutputFormat.Excel
+                    ? await printFormService.ExportDocumentExcelAsync(selectedReport, selected.Id)
+                    : await printFormService.ExportDocumentAsync(selectedReport, selected.Id);
+
+                var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
+                StatusText.Text = $"Печатная форма открыта: {outputPath}";
             }
             catch (Exception ex)
             {
@@ -626,6 +652,20 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка предпросмотра платежного поручения: {ex.Message}",
                     "Платежное поручение", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            finally
+            {
+                _isPrinting = false;
+                UpdateButtonsState();
+            }
+        }
+
+        private static Report SelectPaymentOrderPrintForm(IReadOnlyList<Report> forms)
+        {
+            return forms.FirstOrDefault(form => string.Equals(form.Code, "payment.order.native", StringComparison.OrdinalIgnoreCase))
+                ?? forms.FirstOrDefault(form => form.IsDefault &&
+                    !string.Equals(form.Code, PaymentOrderPrintReportCode, StringComparison.OrdinalIgnoreCase))
+                ?? forms.FirstOrDefault(form => form.IsDefault)
+                ?? forms.First();
         }
 
         private async Task<DataTable> BuildPaymentOrderPrintTableAsync(PaymentOrderRow row, BIS.ERP.Data.AppDbContext context)

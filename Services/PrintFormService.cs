@@ -1,4 +1,4 @@
-using BIS.ERP.Data;
+﻿using BIS.ERP.Data;
 using BIS.ERP.Models;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
@@ -249,6 +249,65 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        public async Task SeedPaymentOrderFormsAsync()
+        {
+            await EnsureSchemaAsync();
+            var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
+            const string code = "payment.order.native";
+            if (deletedReportCodes.Contains(code))
+                return;
+
+            var paymentOrder = await _context.MetadataObjects.AsNoTracking()
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" &&
+                    (item.Name == "Платежное поручение" || item.TableName == "doc_payment_orders"));
+
+            if (paymentOrder == null)
+                return;
+
+            var report = await _context.Reports.FirstOrDefaultAsync(item => item.Code == code);
+            var isNewReport = report == null;
+            if (report == null)
+            {
+                report = new Report
+                {
+                    Id = Guid.NewGuid(),
+                    Code = code,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.Reports.Add(report);
+            }
+
+            if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
+                report.Name = "Платежное поручение (нативный)";
+            if (isNewReport || string.IsNullOrWhiteSpace(report.TitleText))
+                report.TitleText = "Платежное поручение";
+            if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
+                report.Description = "Безопасная нативная печатная форма платежного поручения";
+            report.DataSourceType = "Document";
+            report.DataSourceId = paymentOrder.Id;
+            report.ReportType = "PaymentOrder";
+            report.IsPrintForm = true;
+            report.SourceFormat = "Native";
+            report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
+            if (isNewReport)
+            {
+                report.IsActive = true;
+                report.IsDefault = true;
+                report.Icon = "🖨";
+                report.Order = 15;
+                report.PageOrientation = "Portrait";
+                report.ShowGridLines = false;
+                report.ShowHeader = false;
+                report.ShowFooter = false;
+                report.ShowPageNumbers = false;
+            }
+
+            if (isNewReport || string.IsNullOrWhiteSpace(report.Template))
+                report.Template = JsonSerializer.Serialize(CreateDefaultPaymentOrderTemplate(), new JsonSerializerOptions { WriteIndented = true });
+            report.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+        }
         public async Task SeedInvoiceFormsAsync()
         {
             await EnsureSchemaAsync();
@@ -637,6 +696,73 @@ namespace BIS.ERP.Services
             };
         }
 
+        private static PrintFormTemplate CreateDefaultPaymentOrderTemplate()
+        {
+            var elements = new List<PrintFormElement>();
+            void Add(string type, string text, string expression, double left, double top, double width, double height,
+                double fontSize = 9, bool bold = false, string align = "Left", string band = "Body")
+            {
+                elements.Add(new PrintFormElement
+                {
+                    Type = type,
+                    Text = text,
+                    Expression = expression,
+                    BandType = band,
+                    Left = left,
+                    Top = top,
+                    Width = width,
+                    Height = height,
+                    FontName = "Arial",
+                    FontSize = fontSize,
+                    Bold = bold,
+                    Alignment = align,
+                    BorderStyle = type == "Box" ? "Solid" : "None",
+                    Order = elements.Count
+                });
+            }
+
+            Add("Box", "", "", 70, 70, 1960, 2550, 9, false);
+            Add("Text", "ПЛАТЕЖНОЕ ПОРУЧЕНИЕ N", "", 120, 130, 760, 70, 14, true);
+            Add("Expression", "", "number", 900, 130, 300, 70, 14, true, "Center");
+            Add("Text", "от", "", 1230, 130, 70, 70, 10);
+            Add("Expression", "", "date", 1310, 130, 300, 70, 10);
+            Add("Text", "Организация:", "", 120, 250, 300, 55, 10, true);
+            Add("Expression", "", "organization", 430, 250, 1450, 55, 10);
+            Add("Box", "", "", 120, 380, 1780, 220, 9, false);
+            Add("Text", "Дебет", "", 150, 410, 330, 60, 9, true, "Center");
+            Add("Text", "Кредит", "", 570, 410, 330, 60, 9, true, "Center");
+            Add("Text", "Сумма", "", 1040, 410, 330, 60, 9, true, "Center");
+            Add("Expression", "", "debit_account", 150, 500, 360, 60, 9);
+            Add("Expression", "", "credit_account", 570, 500, 360, 60, 9);
+            Add("Expression", "", "amount", 1040, 500, 300, 60, 9, false, "Right");
+            Add("Text", "Назначение платежа:", "", 120, 720, 440, 60, 10, true);
+            Add("Expression", "", "basis", 120, 795, 1760, 180, 10);
+            Add("Text", "Сумма прописью:", "", 120, 1040, 420, 60, 10, true);
+            Add("Expression", "", "amount_in_words", 120, 1110, 1760, 150, 10);
+            Add("Text", "Примечание:", "", 120, 1320, 300, 60, 10, true);
+            Add("Expression", "", "note", 430, 1320, 1450, 100, 10);
+            Add("Text", "Руководитель", "", 120, 1700, 360, 60, 10, true);
+            Add("Line", "", "", 520, 1750, 560, 0, 9, false);
+            Add("Text", "Главный бухгалтер", "", 120, 1840, 430, 60, 10, true);
+            Add("Line", "", "", 560, 1890, 520, 0, 9, false);
+            Add("Text", "Исполнитель", "", 120, 1980, 360, 60, 10, true);
+            Add("Line", "", "", 520, 2030, 560, 0, 9, false);
+
+            return new PrintFormTemplate
+            {
+                SourceFormat = "Native",
+                OriginalFileName = "PaymentOrderNative",
+                PageWidth = 2100,
+                PageHeight = 2970,
+                Bands = new List<PrintFormBand>
+                {
+                    new() { Type = "Header", Top = 0, Height = 320, Order = 0 },
+                    new() { Type = "Body", Top = 320, Height = 1260, Order = 1 },
+                    new() { Type = "Footer", Top = 1580, Height = 760, Order = 2 }
+                },
+                Elements = elements
+            };
+        }
         public async Task<List<Report>> GetPrintFormsAsync(Guid metadataId, bool includeInactive = true)
         {
             await EnsureSchemaAsync();
@@ -748,6 +874,70 @@ namespace BIS.ERP.Services
             return BuildTemplateLayoutPdf(report, data, mappings);
         }
 
+        public async Task<byte[]> ExportDocumentExcelAsync(Report report, Guid recordId)
+        {
+            if (!report.IsActive)
+                throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            if (!report.DataSourceId.HasValue)
+                throw new InvalidOperationException("У печатной формы не указан документ-источник.");
+
+            var metadata = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Id == report.DataSourceId.Value)
+                ?? throw new InvalidOperationException("Документ-источник печатной формы не найден.");
+            if (InvoiceDocumentTypes.IsSales(metadata.Name) || InvoiceDocumentTypes.IsPurchase(metadata.Name))
+                return await ExportInvoiceDocumentExcelAsync(report, recordId, metadata);
+
+            var metadataService = new MetadataService(_context);
+            var rows = await metadataService.GetCatalogDataAsync(metadata.Id);
+            var rawRow = rows.FirstOrDefault(row => Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var id) && id == recordId)
+                ?? throw new InvalidOperationException("Документ для печати не найден.");
+            var maps = await ReferenceDisplayHelper.LoadMapsAsync(metadata, metadataService);
+            var row = ReferenceDisplayHelper.ResolveRows(new[] { rawRow }, maps).Single();
+            var data = await BuildCashOrderDataAsync(row, metadata.Name);
+            var mappings = await LoadElementMappingsAsync(report);
+
+            if (string.IsNullOrWhiteSpace(report.Template))
+            {
+                var fallbackTemplate = CreateBlankNativeTemplate();
+                report.Template = JsonSerializer.Serialize(fallbackTemplate);
+                report.SourceFormat = "Native";
+            }
+
+            return BuildTemplateLayoutExcel(report, data, mappings);
+        }
+
+        public async Task<byte[]> ExportInvoiceDocumentExcelAsync(Report report, Guid invoiceId)
+        {
+            if (!report.IsActive)
+                throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            if (!report.DataSourceId.HasValue)
+                throw new InvalidOperationException("У печатной формы не указан документ-источник.");
+
+            var metadata = await _context.MetadataObjects.Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Id == report.DataSourceId.Value)
+                ?? throw new InvalidOperationException("Документ-источник печатной формы не найден.");
+            return await ExportInvoiceDocumentExcelAsync(report, invoiceId, metadata);
+        }
+
+        private async Task<byte[]> ExportInvoiceDocumentExcelAsync(Report report, Guid invoiceId, MetadataObject metadata)
+        {
+            var invoiceService = new InvoiceService(_context);
+            invoiceService.Configure(metadata);
+            await invoiceService.EnsureSchemaAsync();
+            var invoice = await invoiceService.GetInvoiceAsync(invoiceId)
+                ?? throw new InvalidOperationException("Счет-фактура для печати не найден.");
+            var (issuer, recipient) = await LoadInvoicePartiesAsync(invoice, metadata.Name);
+            var data = BuildInvoicePrintData(invoice, metadata.Name, issuer, recipient);
+            var mappings = await LoadElementMappingsAsync(report);
+
+            if (string.IsNullOrWhiteSpace(report.Template))
+            {
+                report.Template = JsonSerializer.Serialize(GenerateInvoiceFrxTemplate(metadata, InvoiceDocumentTypes.IsSales(metadata.Name)));
+                report.SourceFormat = "FoxProFRX";
+            }
+
+            return BuildTemplateLayoutExcel(report, data, mappings);
+        }
         public async Task<byte[]> ExportInvoiceDocumentAsync(Report report, Guid invoiceId)
         {
             if (!report.IsActive)
@@ -1393,10 +1583,58 @@ namespace BIS.ERP.Services
                 .ToListAsync();
         }
 
+        private async Task<CashOrderPrintData> BuildPaymentOrderDataAsync(Dictionary<string, object> row)
+        {
+            var amount = GetDecimal(row, "Сумма", "amount");
+            var debitAccount = await ResolveAccountCodeAsync(GetString(row, "Дебет", "debit_account", "Наш счет", "our_account_id"));
+            var creditAccount = await ResolveAccountCodeAsync(GetString(row, "Кредит", "credit_account", "Корр. счет", "correspondent_account"));
+            var purpose = GetString(row, "Назначение платежа", "purpose", "Основание", "basis");
+            var note = GetString(row, "Примечание", "description");
+
+            return new CashOrderPrintData
+            {
+                DocumentName = "Платежное поручение",
+                Number = GetString(row, "Номер", "Номер документа", "doc_number"),
+                Date = GetDate(row, "Дата", "doc_date"),
+                Organization = GetString(row, "Организация", "organization_id"),
+                Person = GetString(row, "Организация", "organization_id"),
+                CashDesk = debitAccount,
+                CorrespondentAccount = creditAccount,
+                DebitAccount = debitAccount,
+                CreditAccount = creditAccount,
+                Amount = amount,
+                AmountInCurrency = GetDecimal(row, "Сумма в валюте", "amount_currency", "amount_in_currency"),
+                CurrencyName = GetString(row, "Валюта", "currency", "currency_id"),
+                ExchangeRate = GetDecimal(row, "Курс", "exchange_rate", "rate", "kurs_v"),
+                AmountInWords = RussianMoneyInWords(amount),
+                Basis = purpose,
+                Note = note,
+                ExtraFields = BuildPrintExtraFields(row)
+            };
+        }
+
+        private static Dictionary<string, object> BuildPrintExtraFields(Dictionary<string, object> row)
+        {
+            var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in row)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key))
+                    continue;
+
+                var value = pair.Value ?? string.Empty;
+                extra[pair.Key] = value;
+                extra[NormalizeFieldName(pair.Key)] = value;
+            }
+
+            return extra;
+        }
         private async Task<CashOrderPrintData> BuildCashOrderDataAsync(
             Dictionary<string, object> row,
             string documentName)
         {
+            if (documentName.Contains("Платежное поручение", StringComparison.OrdinalIgnoreCase))
+                return await BuildPaymentOrderDataAsync(row);
+
             var amount = GetDecimal(row, "Сумма", "amount");
             var correspondentAccount = GetString(row, "Корр. счет", "correspondent_account");
             correspondentAccount = await ResolveAccountCodeAsync(correspondentAccount);
@@ -1914,11 +2152,11 @@ namespace BIS.ERP.Services
 
             using var workbook = new XLWorkbook();
             var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
-            ConfigureFrxExcelWorksheet(worksheet, report);
 
             var pageWidth = Math.Max(1000d, layoutTemplate.PageWidth);
             var pageHeight = Math.Max(1000d, layoutTemplate.PageHeight);
             var landscape = pageWidth >= pageHeight || string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
+            ConfigureFrxExcelWorksheet(worksheet, report, landscape);
             var maxColumns = landscape ? 88 : 66;
             var maxRows = landscape ? 58 : 82;
             if (ShouldPackTabularFrxTemplate(layoutTemplate, report, dataTable))
@@ -2484,11 +2722,11 @@ namespace BIS.ERP.Services
             BorderStyle = element.BorderStyle,
             Order = element.Order
         };
-        private static void ConfigureFrxExcelWorksheet(IXLWorksheet worksheet, Report report)
+        private static void ConfigureFrxExcelWorksheet(IXLWorksheet worksheet, Report report, bool landscape)
         {
             worksheet.ShowGridLines = false;
             worksheet.Style.Font.FontName = string.IsNullOrWhiteSpace(report.FontName) ? "Arial" : report.FontName;
-            worksheet.PageSetup.PageOrientation = string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase)
+            worksheet.PageSetup.PageOrientation = landscape
                 ? XLPageOrientation.Landscape
                 : XLPageOrientation.Portrait;
             worksheet.PageSetup.Margins.Top = 0.25;

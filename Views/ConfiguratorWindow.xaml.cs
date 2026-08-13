@@ -1,4 +1,4 @@
-using BIS.ERP.Configurator.Views;
+﻿using BIS.ERP.Configurator.Views;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -2594,7 +2594,7 @@ namespace BIS.ERP.Views
                 Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
                 Foreground = Brushes.White
             };
-            designerButton.Click += async (s, e) =>
+            designerButton.Click += async (_, _) =>
             {
                 var fullReport = await LoadFullReportAsync(report);
                 var designer = new ReportDesignerWindow(fullReport) { Owner = this };
@@ -2602,6 +2602,18 @@ namespace BIS.ERP.Views
                     await RefreshReportsTreeAndSelectReportAsync(report.Id, showEditor: true);
             };
             mainPanel.Children.Add(designerButton);
+
+            var previewButton = new Button
+            {
+                Content = "Предпросмотр",
+                Height = 36,
+                MinWidth = 180,
+                Margin = new Thickness(0, 10, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
+                Foreground = Brushes.White
+            };
+            previewButton.Click += async (_, _) => await PreviewReportDirectAsync(report);
+            mainPanel.Children.Add(previewButton);
 
             var availabilityButton = new Button
             {
@@ -2631,40 +2643,6 @@ namespace BIS.ERP.Views
             };
             deleteButton.Click += async (_, _) => await DeleteSelectedReport(report);
             mainPanel.Children.Add(deleteButton);
-
-            // Предпросмотр
-            if (report.SourceFormat == "FoxProFRX" && !string.IsNullOrWhiteSpace(report.Template))
-            {
-                var previewButton = new Button
-                {
-                    Content = "🚫 Предпросмотр печатной формы",
-                    Height = 36,
-                    MinWidth = 180,
-                    Margin = new Thickness(0, 10, 0, 0),
-                    Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
-                    Foreground = Brushes.White
-                };
-                previewButton.Click += (_, _) =>
-                {
-                    try
-                    {
-                        var pdf = new PrintFormService(_context).ExportTemplatePreview(report);
-                        var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.pdf");
-                        File.WriteAllBytes(tempFile, pdf);
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = tempFile,
-                            UseShellExecute = true
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
-                            MessageBoxButton.OK, MessageBoxImage.Error);
-                    }
-                };
-                mainPanel.Children.Add(previewButton);
-            }
 
             PropertiesPanel.Children.Add(mainPanel);
         }
@@ -2802,34 +2780,23 @@ namespace BIS.ERP.Views
 
         private async void OnPreviewReportPdfClick(object sender, RoutedEventArgs e)
         {
-            if (_selectedReport == null) return;
-            try
-            {
-                var fullReport = await LoadFullReportAsync(_selectedReport);
-                var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
-                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
-                File.WriteAllBytes(tempFile, pdf);
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = tempFile,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            if (_selectedReport != null)
+                await PreviewReportDirectAsync(_selectedReport);
         }
 
         private async void OnPreviewReportClick(object sender, RoutedEventArgs e)
         {
-            if (_selectedReport == null) return;
+            if (_selectedReport != null)
+                await PreviewReportDirectAsync(_selectedReport);
+        }
+
+        private async Task PreviewReportDirectAsync(Report report)
+        {
             try
             {
-                var fullReport = await LoadFullReportAsync(_selectedReport);
+                var fullReport = await LoadFullReportAsync(report);
                 var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
-                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
+                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.pdf");
                 File.WriteAllBytes(tempFile, pdf);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
@@ -2857,12 +2824,9 @@ namespace BIS.ERP.Views
 
         private async void OnCreateReportClick(object sender, RoutedEventArgs e)
         {
-            var designer = new ReportDesignerWindow();
-            designer.Owner = this;
+            var designer = new ReportDesignerWindow { Owner = this };
             if (designer.ShowDialog() == true)
-            {
                 await LoadMetadata();
-            }
         }
 
         private async void OnImportFrxClick(object sender, RoutedEventArgs e)

@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -844,6 +844,69 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task EnsureBankAccountsCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Расчетные счета организаций");
+
+            if (catalog == null)
+                return;
+
+            await RemoveDuplicateMetadataFieldsAsync(catalog);
+
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.OrderBy(field => field.Order).First(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetBankAccountFields(catalog.Id))
+            {
+                if (existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    existing.Name = desired.Name;
+                    existing.FieldType = desired.FieldType;
+                    existing.ReferenceCatalog = desired.ReferenceCatalog;
+                    existing.DisplayPattern = desired.DisplayPattern;
+                    existing.DisplayFields = desired.DisplayFields;
+                    existing.Order = desired.Order;
+                    existing.IsRequired = desired.IsRequired;
+                    existing.IsUnique = desired.IsUnique;
+                    existing.Length = desired.Length;
+                    existing.Precision = desired.Precision;
+                    existing.Scale = desired.Scale;
+                    continue;
+                }
+
+                desired.Id = Guid.NewGuid();
+                desired.MetadataObjectId = catalog.Id;
+                await _context.MetadataFields.AddAsync(desired);
+                await AddColumnToTableAsync(catalog.TableName, desired);
+                catalog.Fields.Add(desired);
+                existingByColumn[desired.DbColumnName] = desired;
+            }
+
+            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE ""{catalog.TableName}""
+                    SET ""current_balance"" = 0
+                    WHERE ""current_balance"" IS NULL;
+
+                    ALTER TABLE ""{catalog.TableName}""
+                    ALTER COLUMN ""current_balance"" DROP NOT NULL,
+                    ALTER COLUMN ""current_balance"" SET DEFAULT 0;");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации остатков расчетных счетов организаций: {ex.Message}");
+            }
+        }
         private async Task CreateCashDesksCatalog(MetadataConfiguration config)
         {
             try

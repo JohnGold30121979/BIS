@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System.IO;
 using System.IO.Compression;
@@ -8,6 +8,7 @@ namespace BIS.ERP.Services;
 
 public partial class MetadataService
 {
+    private const string PaymentOrderPrPl23ReportCode = "standard.frx.finance.payment-order.pr-pl23";
     public async Task EnsureStandardReportsAsync()
     {
         await new PrintFormService(_context).EnsureSchemaAsync();
@@ -28,6 +29,24 @@ public partial class MetadataService
         await _context.SaveChangesAsync();
         await MarkReconciliationFrxReportsAsTemplateVariantsAsync();
         await MarkTrialBalanceFrxReportsAsTemplateVariantsAsync();
+    }
+    public async Task EnsurePaymentOrderPrintFormAsync()
+    {
+        await new PrintFormService(_context).EnsureSchemaAsync();
+        await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
+        _context.ChangeTracker.Clear();
+
+        var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
+        if (deletedReportCodes.Contains(PaymentOrderPrPl23ReportCode))
+            return;
+
+        var definition = StandardFrxReportTemplates.GetDefinitions()
+            .FirstOrDefault(item => item.Code == PaymentOrderPrPl23ReportCode);
+        if (definition == null)
+            return;
+
+        await EnsureStandardFrxReportAsync(definition);
+        await _context.SaveChangesAsync();
     }
 
     private static readonly string[] DeprecatedObjectTreeReportCodes =
@@ -177,6 +196,10 @@ public partial class MetadataService
 
         var templateJson = DecodeStandardFrxTemplate(definition.TemplateCompressedBase64);
         var shouldSeedTemplate = isNewReport || string.IsNullOrWhiteSpace(report.Template);
+        var isPaymentOrderPrintForm = string.Equals(
+            definition.Code,
+            PaymentOrderPrPl23ReportCode,
+            StringComparison.OrdinalIgnoreCase);
 
         report.Code = definition.Code;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
@@ -191,7 +214,7 @@ public partial class MetadataService
         report.Settings = string.IsNullOrWhiteSpace(report.Settings) ? "{}" : report.Settings;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Icon))
             report.Icon = definition.Icon;
-        if (isNewReport)
+        if (isNewReport || isPaymentOrderPrintForm)
             report.IsActive = source != null || IsStandaloneStandardFrxVariant(definition.Code);
         report.IsPrintForm = definition.IsPrintForm;
         if (isNewReport)

@@ -172,9 +172,14 @@ namespace BIS.ERP.Services
             _context.MetadataObjects.RemoveRange(existingObjects);
             await _context.SaveChangesAsync();
 
+            var metadataConfigId = await EnsureImportMetadataConfigurationAsync();
+
             DetachMetadataNavigation(metadata);
             foreach (var obj in metadata)
             {
+                // Конфигурационный пакет может быть выгружен из другой инфобазы.
+                // Ее MetadataConfigId в текущей базе не существует и ломает FK при загрузке.
+                obj.MetadataConfigId = metadataConfigId;
                 foreach (var field in obj.Fields)
                     field.MetadataObjectId = obj.Id;
                 foreach (var calc in obj.Calculations)
@@ -186,6 +191,33 @@ namespace BIS.ERP.Services
             await _context.MetadataObjects.AddRangeAsync(metadata);
         }
 
+        private async Task<Guid> EnsureImportMetadataConfigurationAsync()
+        {
+            var config = await _context.MetadataConfigurations
+                .OrderByDescending(item => item.IsInitialized)
+                .ThenBy(item => item.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (config == null)
+            {
+                config = new MetadataConfiguration
+                {
+                    Id = Guid.NewGuid(),
+                    InfoBaseId = Guid.Empty,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    Version = "1.0",
+                    IsInitialized = true
+                };
+                await _context.MetadataConfigurations.AddAsync(config);
+                await _context.SaveChangesAsync();
+                return config.Id;
+            }
+
+            config.IsInitialized = true;
+            config.UpdatedAt = DateTime.UtcNow;
+            return config.Id;
+        }
         private async Task ReplaceReportsAsync(List<Report> reports)
         {
             await new PrintFormService(_context).EnsureSchemaAsync();

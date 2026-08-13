@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -1062,6 +1062,10 @@ namespace BIS.ERP.Views
                 {
                     NativeTextBox.Text = string.Empty;
                     NativeFieldCombo.SelectedValue = null;
+                    NativeExpressionBox.Text = string.Empty;
+                    NativeSubstringFieldCombo.SelectedValue = null;
+                    NativeSubstringStartBox.Text = "1";
+                    NativeSubstringLengthBox.Text = "1";
                     NativeLeftBox.Text = string.Empty;
                     NativeTopBox.Text = string.Empty;
                     NativeWidthBox.Text = string.Empty;
@@ -1075,6 +1079,8 @@ namespace BIS.ERP.Views
 
                 NativeTextBox.Text = element.Text;
                 NativeFieldCombo.SelectedValue = element.Expression;
+                NativeExpressionBox.Text = element.Expression;
+                FillNativeSubstringControls(element.Expression);
                 NativeLeftBox.Text = FormatNumber(element.Left);
                 NativeTopBox.Text = FormatNumber(element.Top);
                 NativeWidthBox.Text = FormatNumber(element.Width);
@@ -1096,7 +1102,8 @@ namespace BIS.ERP.Views
         private void AttachNativePropertyChangeHandlers()
         {
             NativeTextBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
-            NativeFieldCombo.SelectionChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
+            NativeFieldCombo.SelectionChanged += (_, _) => OnNativeFieldComboSelectionChanged();
+            NativeExpressionBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
             NativeLeftBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
             NativeTopBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
             NativeWidthBox.TextChanged += (_, _) => UpdateSelectedNativeElementFromPropertyControls();
@@ -1116,7 +1123,7 @@ namespace BIS.ERP.Views
                 return;
 
             _selectedNativeElement.Text = NativeTextBox.Text;
-            _selectedNativeElement.Expression = NativeFieldCombo.SelectedValue?.ToString() ?? string.Empty;
+            _selectedNativeElement.Expression = GetNativeExpressionFromPropertyControls();
             _selectedNativeElement.Left = ParseNumber(NativeLeftBox.Text, _selectedNativeElement.Left);
             _selectedNativeElement.Top = ParseNumber(NativeTopBox.Text, _selectedNativeElement.Top);
             _selectedNativeElement.Width = Math.Max(1, ParseNumber(NativeWidthBox.Text, _selectedNativeElement.Width));
@@ -1130,6 +1137,90 @@ namespace BIS.ERP.Views
             NativeElementsGrid.Items.Refresh();
         }
 
+        private string GetNativeExpressionFromPropertyControls()
+        {
+            var expressionText = NativeExpressionBox.Text?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(expressionText))
+                return expressionText;
+
+            return NativeFieldCombo.SelectedValue?.ToString() ?? string.Empty;
+        }
+
+        private string BuildNativeSubstringExpression(string fieldName)
+        {
+            var sourceField = string.IsNullOrWhiteSpace(fieldName) ? "amount" : fieldName.Trim();
+            var start = ParsePositiveInt(NativeSubstringStartBox.Text, 1);
+            var length = ParsePositiveInt(NativeSubstringLengthBox.Text, 1);
+            NativeSubstringStartBox.Text = start.ToString(CultureInfo.InvariantCulture);
+            NativeSubstringLengthBox.Text = length.ToString(CultureInfo.InvariantCulture);
+            return $"SUBSTR(ALLTRIM({sourceField}),{start},{length})";
+        }
+
+        private void FillNativeSubstringControls(string expression)
+        {
+            var parsed = ParseNativeSubstringExpression(expression);
+            if (parsed != null)
+            {
+                NativeSubstringFieldCombo.SelectedValue = parsed.Value.FieldName;
+                NativeSubstringStartBox.Text = parsed.Value.Start.ToString(CultureInfo.InvariantCulture);
+                NativeSubstringLengthBox.Text = parsed.Value.Length.ToString(CultureInfo.InvariantCulture);
+                return;
+            }
+
+            NativeSubstringFieldCombo.SelectedValue = NativeFieldCombo.SelectedValue;
+            NativeSubstringStartBox.Text = "1";
+            NativeSubstringLengthBox.Text = "1";
+        }
+
+        private static (string FieldName, int Start, int Length)? ParseNativeSubstringExpression(string expression)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return null;
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                expression.Trim(),
+                @"(?i)^SUBSTR\(\s*(?:ALLTRIM\(|ALLTR\(|TRIM\()?\s*([^,\)]+)\s*\)?\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$");
+            if (!match.Success)
+                return null;
+
+            return (
+                match.Groups[1].Value.Trim(),
+                int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture),
+                int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+        }
+
+        private static int ParsePositiveInt(string textValue, int fallback)
+        {
+            return int.TryParse(textValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0
+                ? value
+                : fallback;
+        }
+        private void OnNativeFieldComboSelectionChanged()
+        {
+            if (_suspendNativePropertyUpdates || _selectedNativeElement == null)
+                return;
+
+            var selectedField = NativeFieldCombo.SelectedValue?.ToString();
+            if (!string.IsNullOrWhiteSpace(selectedField) &&
+                ShouldReplaceNativeExpressionFromField(_selectedNativeElement.Expression, NativeExpressionBox.Text))
+            {
+                NativeExpressionBox.Text = selectedField;
+            }
+
+            UpdateSelectedNativeElementFromPropertyControls();
+        }
+
+        private static bool ShouldReplaceNativeExpressionFromField(string? currentExpression, string? propertyExpression)
+        {
+            var expression = string.IsNullOrWhiteSpace(propertyExpression)
+                ? currentExpression
+                : propertyExpression;
+
+            if (string.IsNullOrWhiteSpace(expression))
+                return true;
+
+            return expression.All(ch => char.IsLetterOrDigit(ch) || ch is '_' or '.');
+        }
         private void OnApplyNativeElementPropertiesClick(object sender, RoutedEventArgs e)
         {
             ApplyNativeElementProperties();
@@ -1151,7 +1242,7 @@ namespace BIS.ERP.Views
                 return false;
 
             _selectedNativeElement.Text = NativeTextBox.Text;
-            _selectedNativeElement.Expression = NativeFieldCombo.SelectedValue?.ToString() ?? string.Empty;
+            _selectedNativeElement.Expression = GetNativeExpressionFromPropertyControls();
             _selectedNativeElement.Left = ParseNumber(NativeLeftBox.Text, _selectedNativeElement.Left);
             _selectedNativeElement.Top = ParseNumber(NativeTopBox.Text, _selectedNativeElement.Top);
             _selectedNativeElement.Width = Math.Max(1, ParseNumber(NativeWidthBox.Text, _selectedNativeElement.Width));
@@ -1225,6 +1316,36 @@ namespace BIS.ERP.Views
                 ?? AvailableFields.SelectedItem as FieldDef
                 ?? AvailableDataFields.FirstOrDefault();
             AddNativeElement("Expression", string.Empty, selectedField?.DbColumnName ?? "amount", 520, 70);
+        }
+
+        private void OnAddNativeSubstringClick(object sender, RoutedEventArgs e)
+        {
+            var selectedField = NativeSubstringFieldCombo.SelectedItem as FieldDef
+                ?? NativeFieldCombo.SelectedItem as FieldDef
+                ?? AvailableFields.SelectedItem as FieldDef
+                ?? AvailableDataFields.FirstOrDefault();
+
+            var expression = BuildNativeSubstringExpression(selectedField?.DbColumnName ?? "amount");
+            AddNativeElement("SUBSTR", string.Empty, expression, 260, 70);
+        }
+
+        private void OnBuildNativeSubstringClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedNativeElement == null)
+                return;
+
+            var selectedField = NativeSubstringFieldCombo.SelectedItem as FieldDef
+                ?? NativeFieldCombo.SelectedItem as FieldDef
+                ?? AvailableDataFields.FirstOrDefault(field =>
+                    string.Equals(field.DbColumnName, NativeFieldCombo.SelectedValue?.ToString(), StringComparison.OrdinalIgnoreCase))
+                ?? AvailableDataFields.FirstOrDefault();
+
+            _selectedNativeElement.Type = "SUBSTR";
+            _selectedNativeElement.Text = string.Empty;
+            _selectedNativeElement.Expression = BuildNativeSubstringExpression(selectedField?.DbColumnName ?? _selectedNativeElement.Expression);
+            FillNativeElementProperties(_selectedNativeElement);
+            RenderNativeDesigner();
+            NativeElementsGrid.Items.Refresh();
         }
 
         private void OnAddNativeLineClick(object sender, RoutedEventArgs e)
@@ -1366,7 +1487,7 @@ namespace BIS.ERP.Views
         public string BorderStyle { get; set; } = "None";
         public string DisplayText => Type switch
         {
-            "Expression" => string.IsNullOrWhiteSpace(Expression) ? "{поле}" : $"{{{Expression}}}",
+            "Expression" or "SUBSTR" => string.IsNullOrWhiteSpace(Expression) ? "{поле}" : $"{{{Expression}}}",
             "Line" => "Линия",
             "Box" => "Рамка",
             _ => string.IsNullOrWhiteSpace(Text) ? "Текст" : Text
@@ -1393,7 +1514,7 @@ namespace BIS.ERP.Views
 
         public PrintFormElement ToElement() => new()
         {
-            Type = Type,
+            Type = Type == "SUBSTR" ? "Expression" : Type,
             Text = Text,
             Expression = Expression,
             BandType = BandType,

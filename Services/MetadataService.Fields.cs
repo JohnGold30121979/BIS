@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 
 namespace BIS.ERP.Services;
 
@@ -950,8 +950,8 @@ public partial class MetadataService
             FieldType = "Decimal",
             Precision = 18,
             Scale = 2,
-            IsRequired = true,           
-            Order = 8,
+            IsRequired = false,
+            Order = 7,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -962,7 +962,7 @@ public partial class MetadataService
             FieldType = "Bool",
             IsRequired = true,
             IsUnique = false,
-            Order = 7,
+            Order = 8,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -974,7 +974,7 @@ public partial class MetadataService
             Length = 500,
             IsRequired = false,
             IsUnique = false,
-            Order = 8,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         }
     };
@@ -1266,7 +1266,7 @@ public partial class MetadataService
             DisplayFields = "Код,Наименование",
             IsRequired = false,
             IsUnique = false,
-            Order = 8,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -1882,7 +1882,7 @@ public partial class MetadataService
             Length = 50,
             IsRequired = true,
             IsUnique = false,
-            Order = 7,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField

@@ -1501,6 +1501,8 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "d_xls", typeof(DateTime));
             AddCashOrderColumn(table, "ved2.d_xls", typeof(DateTime));
             AddCashOrderColumn(table, "ved2.dok", typeof(string));
+            AddCashOrderColumn(table, "ved2.nuch", typeof(string));
+            AddCashOrderColumn(table, "ved2.d_nuch", typeof(string));
             AddCashOrderColumn(table, "ved2.name_kod", typeof(string));
             AddCashOrderColumn(table, "ved2.deb", typeof(decimal));
             AddCashOrderColumn(table, "ved2.cred", typeof(decimal));
@@ -1517,6 +1519,8 @@ namespace BIS.ERP.Views
                 SetCashOrderValue(dataRow, "d_xls", row.DocDate);
                 SetCashOrderValue(dataRow, "ved2.d_xls", row.DocDate);
                 SetCashOrderValue(dataRow, "ved2.dok", row.DocNumber);
+                SetCashOrderValue(dataRow, "ved2.nuch", row.DocNumber);
+                SetCashOrderValue(dataRow, "ved2.d_nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "ved2.name_kod", BuildCashBookText(row));
                 SetCashOrderValue(dataRow, "ved2.deb", receiptAmount);
                 SetCashOrderValue(dataRow, "ved2.cred", paymentAmount);
@@ -1540,6 +1544,7 @@ namespace BIS.ERP.Views
             AddCashReportCommonColumns(table);
             AddCashOrderColumn(table, "d_xls", typeof(DateTime));
             AddCashOrderColumn(table, "d_nuch", typeof(string));
+            AddCashOrderColumn(table, "nuch", typeof(string));
             AddCashOrderColumn(table, "dovf", typeof(string));
             AddCashOrderColumn(table, "tex", typeof(string));
             AddCashOrderColumn(table, "deb", typeof(string));
@@ -1547,6 +1552,7 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "pr_ras2.d_xls", typeof(DateTime));
             AddCashOrderColumn(table, "pr_ras2.dok", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.d_nuch", typeof(string));
+            AddCashOrderColumn(table, "pr_ras2.nuch", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.dovf", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.tex", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.deb", typeof(string));
@@ -1563,6 +1569,7 @@ namespace BIS.ERP.Views
                 FillCashReportCommonValues(dataRow, row, startDate, endDate, cashDeskName, turnoverSummary);
                 SetCashOrderValue(dataRow, "d_xls", row.DocDate);
                 SetCashOrderValue(dataRow, "d_nuch", row.DocNumber);
+                SetCashOrderValue(dataRow, "nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "dovf", party);
                 SetCashOrderValue(dataRow, "tex", basis);
                 SetCashOrderValue(dataRow, "deb", correspondentAccount);
@@ -1570,6 +1577,7 @@ namespace BIS.ERP.Views
                 SetCashOrderValue(dataRow, "pr_ras2.d_xls", row.DocDate);
                 SetCashOrderValue(dataRow, "pr_ras2.dok", row.DocNumber);
                 SetCashOrderValue(dataRow, "pr_ras2.d_nuch", row.DocNumber);
+                SetCashOrderValue(dataRow, "pr_ras2.nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "pr_ras2.dovf", party);
                 SetCashOrderValue(dataRow, "pr_ras2.tex", basis);
                 SetCashOrderValue(dataRow, "pr_ras2.deb", correspondentAccount);
@@ -1596,6 +1604,8 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "Документ", typeof(string));
             AddCashOrderColumn(table, "document_number", typeof(string));
             AddCashOrderColumn(table, "dok", typeof(string));
+            AddCashOrderColumn(table, "nuch", typeof(string));
+            AddCashOrderColumn(table, "d_nuch", typeof(string));
             AddCashOrderColumn(table, "Тип", typeof(string));
             AddCashOrderColumn(table, "order_type", typeof(string));
             AddCashOrderColumn(table, "debit", typeof(string));
@@ -1668,6 +1678,8 @@ namespace BIS.ERP.Views
             SetCashOrderValue(dataRow, "Документ", row.DocNumber);
             SetCashOrderValue(dataRow, "document_number", row.DocNumber);
             SetCashOrderValue(dataRow, "dok", row.DocNumber);
+            SetCashOrderValue(dataRow, "nuch", row.DocNumber);
+            SetCashOrderValue(dataRow, "d_nuch", row.DocNumber);
             SetCashOrderValue(dataRow, "Тип", row.OrderTypeDisplay);
             SetCashOrderValue(dataRow, "order_type", row.OrderTypeDisplay);
             SetCashOrderValue(dataRow, "debit", debitAccount);
@@ -1794,6 +1806,8 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "Документ", typeof(string));
             AddCashOrderColumn(table, "document_number", typeof(string));
             AddCashOrderColumn(table, "dok", typeof(string));
+            AddCashOrderColumn(table, "nuch", typeof(string));
+            AddCashOrderColumn(table, "d_nuch", typeof(string));
             AddCashOrderColumn(table, "Тип", typeof(string));
             AddCashOrderColumn(table, "order_type", typeof(string));
             AddCashOrderColumn(table, "Дебет", typeof(string));
@@ -1848,6 +1862,8 @@ namespace BIS.ERP.Views
                 SetCashOrderValue(dataRow, "Документ", row.DocNumber);
                 SetCashOrderValue(dataRow, "document_number", row.DocNumber);
                 SetCashOrderValue(dataRow, "dok", row.DocNumber);
+                SetCashOrderValue(dataRow, "nuch", row.DocNumber);
+                SetCashOrderValue(dataRow, "d_nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "Тип", row.OrderTypeDisplay);
                 SetCashOrderValue(dataRow, "order_type", row.OrderTypeDisplay);
                 SetCashOrderValue(dataRow, "Дебет", ExtractAccountCode(row.DebitAccount));
@@ -1914,6 +1930,7 @@ namespace BIS.ERP.Views
                 }
 
                 Report? selectedReport;
+                var selectedFormat = PrintFormOutputFormat.Pdf;
                 if (ChoosePrintFormCheckBox.IsChecked == true)
                 {
                     var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
@@ -1921,19 +1938,21 @@ namespace BIS.ERP.Views
                         return;
 
                     selectedReport = selectionDialog.SelectedReport;
+                    selectedFormat = selectionDialog.SelectedFormat;
                 }
                 else
                 {
                     selectedReport = forms.FirstOrDefault(form => form.IsDefault) ?? forms.First();
                 }
 
-                StatusText.Text = "Формирование PDF...";
-                var pdf = await printFormService.ExportDocumentAsync(selectedReport, selectedRow.Id);
-                StatusText.Text = "PDF сформирован";
-
-                var previewWindow = new PdfPreviewWindow(pdf) { Owner = Window.GetWindow(this) };
-                previewWindow.ShowDialog();
-                StatusText.Text = "Готово";
+                StatusText.Text = selectedFormat == PrintFormOutputFormat.Excel
+                    ? "Формирование Excel..."
+                    : "Формирование PDF...";
+                var output = selectedFormat == PrintFormOutputFormat.Excel
+                    ? await printFormService.ExportDocumentExcelAsync(selectedReport, selectedRow.Id)
+                    : await printFormService.ExportDocumentAsync(selectedReport, selectedRow.Id);
+                var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
+                StatusText.Text = $"Открыт файл печатной формы: {outputPath}";
             }
             catch (Exception ex)
             {
