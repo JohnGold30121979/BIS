@@ -29,6 +29,7 @@ namespace BIS.ERP.Views
         public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
+        public ObservableCollection<FieldDef> AvailableLayoutFields { get; } = new();
         public ObservableCollection<FoxProReportFieldRule> FoxProRules { get; } = new();
         private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
@@ -79,11 +80,21 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-
         private async Task LoadDataSources()
         {
             _availableCatalogs = await _metadataService.GetCatalogsAsync();
             _availableCatalogs.AddRange(await _metadataService.GetDocumentsAsync());
+
+            var reportSources = (await _metadataService.GetAllMetadataObjectsAsync())
+                .Where(item => item.ObjectType == "ReportSource")
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Name)
+                .ToList();
+            foreach (var source in reportSources)
+            {
+                if (_availableCatalogs.All(item => item.Id != source.Id))
+                    _availableCatalogs.Add(source);
+            }
 
             DataSourceCombo.Items.Clear();
             DataSourceCombo.Items.Add(new ComboBoxItem { Tag = null, Content = "-- Выберите источник данных --" });
@@ -93,13 +104,19 @@ namespace BIS.ERP.Views
                 DataSourceCombo.Items.Add(new ComboBoxItem
                 {
                     Tag = catalog,
-                    Content = $"{(catalog.ObjectType == "Document" ? "📄" : "📚")} {catalog.Name}"
+                    Content = $"{GetDataSourceIcon(catalog)} {catalog.Name}"
                 });
             }
 
             DataSourceCombo.SelectedIndex = 0;
         }
 
+        private static string GetDataSourceIcon(MetadataObject catalog) => catalog.ObjectType switch
+        {
+            "Document" => "📄",
+            "ReportSource" => "📌",
+            _ => "📚"
+        };
         private async void OnDataSourceChanged(object sender, SelectionChangedEventArgs e)
         {
             var selected = DataSourceCombo.SelectedItem as ComboBoxItem;
@@ -111,6 +128,8 @@ namespace BIS.ERP.Views
             {
                 AvailableSourceFields.Clear();
                 AvailableDataFields.Clear();
+                AvailableFilterFields.Clear();
+                AvailableLayoutFields.Clear();
                 AddComputedDataFields();
             }
         }
@@ -119,21 +138,21 @@ namespace BIS.ERP.Views
         {
             var addedFieldNames = _reportFields.Select(f => f.DisplayName).ToHashSet();
 
-            var fields = new List<FieldDef>();
+            var allFields = catalog.Fields
+                .OrderBy(f => f.Order)
+                .Select(field => new FieldDef { Name = field.Name, DbColumnName = field.DbColumnName, Type = field.FieldType })
+                .ToList();
 
-            foreach (var field in catalog.Fields.OrderBy(f => f.Order))
-            {
-                if (!addedFieldNames.Contains(field.Name))
-                {
-                    fields.Add(new FieldDef { Name = field.Name, DbColumnName = field.DbColumnName, Type = field.FieldType });
-                }
-            }
+            var fields = allFields
+                .Where(field => !addedFieldNames.Contains(field.Name))
+                .ToList();
 
             CommitDesignerGridEdits();
 
             AvailableSourceFields.Clear();
             AvailableDataFields.Clear();
             AvailableFilterFields.Clear();
+            AvailableLayoutFields.Clear();
 
             foreach (var field in fields)
             {
@@ -143,14 +162,10 @@ namespace BIS.ERP.Views
 
             AddComputedDataFields();
 
-            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            foreach (var field in allFields)
             {
-                AvailableFilterFields.Add(new FieldDef
-                {
-                    Name = field.Name,
-                    DbColumnName = field.DbColumnName,
-                    Type = field.FieldType
-                });
+                AvailableFilterFields.Add(field);
+                AvailableLayoutFields.Add(field);
             }
 
             await Task.CompletedTask;
@@ -289,6 +304,74 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void SyncReportFieldsWithSourceIfStale(Report report, MetadataObject catalog)
+        {
+            if (catalog.ObjectType != "ReportSource" || catalog.Fields.Count == 0)
+                return;
+
+            var sourceFieldNames = catalog.Fields
+                .SelectMany(field => new[] { field.Name, field.DbColumnName })
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var mirrorSourceSchema = string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase);
+            var hasStaleFields = _reportFields.Any(field =>
+                !sourceFieldNames.Contains(field.FieldName) &&
+                !sourceFieldNames.Contains(field.DisplayName));
+
+            if (_reportFields.Count > 0 && !mirrorSourceSchema && !hasStaleFields)
+                return;
+
+            if (mirrorSourceSchema && _reportFields.Count == catalog.Fields.Count && !hasStaleFields)
+                return;
+
+            _reportFields.Clear();
+            var order = 1;
+            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            {
+                var fieldName = string.IsNullOrWhiteSpace(field.DbColumnName)
+                    ? field.Name
+                    : field.DbColumnName;
+
+                _reportFields.Add(new ReportField
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = report.Id,
+                    FieldName = fieldName,
+                    DisplayName = field.Name,
+                    Order = order++,
+                    Width = GetDefaultReportFieldWidth(field.FieldType),
+                    IsVisible = true,
+                    Alignment = GetDefaultReportFieldAlignment(field.FieldType)
+                });
+            }
+        }
+
+        private static int GetDefaultReportFieldWidth(string fieldType)
+        {
+            return fieldType switch
+            {
+                "Decimal" => 100,
+                "Money" => 100,
+                "Int" => 80,
+                "Integer" => 80,
+                "Date" => 90,
+                "DateTime" => 100,
+                _ => 140
+            };
+        }
+
+        private static string GetDefaultReportFieldAlignment(string fieldType)
+        {
+            return fieldType switch
+            {
+                "Decimal" => "Right",
+                "Money" => "Right",
+                "Int" => "Right",
+                "Integer" => "Right",
+                _ => "Left"
+            };
+        }
         private async Task LoadReportAsync(Report report)
         {
             _currentReport = report;
@@ -360,6 +443,7 @@ namespace BIS.ERP.Views
                 var catalog = _availableCatalogs.FirstOrDefault(c => c.Id == report.DataSourceId);
                 if (catalog != null)
                 {
+                    SyncReportFieldsWithSourceIfStale(report, catalog);
                     await LoadAvailableFields(catalog);
                 }
             }
@@ -634,61 +718,13 @@ namespace BIS.ERP.Views
 
                 var mappingsToAdd = BuildReportElementMappings(_currentReport.Id);
 
+                _currentReport.Fields = fieldsToAdd;
+                _currentReport.Filters = filtersToAdd;
+                _currentReport.ElementMappings = mappingsToAdd;
+
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-
-                if (_currentReport.Id == Guid.Empty)
-                {
-                    _currentReport.Id = Guid.NewGuid();
-                    _currentReport.Fields = fieldsToAdd;
-                    _currentReport.Filters = filtersToAdd;
-                    foreach (var mapping in mappingsToAdd)
-                        mapping.ReportId = _currentReport.Id;
-                    _currentReport.ElementMappings = mappingsToAdd;
-                    context.Reports.Add(_currentReport);
-                }
-                else
-                {
-                    var existingReport = await context.Reports
-                        .Include(r => r.Fields)
-                        .Include(r => r.Filters)
-                        .Include(r => r.ElementMappings)
-                        .FirstOrDefaultAsync(r => r.Id == _currentReport.Id);
-
-                    if (existingReport == null)
-                    {
-                        _currentReport.Id = Guid.NewGuid();
-                        _currentReport.Fields = fieldsToAdd;
-                        _currentReport.Filters = filtersToAdd;
-                        foreach (var mapping in mappingsToAdd)
-                            mapping.ReportId = _currentReport.Id;
-                        _currentReport.ElementMappings = mappingsToAdd;
-                        context.Reports.Add(_currentReport);
-                    }
-                    else
-                    {
-                        // ✅ УДАЛЯЕМ СТАРЫЙ И СОЗДАЕМ НОВЫЙ
-                        var reportId = existingReport.Id;
-                        var createdAt = existingReport.CreatedAt;
-
-                        context.ReportFields.RemoveRange(existingReport.Fields);
-                        context.ReportFilters.RemoveRange(existingReport.Filters);
-                        context.ReportElementMappings.RemoveRange(existingReport.ElementMappings);
-                        context.Reports.Remove(existingReport);
-                        await context.SaveChangesAsync();
-
-                        _currentReport.Id = reportId;
-                        _currentReport.CreatedAt = createdAt;
-                        _currentReport.Fields = fieldsToAdd;
-                        _currentReport.Filters = filtersToAdd;
-                        foreach (var mapping in mappingsToAdd)
-                            mapping.ReportId = reportId;
-                        _currentReport.ElementMappings = mappingsToAdd;
-                        context.Reports.Add(_currentReport);
-                    }
-                }
-
-                await context.SaveChangesAsync();
-
+                var reportService = new ReportService(context);
+                _currentReport = await reportService.SaveReportAsync(_currentReport);
                 MessageBox.Show($"Отчет \"{_currentReport.Name}\" сохранен!", "Успех",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
@@ -1299,3 +1335,5 @@ namespace BIS.ERP.Views
             PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
     }
 }
+
+

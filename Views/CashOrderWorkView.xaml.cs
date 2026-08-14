@@ -1617,12 +1617,12 @@ namespace BIS.ERP.Views
 
                 CashBookButton.IsEnabled = false;
                 Cursor = Cursors.Wait;
-                StatusText.Text = "Формирование Excel кассовой книги по макету конфигуратора...";
+                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы кассовой книги..." : "Формирование Excel кассовой книги по макету конфигуратора...";
                 SystemLogService.Info(
                     $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
                     "CashOrderWorkView.CashBook");
 
-                await OpenConfiguredCashReportExcelAsync(
+                await OpenConfiguredCashReportAsync(
                     CashBookReportCode,
                     caption,
                     BuildCashBookReportDataTable(rows, startDate, endDate, cashDeskName, turnoverSummary),
@@ -1682,12 +1682,12 @@ namespace BIS.ERP.Views
 
                 ReceiptExpenseRegisterButton.IsEnabled = false;
                 Cursor = Cursors.Wait;
-                StatusText.Text = "Формирование Excel-реестра приходов/расходов по макету конфигуратора...";
+                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы реестра приходов/расходов..." : "Формирование Excel-реестра приходов/расходов по макету конфигуратора...";
                 SystemLogService.Info(
                     $"Старт формирования реестра приходов/расходов. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
                     "CashOrderWorkView.ReceiptExpenseRegister");
 
-                await OpenConfiguredCashReportExcelAsync(
+                await OpenConfiguredCashReportAsync(
                     ReceiptExpenseRegisterReportCode,
                     caption,
                     BuildReceiptExpenseRegisterReportDataTable(rows, startDate, endDate, cashDeskName, turnoverSummary),
@@ -1728,7 +1728,7 @@ namespace BIS.ERP.Views
         }
 
 
-        private async Task OpenConfiguredCashReportExcelAsync(
+        private async Task OpenConfiguredCashReportAsync(
             string reportCode,
             string caption,
             DataTable dataTable,
@@ -1751,20 +1751,40 @@ namespace BIS.ERP.Views
             if (!report.IsActive)
                 throw new InvalidOperationException($"Отчет \"{caption}\" отключен в конфигураторе.");
 
-            report.SubtitleText = $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            var selectedReport = report;
+            var selectedFormat = PrintFormOutputFormat.Excel;
+            if (ChoosePrintFormCheckBox.IsChecked == true)
+            {
+                var selectionDialog = new PrintFormSelectionDialog(new[] { report })
+                {
+                    Owner = Window.GetWindow(this)
+                };
+
+                if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
+                {
+                    StatusText.Text = "Формирование отчета отменено";
+                    return;
+                }
+
+                selectedReport = selectionDialog.SelectedReport;
+                selectedFormat = selectionDialog.SelectedFormat;
+            }
+
+            selectedReport.SubtitleText = $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
             var ruleService = new FoxProReportFieldRuleService(context);
             await ruleService.SeedDefaultRulesAsync();
             var rules = await ruleService.GetRulesAsync(includeInactive: false);
             var dataSnapshot = dataTable.Copy();
             var printFormService = new PrintFormService(context);
-            var excelBytes = await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, report, rules));
+            var output = selectedFormat == PrintFormOutputFormat.Excel
+                ? await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, selectedReport, rules))
+                : await Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, selectedReport, rules));
 
-            var outputPath = BuildCashReportExcelPath(outputBaseName);
-            await File.WriteAllBytesAsync(outputPath, excelBytes);
-            Process.Start(new ProcessStartInfo(outputPath) { UseShellExecute = true });
+            var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
+            var formatName = PrintFormOutputFileService.GetDisplayName(selectedFormat);
 
-            StatusText.Text = $"{caption} открыт в Excel: {dataTable.Rows.Count} строк";
-            SystemLogService.Info($"{caption} открыт по настраиваемому макету: {outputPath}", logSource);
+            StatusText.Text = $"{caption} открыт в {formatName}: {dataTable.Rows.Count} строк";
+            SystemLogService.Info($"{caption} открыт по настраиваемому макету ({formatName}): {outputPath}", logSource);
         }
 
         private DataTable BuildCashBookReportDataTable(
@@ -1784,6 +1804,10 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "ved2.name_kod", typeof(string));
             AddCashOrderColumn(table, "ved2.deb", typeof(decimal));
             AddCashOrderColumn(table, "ved2.cred", typeof(decimal));
+            AddCashOrderColumn(table, "ved2.sum_debet", typeof(decimal));
+            AddCashOrderColumn(table, "ved2.sum_credit", typeof(decimal));
+            AddCashOrderColumn(table, "ved2.opening_balance", typeof(decimal));
+            AddCashOrderColumn(table, "ved2.closing_balance", typeof(decimal));
             AddCashOrderColumn(table, "name_kod", typeof(string));
             AddCashOrderColumn(table, "deb", typeof(decimal));
             AddCashOrderColumn(table, "cred", typeof(decimal));
@@ -1802,6 +1826,10 @@ namespace BIS.ERP.Views
                 SetCashOrderValue(dataRow, "ved2.name_kod", BuildCashBookText(row));
                 SetCashOrderValue(dataRow, "ved2.deb", receiptAmount);
                 SetCashOrderValue(dataRow, "ved2.cred", paymentAmount);
+                SetCashOrderValue(dataRow, "ved2.sum_debet", receiptAmount);
+                SetCashOrderValue(dataRow, "ved2.sum_credit", paymentAmount);
+                SetCashOrderValue(dataRow, "ved2.opening_balance", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
+                SetCashOrderValue(dataRow, "ved2.closing_balance", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
                 SetCashOrderValue(dataRow, "name_kod", BuildCashBookText(row));
                 SetCashOrderValue(dataRow, "deb", receiptAmount);
                 SetCashOrderValue(dataRow, "cred", paymentAmount);
@@ -1835,6 +1863,10 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "pr_ras2.tex", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.deb", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.sum", typeof(decimal));
+            AddCashOrderColumn(table, "pr_ras2.sum_debet", typeof(decimal));
+            AddCashOrderColumn(table, "pr_ras2.sum_credit", typeof(decimal));
+            AddCashOrderColumn(table, "pr_ras2.opening_balance", typeof(decimal));
+            AddCashOrderColumn(table, "pr_ras2.closing_balance", typeof(decimal));
 
             foreach (var row in rows)
             {
@@ -1860,6 +1892,10 @@ namespace BIS.ERP.Views
                 SetCashOrderValue(dataRow, "pr_ras2.tex", basis);
                 SetCashOrderValue(dataRow, "pr_ras2.deb", correspondentAccount);
                 SetCashOrderValue(dataRow, "pr_ras2.sum", row.Amount);
+                SetCashOrderValue(dataRow, "pr_ras2.sum_debet", row.IsReceipt ? row.Amount : 0m);
+                SetCashOrderValue(dataRow, "pr_ras2.sum_credit", row.IsReceipt ? 0m : row.Amount);
+                SetCashOrderValue(dataRow, "pr_ras2.opening_balance", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
+                SetCashOrderValue(dataRow, "pr_ras2.closing_balance", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
                 table.Rows.Add(dataRow);
             }
 
@@ -1895,6 +1931,13 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "kor_sch", typeof(string));
             AddCashOrderColumn(table, "debit_amount", typeof(decimal));
             AddCashOrderColumn(table, "credit_amount", typeof(decimal));
+            AddCashOrderColumn(table, "sum_debet", typeof(decimal));
+            AddCashOrderColumn(table, "sum_debit", typeof(decimal));
+            AddCashOrderColumn(table, "sum_credit", typeof(decimal));
+            AddCashOrderColumn(table, "opening_balance", typeof(decimal));
+            AddCashOrderColumn(table, "closing_balance", typeof(decimal));
+            AddCashOrderColumn(table, "Остаток на начало", typeof(decimal));
+            AddCashOrderColumn(table, "Остаток на конец", typeof(decimal));
             AddCashOrderColumn(table, "amount", typeof(decimal));
             AddCashOrderColumn(table, "amount_currency", typeof(decimal));
             AddCashOrderColumn(table, "currency", typeof(string));
@@ -1941,6 +1984,8 @@ namespace BIS.ERP.Views
             var receiptAmount = row.IsReceipt ? row.Amount : 0m;
             var paymentAmount = row.IsReceipt ? 0m : row.Amount;
             var basis = FirstNotEmpty(row.Basis, row.Description, row.OrderTypeDisplay);
+            var openingBalance = turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit;
+            var closingBalance = turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit;
 
             SetCashOrderValue(dataRow, "Id", row.Id);
             SetCashOrderValue(dataRow, "report_name", "Расходный/Приходный КО");
@@ -1969,6 +2014,13 @@ namespace BIS.ERP.Views
             SetCashOrderValue(dataRow, "kor_sch", creditAccount);
             SetCashOrderValue(dataRow, "debit_amount", receiptAmount);
             SetCashOrderValue(dataRow, "credit_amount", paymentAmount);
+            SetCashOrderValue(dataRow, "sum_debet", receiptAmount);
+            SetCashOrderValue(dataRow, "sum_debit", receiptAmount);
+            SetCashOrderValue(dataRow, "sum_credit", paymentAmount);
+            SetCashOrderValue(dataRow, "opening_balance", openingBalance);
+            SetCashOrderValue(dataRow, "closing_balance", closingBalance);
+            SetCashOrderValue(dataRow, "Остаток на начало", openingBalance);
+            SetCashOrderValue(dataRow, "Остаток на конец", closingBalance);
             SetCashOrderValue(dataRow, "amount", row.Amount);
             SetCashOrderValue(dataRow, "amount_currency", row.AmountInCurrency == 0 ? row.Amount : row.AmountInCurrency);
             SetCashOrderValue(dataRow, "currency", row.CurrencyName);
@@ -1995,10 +2047,10 @@ namespace BIS.ERP.Views
             SetCashOrderValue(dataRow, "credit_turnover", turnoverSummary.CreditTurnover);
             SetCashOrderValue(dataRow, "closing_debit", turnoverSummary.ClosingDebit);
             SetCashOrderValue(dataRow, "closing_credit", turnoverSummary.ClosingCredit);
-            SetCashOrderValue(dataRow, "ost_n", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
-            SetCashOrderValue(dataRow, "ost_k", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
-            SetCashOrderValue(dataRow, "balance_start", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
-            SetCashOrderValue(dataRow, "balance_end", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
+            SetCashOrderValue(dataRow, "ost_n", openingBalance);
+            SetCashOrderValue(dataRow, "ost_k", closingBalance);
+            SetCashOrderValue(dataRow, "balance_start", openingBalance);
+            SetCashOrderValue(dataRow, "balance_end", closingBalance);
         }
         private static string FirstNotEmpty(params string[] values)
         {
@@ -2237,6 +2289,32 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Ошибка печати";
                 MessageBox.Show($"Ошибка печати: {ex.Message}", "Печать", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+        private void DataGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.OriginalSource is not DependencyObject source)
+                return;
+
+            var row = FindVisualParent<DataGridRow>(source);
+            if (row == null)
+                return;
+
+            row.IsSelected = true;
+            DataGrid.SelectedItem = row.Item;
+            DataGrid.Focus();
+        }
+
+        private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
+        {
+            while (child != null)
+            {
+                if (child is T parent)
+                    return parent;
+
+                child = VisualTreeHelper.GetParent(child);
+            }
+
+            return null;
         }
         private async void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {

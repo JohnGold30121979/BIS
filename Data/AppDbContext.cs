@@ -34,6 +34,8 @@ public class AppDbContext : DbContext
     public DbSet<ReportFilter> ReportFilters { get; set; }
     public DbSet<ReportGroup> ReportGroups { get; set; }
     public DbSet<ReportElementMapping> ReportElementMappings { get; set; }
+    public DbSet<ReportDataSet> ReportDataSets { get; set; }
+    public DbSet<ReportDataSetField> ReportDataSetFields { get; set; }
 
     // DbSet для документов (без внешних ключей на InfoBase)
     public DbSet<Document> Documents { get; set; }
@@ -114,7 +116,17 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<ReportGroup>().HasKey(g => g.Id);
         modelBuilder.Entity<ReportElementMapping>().HasKey(m => m.Id);
         modelBuilder.Entity<ReportElementMapping>().HasIndex(m => new { m.ReportId, m.ElementOrder });
-
+        modelBuilder.Entity<ReportDataSet>().HasKey(item => item.Id);
+        modelBuilder.Entity<ReportDataSet>().HasIndex(item => item.Code).IsUnique();
+        modelBuilder.Entity<ReportDataSet>()
+            .HasMany(item => item.Fields)
+            .WithOne(field => field.ReportDataSet)
+            .HasForeignKey(field => field.ReportDataSetId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ReportDataSetField>().HasKey(item => item.Id);
+        modelBuilder.Entity<ReportDataSetField>()
+            .HasIndex(item => new { item.ReportDataSetId, item.DbColumnName })
+            .IsUnique();
         // НАСТРОЙКИ ДЛЯ ДОКУМЕНТОВ (без связи с InfoBase)
         modelBuilder.Entity<Document>().HasKey(d => d.Id);
         modelBuilder.Entity<Document>().Property(d => d.Number).HasMaxLength(50);
@@ -206,3 +218,4 @@ public class AppDbContext : DbContext
         return $"Host={host};Port={port};Database={database};Username={username};Password={password}";
     }
 }
+

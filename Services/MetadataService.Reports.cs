@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System.IO;
 using System.IO.Compression;
@@ -9,11 +9,18 @@ namespace BIS.ERP.Services;
 public partial class MetadataService
 {
     private const string PaymentOrderPrPl23ReportCode = "standard.frx.finance.payment-order.pr-pl23";
+    private const string CashBookFrxReportCode = "standard.frx.finance.cash.cash-book";
+    private const string ReceiptExpenseRegisterFrxReportCode = "standard.frx.finance.cash.receipts-expenses-register";
+    public const string CashOrderTurnoverReportSourceName = "РКО/ПКО обороты по кассе";
+    public const string CashOrderTurnoverReportSourceTableName = "report_cash_order_turnover_source";
+
     public async Task EnsureStandardReportsAsync()
     {
         await new PrintFormService(_context).EnsureSchemaAsync();
         await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
+        await new ReportDataSetService(_context).EnsureStandardDataSetsAsync();
         _context.ChangeTracker.Clear();
+        await EnsureCashOrderTurnoverReportSourceAsync();
         await DeleteDeprecatedObjectTreeReportsAsync();
         var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
 
@@ -49,6 +56,117 @@ public partial class MetadataService
         await _context.SaveChangesAsync();
     }
 
+    private async Task EnsureCashOrderTurnoverReportSourceAsync()
+    {
+        var source = await _context.MetadataObjects
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item =>
+                item.ObjectType == "ReportSource" &&
+                item.Name == CashOrderTurnoverReportSourceName);
+
+        if (source == null)
+        {
+            var configId = await _context.MetadataConfigurations
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync();
+
+            source = new MetadataObject
+            {
+                Id = Guid.NewGuid(),
+                Name = CashOrderTurnoverReportSourceName,
+                TableName = CashOrderTurnoverReportSourceTableName,
+                ObjectType = "ReportSource",
+                Description = "Виртуальный источник кассовых отчетов: РКО/ПКО сгруппированы по корреспондентскому счету с суммами прихода, расхода и остатками.",
+                Icon = "📒",
+                Order = 95,
+                IsSystem = true,
+                MetadataConfigId = configId,
+                Fields = new List<MetadataField>()
+            };
+            await _context.MetadataObjects.AddAsync(source);
+        }
+
+        foreach (var desired in BuildCashOrderTurnoverReportSourceFields(source.Id))
+        {
+            var existing = source.Fields.FirstOrDefault(field =>
+                field.DbColumnName.Equals(desired.DbColumnName, StringComparison.OrdinalIgnoreCase));
+            if (existing == null)
+            {
+                source.Fields.Add(desired);
+                await _context.MetadataFields.AddAsync(desired);
+                continue;
+            }
+
+            ApplyCashOrderTurnoverFieldTemplate(existing, desired);
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    private static List<MetadataField> BuildCashOrderTurnoverReportSourceFields(Guid metadataObjectId) => new()
+    {
+        CashOrderTurnoverField(metadataObjectId, "Дата", "report_date", "DateTime", 1),
+        CashOrderTurnoverField(metadataObjectId, "Дата FRX", "d_xls", "DateTime", 2),
+        CashOrderTurnoverField(metadataObjectId, "Документ", "doc_number", "String", 3),
+        CashOrderTurnoverField(metadataObjectId, "Документ FRX", "dok", "String", 4),
+        CashOrderTurnoverField(metadataObjectId, "Номер учета", "nuch", "String", 5),
+        CashOrderTurnoverField(metadataObjectId, "Номер учета FRX", "d_nuch", "String", 6),
+        CashOrderTurnoverField(metadataObjectId, "Тип КО", "order_kind", "String", 7),
+        CashOrderTurnoverField(metadataObjectId, "Касса", "cash_desk", "String", 8),
+        CashOrderTurnoverField(metadataObjectId, "Счет кассы", "cash_account", "String", 9),
+        CashOrderTurnoverField(metadataObjectId, "Корр. счет", "correspondent_account", "String", 10),
+        CashOrderTurnoverField(metadataObjectId, "Остаток на начало", "opening_balance", "Decimal", 11),
+        CashOrderTurnoverField(metadataObjectId, "Сумма Приход", "sum_debet", "Decimal", 12),
+        CashOrderTurnoverField(metadataObjectId, "Сумма Расход", "sum_credit", "Decimal", 13),
+        CashOrderTurnoverField(metadataObjectId, "Остаток на конец", "closing_balance", "Decimal", 14),
+        CashOrderTurnoverField(metadataObjectId, "Приход FRX", "deb", "Decimal", 15),
+        CashOrderTurnoverField(metadataObjectId, "Расход FRX", "cred", "Decimal", 16),
+        CashOrderTurnoverField(metadataObjectId, "Сумма", "sum", "Decimal", 17),
+        CashOrderTurnoverField(metadataObjectId, "Содержание", "tex", "String", 18),
+        CashOrderTurnoverField(metadataObjectId, "Наименование", "name_kod", "String", 19),
+        CashOrderTurnoverField(metadataObjectId, "Основание", "basis", "String", 20),
+        CashOrderTurnoverField(metadataObjectId, "Примечание", "description", "String", 21),
+        CashOrderTurnoverField(metadataObjectId, "Количество документов", "document_count", "Int", 22),
+        CashOrderTurnoverField(metadataObjectId, "Модуль", "module", "String", 23)
+    };
+
+    private static MetadataField CashOrderTurnoverField(
+        Guid metadataObjectId,
+        string name,
+        string dbColumnName,
+        string fieldType,
+        int order) => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = name,
+        DbColumnName = dbColumnName,
+        FieldType = fieldType,
+        Length = fieldType == "String" ? 500 : 0,
+        Precision = 18,
+        Scale = 2,
+        IsRequired = false,
+        Order = order,
+        MetadataObjectId = metadataObjectId
+    };
+
+    private static void ApplyCashOrderTurnoverFieldTemplate(MetadataField existing, MetadataField desired)
+    {
+        existing.Name = desired.Name;
+        existing.FieldType = desired.FieldType;
+        existing.Length = desired.Length;
+        existing.Precision = desired.Precision;
+        existing.Scale = desired.Scale;
+        existing.Order = desired.Order;
+        existing.IsRequired = false;
+        existing.IsUnique = false;
+        existing.ReferenceCatalog = desired.ReferenceCatalog;
+        existing.DisplayPattern = desired.DisplayPattern;
+        existing.DisplayFields = desired.DisplayFields;
+    }
+
+    private static bool IsCashOrderTurnoverFrxReportCode(string? code) =>
+        string.Equals(code, CashBookFrxReportCode, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(code, ReceiptExpenseRegisterFrxReportCode, StringComparison.OrdinalIgnoreCase);
     private static readonly string[] DeprecatedObjectTreeReportCodes =
     {
         "standard.finance.trial-balance",
@@ -174,12 +292,19 @@ public partial class MetadataService
     }
     private async Task EnsureStandardFrxReportAsync(StandardFrxReportTemplateDefinition definition)
     {
+        var sourceName = IsCashOrderTurnoverFrxReportCode(definition.Code)
+            ? CashOrderTurnoverReportSourceName
+            : definition.SourceName;
+        var sourceObjectType = IsCashOrderTurnoverFrxReportCode(definition.Code)
+            ? "ReportSource"
+            : definition.SourceObjectType;
+
         var source = await _context.MetadataObjects
             .AsNoTracking()
             .Include(metadata => metadata.Fields)
             .FirstOrDefaultAsync(metadata =>
-                metadata.Name == definition.SourceName &&
-                metadata.ObjectType == definition.SourceObjectType);
+                metadata.Name == sourceName &&
+                metadata.ObjectType == sourceObjectType);
 
         var report = await _context.Reports
             .FirstOrDefaultAsync(item => item.Code == definition.Code);
@@ -206,7 +331,7 @@ public partial class MetadataService
             report.Name = definition.Name;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
             report.Description = definition.Description;
-        report.DataSourceType = definition.SourceObjectType;
+        report.DataSourceType = sourceObjectType;
         report.DataSourceId = source?.Id;
         report.ReportType = definition.ReportType;
         if (shouldSeedTemplate)
@@ -899,4 +1024,6 @@ public partial class MetadataService
         string PageOrientation,
         IReadOnlyList<string> Fields);
 }
+
+
 

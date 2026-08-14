@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace BIS.ERP.Services
@@ -164,6 +164,7 @@ namespace BIS.ERP.Services
                 END $$;");
 
             await new CashDayClosureService(_context).EnsureSchemaAsync();
+            await new ReportDataSetService(_context).EnsureSchemaAsync();
 
             lock (SyncLock)
             {
@@ -172,3 +173,4 @@ namespace BIS.ERP.Services
         }
     }
 }
+

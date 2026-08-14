@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Configurator.Views;
+using BIS.ERP.Configurator.Views;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -411,6 +411,21 @@ namespace BIS.ERP.Views
             PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new SystemLogViewerView()));
         }
 
+        private void ShowReportDataSetsEditor()
+        {
+            if (_context == null)
+                return;
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Наборы данных отчетов";
+            EditorDescription.Text = "SQL-источники для отчетов, которые администратор может менять без перекомпиляции";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new ReportDataSetManagementView(_context)));
+        }
+
+        private void OnReportDataSetsClick(object sender, RoutedEventArgs e)
+        {
+            ShowReportDataSetsEditor();
+        }
         private IEnumerable<BIS.ERP.NavigationItem> BuildUserAccessNavigationItems()
         {
             var items = new List<BIS.ERP.NavigationItem>();
@@ -3063,5 +3078,10 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+
+
+
+
 
 

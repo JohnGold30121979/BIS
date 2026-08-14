@@ -163,10 +163,6 @@
                     <Button x:Name="BatchPostButton" Content="✅ Провести выбранные" Width="165" Height="35" Margin="0,0,10,0"
                             Background="#8E44AD" Foreground="White" Click="OnBatchPostClick"
                             ToolTip="Провести все отмеченные непроведенные документы"/>
-                    <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
-                            Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
-                    <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,5"
-                              ToolTip="Если выключено, сразу открывается активная форма по умолчанию. Если включено, можно выбрать вариант печатной формы."/>
                 </WrapPanel>
             </Border>
             <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFF8EC" CornerRadius="5">
@@ -185,6 +181,10 @@
                     <TextBlock Text="Отчеты по кассе:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
                     <Button x:Name="CashBookButton" Content="Кассовая книга" Width="125" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
                     <Button x:Name="ReceiptExpenseRegisterButton" Content="Реестр приходов/расходов" Width="185" Height="32" Margin="0,0,8,0" Background="#34495E" Foreground="White" Click="OnReceiptExpenseRegisterClick"/>
+                    <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="32" Margin="10,0,8,0"
+                            Background="#2C3E50" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
+                    <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,0"
+                              ToolTip="Если выключено, сразу открывается активная форма по умолчанию. Если включено, можно выбрать вариант печатной формы."/>
                 </WrapPanel>
             </Border>
         </StackPanel>
@@ -193,8 +193,14 @@
         <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 
           IsReadOnly="True" SelectionChanged="OnSelectionChanged"
           AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1"
+          PreviewMouseRightButtonDown="DataGrid_PreviewMouseRightButtonDown"
           MouseDoubleClick="DataGrid_MouseDoubleClick"
           LoadingRow="DataGrid_LoadingRow">
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Печатная форма выбранного документа" Click="OnPrintClick"/>
+                </ContextMenu>
+            </DataGrid.ContextMenu>
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Setter Property="Background" Value="White"/>
