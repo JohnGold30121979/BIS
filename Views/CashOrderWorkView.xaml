@@ -42,26 +42,110 @@
                             Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
                 </WrapPanel>
             </Border>
-            <Border Margin="0,0,0,8" Padding="10,7" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
-                <StackPanel>
-                    <TextBlock x:Name="CashTurnoverHintText" Text="Остатки по кассе: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#2C3E50" Margin="0,0,0,5"/>
-                    <WrapPanel>
-                        <TextBlock Text="Дата/период:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashTurnoverDateText" Text="-" MinWidth="105" Margin="0,0,14,0"/>
-                        <TextBlock Text="ДН:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashOpeningDebitText" Text="0,00" MinWidth="85" TextAlignment="Right" Margin="0,0,14,0"/>
-                        <TextBlock Text="КН:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashOpeningCreditText" Text="0,00" MinWidth="85" TextAlignment="Right" Margin="0,0,14,0"/>
-                        <TextBlock Text="Дт оборот:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashDebitTurnoverText" Text="0,00" MinWidth="90" TextAlignment="Right" Margin="0,0,14,0"/>
-                        <TextBlock Text="Кт оборот:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashCreditTurnoverText" Text="0,00" MinWidth="90" TextAlignment="Right" Margin="0,0,14,0"/>
-                        <TextBlock Text="ДК:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashClosingDebitText" Text="0,00" MinWidth="85" TextAlignment="Right" Margin="0,0,14,0"/>
-                        <TextBlock Text="КК:" FontWeight="Bold" Margin="0,0,4,0"/>
-                        <TextBlock x:Name="CashClosingCreditText" Text="0,00" MinWidth="85" TextAlignment="Right"/>
-                    </WrapPanel>
-                </StackPanel>
+            <Border Margin="0,0,0,8" Padding="6" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Padding="8,6" BorderBrush="#CFEBD8" BorderThickness="1" Background="#F7FFF9" CornerRadius="4">
+                        <StackPanel>
+                            <TextBlock x:Name="OpenCashDayHintText" Text="Текущий открытый день: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#1D6F42" TextTrimming="CharacterEllipsis" Margin="0,0,0,4"/>
+                            <WrapPanel Margin="0,0,0,5">
+                                <TextBlock Text="Дата:" FontWeight="Bold" Margin="0,0,4,0"/>
+                                <TextBlock x:Name="OpenCashDayDateText" Text="-" Foreground="#2C3E50"/>
+                            </WrapPanel>
+                            <UniformGrid Columns="6">
+                                <Border BorderBrush="#D8E6DD" BorderThickness="1,1,0,1" Background="#FFFFFF" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="ДН" FontSize="11" Foreground="#607D6B" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="OpenCashOpeningDebitText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D8E6DD" BorderThickness="1,1,0,1" Background="#FFFFFF" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="КН" FontSize="11" Foreground="#607D6B" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="OpenCashOpeningCreditText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D8E6DD" BorderThickness="1,1,0,1" Background="#FFFFFF" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="Дт оборот" FontSize="11" Foreground="#607D6B" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="OpenCashDebitTurnoverText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D8E6DD" BorderThickness="1,1,0,1" Background="#FFFFFF" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="Кт оборот" FontSize="11" Foreground="#607D6B" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="OpenCashCreditTurnoverText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D8E6DD" BorderThickness="1,1,0,1" Background="#FFFFFF" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="ДК" FontSize="11" Foreground="#607D6B" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="OpenCashClosingDebitText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D8E6DD" BorderThickness="1" Background="#FFFFFF" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="КК" FontSize="11" Foreground="#607D6B" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="OpenCashClosingCreditText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Padding="8,6" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFFFFF" CornerRadius="4">
+                        <StackPanel>
+                            <TextBlock x:Name="CashTurnoverHintText" Text="Общие остатки за период: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#2C3E50" TextTrimming="CharacterEllipsis" Margin="0,0,0,4"/>
+                            <WrapPanel Margin="0,0,0,5">
+                                <TextBlock Text="Период:" FontWeight="Bold" Margin="0,0,4,0"/>
+                                <TextBlock x:Name="CashTurnoverDateText" Text="-" Foreground="#2C3E50"/>
+                            </WrapPanel>
+                            <UniformGrid Columns="6">
+                                <Border BorderBrush="#D5DEE8" BorderThickness="1,1,0,1" Background="#FAFCFE" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="ДН" FontSize="11" Foreground="#607080" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="CashOpeningDebitText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D5DEE8" BorderThickness="1,1,0,1" Background="#FAFCFE" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="КН" FontSize="11" Foreground="#607080" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="CashOpeningCreditText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D5DEE8" BorderThickness="1,1,0,1" Background="#FAFCFE" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="Дт оборот" FontSize="11" Foreground="#607080" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="CashDebitTurnoverText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D5DEE8" BorderThickness="1,1,0,1" Background="#FAFCFE" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="Кт оборот" FontSize="11" Foreground="#607080" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="CashCreditTurnoverText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D5DEE8" BorderThickness="1,1,0,1" Background="#FAFCFE" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="ДК" FontSize="11" Foreground="#607080" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="CashClosingDebitText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border BorderBrush="#D5DEE8" BorderThickness="1" Background="#FAFCFE" Padding="4,3">
+                                    <StackPanel>
+                                        <TextBlock Text="КК" FontSize="11" Foreground="#607080" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="CashClosingCreditText" Text="0,00" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Border>
             <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFFFFF" CornerRadius="5">
                 <WrapPanel>
@@ -76,6 +160,9 @@
                             Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
                     <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
                             Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
+                    <Button x:Name="BatchPostButton" Content="✅ Провести выбранные" Width="165" Height="35" Margin="0,0,10,0"
+                            Background="#8E44AD" Foreground="White" Click="OnBatchPostClick"
+                            ToolTip="Провести все отмеченные непроведенные документы"/>
                     <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
                             Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
                     <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,5"
@@ -119,6 +206,17 @@
                 </Style>
             </DataGrid.RowStyle>
             <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Выбор" Width="70" IsReadOnly="False">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsSelectedForBatchPost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEnabled="{Binding CanBatchPost}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      ToolTip="Отметить непроведенный документ для массового проведения"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTextColumn Header="День" Binding="{Binding CashDayStatusDisplay}" Width="85">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">

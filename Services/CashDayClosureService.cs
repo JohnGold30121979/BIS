@@ -2,6 +2,7 @@ using System.Data;
 using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace BIS.ERP.Services
 {
@@ -170,6 +171,38 @@ namespace BIS.ERP.Services
             return "\"" + identifier.Replace("\"", "\"\"") + "\"";
         }
 
+        private static NpgsqlParameter DateParameter(string name, DateTime date) =>
+            new(name, NpgsqlDbType.Date) { Value = date.Date };
+
+        private async Task<List<DateTime>> ExecuteDateListAsync(string sql, params NpgsqlParameter[] parameters)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                foreach (var parameter in parameters)
+                    command.Parameters.Add(parameter);
+
+                var dates = new List<DateTime>();
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                    dates.Add(reader.GetDateTime(0).Date);
+
+                return dates;
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
+        }
+
         public async Task EnsureExistsAsync()
         {
             await EnsureSchemaAsync();
@@ -196,7 +229,6 @@ namespace BIS.ERP.Services
         {
             await EnsureExistsAsync();
             var description = $"Закрытие кассового дня {closeDate:dd.MM.yyyy}";
-            var closeDateUtc = DateTime.SpecifyKind(closeDate.Date, DateTimeKind.Utc);
 
             try
             {
@@ -227,7 +259,7 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@id", Guid.NewGuid()),
                     new NpgsqlParameter("@cashDeskId", cashDeskId),
                     new NpgsqlParameter("@cashDeskName", cashDeskName ?? string.Empty),
-                    new NpgsqlParameter("@closeDate", closeDateUtc),
+                    DateParameter("@closeDate", closeDate),
                     new NpgsqlParameter("@closedBy", closedBy ?? string.Empty),
                     new NpgsqlParameter("@openingDebit", openingDebit),
                     new NpgsqlParameter("@openingCredit", openingCredit),
@@ -251,7 +283,6 @@ namespace BIS.ERP.Services
         {
             await EnsureExistsAsync();
             var description = $"Открытие кассового дня {closeDate:dd.MM.yyyy}";
-            var closeDateUtc = DateTime.SpecifyKind(closeDate.Date, DateTimeKind.Utc);
             var openDates = await GetOpenDayDatesAsync(cashDeskId);
             var anotherOpenDate = openDates.FirstOrDefault(date => date.Date != closeDate.Date);
 
@@ -277,7 +308,7 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@openedBy", openedBy ?? string.Empty),
                     new NpgsqlParameter("@description", description),
                     new NpgsqlParameter("@cashDeskId", cashDeskId),
-                    new NpgsqlParameter("@closeDate", closeDateUtc));
+                    DateParameter("@closeDate", closeDate));
             }
             catch (Exception ex)
             {
@@ -303,7 +334,6 @@ namespace BIS.ERP.Services
         public async Task<bool> IsDayClosedAsync(Guid cashDeskId, DateTime cashDate)
         {
             await EnsureExistsAsync();
-            var cashDateUtc = DateTime.SpecifyKind(cashDate.Date, DateTimeKind.Utc);
 
             return await ExecuteScalarBoolAsync("""
                 SELECT EXISTS (
@@ -315,13 +345,12 @@ namespace BIS.ERP.Services
                 )
                 """,
                 new NpgsqlParameter("@cashDeskId", cashDeskId),
-                new NpgsqlParameter("@cashDate", cashDateUtc));
+                DateParameter("@cashDate", cashDate));
         }
 
         public async Task<bool> IsDayOpenAsync(Guid cashDeskId, DateTime cashDate)
         {
             await EnsureExistsAsync();
-            var cashDateUtc = DateTime.SpecifyKind(cashDate.Date, DateTimeKind.Utc);
 
             return await ExecuteScalarBoolAsync("""
                 SELECT EXISTS (
@@ -333,62 +362,57 @@ namespace BIS.ERP.Services
                 )
                 """,
                 new NpgsqlParameter("@cashDeskId", cashDeskId),
-                new NpgsqlParameter("@cashDate", cashDateUtc));
+                DateParameter("@cashDate", cashDate));
         }
 
         public async Task<List<DateTime>> GetOpenDayDatesAsync(Guid cashDeskId)
         {
             await EnsureExistsAsync();
 
-            var dates = await _context.Database.SqlQuery<DateTime>($"""
-                SELECT "CloseDate"::timestamp AS "Value"
+            return await ExecuteDateListAsync("""
+                SELECT "CloseDate"
                 FROM "CashDayClosures"
-                WHERE "CashDeskId" = {cashDeskId}
+                WHERE "CashDeskId" = @cashDeskId
                   AND "IsClosed" = false
                 ORDER BY "CloseDate"
-                """).ToListAsync();
-
-            return dates.Select(d => DateTime.SpecifyKind(d, DateTimeKind.Utc)).ToList();
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId));
         }
 
         public async Task<List<DateTime>> GetOpenDatesAsync(Guid cashDeskId, DateTime startDate, DateTime endDate)
         {
             await EnsureExistsAsync();
 
-            var startDateUtc = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
-            var endDateUtc = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
-
-            var dates = await _context.Database.SqlQuery<DateTime>($"""
-                SELECT "CloseDate"::timestamp AS "Value"
+            return await ExecuteDateListAsync("""
+                SELECT "CloseDate"
                 FROM "CashDayClosures"
-                WHERE "CashDeskId" = {cashDeskId}
-                  AND "CloseDate" >= {startDateUtc}
-                  AND "CloseDate" <= {endDateUtc}
+                WHERE "CashDeskId" = @cashDeskId
+                  AND "CloseDate" >= @startDate
+                  AND "CloseDate" <= @endDate
                   AND "IsClosed" = false
                 ORDER BY "CloseDate"
-                """).ToListAsync();
-
-            return dates.Select(d => DateTime.SpecifyKind(d, DateTimeKind.Utc)).ToList();
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId),
+                DateParameter("@startDate", startDate),
+                DateParameter("@endDate", endDate));
         }
 
         public async Task<List<DateTime>> GetClosedDatesAsync(Guid cashDeskId, DateTime startDate, DateTime endDate)
         {
             await EnsureExistsAsync();
 
-            var startDateUtc = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
-            var endDateUtc = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
-
-            var dates = await _context.Database.SqlQuery<DateTime>($"""
-                SELECT "CloseDate"::timestamp AS "Value"
+            return await ExecuteDateListAsync("""
+                SELECT "CloseDate"
                 FROM "CashDayClosures"
-                WHERE "CashDeskId" = {cashDeskId}
-                  AND "CloseDate" >= {startDateUtc}
-                  AND "CloseDate" <= {endDateUtc}
+                WHERE "CashDeskId" = @cashDeskId
+                  AND "CloseDate" >= @startDate
+                  AND "CloseDate" <= @endDate
                   AND "IsClosed" = true
                 ORDER BY "CloseDate"
-                """).ToListAsync();
-
-            return dates.Select(d => DateTime.SpecifyKind(d, DateTimeKind.Utc)).ToList();
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId),
+                DateParameter("@startDate", startDate),
+                DateParameter("@endDate", endDate));
         }
     }
 }

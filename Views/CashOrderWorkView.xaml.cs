@@ -92,6 +92,7 @@ namespace BIS.ERP.Views
             PrintButton.IsEnabled = hasSelection;
             PostButton.Content = selected?.IsPosted == true ? "↩ Отменить проведение" : "✅ Провести";
             PostButton.Width = selected?.IsPosted == true ? 175 : 100;
+            BatchPostButton.IsEnabled = GetCurrentFilteredRows().Any(row => row.CanBatchPost);
         }
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -363,6 +364,8 @@ namespace BIS.ERP.Views
             {
                 row.CashDayStatusDisplay = status;
                 row.IsCashDayClosed = isClosed;
+                if (!row.CanBatchPost)
+                    row.IsSelectedForBatchPost = false;
             }
         }
 
@@ -380,6 +383,8 @@ namespace BIS.ERP.Views
                 row.CashDayStatusDisplay = row.IsCashDayClosed
                     ? "Закрыт"
                     : openSet.Contains(rowDate) ? "Открыт" : "Не открыт";
+                if (!row.CanBatchPost)
+                    row.IsSelectedForBatchPost = false;
             }
         }
 
@@ -387,33 +392,81 @@ namespace BIS.ERP.Views
         {
             var periodStart = startDate ?? DateTime.Today;
             var periodEnd = endDate ?? periodStart;
+            var selectedCashDesk = CashDeskFilterCombo.SelectedItem as CashDeskItem;
 
-            if (CashDeskFilterCombo.SelectedItem is not CashDeskItem selectedCashDesk ||
+            await UpdateOpenCashDaySummaryAsync(selectedCashDesk);
+
+            if (selectedCashDesk is null ||
                 selectedCashDesk.Id == Guid.Empty ||
                 string.IsNullOrWhiteSpace(selectedCashDesk.AccountCode))
             {
                 _currentCashTurnover = await CalculateAllCashTurnoverSummaryAsync(periodStart, periodEnd);
-                DisplayCashTurnoverSummary(_currentCashTurnover, "Остатки по всем кассам");
+                DisplayCashTurnoverSummary(_currentCashTurnover, "Общие остатки за период по всем кассам");
                 return;
             }
             if (periodStart > periodEnd)
             {
                 _currentCashTurnover = CashTurnoverSummary.ForPeriod(periodStart, periodEnd, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                DisplayCashTurnoverSummary(_currentCashTurnover, "Остатки по кассе: исправьте период");
+                DisplayCashTurnoverSummary(_currentCashTurnover, "Общие остатки за период: исправьте период");
                 return;
             }
 
             try
             {
                 _currentCashTurnover = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, periodStart, periodEnd);
-                DisplayCashTurnoverSummary(_currentCashTurnover);
+                DisplayCashTurnoverSummary(_currentCashTurnover, $"Общие остатки за период по кассе {selectedCashDesk.DisplayNameWithAccount}");
             }
             catch (Exception ex)
             {
                 SystemLogService.Error("Ошибка расчета остатков и оборотов по кассе.", "CashOrderWorkView.CashTurnover", ex);
                 _currentCashTurnover = CashTurnoverSummary.ForPeriod(periodStart, periodEnd, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                DisplayCashTurnoverSummary(_currentCashTurnover, "Ошибка расчета остатков по кассе. Подробности в системном логе.");
+                DisplayCashTurnoverSummary(_currentCashTurnover, "Общие остатки за период: ошибка расчета. Подробности в системном логе.");
             }
+        }
+
+        private async Task UpdateOpenCashDaySummaryAsync(CashDeskItem? selectedCashDesk)
+        {
+            if (selectedCashDesk is null || selectedCashDesk.Id == Guid.Empty || string.IsNullOrWhiteSpace(selectedCashDesk.AccountCode))
+            {
+                DisplayOpenCashDaySummary(CashTurnoverSummary.Empty, "Текущий открытый день: выберите конкретную кассу", "-");
+                return;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var cashDayService = new CashDayClosureService(context);
+                var openDates = await cashDayService.GetOpenDayDatesAsync(selectedCashDesk.Id);
+                var openDate = openDates.OrderByDescending(date => date.Date).FirstOrDefault();
+
+                if (openDate == default)
+                {
+                    var empty = CashTurnoverSummary.ForPeriod(DateTime.Today, DateTime.Today, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
+                    DisplayOpenCashDaySummary(empty, $"Текущий открытый день по кассе {selectedCashDesk.DisplayNameWithAccount}: открытых дней нет", "-");
+                    return;
+                }
+
+                var openDaySummary = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, openDate.Date, openDate.Date);
+                DisplayOpenCashDaySummary(openDaySummary, $"Текущий открытый день по кассе {selectedCashDesk.DisplayNameWithAccount}", openDate.ToString("dd.MM.yyyy"));
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Ошибка расчета текущего открытого кассового дня.", "CashOrderWorkView.OpenCashDaySummary", ex);
+                var fallback = CashTurnoverSummary.ForPeriod(DateTime.Today, DateTime.Today, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
+                DisplayOpenCashDaySummary(fallback, "Текущий открытый день: ошибка расчета. Подробности в системном логе.", "-");
+            }
+        }
+
+        private void DisplayOpenCashDaySummary(CashTurnoverSummary summary, string hint, string dateText)
+        {
+            OpenCashDayHintText.Text = hint;
+            OpenCashDayDateText.Text = dateText;
+            OpenCashOpeningDebitText.Text = FormatCashAmount(summary.OpeningDebit);
+            OpenCashOpeningCreditText.Text = FormatCashAmount(summary.OpeningCredit);
+            OpenCashDebitTurnoverText.Text = FormatCashAmount(summary.DebitTurnover);
+            OpenCashCreditTurnoverText.Text = FormatCashAmount(summary.CreditTurnover);
+            OpenCashClosingDebitText.Text = FormatCashAmount(summary.ClosingDebit);
+            OpenCashClosingCreditText.Text = FormatCashAmount(summary.ClosingCredit);
         }
 
         private void DisplayCashTurnoverSummary(CashTurnoverSummary summary, string? hint = null)
@@ -995,11 +1048,96 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnBatchPostClick(object sender, RoutedEventArgs e)
+        {
+            const string caption = "Массовое проведение кассовых ордеров";
+            var selectedRows = GetCurrentFilteredRows()
+                .Where(row => row.IsSelectedForBatchPost)
+                .ToList();
+
+            if (selectedRows.Count == 0)
+            {
+                MessageBox.Show("Отметьте непроведенные документы для проведения.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var unavailableRows = selectedRows.Where(row => !row.CanBatchPost).ToList();
+            if (unavailableRows.Count > 0)
+            {
+                MessageBox.Show("Среди отмеченных есть уже проведенные документы или документы закрытого дня. Снимите отметки и повторите.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var confirm = MessageBox.Show($"Провести выбранные документы: {selectedRows.Count}?", caption, MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes)
+                return;
+
+            var postedCount = 0;
+            var errors = new List<string>();
+            try
+            {
+                foreach (var row in selectedRows)
+                {
+                    if (!await EnsureCashDayAllowsDocumentAsync(row, caption))
+                        return;
+
+                    try
+                    {
+                        StatusText.Text = $"Проведение документа № {row.DocNumber}...";
+                        await _metadataService.PostDocumentAsync(_documentMetadata.Id, row.Id);
+                        postedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        errors.Add($"№ {row.DocNumber}: {ex.Message}");
+                        SystemLogService.Error($"Ошибка массового проведения кассового документа № {row.DocNumber}.", "CashOrderWorkView.OnBatchPostClick", ex);
+                    }
+                }
+
+                await LoadData();
+
+                if (errors.Count > 0)
+                {
+                    var details = string.Join(Environment.NewLine, errors.Take(5));
+                    if (errors.Count > 5)
+                        details += Environment.NewLine + $"... и еще ошибок: {errors.Count - 5}";
+                    MessageBox.Show($"Проведено документов: {postedCount}. Ошибок: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                MessageBox.Show($"Проведено документов: {postedCount}.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            finally
+            {
+                StatusText.Text = "✅ Готово";
+            }
+        }
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
             await LoadData();
         }
 
+        private List<CashOrderRow> GetUnpostedCashDayRows(CashDeskItem cashDesk, DateTime cashDate)
+        {
+            return _allRows
+                .Where(row => row.DocDate.Date == cashDate.Date)
+                .Where(row => RowMatchesCashDesk(row, cashDesk))
+                .Where(row => !row.IsPosted)
+                .OrderBy(row => row.DocNumber)
+                .ToList();
+        }
+
+        private static string BuildUnpostedCashDayMessage(DateTime cashDate, List<CashOrderRow> rows)
+        {
+            var documents = string.Join(", ", rows.Take(8).Select(row => $"{row.OrderTypeDisplay} № {row.DocNumber}"));
+            if (rows.Count > 8)
+                documents += $", ... еще {rows.Count - 8}";
+
+            return $"Нельзя закрыть кассовый день {cashDate:dd.MM.yyyy}: есть непроведенные документы.{Environment.NewLine}" +
+                   $"Непроведенных документов: {rows.Count}.{Environment.NewLine}" +
+                   $"Документы: {documents}.{Environment.NewLine}" +
+                   "Сначала проведите документы или снимите лишние записи.";
+        }
         private bool TryGetCurrentPeriod(string caption, out DateTime startDate, out DateTime endDate)
         {
             startDate = PeriodStartDatePicker.SelectedDate?.Date ?? DateTime.Today;
@@ -1266,6 +1404,13 @@ namespace BIS.ERP.Views
                 return;
 
             var cashDate = (CashDayDatePicker.SelectedDate ?? DateTime.Today).Date;
+            var unpostedRows = GetUnpostedCashDayRows(cashDesk, cashDate);
+            if (unpostedRows.Count > 0)
+            {
+                MessageBox.Show(BuildUnpostedCashDayMessage(cashDate, unpostedRows), caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             var confirm = MessageBox.Show($"Закрыть кассовый день {cashDate:dd.MM.yyyy} по кассе \"{cashDesk.DisplayNameWithAccount}\"?",
                 caption,
                 MessageBoxButton.YesNo,
@@ -2189,6 +2334,8 @@ namespace BIS.ERP.Views
         public string CorrespondentAccountName { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public bool IsPosted { get; set; }
+        public bool IsSelectedForBatchPost { get; set; }
+        public bool CanBatchPost => !IsPosted && !IsCashDayClosed;
         public string IsPostedDisplay => LocalizationService.DisplayValue(IsPosted);
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
