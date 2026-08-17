@@ -371,57 +371,49 @@ namespace BIS.ERP.Views
         {
             if (_context == null)
                 return;
-            SetPropertiesScrollEnabled(false);
-            EditorTitle.Text = "Модули и разделы";
-            EditorDescription.Text = "Состав документов и отчетов рабочего интерфейса";
-            PropertiesPanel.Children.Clear();
-            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(
-                new BIS.ERP.Views.Configurator.ModuleManagementView(_context)));
-        }
 
+            OpenConfiguratorDocument(
+                "config:modules",
+                "Модули и разделы",
+                new BIS.ERP.Views.Configurator.ModuleManagementView(_context));
+        }
         private void ShowAccountingSetupEditor()
         {
             if (_context == null)
                 return;
-            SetPropertiesScrollEnabled(false);
-            EditorTitle.Text = "Настройка бухгалтерского учета";
-            EditorDescription.Text = "Служебные параметры учета: входящие остатки, строки отчетности и расчет курсовой разницы";
-            PropertiesPanel.Children.Clear();
-            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new AccountingSetupView(_context)));
-        }
 
+            OpenConfiguratorDocument(
+                "config:accounting-setup",
+                "Настройка учета",
+                new AccountingSetupView(_context));
+        }
         private void ShowUsersEditor()
         {
             if (_context == null)
                 return;
-            SetPropertiesScrollEnabled(false);
-            EditorTitle.Text = "Пользователи и права";
-            EditorDescription.Text = "Пользователи текущей информационной базы и доступ к рабочему окну";
-            PropertiesPanel.Children.Clear();
-            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(
-                new UserAccessManagementView(_context, BuildUserAccessNavigationItems(), ServiceLocator.AuthService.CurrentUser)));
-        }
 
+            OpenConfiguratorDocument(
+                "config:user-access",
+                "Пользователи и права",
+                new UserAccessManagementView(_context, BuildUserAccessNavigationItems(), ServiceLocator.AuthService.CurrentUser));
+        }
         private void ShowSystemLogsViewer()
         {
-            SetPropertiesScrollEnabled(false);
-            EditorTitle.Text = "Просмотр логов";
-            EditorDescription.Text = "Основной системный лог и служебные файлы журнала приложения";
-            PropertiesPanel.Children.Clear();
-            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new SystemLogViewerView()));
+            OpenConfiguratorDocument(
+                "config:system-logs",
+                "Просмотр логов",
+                new SystemLogViewerView());
         }
-
         private void ShowReportDataSetsEditor()
         {
             if (_context == null)
                 return;
-            SetPropertiesScrollEnabled(false);
-            EditorTitle.Text = "Наборы данных отчетов";
-            EditorDescription.Text = "SQL-источники для отчетов, которые администратор может менять без перекомпиляции";
-            PropertiesPanel.Children.Clear();
-            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new ReportDataSetManagementView(_context)));
-        }
 
+            OpenConfiguratorDocument(
+                "config:report-data-sets",
+                "Наборы данных отчетов",
+                new ReportDataSetManagementView(_context));
+        }
         private void OnReportDataSetsClick(object sender, RoutedEventArgs e)
         {
             ShowReportDataSetsEditor();
@@ -482,6 +474,13 @@ namespace BIS.ERP.Views
             return items;
         }
 
+        private void OpenConfiguratorDocument(string key, string title, UserControl content)
+        {
+            _fixedPropertiesContent = null;
+            LegacyEditorHost.Visibility = Visibility.Collapsed;
+            ConfiguratorWorkspace.Visibility = Visibility.Visible;
+            ConfiguratorWorkspace.OpenDocument(key, title, content);
+        }
         private FrameworkElement CreateFixedPropertiesHost(UIElement content)
         {
             var host = new Grid
@@ -497,6 +496,8 @@ namespace BIS.ERP.Views
         private void SetPropertiesScrollEnabled(bool enabled)
         {
             _fixedPropertiesContent = null;
+            LegacyEditorHost.Visibility = Visibility.Visible;
+            ConfiguratorWorkspace.Visibility = Visibility.Collapsed;
             PropertiesScrollViewer.VerticalScrollBarVisibility = enabled
                 ? ScrollBarVisibility.Auto
                 : ScrollBarVisibility.Disabled;

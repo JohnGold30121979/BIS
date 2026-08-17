@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using BIS.ERP.Views.Dialogs;
@@ -875,7 +875,7 @@ namespace BIS.ERP
 
             scrollViewer.Content = stackPanel;
             page.Content = scrollViewer;
-            _navigation.NavigateTo(page);
+            _navigation.NavigateTo(page, ToTitleCase(rootItem.Name), $"overview:{rootItem.Id}");
         }
 
         private Border CreateNavigationOverviewHeader(NavigationItem rootItem)
@@ -1309,7 +1309,7 @@ namespace BIS.ERP
                     if (item.Tag is MetadataObject catalog)
                     {
                         var catalogView = new CatalogDataView(catalog, _metadataService);
-                        _navigation.NavigateTo(catalogView);
+                        _navigation.NavigateTo(catalogView, item.Name, $"catalog:{item.Id}");
                     }
                     break;
 
@@ -1317,46 +1317,46 @@ namespace BIS.ERP
                     var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
                     var employeeService = new EmployeeService(dbContext, _metadataService);
                     var employeesView = new EmployeesCatalogView(employeeService, _metadataService);
-                    _navigation.NavigateTo(employeesView);
+                    _navigation.NavigateTo(employeesView, item.Name, $"catalog:{item.Id}");
                     break;
 
                 case "DynamicDocument":
                     if (item.Tag is MetadataObject document)
                     {
                         var dynamicView = new DynamicDocumentWorkView(document, _metadataService);
-                        _navigation.NavigateTo(dynamicView);
+                        _navigation.NavigateTo(dynamicView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
                 case "DbfDocuments":
                     var dbfView = new DynamicDocumentsView(_documentService);
-                    _navigation.NavigateTo(dbfView);
+                    _navigation.NavigateTo(dbfView, item.Name, item.Id);
                     break;
 
                 case "PostingsJournal":
                     var journalContext = await _infoBaseManager.GetCurrentDbContextAsync();
                     var postingService = new PostingService(journalContext);
                     var journalView = new PostingsJournalView(postingService);
-                    _navigation.NavigateTo(journalView);
+                    _navigation.NavigateTo(journalView, item.Name, item.Id);
                     break;
 
                 case "EsfExport":
                     var esfExportContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                    _navigation.NavigateTo(new EsfExportWorkView(esfExportContext));
+                    _navigation.NavigateTo(new EsfExportWorkView(esfExportContext), item.Name, item.Id);
                     break;
 
                 case "MutualSettlements":
                     var msdbContext = await _infoBaseManager.GetCurrentDbContextAsync();
                     var msMetadataService = new MetadataService(msdbContext);
                     var msView = new MutualSettlementsView(msMetadataService);
-                    _navigation.NavigateTo(msView);
+                    _navigation.NavigateTo(msView, item.Name, item.Id);
                     break;
 
                 case "PostingsDocument":
                     if (item.Tag is MetadataObject postingsDocument)
                     {
                         var postingsView = new PostingsView(postingsDocument, _metadataService);
-                        _navigation.NavigateTo(postingsView);
+                        _navigation.NavigateTo(postingsView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
@@ -1364,12 +1364,12 @@ namespace BIS.ERP
                     if (item.Tag is MetadataObject[] cashOrderDocuments && cashOrderDocuments.FirstOrDefault() is { } singleCashOrderDocument)
                     {
                         var cashOrderView = new CashOrderWorkView(singleCashOrderDocument, _metadataService);
-                        _navigation.NavigateTo(cashOrderView);
+                        _navigation.NavigateTo(cashOrderView, item.Name, $"document:{item.Id}");
                     }
                     else if (item.Tag is MetadataObject cashOrderDocument)
                     {
                         var cashOrderView = new CashOrderWorkView(cashOrderDocument, _metadataService);
-                        _navigation.NavigateTo(cashOrderView);
+                        _navigation.NavigateTo(cashOrderView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
@@ -1377,7 +1377,7 @@ namespace BIS.ERP
                     if (item.Tag is MetadataObject paymentDocument)
                     {
                         var paymentView = new PaymentOrderWorkView(paymentDocument, _metadataService);
-                        _navigation.NavigateTo(paymentView);
+                        _navigation.NavigateTo(paymentView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
@@ -1385,7 +1385,7 @@ namespace BIS.ERP
                     if (item.Tag is MetadataObject financeDocument)
                     {
                         var financeDocumentView = new FinanceDocumentWorkView(financeDocument, _metadataService);
-                        _navigation.NavigateTo(financeDocumentView);
+                        _navigation.NavigateTo(financeDocumentView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
@@ -1393,7 +1393,7 @@ namespace BIS.ERP
                     if (item.Tag is MetadataObject invoiceDocument)
                     {
                         var invoiceView = new InvoiceWorkView(invoiceDocument, _metadataService);
-                        _navigation.NavigateTo(invoiceView);
+                        _navigation.NavigateTo(invoiceView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
@@ -1415,12 +1415,12 @@ namespace BIS.ERP
                     break;
 
                 case "SystemLogs":
-                    _navigation.NavigateTo(new SystemLogViewerView());
+                    _navigation.NavigateTo(new SystemLogViewerView(), item.Name, item.Id);
                     break;
 
                 case "UserAccessManagement":
                     var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                    _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser));
+                    _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser), item.Name, item.Id);
                     break;
 
                 case "AboutSystem":
@@ -1731,7 +1731,7 @@ namespace BIS.ERP
             var view = new AccountingReportsView(context);
             if (!string.IsNullOrWhiteSpace(selectedReportType))
                 view.SelectReportType(selectedReportType);
-            _navigation.NavigateTo(view);
+            _navigation.NavigateTo(view, "Бухгалтерские отчеты", $"AccountingReports:{selectedReportType ?? "default"}");
         }
 
         private static bool IsReconciliationReport(Report report) =>

@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Threading.Tasks;
 using BIS.ERP.Data;
@@ -219,7 +220,8 @@ namespace BIS.ERP.Services
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                var organizationId = reader.IsDBNull(3) ? (Guid?)null : reader.GetGuid(3);
+                var organizationId = ReadNullableGuid(reader, 3);
+                var currencyId = ReadNullableGuid(reader, 12);
                 result.Add(new InvoiceListRow
                 {
                     Id = reader.GetGuid(0),
@@ -236,8 +238,8 @@ namespace BIS.ERP.Services
                     ModuleCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
                     ExchangeCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
                     TaxStatus = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
-                    CurrencyId = reader.IsDBNull(12) ? null : reader.GetGuid(12),
-                    CurrencyName = !reader.IsDBNull(12) && currencyMap.TryGetValue(reader.GetGuid(12), out var currencyName)
+                    CurrencyId = currencyId,
+                    CurrencyName = currencyId.HasValue && currencyMap.TryGetValue(currencyId.Value, out var currencyName)
                         ? currencyName
                         : string.Empty,
                     ExchangeRate = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
@@ -317,7 +319,8 @@ namespace BIS.ERP.Services
                 return null;
             }
 
-            var organizationId = reader.IsDBNull(10) ? (Guid?)null : reader.GetGuid(10);
+            var organizationId = ReadNullableGuid(reader, 10);
+            var currencyId = ReadNullableGuid(reader, 21);
             var invoice = new InvoiceDocument
             {
                 Id = reader.GetGuid(0),
@@ -344,7 +347,7 @@ namespace BIS.ERP.Services
                 SalesTaxTotal = reader.GetDecimal(18),
                 TotalAmount = reader.GetDecimal(19),
                 IsPosted = reader.GetBoolean(20),
-                CurrencyId = reader.IsDBNull(21) ? null : reader.GetGuid(21),
+                CurrencyId = currencyId,
                 ExchangeRate = reader.IsDBNull(22) ? 0m : reader.GetDecimal(22),
                 AmountCurrency = reader.IsDBNull(23) ? 0m : reader.GetDecimal(23)
             };
@@ -1270,6 +1273,19 @@ namespace BIS.ERP.Services
                    value.Equals("да", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static Guid? ReadNullableGuid(DbDataReader reader, int ordinal)
+        {
+            if (reader.IsDBNull(ordinal))
+                return null;
+
+            var value = reader.GetValue(ordinal);
+            if (value is Guid guid)
+                return guid;
+
+            return Guid.TryParse(value?.ToString(), out var parsed)
+                ? parsed
+                : null;
+        }
         private static string NormalizeAccountOrDefault(string? value, string fallback)
         {
             var normalized = value?.Trim();
