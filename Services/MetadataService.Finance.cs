@@ -5,6 +5,10 @@ namespace BIS.ERP.Services;
 
 public partial class MetadataService
 {
+    private const string AccountPairsCatalogName = "Пары счетов";
+    private const string LegacyAdvancePaymentsCatalogName = "Авансовые платежи";
+    private const string AccountPairsCatalogTableName = "catalog_advance_payments";
+
     #region Finance catalog fields
 
     private List<MetadataField> GetAdvancePaymentFields(Guid metadataObjectId)
@@ -77,7 +81,7 @@ public partial class MetadataService
             var catalogId = Guid.NewGuid();
             var catalog = new MetadataObject
             {
-                Id = catalogId, Name = "Авансовые платежи", TableName = "catalog_advance_payments",
+                Id = catalogId, Name = AccountPairsCatalogName, TableName = AccountPairsCatalogTableName,
                 ObjectType = "Catalog", Description = "Справочник пар счетов для учета авансовых платежей",
                 Icon = "💳", Order = 20, IsSystem = true, MetadataConfigId = config.Id,
                 Fields = GetAdvancePaymentFields(catalogId)
@@ -86,23 +90,22 @@ public partial class MetadataService
             await _context.SaveChangesAsync();
             await CreateTableForCatalogAsync(catalog);
             await AddAdvancePaymentDataToTable(catalog);
-            System.Diagnostics.Debug.WriteLine("Справочник 'Авансовые платежи' создан");
+            System.Diagnostics.Debug.WriteLine($"Справочник '{AccountPairsCatalogName}' создан");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Авансовые платежи': {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
     }
 
     private async Task EnsureAdvancePaymentsCatalogStructureAsync()
     {
-        var catalog = await _context.MetadataObjects
-            .Include(metadata => metadata.Fields)
-            .FirstOrDefaultAsync(metadata => metadata.ObjectType == "Catalog" && metadata.Name == "Авансовые платежи");
+        var catalog = await GetAccountPairsCatalogAsync(includeFields: true);
 
         if (catalog == null)
             return;
 
+        await RenameLegacyAdvancePaymentsCatalogAsync(catalog);
         await MigrateAdvancePaymentsModuleFieldAsync(catalog);
 
         foreach (var field in catalog.Fields)
@@ -253,8 +256,44 @@ public partial class MetadataService
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации справочника 'Авансовые платежи': {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
+    }
+
+    private async Task<MetadataObject?> GetAccountPairsCatalogAsync(bool includeFields = false)
+    {
+        IQueryable<MetadataObject> query = _context.MetadataObjects;
+        if (includeFields)
+            query = query.Include(metadata => metadata.Fields);
+
+        return await query
+            .Where(metadata =>
+                metadata.ObjectType == "Catalog" &&
+                (metadata.Name == AccountPairsCatalogName ||
+                 (metadata.Name == LegacyAdvancePaymentsCatalogName &&
+                  metadata.TableName == AccountPairsCatalogTableName)))
+            .OrderByDescending(metadata => metadata.Name == AccountPairsCatalogName)
+            .ThenByDescending(metadata => metadata.TableName == AccountPairsCatalogTableName)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task RenameLegacyAdvancePaymentsCatalogAsync(MetadataObject catalog)
+    {
+        if (!string.Equals(catalog.Name, LegacyAdvancePaymentsCatalogName, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var targetNameExists = await _context.MetadataObjects.AnyAsync(metadata =>
+            metadata.Id != catalog.Id &&
+            metadata.ObjectType == "Catalog" &&
+            metadata.Name == AccountPairsCatalogName);
+        if (targetNameExists)
+            return;
+
+        catalog.Name = AccountPairsCatalogName;
+        catalog.TableName = string.IsNullOrWhiteSpace(catalog.TableName)
+            ? AccountPairsCatalogTableName
+            : catalog.TableName;
+        catalog.Description = "Справочник пар счетов для учета авансовых платежей";
     }
 
     private async Task CreateAccountAccessCatalog(MetadataConfiguration config)
@@ -425,20 +464,110 @@ public partial class MetadataService
 
     #region Finance data seeding
 
+    private async Task NormalizeAdvancePaymentSeedCodesAsync(string tableName)
+    {
+        try
+        {
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{tableName}"" AS source
+                SET ""is_active"" = false,
+                    ""UpdatedAt"" = NOW()
+                WHERE source.""code"" IN (
+                    'SERVICES',
+                    'SUPPLIERS',
+                    'EMPLOYEE_ADVANCES',
+                    'ENERGY_ORGANIZATIONS',
+                    'ENERGY_POPULATION',
+                    'LOANS',
+                    'ENERGY_SERVICES',
+                    'PENALTIES_POPULATION',
+                    'ENERGY_PERSONAL_ACCOUNTS',
+                    'OTHER_SERVICES'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM ""{tableName}"" AS target
+                    WHERE target.""code"" = CASE source.""code""
+                        WHEN 'SERVICES' THEN '1'
+                        WHEN 'SUPPLIERS' THEN '2'
+                        WHEN 'EMPLOYEE_ADVANCES' THEN '3'
+                        WHEN 'ENERGY_ORGANIZATIONS' THEN '4'
+                        WHEN 'ENERGY_POPULATION' THEN '5'
+                        WHEN 'LOANS' THEN '6'
+                        WHEN 'ENERGY_SERVICES' THEN '7'
+                        WHEN 'PENALTIES_POPULATION' THEN '8'
+                        WHEN 'ENERGY_PERSONAL_ACCOUNTS' THEN '9'
+                        WHEN 'OTHER_SERVICES' THEN '10'
+                        ELSE source.""code""
+                    END
+                );
+
+                UPDATE ""{tableName}"" AS source
+                SET ""code"" = CASE source.""code""
+                        WHEN 'SERVICES' THEN '1'
+                        WHEN 'SUPPLIERS' THEN '2'
+                        WHEN 'EMPLOYEE_ADVANCES' THEN '3'
+                        WHEN 'ENERGY_ORGANIZATIONS' THEN '4'
+                        WHEN 'ENERGY_POPULATION' THEN '5'
+                        WHEN 'LOANS' THEN '6'
+                        WHEN 'ENERGY_SERVICES' THEN '7'
+                        WHEN 'PENALTIES_POPULATION' THEN '8'
+                        WHEN 'ENERGY_PERSONAL_ACCOUNTS' THEN '9'
+                        WHEN 'OTHER_SERVICES' THEN '10'
+                        ELSE source.""code""
+                    END,
+                    ""UpdatedAt"" = NOW()
+                WHERE source.""code"" IN (
+                    'SERVICES',
+                    'SUPPLIERS',
+                    'EMPLOYEE_ADVANCES',
+                    'ENERGY_ORGANIZATIONS',
+                    'ENERGY_POPULATION',
+                    'LOANS',
+                    'ENERGY_SERVICES',
+                    'PENALTIES_POPULATION',
+                    'ENERGY_PERSONAL_ACCOUNTS',
+                    'OTHER_SERVICES'
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM ""{tableName}"" AS target
+                    WHERE target.""code"" = CASE source.""code""
+                        WHEN 'SERVICES' THEN '1'
+                        WHEN 'SUPPLIERS' THEN '2'
+                        WHEN 'EMPLOYEE_ADVANCES' THEN '3'
+                        WHEN 'ENERGY_ORGANIZATIONS' THEN '4'
+                        WHEN 'ENERGY_POPULATION' THEN '5'
+                        WHEN 'LOANS' THEN '6'
+                        WHEN 'ENERGY_SERVICES' THEN '7'
+                        WHEN 'PENALTIES_POPULATION' THEN '8'
+                        WHEN 'ENERGY_PERSONAL_ACCOUNTS' THEN '9'
+                        WHEN 'OTHER_SERVICES' THEN '10'
+                        ELSE source.""code""
+                    END
+                );");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника '{AccountPairsCatalogName}': {ex.Message}");
+        }
+    }
     private async Task AddAdvancePaymentDataToTable(MetadataObject catalog)
     {
+        await NormalizeAdvancePaymentSeedCodesAsync(catalog.TableName);
+
         var items = new[]
         {
-            new { code = "SERVICES", name = "Расчеты по услугам", debit = "18200000", credit = "31200000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
-            new { code = "SUPPLIERS", name = "Расчеты с поставщиками", debit = "18100000", credit = "31100000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
-            new { code = "EMPLOYEE_ADVANCES", name = "Расчеты с подотчетными лицами", debit = "15200000", credit = "36200000", module = "Финансы", organizations = false, personnel = true, currency = false, settlements = false, postings = false, internalSettlements = false },
-            new { code = "ENERGY_ORGANIZATIONS", name = "Расчеты за электроэнергию организаций", debit = "14100000", credit = "32100000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = true },
-            new { code = "ENERGY_POPULATION", name = "Расчеты за электроэнергию населения", debit = "14130000", credit = "32130000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = false, internalSettlements = false },
-            new { code = "LOANS", name = "Займы", debit = "33200000", credit = "33200000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
-            new { code = "ENERGY_SERVICES", name = "Расчеты по услугам электроэнергии", debit = "14170100", credit = "32170100", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = true },
-            new { code = "PENALTIES_POPULATION", name = "Расчеты по пени населения", debit = "14170200", credit = "32170200", module = "Финансы", organizations = false, personnel = false, currency = false, settlements = false, postings = false, internalSettlements = true },
-            new { code = "ENERGY_PERSONAL_ACCOUNTS", name = "Расчеты за электроэнергию населения по лицевым счетам", debit = "14140000", credit = "32140000", module = "Финансы", organizations = false, personnel = false, currency = false, settlements = false, postings = false, internalSettlements = true },
-            new { code = "OTHER_SERVICES", name = "Расчеты по прочим услугам", debit = "14160000", credit = "32160000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = false, internalSettlements = false }
+            new { code = "1", name = "Расчеты по услугам", debit = "18200000", credit = "31200000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
+            new { code = "2", name = "Расчеты с поставщиками", debit = "18100000", credit = "31100000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
+            new { code = "3", name = "Расчеты с подотчетными лицами", debit = "15200000", credit = "36200000", module = "Финансы", organizations = false, personnel = true, currency = false, settlements = false, postings = false, internalSettlements = false },
+            new { code = "4", name = "Расчеты за электроэнергию организаций", debit = "14100000", credit = "32100000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = true },
+            new { code = "5", name = "Расчеты за электроэнергию населения", debit = "14130000", credit = "32130000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = false, internalSettlements = false },
+            new { code = "6", name = "Займы", debit = "33200000", credit = "33200000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
+            new { code = "7", name = "Расчеты по услугам электроэнергии", debit = "14170100", credit = "32170100", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = true },
+            new { code = "8", name = "Расчеты по пени населения", debit = "14170200", credit = "32170200", module = "Финансы", organizations = false, personnel = false, currency = false, settlements = false, postings = false, internalSettlements = true },
+            new { code = "9", name = "Расчеты за электроэнергию населения по лицевым счетам", debit = "14140000", credit = "32140000", module = "Финансы", organizations = false, personnel = false, currency = false, settlements = false, postings = false, internalSettlements = true },
+            new { code = "10", name = "Расчеты по прочим услугам", debit = "14160000", credit = "32160000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = false, internalSettlements = false }
         };
 
         foreach (var item in items)
@@ -469,10 +598,8 @@ public partial class MetadataService
     private async Task DeactivateLegacyAdvancePaymentRowsAsync(string tableName)
     {
         await _context.Database.ExecuteSqlRawAsync($@"
-            UPDATE ""{tableName}""
-            SET ""is_active"" = false,
-                ""UpdatedAt"" = NOW()
-            WHERE ""code"" IN ('AP01', 'AP02', 'AP03');");
+            DELETE FROM ""{tableName}""
+            WHERE ""code"" IN ('AP01', 'AP02', 'AP03', 'SERVICES', 'SUPPLIERS', 'EMPLOYEE_ADVANCES', 'ENERGY_ORGANIZATIONS', 'ENERGY_POPULATION', 'LOANS', 'ENERGY_SERVICES', 'PENALTIES_POPULATION', 'ENERGY_PERSONAL_ACCOUNTS', 'OTHER_SERVICES');");
     }
 
     private async Task MigrateAdvancePaymentsModuleFieldAsync(MetadataObject catalog)
@@ -511,12 +638,19 @@ public partial class MetadataService
 
     public async Task<List<Dictionary<string, object>>> GetAdvancePaymentPairsAsync()
     {
-        var catalog = await _context.MetadataObjects.FirstOrDefaultAsync(m => m.Name == "Авансовые платежи" && m.ObjectType == "Catalog");
+        var catalog = await GetAccountPairsCatalogAsync();
         if (catalog == null) return new List<Dictionary<string, object>>();
 
         var result = new List<Dictionary<string, object>>();
         using var command = _context.Database.GetDbConnection().CreateCommand();
-        command.CommandText = $@"SELECT * FROM ""{catalog.TableName}"" WHERE ""is_active"" = true ORDER BY ""code""";
+        command.CommandText = $@"
+            SELECT *
+            FROM ""{catalog.TableName}""
+            WHERE ""is_active"" = true
+            ORDER BY
+                CASE WHEN ""code"" ~ '^[0-9]+$' THEN 0 ELSE 1 END,
+                CASE WHEN ""code"" ~ '^[0-9]+$' THEN ""code""::integer ELSE NULL END,
+                ""code""";
         try
         {
             await _context.Database.OpenConnectionAsync();

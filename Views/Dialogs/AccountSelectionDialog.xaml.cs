@@ -14,6 +14,7 @@ namespace BIS.ERP.Views
         public Dictionary<string, object> SelectedAccount { get; private set; }
         private List<Dictionary<string, object>> _accounts;
         private DataTable _accountsTable = new();
+        private DataTable _visibleAccountsTable = new();
 
         public AccountSelectionDialog(List<Dictionary<string, object>> accounts)
         {
@@ -22,7 +23,8 @@ namespace BIS.ERP.Views
 
             // Преобразуем в DataTable для лучшего отображения
             _accountsTable = ConvertToDataTable(accounts);
-            AccountsGrid.ItemsSource = _accountsTable.DefaultView;
+            _visibleAccountsTable = _accountsTable;
+            AccountsGrid.ItemsSource = _visibleAccountsTable.DefaultView;
         }
 
         private DataTable ConvertToDataTable(List<Dictionary<string, object>> data)
@@ -43,15 +45,26 @@ namespace BIS.ERP.Views
             foreach (var row in data)
             {
                 dataTable.Rows.Add(
-                    row.ContainsKey("Код") ? row["Код"].ToString() : "",
-                    row.ContainsKey("Наименование") ? row["Наименование"].ToString() : "",
-                    FormatAccountType(row.ContainsKey("Тип счета") ? row["Тип счета"]?.ToString() : ""),
-                    FormatActiveValue(row.ContainsKey("Активен") ? row["Активен"] : null),
-                    row.ContainsKey("Id") ? row["Id"].ToString() : ""
+                    GetAccountRowValue(row, "Код", "code", "Code", "Счет", "schet", "account_code", "AccountCode"),
+                    GetAccountRowValue(row, "Наименование", "name", "Name"),
+                    FormatAccountType(GetAccountRowValue(row, "Тип счета", "account_type", "AccountType")),
+                    FormatActiveValue(GetAccountRowValue(row, "Активен", "is_active", "IsActive")),
+                    GetAccountRowValue(row, "Id")
                 );
             }
 
             return dataTable;
+        }
+
+        private static string GetAccountRowValue(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
         }
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
@@ -72,20 +85,68 @@ namespace BIS.ERP.Views
 
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            var view = _accountsTable.DefaultView;
-            var searchText = SearchBox.Text?.Trim().Replace("'", "''") ?? string.Empty;
+            var searchText = SearchBox.Text?.Trim() ?? string.Empty;
 
-            if (string.IsNullOrWhiteSpace(searchText))
+            _visibleAccountsTable = string.IsNullOrWhiteSpace(searchText)
+                ? _accountsTable
+                : BuildFilteredAccountsTable(searchText);
+
+            AccountsGrid.ItemsSource = _visibleAccountsTable.DefaultView;
+
+            if (_visibleAccountsTable.DefaultView.Count > 0)
+                AccountsGrid.SelectedIndex = 0;
+        }
+
+        private DataTable BuildFilteredAccountsTable(string searchText)
+        {
+            var result = _accountsTable.Clone();
+
+            foreach (DataRow row in _accountsTable.Rows)
             {
-                view.RowFilter = string.Empty;
-                return;
+                if (MatchesAccountSearch(row, searchText))
+                    result.ImportRow(row);
             }
 
-            view.RowFilter =
-                $"[Код] LIKE '%{searchText}%' OR [Наименование] LIKE '%{searchText}%' OR [Тип счета] LIKE '%{searchText}%'";
+            return result;
+        }
 
-            if (view.Count > 0)
-                AccountsGrid.SelectedIndex = 0;
+        private static bool MatchesAccountSearch(DataRow row, string searchText)
+        {
+            var code = row["Код"]?.ToString() ?? string.Empty;
+            var name = row["Наименование"]?.ToString() ?? string.Empty;
+            var type = row["Тип счета"]?.ToString() ?? string.Empty;
+            var digitSearch = ExtractDigits(searchText);
+
+            if (!string.IsNullOrEmpty(digitSearch))
+                return ExtractDigits(code).StartsWith(digitSearch, StringComparison.Ordinal);
+
+            return name.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                   type.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                   code.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static bool ContainsDigitsInOrder(string valueDigits, string searchDigits)
+        {
+            if (string.IsNullOrEmpty(searchDigits))
+                return true;
+
+            var searchIndex = 0;
+            foreach (var digit in valueDigits)
+            {
+                if (digit != searchDigits[searchIndex])
+                    continue;
+
+                searchIndex++;
+                if (searchIndex == searchDigits.Length)
+                    return true;
+            }
+
+            return false;
         }
 
         private void SelectCurrentAccount()

@@ -35,14 +35,16 @@ namespace BIS.ERP.Services
             return MessageBox.Show(_owner, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
         }
 
-        public async Task<bool> ShowLoginAsync()
+        public async Task<bool> ShowLoginAsync(bool isConfiguratorMode = false)
         {
             var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
             var infoBaseText = currentInfoBase == null
                 ? string.Empty
                 : $"Инфобаза: {currentInfoBase.Name} ({currentInfoBase.DatabaseName})";
 
-            var loginWindow = new LoginWindow(infoBaseText)
+            var selectedModeText = isConfiguratorMode ? "Режим: Конфигуратор" : "Режим: Рабочий режим";
+
+            var loginWindow = new LoginWindow(infoBaseText, selectedModeText)
             {
                 Owner = _owner,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner
@@ -59,11 +61,27 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        public bool ShowEditInfoBase(InfoBase infoBase, out string? infoBaseName)
+        public bool ShowEditInfoBase(
+            InfoBase infoBase,
+            out string? infoBaseName,
+            out string? infoBaseIcon,
+            out byte[]? logoImage,
+            out string? logoContentType,
+            out string? logoFileName)
         {
-            var dialog = new EditInfoBaseDialog(infoBase.Name) { Owner = _owner };
+            var dialog = new EditInfoBaseDialog(
+                infoBase.Name,
+                infoBase.Icon,
+                infoBase.LogoImage,
+                infoBase.LogoContentType,
+                infoBase.LogoFileName)
+            { Owner = _owner };
             var result = dialog.ShowDialog() == true;
             infoBaseName = result ? dialog.InfoBaseName : null;
+            infoBaseIcon = result ? dialog.InfoBaseIcon : null;
+            logoImage = result ? dialog.LogoImageBytes : null;
+            logoContentType = result ? dialog.LogoContentType : null;
+            logoFileName = result ? dialog.LogoFileName : null;
             return result;
         }
 

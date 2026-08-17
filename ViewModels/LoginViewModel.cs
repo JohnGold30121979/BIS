@@ -23,19 +23,24 @@ namespace BIS.ERP.ViewModels
         private string selectedInfoBaseText = string.Empty;
 
         [ObservableProperty]
+        private string selectedModeText = string.Empty;
+
+        [ObservableProperty]
         private bool isBusy;
 
         public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
         public bool HasSelectedInfoBase => !string.IsNullOrWhiteSpace(SelectedInfoBaseText);
+        public bool HasSelectedMode => !string.IsNullOrWhiteSpace(SelectedModeText);
 
         public event EventHandler? LoginSucceeded;
         public event EventHandler? CloseRequested;
         public event EventHandler? BackRequested;
 
-        public LoginViewModel(IAuthService authService, string selectedInfoBaseText = "")
+        public LoginViewModel(IAuthService authService, string selectedInfoBaseText = "", string selectedModeText = "")
         {
             _authService = authService;
             SelectedInfoBaseText = selectedInfoBaseText;
+            SelectedModeText = selectedModeText;
         }
 
         partial void OnErrorMessageChanged(string value)
@@ -46,6 +51,11 @@ namespace BIS.ERP.ViewModels
         partial void OnSelectedInfoBaseTextChanged(string value)
         {
             OnPropertyChanged(nameof(HasSelectedInfoBase));
+        }
+
+        partial void OnSelectedModeTextChanged(string value)
+        {
+            OnPropertyChanged(nameof(HasSelectedMode));
         }
 
         [RelayCommand]

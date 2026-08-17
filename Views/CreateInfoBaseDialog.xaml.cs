@@ -14,12 +14,22 @@ namespace BIS.ERP.Views
         public string Username => UsernameBox.Text;
         public string Password => PasswordBox.Password;
         public string DatabaseName => DatabaseBox.Text.Trim();
+        public string InfoBaseIcon => string.IsNullOrWhiteSpace(IconBox.Text)
+            ? BIS.ERP.Models.InfoBase.DefaultIcon
+            : IconBox.Text.Trim();
+        public byte[]? LogoImageBytes => logoImageBytes;
+        public string? LogoContentType => logoContentType;
+        public string? LogoFileName => logoFileName;
         public string InitialPatchVersion => string.IsNullOrWhiteSpace(PatchVersionBox.Text)
             ? InfoBaseManager.DefaultPatchVersion
             : PatchVersionBox.Text.Trim();
         public bool AttachExisting => (ModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() == "Attach";
 
         public bool IsSuccess { get; private set; } = false;
+
+        private byte[]? logoImageBytes;
+        private string? logoContentType;
+        private string? logoFileName;
 
         public CreateInfoBaseDialog()
         {
@@ -34,6 +44,52 @@ namespace BIS.ERP.Views
             PatchVersionBox.Text = InfoBaseManager.DefaultPatchVersion;
 
             GenerateDatabaseName();
+            UpdateLogoPreview();
+        }
+
+        private void OnIconSelected(object sender, SelectionChangedEventArgs e)
+        {
+            if (IconBox == null)
+                return;
+
+            var selectedIcon = (IconCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            if (!string.IsNullOrWhiteSpace(selectedIcon))
+                IconBox.Text = selectedIcon;
+        }
+
+        private void OnLoadLogoClick(object sender, RoutedEventArgs e)
+        {
+            if (!LogoFileService.TryPickLogo(this, out var logo, out var error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                    ShowError(error);
+                return;
+            }
+
+            logoImageBytes = logo!.ImageBytes;
+            logoContentType = logo.ContentType;
+            logoFileName = logo.FileName;
+            ErrorText.Visibility = Visibility.Collapsed;
+            UpdateLogoPreview();
+        }
+
+        private void OnClearLogoClick(object sender, RoutedEventArgs e)
+        {
+            logoImageBytes = null;
+            logoContentType = null;
+            logoFileName = null;
+            UpdateLogoPreview();
+        }
+
+        private void UpdateLogoPreview()
+        {
+            var imageSource = LogoFileService.CreateImageSource(logoImageBytes);
+            LogoPreviewImage.Source = imageSource;
+            LogoPreviewImage.Visibility = imageSource == null ? Visibility.Collapsed : Visibility.Visible;
+            LogoPlaceholderText.Visibility = imageSource == null ? Visibility.Visible : Visibility.Collapsed;
+            LogoNameText.Text = string.IsNullOrWhiteSpace(logoFileName)
+                ? "Логотип не загружен"
+                : $"Загружен: {logoFileName}";
         }
 
         private void GenerateDatabaseName()
@@ -187,8 +243,8 @@ namespace BIS.ERP.Views
 
                 // Создаем базу с описанием
                 var newBase = AttachExisting
-                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion)
-                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, InitialPatchVersion);
+                    ? await manager.AttachInfoBaseAsync(InfoBaseName, Host, Port, DatabaseName, Username, Password, InitialPatchVersion, InfoBaseIcon, LogoImageBytes, LogoContentType, LogoFileName)
+                    : await manager.CreateInfoBaseAsync(InfoBaseName, "Universal", Host, Port, Username, Password, DatabaseName, InitialPatchVersion, InfoBaseIcon, LogoImageBytes, LogoContentType, LogoFileName);
 
                 // Обновляем описание для отображения
                 if (newBase != null)
@@ -205,20 +261,32 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                ShowError($"Ошибка создания: {ex.Message}");
+                ShowError($"Ошибка создания: {GetFullExceptionMessage(ex)}");
                 CreateButton.IsEnabled = true;
             }
+        }
+
+        private static string GetFullExceptionMessage(Exception exception)
+        {
+            var messages = new List<string>();
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message))
+                    messages.Add(current.Message);
+            }
+
+            return string.Join(Environment.NewLine, messages);
         }
         private void OnExpanderExpanded(object sender, RoutedEventArgs e)
         {
             // Увеличиваем высоту окна при раскрытии
-            this.Height = 600;
+            this.Height = 760;
         }
 
         private void OnExpanderCollapsed(object sender, RoutedEventArgs e)
         {
             // Возвращаем высоту при сворачивании
-            this.Height = 420;
+            this.Height = 560;
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e)

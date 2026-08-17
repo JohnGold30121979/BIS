@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using BIS.ERP.Views.Dialogs;
@@ -58,11 +58,67 @@ namespace BIS.ERP
         private Point _dragStartPoint;
         private NavigationItem _draggedItem;
         private bool _closeForModeSwitch;
+        private readonly Dictionary<string, string> _overviewSearchTextByItemId = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _overviewViewModeByItemId = new(StringComparer.OrdinalIgnoreCase);
+        private const string OverviewBlocksMode = "Блоки";
+        private const string OverviewListMode = "Список";
         private static readonly HashSet<string> NotReadyFinanceDocuments = new(StringComparer.OrdinalIgnoreCase)
         {
             "Расчет курсовой разницы"
         };
 
+        private static readonly HashSet<string> RemovedDocumentNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Доверенность",
+            "Платежная ведомость"
+        };
+
+
+        private static readonly HashSet<string> FixedAssetsNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Основные средства",
+            "Соответствия счетов ОС",
+            "Группы ОС",
+            "Подгруппы ОС",
+            "Виды ОС",
+            "Методы амортизации ОС",
+            "Статусы ОС",
+            "Налоговые группы ОС",
+            "Параметры контура ОС",
+            "Покупка ОС",
+            "Ввод ОС в эксплуатацию",
+            "Приход из производства ОС",
+            "Переоценка ОС",
+            "Реализация ОС",
+            "Частичная реализация ОС",
+            "Ликвидация ОС",
+            "Укомплектация ОС",
+            "Разукомплектация ОС",
+            "Начисление амортизации",
+            "Списание амортизации",
+            "Консервация ОС",
+            "Расконсервация ОС",
+            "Передача ОС в подотчет",
+            "Смена затратного счета"
+        };
+
+        private static readonly HashSet<string> InventoryNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Виды материалов",
+            "Справочник материалов",
+            "Наименования категорий",
+            "Приход товаров",
+            "Расход товаров",
+            "Внутреннее перемещение ТМЦ",
+            "Приход из производства ТМЦ",
+            "Расход в производство",
+            "Передача ТМЦ в подотчет",
+            "Инвентаризация ТМЦ",
+            "Ведомость наличия материалов",
+            "Перечень материалов",
+            "Журнал прихода товаров",
+            "Журнал расхода товаров"
+        };
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
         public MainWorkWindow(IAuthService authService)
@@ -92,19 +148,20 @@ namespace BIS.ERP
             {
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
-                SystemIconText.Text = systemConfiguration.Icon;
+                LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, systemConfiguration.Icon);
                 _currentInfoBase = await _infoBaseManager.GetCurrentInfoBaseAsync();
                 if (_currentInfoBase != null)
                 {
                     CurrentInfoBaseText.Text = _currentInfoBase.Name;
+                    LogoDisplayHelper.Apply(InfoBaseLogoImage, InfoBaseIconText, _currentInfoBase.LogoImage, _currentInfoBase.DisplayIcon);
                     this.Title = $"{systemConfiguration.SystemName} - {_currentInfoBase.Name}";
 
                     // ✅ Устанавливаем иконку кнопки темы при загрузке
                     var settings = AppSettings.Instance;
                     if (ThemeToggleButton != null)
                     {
-                        ThemeToggleButton.Content = settings.Theme == "Dark" ? "🌞" : "🌙";
-                        ThemeToggleButton.ToolTip = settings.Theme == "Dark" ? "Светлая тема" : "Темная тема";
+                        ThemeToggleButton.Content = ThemeService.GetThemeToggleIcon(settings.Theme);
+                        ThemeToggleButton.ToolTip = ThemeService.GetThemeToggleToolTip(settings.Theme);
                     }
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
@@ -144,14 +201,32 @@ namespace BIS.ERP
             NavigationItems.Clear();
 
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
-            var catalogs = allMetadata.Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты").ToList();
-            var documents = allMetadata
-                .Where(item => item.ObjectType == "Document" && !NotReadyFinanceDocuments.Contains(item.Name))
+            var allModules = await _moduleMetadataService.GetModulesAsync(includeInactive: true);
+            var modules = allModules
+                .Where(module => module.IsActive && !ModuleMetadataService.IsDevelopmentDisabledModuleCode(module.Code))
+                .OrderBy(module => module.Order)
+                .ThenBy(module => module.Name)
                 .ToList();
-            var reports = await _reportService.GetNavigationReportsAsync();
-            var modules = await _moduleMetadataService.GetModulesAsync();
+            var activeModuleCodes = modules.Select(module => module.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var hiddenMetadataIds = allMetadata
+                .Where(item => IsHiddenByUnavailableModule(item, activeModuleCodes))
+                .Select(item => item.Id)
+                .ToHashSet();
+            var catalogs = MetadataService.CollapseDuplicateCatalogsForNavigation(
+                allMetadata.Where(item => item.ObjectType == "Catalog" &&
+                                          item.Name != "Контрагенты" &&
+                                          !hiddenMetadataIds.Contains(item.Id)));
+            var documents = allMetadata
+                .Where(item => item.ObjectType == "Document" &&
+                               !NotReadyFinanceDocuments.Contains(item.Name) &&
+                               !RemovedDocumentNames.Contains(item.Name) &&
+                               !hiddenMetadataIds.Contains(item.Id))
+                .ToList();
+            var reports = (await _reportService.GetNavigationReportsAsync())
+                .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, activeModuleCodes))
+                .ToList();
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
-            if (modules.Count == 0 && (await _moduleMetadataService.GetModulesAsync(true)).Count == 0)
+            if (modules.Count == 0 && allModules.Count == 0)
             {
                 await BuildLegacyNavigationTree();
                 return;
@@ -197,8 +272,7 @@ namespace BIS.ERP
                     {
                         Id = $"ModuleDocuments:{module.Id}", Name = "Документы", Icon = "📄", Type = "Group"
                     };
-                    foreach (var document in moduleDocuments)
-                        group.Children.Add(CreateDocumentNavigationItem(document));
+                    AddDocumentNavigationItems(group, moduleDocuments);
                     moduleSection.Children.Add(group);
                 }
 
@@ -227,6 +301,7 @@ namespace BIS.ERP
                         Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
                     };
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
+                    financeTools.Children.Add(new NavigationItem { Id = "EsfExport", Name = "Выгрузка ЭСФ", Icon = "📤", Type = "EsfExport" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleSection.Children.Add(financeTools);
@@ -238,14 +313,13 @@ namespace BIS.ERP
 
             var unassignedDocuments = documents.Where(document => !assignmentByObject.ContainsKey(document.Id)).ToList();
             var unassignedReports = reports.Where(report => !assignmentByObject.ContainsKey(report.Id)).ToList();
-            if (unassignedDocuments.Count > 0 || unassignedReports.Count > 0)
+            if (!ModuleMetadataService.HideUnassignedObjectsInNavigationDuringDevelopment && (unassignedDocuments.Count > 0 || unassignedReports.Count > 0))
             {
                 var otherSection = new NavigationItem
                 {
                     Id = "UnassignedSection", Name = "НЕРАСПРЕДЕЛЕННЫЕ ОБЪЕКТЫ", Icon = "📂", Type = "Section"
                 };
-                foreach (var document in unassignedDocuments.OrderBy(document => document.Name))
-                    otherSection.Children.Add(CreateDocumentNavigationItem(document));
+                AddDocumentNavigationItems(otherSection, unassignedDocuments);
                 foreach (var report in unassignedReports.OrderBy(report => report.Name))
                     otherSection.Children.Add(new NavigationItem
                     {
@@ -262,7 +336,7 @@ namespace BIS.ERP
             var dbfCount = await _documentService.GetDocumentsCountAsync();
             serviceSection.Children.Add(new NavigationItem
             {
-                Id = "DbfDocuments", Name = "DBF Документы", Icon = "🗄", Type = "DbfDocuments",
+                Id = "DbfDocuments", Name = "FoxPro documents", Icon = "🗄", Type = "DbfDocuments",
                 Badge = dbfCount > 0 ? dbfCount.ToString() : string.Empty
             });
             NavigationItems.Add(serviceSection);
@@ -274,15 +348,103 @@ namespace BIS.ERP
 
             NavigationTree.SelectedItemChanged -= OnNavigationItemSelected;
             NavigationTree.SelectedItemChanged += OnNavigationItemSelected;
+            if (NavigationItems.Count > 0)
+                ShowNavigationOverview(NavigationItems[0]);
+        }
+
+        private static bool IsHiddenByUnavailableModule(MetadataObject metadata, IReadOnlySet<string> activeModuleCodes)
+        {
+            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationObject(metadata.Name, metadata.TableName))
+                return true;
+            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationObject(metadata.Name, metadata.TableName))
+                return true;
+            return false;
+        }
+
+        private static bool IsHiddenByUnavailableModule(Report report, IReadOnlySet<Guid> hiddenMetadataIds, IReadOnlySet<string> activeModuleCodes)
+        {
+            if (report.DataSourceId.HasValue && hiddenMetadataIds.Contains(report.DataSourceId.Value))
+                return true;
+            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationObject(report.Name, string.Empty))
+                return true;
+            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationObject(report.Name, string.Empty))
+                return true;
+            return false;
+        }
+
+        private static bool IsFixedAssetsNavigationObject(string name, string? tableName)
+        {
+            if (FixedAssetsNavigationObjectNames.Contains(name))
+                return true;
+
+            var normalizedTable = tableName ?? string.Empty;
+            return normalizedTable.StartsWith("catalog_asset_", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedTable.StartsWith("doc_asset_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsInventoryNavigationObject(string name, string? tableName)
+        {
+            if (InventoryNavigationObjectNames.Contains(name))
+                return true;
+
+            var normalizedTable = tableName ?? string.Empty;
+            return normalizedTable.Contains("material", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedTable.Contains("inventory", StringComparison.OrdinalIgnoreCase);
+        }
+        private static bool IsCashOrderDocument(MetadataObject document)
+            => document.Name == "Расходный/Приходный КО" || document.TableName == "doc_cash_orders";
+
+        private static void AddDocumentNavigationItems(NavigationItem group, IEnumerable<MetadataObject> documents)
+        {
+            var orderedDocuments = documents
+                .OrderBy(document => document.Order)
+                .ThenBy(document => document.Name)
+                .ToList();
+            var cashOrderDocuments = orderedDocuments
+                .Where(IsCashOrderDocument)
+                .OrderBy(document => document.Order)
+                .ThenBy(document => document.Name)
+                .ToArray();
+            var cashOrdersNavigationAdded = false;
+
+            foreach (var document in orderedDocuments)
+            {
+                if (IsCashOrderDocument(document))
+                {
+                    if (!cashOrdersNavigationAdded)
+                    {
+                        group.Children.Add(CreateCashOrdersNavigationItem(cashOrderDocuments));
+                        cashOrdersNavigationAdded = true;
+                    }
+
+                    continue;
+                }
+
+                group.Children.Add(CreateDocumentNavigationItem(document));
+            }
+        }
+
+        private static NavigationItem CreateCashOrdersNavigationItem(MetadataObject[] cashOrderDocuments)
+        {
+            var firstDocument = cashOrderDocuments.FirstOrDefault();
+            return new NavigationItem
+            {
+                Id = "CashOrders",
+                Name = "Расходный/Приходный КО",
+                Icon = "💵",
+                Type = "CashOrder",
+                Tag = cashOrderDocuments,
+                Order = firstDocument?.Order ?? 0
+            };
         }
 
         private static NavigationItem CreateDocumentNavigationItem(MetadataObject document)
         {
             var type = document.Name switch
             {
-                "Приходный кассовый ордер" or "Расходный кассовый ордер" => "CashOrder",
+                "Расходный/Приходный КО" => "CashOrder",
                 "Платежное поручение" => "PaymentOrder",
-                "Авансовый отчет" or "Доверенность" or "Платежная ведомость" => "FinanceDocument",
+                "Авансовый отчет" or "Авансовые платежи" or "Платежная ведомость" => "FinanceDocument",
                 "Проводки" => "PostingsDocument",
                 InvoiceDocumentTypes.SalesIssue or InvoiceDocumentTypes.PurchaseRegistration => "InvoiceDocument",
                 _ => "DynamicDocument"
@@ -314,6 +476,7 @@ namespace BIS.ERP
             if (_authService.IsAdmin)
             {
                 adminSection.Children.Add(new NavigationItem { Id = "Settings", Name = "Настройки системы", Icon = "⚙", Type = "Settings" });
+                adminSection.Children.Add(new NavigationItem { Id = "SystemLogs", Name = "Просмотр логов", Icon = "📄", Type = "SystemLogs" });
             }
             if (UserAccessService.CanManageUsers(_authService.CurrentUser))
             {
@@ -327,6 +490,10 @@ namespace BIS.ERP
         private async Task BuildLegacyNavigationTree()
         {
             NavigationItems.Clear();
+            var activeModuleCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ModuleMetadataService.FinanceCode
+            };
 
             // ========== РАЗДЕЛ: ДАННЫЕ ==========
             var dataSection = new NavigationItem
@@ -338,7 +505,7 @@ namespace BIS.ERP
             };
 
             // Справочники
-            var catalogs = await _metadataService.GetCatalogsAsync();
+            var catalogs = (await _metadataService.GetCatalogsAsync()).Where(item => !IsHiddenByUnavailableModule(item, activeModuleCodes)).ToList();
             if (catalogs.Any())
             {
                 var catalogsGroup = new NavigationItem
@@ -383,7 +550,7 @@ namespace BIS.ERP
 
             // Динамические документы
             var documents = (await _metadataService.GetDocumentsAsync())
-                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name))
+                .Where(item => !NotReadyFinanceDocuments.Contains(item.Name) && !RemovedDocumentNames.Contains(item.Name) && !IsHiddenByUnavailableModule(item, activeModuleCodes))
                 .ToList();
             if (documents.Any())
             {
@@ -395,20 +562,32 @@ namespace BIS.ERP
                     Type = "Group"
                 };
 
+                var cashOrderDocuments = documents
+                    .Where(IsCashOrderDocument)
+                    .OrderBy(doc => doc.Order)
+                    .ToList();
+                var cashOrdersNavigationAdded = false;
+
                 foreach (var doc in documents.OrderBy(d => d.Order).ThenBy(d => d.Name))
                 {
-                    // Для кассовых ордеров используем кастомный тип
-                    if (doc.Name == "Приходный кассовый ордер" || doc.Name == "Расходный кассовый ордер")
+                    // Для кассовых ордеров используем один объединенный список.
+                    if (IsCashOrderDocument(doc))
                     {
-                        docsGroup.Children.Add(new NavigationItem
+                        if (!cashOrdersNavigationAdded)
                         {
-                            Id = doc.Id.ToString(),
-                            Name = doc.Name,
-                            Icon = doc.Icon,
-                            Type = "CashOrder",
-                            Tag = doc,
-                            Order = doc.Order
-                        });
+                            docsGroup.Children.Add(new NavigationItem
+                            {
+                                Id = "CashOrders",
+                                Name = "Расходный/Приходный КО",
+                                Icon = "💵",
+                                Type = "CashOrder",
+                                Tag = cashOrderDocuments.ToArray(),
+                                Order = cashOrderDocuments.Count > 0 ? cashOrderDocuments.Min(item => item.Order) : doc.Order
+                            });
+                            cashOrdersNavigationAdded = true;
+                        }
+
+                        continue;
                     }
                     // Для платежных поручений используем кастомный тип
                     else if (doc.Name == "Платежное поручение")
@@ -423,9 +602,9 @@ namespace BIS.ERP
                             Order = doc.Order
                         });
                     }
-                    else if (doc.Name == "Авансовый отчет" ||
-                             doc.Name == "Доверенность" ||
-                             doc.Name == "Платежная ведомость")
+                    else if ((doc.Name == "Авансовый отчет" ||
+                             doc.Name == "Авансовые платежи" ||
+                             doc.Name == "Платежная ведомость"))
                     {
                         docsGroup.Children.Add(new NavigationItem
                         {
@@ -467,12 +646,12 @@ namespace BIS.ERP
                 dataSection.Children.Add(docsGroup);
             }
 
-            // Импортированные DBF документы
+            // Imported FoxPro documents
             var dbfCount = await _documentService.GetDocumentsCountAsync();
             dataSection.Children.Add(new NavigationItem
             {
                 Id = "DbfDocuments",
-                Name = "DBF Документы",
+                Name = "FoxPro documents",
                 Icon = "🗄️",
                 Type = "DbfDocuments",
                 Badge = dbfCount > 0 ? dbfCount.ToString() : ""
@@ -498,6 +677,13 @@ namespace BIS.ERP
             };
             accountingSection.Children.Add(new NavigationItem
             {
+                Id = "EsfExport",
+                Name = "Выгрузка ЭСФ",
+                Icon = "📤",
+                Type = "EsfExport"
+            });
+            accountingSection.Children.Add(new NavigationItem
+            {
                 Id = "AccountingReports",
                 Name = "Бухгалтерские отчеты",
                 Icon = "📈",
@@ -507,7 +693,7 @@ namespace BIS.ERP
 
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
-            var navigationReports = reports.Where(report => report.IsActive && !report.IsPrintForm).ToList();
+            var navigationReports = reports.Where(report => report.IsActive && !report.IsPrintForm && !IsHiddenByUnavailableModule(report, new HashSet<Guid>(), activeModuleCodes)).ToList();
             if (navigationReports.Any())
             {
                 var reportsSection = new NavigationItem
@@ -575,6 +761,13 @@ namespace BIS.ERP
                     Icon = "⚙️",
                     Type = "Settings"
                 });
+                adminSection.Children.Add(new NavigationItem
+                {
+                    Id = "SystemLogs",
+                    Name = "Просмотр логов",
+                    Icon = "📄",
+                    Type = "SystemLogs"
+                });
             }
             if (UserAccessService.CanManageUsers(_authService.CurrentUser))
             {
@@ -611,6 +804,8 @@ namespace BIS.ERP
             // Подписываемся на события выбора
             NavigationTree.SelectedItemChanged -= OnNavigationItemSelected;
             NavigationTree.SelectedItemChanged += OnNavigationItemSelected;
+            if (NavigationItems.Count > 0)
+                ShowNavigationOverview(NavigationItems[0]);
 
             // Раскрываем секции по умолчанию
             foreach (var item in NavigationItems)
@@ -640,6 +835,698 @@ namespace BIS.ERP
             return null;
         }
 
+        private sealed class NavigationOverviewGroup
+        {
+            public string Title { get; init; } = string.Empty;
+            public string Icon { get; init; } = "📁";
+            public List<NavigationItem> Items { get; init; } = new();
+        }
+
+        private void ShowNavigationOverview(NavigationItem rootItem)
+        {
+            var searchText = _overviewSearchTextByItemId.TryGetValue(rootItem.Id, out var savedSearch)
+                ? savedSearch
+                : string.Empty;
+            var viewMode = _overviewViewModeByItemId.TryGetValue(rootItem.Id, out var savedViewMode)
+                ? savedViewMode
+                : OverviewBlocksMode;
+
+            var page = new UserControl();
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+            var stackPanel = new StackPanel();
+            var contentPanel = new StackPanel();
+
+            stackPanel.Children.Add(CreateNavigationOverviewHeader(rootItem));
+            stackPanel.Children.Add(CreateNavigationOverviewToolbar(
+                searchText,
+                viewMode,
+                (search, mode) =>
+                {
+                    _overviewSearchTextByItemId[rootItem.Id] = search;
+                    _overviewViewModeByItemId[rootItem.Id] = mode;
+                    FillNavigationOverview(rootItem, contentPanel, search, mode);
+                }));
+            stackPanel.Children.Add(contentPanel);
+            FillNavigationOverview(rootItem, contentPanel, searchText, viewMode);
+
+            scrollViewer.Content = stackPanel;
+            page.Content = scrollViewer;
+            _navigation.NavigateTo(page);
+        }
+
+        private Border CreateNavigationOverviewHeader(NavigationItem rootItem)
+        {
+            var header = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 14),
+                BorderThickness = new Thickness(1)
+            };
+            header.SetResourceReference(Border.BackgroundProperty, "AppSurfaceBrush");
+            header.SetResourceReference(Border.BorderBrushProperty, "AppBorderBrush");
+
+            var stack = new StackPanel();
+            var title = new TextBlock
+            {
+                Text = $"{rootItem.Icon} {ToTitleCase(rootItem.Name)}",
+                FontSize = 24,
+                FontWeight = FontWeights.Bold,
+                TextWrapping = TextWrapping.Wrap
+            };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            stack.Children.Add(title);
+
+            var description = new TextBlock
+            {
+                Text = rootItem.Children.Count > 0
+                    ? $"Доступно объектов: {CountLeafNavigationItems(rootItem)}. Выберите плитку или воспользуйтесь поиском."
+                    : "В этом разделе пока нет доступных объектов.",
+                Margin = new Thickness(0, 6, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            };
+            description.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            stack.Children.Add(description);
+
+            header.Child = stack;
+            return header;
+        }
+
+        private static Grid CreateNavigationOverviewToolbar(
+            string searchText,
+            string selectedViewMode,
+            Action<string, string> onChanged)
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var searchPanel = new DockPanel { LastChildFill = true };
+            var searchLabel = new TextBlock
+            {
+                Text = "Поиск:",
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            searchLabel.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            DockPanel.SetDock(searchLabel, Dock.Left);
+            searchPanel.Children.Add(searchLabel);
+
+            var searchBox = new TextBox
+            {
+                Text = searchText,
+                Height = 36,
+                MinWidth = 260,
+                Padding = new Thickness(10, 7, 10, 7),
+                ToolTip = "Поиск по названию, типу, коду, таблице или описанию"
+            };
+            searchBox.SetResourceReference(Control.BackgroundProperty, "AppInputBackgroundBrush");
+            searchBox.SetResourceReference(Control.ForegroundProperty, "AppInputForegroundBrush");
+            searchBox.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
+            searchPanel.Children.Add(searchBox);
+            Grid.SetColumn(searchPanel, 0);
+            grid.Children.Add(searchPanel);
+
+            var viewCombo = new ComboBox
+            {
+                Height = 36,
+                Width = 170,
+                SelectedValuePath = "Content"
+            };
+            viewCombo.Items.Add(new ComboBoxItem { Content = OverviewBlocksMode });
+            viewCombo.Items.Add(new ComboBoxItem { Content = OverviewListMode });
+            viewCombo.SelectedIndex = selectedViewMode == OverviewListMode ? 1 : 0;
+
+            var viewPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var viewLabel = new TextBlock
+            {
+                Text = "Вид:",
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            viewLabel.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            viewPanel.Children.Add(viewLabel);
+            viewPanel.Children.Add(viewCombo);
+            Grid.SetColumn(viewPanel, 2);
+            grid.Children.Add(viewPanel);
+
+            var isApplying = false;
+            void RaiseChanged()
+            {
+                if (isApplying)
+                    return;
+
+                isApplying = true;
+                try
+                {
+                    var viewMode = (viewCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? OverviewBlocksMode;
+                    onChanged(searchBox.Text, viewMode);
+                }
+                finally
+                {
+                    isApplying = false;
+                }
+            }
+
+            searchBox.TextChanged += (_, _) => RaiseChanged();
+            viewCombo.SelectionChanged += (_, _) => RaiseChanged();
+            return grid;
+        }
+
+        private void FillNavigationOverview(NavigationItem rootItem, Panel target, string searchText, string viewMode)
+        {
+            target.Children.Clear();
+
+            var groups = BuildNavigationOverviewGroups(rootItem, searchText);
+            if (groups.Count == 0 || groups.All(group => group.Items.Count == 0))
+            {
+                AddNavigationEmptyText(target, "По вашему запросу ничего не найдено.");
+                return;
+            }
+
+            if (viewMode == OverviewListMode)
+            {
+                foreach (var group in groups)
+                    AddNavigationGroupRows(target, group);
+                return;
+            }
+
+            var hasNestedGroups = rootItem.Children.Any(child => child.Children.Count > 0);
+            if (hasNestedGroups || groups.Count > 1)
+            {
+                var wrapPanel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
+                foreach (var group in groups.Where(group => group.Items.Count > 0))
+                    wrapPanel.Children.Add(CreateNavigationCategoryBlock(group));
+                target.Children.Add(wrapPanel);
+                return;
+            }
+
+            AddResponsiveNavigationTiles(
+                target,
+                groups.SelectMany(group => group.Items).Select(CreateNavigationCard),
+                "В этом разделе нет доступных объектов.");
+        }
+
+        private List<NavigationOverviewGroup> BuildNavigationOverviewGroups(NavigationItem rootItem, string searchText)
+        {
+            var groups = new List<NavigationOverviewGroup>();
+            var directItems = new List<NavigationItem>();
+            var rootMatches = MatchesNavigationSearch(rootItem, searchText);
+
+            foreach (var child in SortNavigationItems(rootItem.Children))
+            {
+                if (child.Children.Count > 0)
+                {
+                    var childMatches = rootMatches || MatchesNavigationSearch(child, searchText);
+                    var childItems = SortNavigationItems(child.Children)
+                        .Where(item => childMatches || MatchesNavigationSearch(item, searchText))
+                        .ToList();
+
+                    if (childItems.Count > 0)
+                    {
+                        groups.Add(new NavigationOverviewGroup
+                        {
+                            Title = child.Name,
+                            Icon = child.Icon,
+                            Items = childItems
+                        });
+                    }
+                }
+                else if (rootMatches || MatchesNavigationSearch(child, searchText))
+                {
+                    directItems.Add(child);
+                }
+            }
+
+            if (directItems.Count > 0)
+            {
+                groups.Insert(0, new NavigationOverviewGroup
+                {
+                    Title = rootItem.Type == "Group" ? rootItem.Name : "Объекты раздела",
+                    Icon = rootItem.Icon,
+                    Items = directItems
+                });
+            }
+
+            return groups;
+        }
+
+        private Border CreateNavigationCategoryBlock(NavigationOverviewGroup group)
+        {
+            var block = new Border
+            {
+                Width = 360,
+                MinHeight = 250,
+                MaxHeight = 520,
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, 14, 14),
+                BorderThickness = new Thickness(1)
+            };
+            block.SetResourceReference(Border.BackgroundProperty, "AppSurfaceBrush");
+            block.SetResourceReference(Border.BorderBrushProperty, "AppBorderBrush");
+
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var header = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+            var title = new TextBlock
+            {
+                Text = $"{group.Icon} {group.Title}",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            header.Children.Add(title);
+
+            var count = new TextBlock
+            {
+                Text = group.Items.Count.ToString(),
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            count.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            DockPanel.SetDock(count, Dock.Right);
+            header.Children.Add(count);
+            Grid.SetRow(header, 0);
+            grid.Children.Add(header);
+
+            var stack = new StackPanel();
+            foreach (var item in group.Items)
+                stack.Children.Add(CreateNavigationCard(item));
+
+            var scrollViewer = new ScrollViewer
+            {
+                Content = stack,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MaxHeight = 445
+            };
+            Grid.SetRow(scrollViewer, 1);
+            grid.Children.Add(scrollViewer);
+
+            block.Child = grid;
+            return block;
+        }
+
+        private void AddNavigationGroupRows(Panel target, NavigationOverviewGroup group)
+        {
+            var title = new TextBlock
+            {
+                Text = $"{group.Icon} {group.Title}",
+                FontSize = 17,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 8, 0, 10)
+            };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            target.Children.Add(title);
+
+            foreach (var item in group.Items)
+                target.Children.Add(CreateNavigationCard(item));
+
+            target.Children.Add(new Border { Height = 12, Background = Brushes.Transparent });
+        }
+
+        private static void AddResponsiveNavigationTiles(
+            Panel target,
+            IEnumerable<UIElement> cards,
+            string emptyText)
+        {
+            var wrapPanel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
+            var added = false;
+
+            foreach (var card in cards)
+            {
+                if (card is FrameworkElement element)
+                {
+                    element.Width = 360;
+                    element.Margin = new Thickness(0, 0, 14, 14);
+                }
+
+                wrapPanel.Children.Add(card);
+                added = true;
+            }
+
+            if (!added)
+            {
+                AddNavigationEmptyText(target, emptyText);
+                return;
+            }
+
+            target.Children.Add(wrapPanel);
+        }
+
+        private static void AddNavigationEmptyText(Panel target, string text)
+        {
+            var empty = new TextBlock
+            {
+                Text = text,
+                Margin = new Thickness(8, 18, 8, 18),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            };
+            empty.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            target.Children.Add(empty);
+        }
+
+        private Border CreateNavigationCard(NavigationItem item)
+        {
+            var card = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10),
+                Margin = new Thickness(0, 0, 0, 8),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand
+            };
+            card.SetResourceReference(Border.BackgroundProperty, "AppSurfaceBrush");
+            card.SetResourceReference(Border.BorderBrushProperty, "AppBorderBrush");
+            card.MouseLeftButtonUp += (_, e) =>
+            {
+                if (e.OriginalSource is DependencyObject source && FindVisualParent<Button>(source) != null)
+                    return;
+                _ = OpenNavigationItemFromOverviewAsync(item);
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var icon = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(item.Icon) ? "📄" : item.Icon,
+                FontSize = 23,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(icon, 0);
+            grid.Children.Add(icon);
+
+            var info = new StackPanel { Margin = new Thickness(8, 0, 8, 0) };
+            var title = new TextBlock
+            {
+                Text = item.Name,
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            info.Children.Add(title);
+
+            var subtitle = new TextBlock
+            {
+                Text = GetNavigationItemSubtitle(item),
+                FontSize = 10,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            subtitle.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            info.Children.Add(subtitle);
+
+            var detail = new TextBlock
+            {
+                Text = GetNavigationItemDetail(item),
+                FontSize = 10,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            detail.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            info.Children.Add(detail);
+            Grid.SetColumn(info, 1);
+            grid.Children.Add(info);
+
+            var openButton = new Button
+            {
+                Content = item.Children.Count > 0 ? "Показать" : "Открыть",
+                Height = 28,
+                MinWidth = 78,
+                Padding = new Thickness(10, 0, 10, 0),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            openButton.Background = (Brush)new BrushConverter().ConvertFrom("#3498DB");
+            openButton.Foreground = Brushes.White;
+            openButton.Click += (_, e) =>
+            {
+                e.Handled = true;
+                _ = OpenNavigationItemFromOverviewAsync(item);
+            };
+            Grid.SetColumn(openButton, 2);
+            grid.Children.Add(openButton);
+
+            card.Child = grid;
+            return card;
+        }
+
+        private async Task OpenNavigationItemFromOverviewAsync(NavigationItem item)
+        {
+            try
+            {
+                await OpenNavigationItemAsync(item);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task OpenNavigationItemAsync(NavigationItem item)
+        {
+            switch (item.Type)
+            {
+                case "Section":
+                case "Group":
+                    ShowNavigationOverview(item);
+                    break;
+
+                case "Catalog":
+                    if (item.Tag is MetadataObject catalog)
+                    {
+                        var catalogView = new CatalogDataView(catalog, _metadataService);
+                        _navigation.NavigateTo(catalogView);
+                    }
+                    break;
+
+                case "EmployeesCatalog":
+                    var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                    var employeeService = new EmployeeService(dbContext, _metadataService);
+                    var employeesView = new EmployeesCatalogView(employeeService, _metadataService);
+                    _navigation.NavigateTo(employeesView);
+                    break;
+
+                case "DynamicDocument":
+                    if (item.Tag is MetadataObject document)
+                    {
+                        var dynamicView = new DynamicDocumentWorkView(document, _metadataService);
+                        _navigation.NavigateTo(dynamicView);
+                    }
+                    break;
+
+                case "DbfDocuments":
+                    var dbfView = new DynamicDocumentsView(_documentService);
+                    _navigation.NavigateTo(dbfView);
+                    break;
+
+                case "PostingsJournal":
+                    var journalContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                    var postingService = new PostingService(journalContext);
+                    var journalView = new PostingsJournalView(postingService);
+                    _navigation.NavigateTo(journalView);
+                    break;
+
+                case "EsfExport":
+                    var esfExportContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                    _navigation.NavigateTo(new EsfExportWorkView(esfExportContext));
+                    break;
+
+                case "MutualSettlements":
+                    var msdbContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                    var msMetadataService = new MetadataService(msdbContext);
+                    var msView = new MutualSettlementsView(msMetadataService);
+                    _navigation.NavigateTo(msView);
+                    break;
+
+                case "PostingsDocument":
+                    if (item.Tag is MetadataObject postingsDocument)
+                    {
+                        var postingsView = new PostingsView(postingsDocument, _metadataService);
+                        _navigation.NavigateTo(postingsView);
+                    }
+                    break;
+
+                case "CashOrder":
+                    if (item.Tag is MetadataObject[] cashOrderDocuments && cashOrderDocuments.FirstOrDefault() is { } singleCashOrderDocument)
+                    {
+                        var cashOrderView = new CashOrderWorkView(singleCashOrderDocument, _metadataService);
+                        _navigation.NavigateTo(cashOrderView);
+                    }
+                    else if (item.Tag is MetadataObject cashOrderDocument)
+                    {
+                        var cashOrderView = new CashOrderWorkView(cashOrderDocument, _metadataService);
+                        _navigation.NavigateTo(cashOrderView);
+                    }
+                    break;
+
+                case "PaymentOrder":
+                    if (item.Tag is MetadataObject paymentDocument)
+                    {
+                        var paymentView = new PaymentOrderWorkView(paymentDocument, _metadataService);
+                        _navigation.NavigateTo(paymentView);
+                    }
+                    break;
+
+                case "FinanceDocument":
+                    if (item.Tag is MetadataObject financeDocument)
+                    {
+                        var financeDocumentView = new FinanceDocumentWorkView(financeDocument, _metadataService);
+                        _navigation.NavigateTo(financeDocumentView);
+                    }
+                    break;
+
+                case "InvoiceDocument":
+                    if (item.Tag is MetadataObject invoiceDocument)
+                    {
+                        var invoiceView = new InvoiceWorkView(invoiceDocument, _metadataService);
+                        _navigation.NavigateTo(invoiceView);
+                    }
+                    break;
+
+                case "Report":
+                    if (item.Tag is Report report)
+                        await OpenReport(report);
+                    break;
+
+                case "AccountingReports":
+                    await OpenAccountingReportsAsync();
+                    break;
+
+                case "Profile":
+                    OnProfileClick(null, null);
+                    break;
+
+                case "Settings":
+                    OpenSettingsWindow();
+                    break;
+
+                case "SystemLogs":
+                    _navigation.NavigateTo(new SystemLogViewerView());
+                    break;
+
+                case "UserAccessManagement":
+                    var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                    _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser));
+                    break;
+
+                case "AboutSystem":
+                    new AboutSystemDialog { Owner = this }.ShowDialog();
+                    break;
+
+                case "SwitchMode":
+                    OnSwitchModeClick(null, null);
+                    break;
+
+                case "Logout":
+                    OnLogoutClick(null, null);
+                    break;
+            }
+        }
+
+        private static IEnumerable<NavigationItem> SortNavigationItems(IEnumerable<NavigationItem> items) =>
+            items.OrderBy(item => item.Order <= 0 ? int.MaxValue : item.Order)
+                .ThenBy(item => item.Name, StringComparer.CurrentCultureIgnoreCase);
+
+        private static int CountLeafNavigationItems(NavigationItem rootItem)
+        {
+            if (rootItem.Children.Count == 0)
+                return 0;
+
+            var count = 0;
+            foreach (var child in rootItem.Children)
+                count += child.Children.Count == 0 ? 1 : CountLeafNavigationItems(child);
+            return count;
+        }
+
+        private static bool MatchesNavigationSearch(NavigationItem item, string searchText)
+        {
+            if (string.IsNullOrWhiteSpace(searchText))
+                return true;
+
+            var search = searchText.Trim();
+            return GetNavigationSearchValues(item).Any(value =>
+                !string.IsNullOrWhiteSpace(value) &&
+                value.Contains(search, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static IEnumerable<string> GetNavigationSearchValues(NavigationItem item)
+        {
+            yield return item.Name;
+            yield return item.Id;
+            yield return item.Type;
+            yield return item.Badge;
+
+            if (item.Tag is MetadataObject metadata)
+            {
+                yield return metadata.Name;
+                yield return metadata.TableName;
+                yield return metadata.Description;
+                yield return metadata.ObjectType;
+            }
+            else if (item.Tag is Report report)
+            {
+                yield return report.Name;
+                yield return report.Code;
+                yield return report.Description;
+                yield return report.SourceFormat;
+            }
+        }
+
+        private static string GetNavigationItemSubtitle(NavigationItem item)
+        {
+            if (item.Children.Count > 0)
+                return $"Объектов: {CountLeafNavigationItems(item)}";
+
+            return item.Type switch
+            {
+                "Catalog" or "EmployeesCatalog" => "Справочник",
+                "DynamicDocument" or "CashOrder" or "PaymentOrder" or "FinanceDocument" or "InvoiceDocument" or "PostingsDocument" => "Документ",
+                "Report" => item.Tag is Report report && report.IsPrintForm ? "Печатная форма" : "Отчет",
+                "DbfDocuments" => "Импортированные документы",
+                "PostingsJournal" => "Журнал",
+                "AccountingReports" => "Отчетность",
+                "MutualSettlements" => "Отчет",
+                "Profile" or "Settings" or "SystemLogs" or "UserAccessManagement" or "SwitchMode" or "Logout" or "AboutSystem" => "Сервисная команда",
+                _ => item.Type
+            };
+        }
+
+        private static string GetNavigationItemDetail(NavigationItem item)
+        {
+            if (item.Tag is MetadataObject metadata)
+                return string.IsNullOrWhiteSpace(metadata.TableName) ? $"Полей: {metadata.Fields?.Count ?? 0}" : metadata.TableName;
+            if (item.Tag is Report report)
+                return string.IsNullOrWhiteSpace(report.Code) ? report.SourceFormat : report.Code;
+            if (item.HasBadge)
+                return $"Количество: {item.Badge}";
+            if (item.Children.Count > 0)
+                return "Откроет вложенный список";
+            return "Открыть";
+        }
+
+        private static string ToTitleCase(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return value;
+            return value == value.ToUpperInvariant()
+                ? value[0] + value[1..].ToLowerInvariant()
+                : value;
+        }
+
         private async void OnNavigationItemSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
             var item = e.NewValue as NavigationItem;
@@ -649,128 +1536,7 @@ namespace BIS.ERP
 
             try
             {
-                switch (item.Type)
-                {
-                    case "Catalog":
-                        if (item.Tag is MetadataObject catalog)
-                        {
-                            var catalogView = new CatalogDataView(catalog, _metadataService);
-                            _navigation.NavigateTo(catalogView);
-                        }
-                        break;
-
-                    case "EmployeesCatalog":
-                        var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        var employeeService = new EmployeeService(dbContext, _metadataService);
-                        var employeesView = new EmployeesCatalogView(employeeService, _metadataService);
-                        _navigation.NavigateTo(employeesView);
-                        break;
-
-                    case "DynamicDocument":
-                        if (item.Tag is MetadataObject document)
-                        {
-                            var dynamicView = new DynamicDocumentWorkView(document, _metadataService);
-                            _navigation.NavigateTo(dynamicView);
-                        }
-                        break;
-
-                    case "DbfDocuments":
-                        var dbfView = new DynamicDocumentsView(_documentService);
-                        _navigation.NavigateTo(dbfView);
-                        break;
-
-                    case "PostingsJournal":
-                        var journalContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        var postingService = new PostingService(journalContext);
-                        var journalView = new PostingsJournalView(postingService);
-                        _navigation.NavigateTo(journalView);
-                        break;
-
-                    case "MutualSettlements":
-                        var msdbContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        var msMetadataService = new MetadataService(msdbContext);
-                        var msView = new MutualSettlementsView(msMetadataService);
-                        _navigation.NavigateTo(msView);
-                        break;
-
-                    case "PostingsDocument":
-                        if (item.Tag is MetadataObject document1)
-                        {
-                            var postingsView = new PostingsView(document1, _metadataService);
-                            _navigation.NavigateTo(postingsView);
-                        }
-                        break;
-
-                    case "CashOrder":
-                        if (item.Tag is MetadataObject document2)
-                        {
-                            // Используем кастомное окно для кассовых ордеров
-                            var cashOrderView = new CashOrderWorkView(document2, _metadataService);
-                            _navigation.NavigateTo(cashOrderView);
-                        }
-                        break;
-
-                    case "PaymentOrder":
-                        if (item.Tag is MetadataObject document3)
-                        {
-                            var paymentView = new PaymentOrderWorkView(document3, _metadataService);
-                            _navigation.NavigateTo(paymentView);
-                        }
-                        break;
-
-                    case "FinanceDocument":
-                        if (item.Tag is MetadataObject financeDocument)
-                        {
-                            var financeDocumentView = new FinanceDocumentWorkView(financeDocument, _metadataService);
-                            _navigation.NavigateTo(financeDocumentView);
-                        }
-                        break;
-
-                    case "InvoiceDocument":
-                        if (item.Tag is MetadataObject invoiceDocument)
-                        {
-                            var invoiceView = new InvoiceWorkView(invoiceDocument, _metadataService);
-                            _navigation.NavigateTo(invoiceView);
-                        }
-                        break;
-
-                    case "Report":
-                        if (item.Tag is Report report)
-                        {
-                            await OpenReport(report);
-                        }
-                        break;
-
-                    case "AccountingReports":
-                        var accountingContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        _navigation.NavigateTo(new AccountingReportsView(accountingContext));
-                        break;
-
-                    case "Profile":
-                        OnProfileClick(null, null);
-                        break;
-
-                    case "Settings":
-                        OpenSettingsWindow();
-                        break;
-
-                    case "UserAccessManagement":
-                        var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser));
-                        break;
-
-                    case "AboutSystem":
-                        new AboutSystemDialog { Owner = this }.ShowDialog();
-                        break;
-
-                    case "SwitchMode":
-                        OnSwitchModeClick(null, null);
-                        break;
-
-                    case "Logout":
-                        OnLogoutClick(null, null);
-                        break;
-                }
+                await OpenNavigationItemAsync(item);
             }
             catch (Exception ex)
             {
@@ -819,7 +1585,7 @@ namespace BIS.ERP
                 {
                     var configuration = await new SystemConfigurationService().GetAsync();
                     SystemNameText.Text = configuration.SystemName;
-                    SystemIconText.Text = configuration.Icon;
+                    LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, configuration.LogoImage, configuration.Icon);
                     Title = $"{configuration.SystemName} - {_currentInfoBase?.Name}";
                 }
             }
@@ -959,8 +1725,26 @@ namespace BIS.ERP
 
         #endregion
 
+        private async Task OpenAccountingReportsAsync(string? selectedReportType = null)
+        {
+            var context = await _infoBaseManager.GetCurrentDbContextAsync();
+            var view = new AccountingReportsView(context);
+            if (!string.IsNullOrWhiteSpace(selectedReportType))
+                view.SelectReportType(selectedReportType);
+            _navigation.NavigateTo(view);
+        }
+
+        private static bool IsReconciliationReport(Report report) =>
+            ReportClassificationService.IsReconciliationReport(report);
+
         private async Task OpenReport(Report report)
         {
+            if (IsReconciliationReport(report))
+            {
+                await OpenAccountingReportsAsync("OrganizationReconciliation");
+                return;
+            }
+
             _isLoadingReport = true;
             Mouse.OverrideCursor = Cursors.Wait;
 
@@ -970,9 +1754,9 @@ namespace BIS.ERP
                 var reportService = new ReportService(context);
                 var loadedReport = await reportService.GetReportAsync(report.Id) ?? report;
                 var data = await reportService.GetReportDataAsync(loadedReport);
+                var pdf = reportService.ExportToPdf(data, loadedReport);
 
-                var preview = new ReportPreviewWindow(data, loadedReport, reportService);
-                preview.Owner = this;
+                var preview = new PdfPreviewWindow(pdf) { Owner = this };
                 preview.ShowDialog();
             }
             catch (Exception ex)
@@ -1037,8 +1821,7 @@ namespace BIS.ERP
             {
                 var settings = AppSettings.Instance;
 
-                // Переключаем тему
-                var newTheme = settings.Theme == "Dark" ? "Default" : "Dark";
+                var newTheme = ThemeService.GetNextTheme(settings.Theme);
 
                 // Сохраняем в настройках
                 settings.Theme = newTheme;
@@ -1050,8 +1833,8 @@ namespace BIS.ERP
                 // Обновляем иконку кнопки
                 if (ThemeToggleButton != null)
                 {
-                    ThemeToggleButton.Content = newTheme == "Dark" ? "🌞" : "🌙";
-                    ThemeToggleButton.ToolTip = newTheme == "Dark" ? "Светлая тема" : "Темная тема";
+                    ThemeToggleButton.Content = ThemeService.GetThemeToggleIcon(newTheme);
+                    ThemeToggleButton.ToolTip = ThemeService.GetThemeToggleToolTip(newTheme);
                 }
 
                 // Показываем уведомление (опционально)
@@ -1065,3 +1848,8 @@ namespace BIS.ERP
         }
     }
 }
+
+
+
+
+

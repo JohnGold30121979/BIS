@@ -88,6 +88,8 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Таб. номер" Binding="{Binding PersonnelNumber}" Width="100"/>
                 <DataGridTextColumn Header="ФИО" Binding="{Binding FullName}" Width="200"/>
+                <DataGridTextColumn Header="Пол" Binding="{Binding Gender}" Width="80"/>
+                <DataGridTextColumn Header="Семейное положение" Binding="{Binding MaritalStatus}" Width="150"/>
                 <DataGridTextColumn Header="Должность" Binding="{Binding Position}" Width="150"/>
                 <DataGridTextColumn Header="Подразделение" Binding="{Binding Department}" Width="150"/>
                 <DataGridTextColumn Header="Дата рождения" Binding="{Binding BirthDate, StringFormat=dd.MM.yyyy}" Width="100"/>

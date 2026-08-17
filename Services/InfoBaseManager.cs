@@ -57,8 +57,17 @@ public class InfoBaseManager
         _masterContext.Database.ExecuteSqlRaw(@"
             ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""Version"" varchar(50);
             ALTER TABLE ""InfoBases"" ALTER COLUMN ""Version"" TYPE varchar(50);
-            UPDATE ""InfoBases"" SET ""Version"" = @version WHERE ""Version"" IS NULL OR ""Version"" = '';",
-            new NpgsqlParameter("@version", DefaultPatchVersion));
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""Icon"" varchar(20);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""Icon"" TYPE varchar(20);
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""LogoImage"" bytea;
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""LogoContentType"" varchar(50);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""LogoContentType"" TYPE varchar(50);
+            ALTER TABLE ""InfoBases"" ADD COLUMN IF NOT EXISTS ""LogoFileName"" varchar(260);
+            ALTER TABLE ""InfoBases"" ALTER COLUMN ""LogoFileName"" TYPE varchar(260);
+            UPDATE ""InfoBases"" SET ""Version"" = @version WHERE ""Version"" IS NULL OR ""Version"" = '';
+            UPDATE ""InfoBases"" SET ""Icon"" = @icon WHERE ""Icon"" IS NULL OR ""Icon"" = '';",
+            new NpgsqlParameter("@version", DefaultPatchVersion),
+            new NpgsqlParameter("@icon", InfoBase.DefaultIcon));
     }
 
     public async Task<List<InfoBase>> GetInfoBasesAsync()
@@ -91,26 +100,40 @@ public class InfoBaseManager
 
     public async Task<InfoBase> CreateInfoBaseAsync(string name, string type,
     string host, int port, string username, string password, string? databaseName = null,
-    string? patchVersion = null)
+    string? patchVersion = null,
+    string? icon = null,
+    byte[]? logoImage = null,
+    string? logoContentType = null,
+    string? logoFileName = null)
     {
         var dbName = string.IsNullOrWhiteSpace(databaseName) ? $"bis_{Guid.NewGuid():N}" : databaseName.Trim();
         var normalizedPatchVersion = NormalizePatchVersion(patchVersion);
         if (!System.Text.RegularExpressions.Regex.IsMatch(dbName, "^[a-zA-Z0-9_]+$"))
             throw new ArgumentException("Имя базы данных может содержать только латинские буквы, цифры и знак подчеркивания.");
 
+        LogInfoBaseCreation(dbName, $"Старт создания инфобазы '{name}'. Сервер: {host}:{port}. Патч: {normalizedPatchVersion}");
         try
         {
+            LogInfoBaseCreation(dbName, "Подключение к системной базе postgres");
             using var connection = new NpgsqlConnection(
                 $"Host={host};Port={port};Database=postgres;Username={username};Password={password}");
             await connection.OpenAsync();
+            LogInfoBaseCreation(dbName, "Подключение к postgres выполнено");
 
+            LogInfoBaseCreation(dbName, $"Создание базы данных '{dbName}'");
             using var cmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", connection);
             await cmd.ExecuteNonQueryAsync();
+            LogInfoBaseCreation(dbName, $"База данных '{dbName}' создана");
 
             var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
             using var dbContext = new AppDbContext(connectionString);
+            LogInfoBaseCreation(dbName, "Создание базовой схемы EF");
             await dbContext.Database.EnsureCreatedAsync();
+            LogInfoBaseCreation(dbName, "Базовая схема EF создана");
+
+            LogInfoBaseCreation(dbName, "Применение runtime-исправлений схемы");
             await new RuntimeSchemaFixService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Runtime-исправления схемы применены");
 
             var infoBase = new InfoBase
             {
@@ -125,30 +148,79 @@ public class InfoBaseManager
                 Password = password,
                 CreatedAt = DateTime.UtcNow,
                 IsActive = false,
-                Version = normalizedPatchVersion
+                Version = normalizedPatchVersion,
+                Icon = NormalizeIcon(icon),
+                LogoImage = logoImage,
+                LogoContentType = NormalizeLogoText(logoContentType, 50),
+                LogoFileName = NormalizeLogoText(logoFileName, 260)
             };
 
             // В InfoBaseManager.CreateInfoBaseAsync
             var metadataService = new MetadataService(dbContext);
+            LogInfoBaseCreation(dbName, "Инициализация базовых метаданных");
             await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
-            await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
-            await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
-            await new InvoiceMetadataSeedService(dbContext).EnsureAsync();
-            var printFormService = new PrintFormService(dbContext);
-            await printFormService.SeedCashOrderFormsAsync();
-            await printFormService.SeedInvoiceFormsAsync();
-            await metadataService.EnsureStandardReportsAsync();
-            await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
+            LogInfoBaseCreation(dbName, "Базовые метаданные инициализированы");
 
+            LogInfoBaseCreation(dbName, "Создание предустановленных справочников");
+            await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь
+            LogInfoBaseCreation(dbName, "Все предустановленные справочники созданы");
+
+            LogInfoBaseCreation(dbName, "Создание служебных метаданных документации и отчетов");
+            await new DocumentationMetadataSeedService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Служебные метаданные документации и отчетов созданы");
+
+            LogInfoBaseCreation(dbName, "Создание метаданных счет-фактур");
+            await new InvoiceMetadataSeedService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Метаданные счет-фактур созданы");
+
+            var printFormService = new PrintFormService(dbContext);
+            LogInfoBaseCreation(dbName, "Создание печатных форм кассовых ордеров");
+            await printFormService.SeedCashOrderFormsAsync();
+            LogInfoBaseCreation(dbName, "Печатные формы кассовых ордеров созданы");
+
+            LogInfoBaseCreation(dbName, "Создание печатных форм счет-фактур");
+            await printFormService.SeedInvoiceFormsAsync();
+            LogInfoBaseCreation(dbName, "Печатные формы счет-фактур созданы");
+
+            LogInfoBaseCreation(dbName, "Создание стандартных отчетов");
+            await metadataService.EnsureStandardReportsAsync();
+            LogInfoBaseCreation(dbName, "Стандартные отчеты созданы");
+
+            LogInfoBaseCreation(dbName, $"Фиксация базового патча {normalizedPatchVersion}");
+            await new BisPatchService(dbContext).EnsureBaselinePatchAsync(normalizedPatchVersion);
+            LogInfoBaseCreation(dbName, $"Базовый патч {normalizedPatchVersion} зафиксирован");
+
+            LogInfoBaseCreation(dbName, "Регистрация инфобазы в master-базе");
             _masterContext.InfoBases.Add(infoBase);
             await _masterContext.SaveChangesAsync();
+            LogInfoBaseCreation(dbName, $"Инфобаза '{name}' зарегистрирована в master-базе");
 
+            LogInfoBaseCreation(dbName, $"Создание инфобазы '{name}' успешно завершено");
             return infoBase;
         }
         catch (Exception ex)
         {
-            throw new Exception($"Ошибка создания базы данных: {ex.Message}");
+            LogInfoBaseCreation(dbName, $"Ошибка создания инфобазы '{name}': {GetFullExceptionMessage(ex)}");
+            throw new Exception($"Ошибка создания базы данных: {GetFullExceptionMessage(ex)}", ex);
         }
+    }
+
+    private static void LogInfoBaseCreation(string databaseName, string message)
+    {
+        System.Diagnostics.Debug.WriteLine(message);
+        EventLogService.LogFileOnly("InfoBaseCreate", "InfoBase", databaseName, details: message);
+    }
+
+    private static string GetFullExceptionMessage(Exception exception)
+    {
+        var messages = new List<string>();
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message))
+                messages.Add(current.Message);
+        }
+
+        return string.Join(Environment.NewLine, messages);
     }
 
     public async Task<bool> DeleteInfoBaseAsync(Guid id)
@@ -230,7 +302,11 @@ public class InfoBaseManager
 
     public async Task<InfoBase> AttachInfoBaseAsync(
         string name, string host, int port, string databaseName, string username, string password,
-        string? patchVersion = null)
+        string? patchVersion = null,
+        string? icon = null,
+        byte[]? logoImage = null,
+        string? logoContentType = null,
+        string? logoFileName = null)
     {
         if (!await TestConnectionAsync(host, port, databaseName, username, password))
             throw new InvalidOperationException("Не удалось подключиться к указанной базе данных.");
@@ -270,7 +346,11 @@ public class InfoBaseManager
             Name = name.Trim(), Description = name.Trim(), Type = "Universal",
             Host = host.Trim(), Port = port, DatabaseName = databaseName.Trim(),
             Username = username.Trim(), Password = password, IsActive = false,
-            Version = normalizedPatchVersion, CreatedAt = DateTime.UtcNow
+            Version = normalizedPatchVersion, CreatedAt = DateTime.UtcNow,
+            Icon = NormalizeIcon(icon),
+            LogoImage = logoImage,
+            LogoContentType = NormalizeLogoText(logoContentType, 50),
+            LogoFileName = NormalizeLogoText(logoFileName, 260)
         };
         await _masterContext.InfoBases.AddAsync(infoBase);
         await _masterContext.SaveChangesAsync();
@@ -278,6 +358,23 @@ public class InfoBaseManager
     }
 
     public async Task UpdateInfoBaseNameAsync(Guid id, string name)
+    {
+        await UpdateInfoBaseAsync(id, name, null);
+    }
+
+    public async Task UpdateInfoBaseAsync(Guid id, string name, string? icon)
+    {
+        await UpdateInfoBaseAsync(id, name, icon, null, null, null, updateLogo: false);
+    }
+
+    public async Task UpdateInfoBaseAsync(
+        Guid id,
+        string name,
+        string? icon,
+        byte[]? logoImage,
+        string? logoContentType,
+        string? logoFileName,
+        bool updateLogo = true)
     {
         var normalizedName = name?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedName))
@@ -289,6 +386,14 @@ public class InfoBaseManager
             ?? throw new InvalidOperationException("Информационная база не найдена.");
         infoBase.Name = normalizedName;
         infoBase.Description = normalizedName;
+        if (icon != null)
+            infoBase.Icon = NormalizeIcon(icon);
+        if (updateLogo)
+        {
+            infoBase.LogoImage = logoImage;
+            infoBase.LogoContentType = NormalizeLogoText(logoContentType, 50);
+            infoBase.LogoFileName = NormalizeLogoText(logoFileName, 260);
+        }
         await _masterContext.SaveChangesAsync();
         if (_currentInfoBase?.Id == id)
             _currentInfoBase = infoBase;
@@ -404,6 +509,20 @@ public class InfoBaseManager
     {
         var normalized = string.IsNullOrWhiteSpace(version) ? DefaultPatchVersion : version.Trim();
         return normalized.Length > 50 ? normalized[..50] : normalized;
+    }
+
+    private static string NormalizeIcon(string? icon)
+    {
+        var normalized = string.IsNullOrWhiteSpace(icon) ? InfoBase.DefaultIcon : icon.Trim();
+        return normalized.Length > 20 ? normalized[..20] : normalized;
+    }
+
+    private static string? NormalizeLogoText(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var normalized = value.Trim();
+        return normalized.Length > maxLength ? normalized[..maxLength] : normalized;
     }
 
     public async Task<AppDbContext> GetCurrentDbContextAsync()

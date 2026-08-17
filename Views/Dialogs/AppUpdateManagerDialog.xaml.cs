@@ -54,7 +54,8 @@ namespace BIS.ERP.Views.Dialogs
         {
             var folderDialog = new OpenFolderDialog
             {
-                Title = "Выберите папку публикации программы"
+                Title = "Выберите папку публикации программы",
+                InitialDirectory = AppContext.BaseDirectory
             };
 
             if (folderDialog.ShowDialog(this) != true)
@@ -210,3 +211,4 @@ namespace BIS.ERP.Views.Dialogs
         private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
     }
 }
+

@@ -99,11 +99,24 @@ namespace BIS.ERP.ViewModels
         [RelayCommand(CanExecute = nameof(HasSelectedInfoBase))]
         private async Task EditAsync()
         {
-            if (SelectedInfoBase == null || !_dialogService.ShowEditInfoBase(SelectedInfoBase, out var newName))
+            if (SelectedInfoBase == null ||
+                !_dialogService.ShowEditInfoBase(
+                    SelectedInfoBase,
+                    out var newName,
+                    out var newIcon,
+                    out var logoImage,
+                    out var logoContentType,
+                    out var logoFileName))
                 return;
             try
             {
-                await _infoBaseManager.UpdateInfoBaseNameAsync(SelectedInfoBase.Id, newName!);
+                await _infoBaseManager.UpdateInfoBaseAsync(
+                    SelectedInfoBase.Id,
+                    newName!,
+                    newIcon,
+                    logoImage,
+                    logoContentType,
+                    logoFileName);
                 await LoadAsync();
             }
             catch (Exception ex)
@@ -163,7 +176,7 @@ namespace BIS.ERP.ViewModels
                 return;
             }
 
-            if (!await _dialogService.ShowLoginAsync())
+            if (!await _dialogService.ShowLoginAsync(configMode))
                 return;
 
             var currentUser = _authService.CurrentUser;
@@ -203,3 +216,4 @@ namespace BIS.ERP.ViewModels
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using Npgsql;
@@ -69,6 +69,21 @@ namespace BIS.ERP.Services
                                 Width = 120
                             })
                             .ToList();
+                    }
+
+                    var customDataSet = await new ReportDataSetService(_context).GetBySourceAsync(catalog);
+                    if (customDataSet != null)
+                    {
+                        dataTable = await new ReportDataSetService(_context).ExecuteAsync(customDataSet, parameters);
+                        await ResolveReportReferencesAsync(dataTable, catalog, selectedFields);
+                        return dataTable;
+                    }
+
+                    if (IsCashOrderTurnoverReportSource(catalog))
+                    {
+                        dataTable = await GetCashOrderTurnoverReportDataAsync(catalog, selectedFields, parameters);
+                        await ResolveReportReferencesAsync(dataTable, catalog, selectedFields);
+                        return dataTable;
                     }
 
                     var selectColumns = new List<string>();
@@ -145,6 +160,176 @@ namespace BIS.ERP.Services
             return dataTable;
         }
 
+        private async Task<DataTable> GetCashOrderTurnoverReportDataAsync(
+            MetadataObject source,
+            IReadOnlyList<ReportField> selectedFields,
+            IReadOnlyDictionary<string, object>? parameters)
+        {
+            var rawTable = new DataTable(source.Name);
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+
+            var baseWhereClauses = new List<string> { @"COALESCE(""is_posted"", false) = true" };
+            var filteredWhereClauses = new List<string>();
+
+            if (TryGetDateParameter(parameters, out var periodStart, "PeriodStart", "periodStart", "StartDate", "startDate", "Дата начала", "С"))
+            {
+                AddParameter(command, "@cashReportStartDate", periodStart.Date);
+                filteredWhereClauses.Add("report_date >= @cashReportStartDate");
+            }
+
+            if (TryGetDateParameter(parameters, out var periodEnd, "PeriodEnd", "periodEnd", "EndDate", "endDate", "Дата окончания", "По"))
+            {
+                AddParameter(command, "@cashReportEndDate", periodEnd.Date);
+                filteredWhereClauses.Add("report_date <= @cashReportEndDate");
+            }
+
+            if (TryGetNonEmptyStringParameter(parameters, out var cashDeskId, "CashDeskId", "cashDeskId", "cash_desk_id", "Касса"))
+            {
+                AddParameter(command, "@cashReportCashDeskId", cashDeskId);
+                baseWhereClauses.Add(@"CAST(""cash_desk_id"" AS text) = @cashReportCashDeskId");
+            }
+
+            var baseWhereSql = string.Join(" AND ", baseWhereClauses);
+            var filteredWhereSql = filteredWhereClauses.Count == 0
+                ? string.Empty
+                : $"WHERE {string.Join(" AND ", filteredWhereClauses)}";
+
+            command.CommandText = $@"
+WITH raw_orders AS (
+    SELECT
+        COALESCE(CAST(""Id"" AS text), '') AS id_text,
+        COALESCE(""doc_date"", NOW())::date AS report_date,
+        COALESCE(""doc_number"", '') AS doc_number,
+        COALESCE(""order_kind"", '') AS order_kind_raw,
+        CASE
+            WHEN LOWER(COALESCE(""order_kind""::text, '')) = 'receipt'
+              OR LOWER(COALESCE(""order_kind""::text, '')) LIKE '%приход%'
+            THEN true
+            ELSE false
+        END AS is_receipt,
+        COALESCE(CAST(""cash_desk_id"" AS text), '') AS cash_desk,
+        COALESCE(NULLIF(""debit_account"", ''), NULLIF(""cash_account"", ''), '') AS debit_account,
+        COALESCE(NULLIF(""credit_account"", ''), NULLIF(""correspondent_account"", ''), '') AS credit_account,
+        COALESCE(""amount"", 0) AS amount,
+        COALESCE(""basis"", '') AS basis,
+        COALESCE(""description"", '') AS description
+    FROM ""doc_cash_orders""
+    WHERE {baseWhereSql}
+),
+base_orders AS (
+    SELECT
+        raw_orders.*,
+        CASE WHEN is_receipt THEN debit_account ELSE credit_account END AS cash_account,
+        CASE WHEN is_receipt THEN credit_account ELSE debit_account END AS correspondent_account
+    FROM raw_orders
+),
+filtered_orders AS (
+    SELECT * FROM base_orders
+    {filteredWhereSql}
+),
+grouped AS (
+    SELECT
+        report_date,
+        cash_desk,
+        cash_account,
+        correspondent_account,
+        is_receipt,
+        MIN(id_text) AS id_text,
+        STRING_AGG(NULLIF(doc_number, ''), ', ' ORDER BY doc_number) AS doc_number,
+        COALESCE(STRING_AGG(NULLIF(basis, ''), '; ' ORDER BY doc_number), '') AS basis,
+        COALESCE(STRING_AGG(NULLIF(description, ''), '; ' ORDER BY doc_number), '') AS description,
+        SUM(CASE WHEN is_receipt THEN amount ELSE 0 END) AS sum_debet,
+        SUM(CASE WHEN is_receipt THEN 0 ELSE amount END) AS sum_credit,
+        SUM(amount) AS sum,
+        COUNT(*)::int AS document_count
+    FROM filtered_orders
+    GROUP BY report_date, cash_desk, cash_account, correspondent_account, is_receipt
+),
+with_balances AS (
+    SELECT
+        grouped.*,
+        COALESCE((
+            SELECT SUM(CASE WHEN history.is_receipt THEN history.amount ELSE -history.amount END)
+            FROM base_orders history
+            WHERE history.cash_desk = grouped.cash_desk
+              AND history.cash_account = grouped.cash_account
+              AND history.report_date < grouped.report_date
+        ), 0) AS opening_balance
+    FROM grouped
+)
+SELECT
+    id_text AS ""Id"",
+    report_date AS ""report_date"",
+    report_date AS ""d_xls"",
+    COALESCE(doc_number, '') AS ""doc_number"",
+    COALESCE(doc_number, '') AS ""dok"",
+    COALESCE(doc_number, '') AS ""nuch"",
+    COALESCE(doc_number, '') AS ""d_nuch"",
+    CASE WHEN is_receipt THEN 'Приходный' ELSE 'Расходный' END AS ""order_kind"",
+    cash_desk AS ""cash_desk"",
+    cash_account AS ""cash_account"",
+    correspondent_account AS ""correspondent_account"",
+    opening_balance AS ""opening_balance"",
+    sum_debet AS ""sum_debet"",
+    sum_debet AS ""sum_debit"",
+    sum_credit AS ""sum_credit"",
+    opening_balance + sum_debet - sum_credit AS ""closing_balance"",
+    sum_debet AS ""deb"",
+    sum_credit AS ""cred"",
+    sum AS ""sum"",
+    COALESCE(NULLIF(basis, ''), NULLIF(description, ''), CASE WHEN is_receipt THEN 'Приходный' ELSE 'Расходный' END) AS ""tex"",
+    COALESCE(NULLIF(basis, ''), NULLIF(description, ''), correspondent_account) AS ""name_kod"",
+    basis AS ""basis"",
+    description AS ""description"",
+    document_count AS ""document_count"",
+    'Финансы'::text AS ""module""
+FROM with_balances
+ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
+            command.CommandTimeout = 60;
+
+            var connectionOpened = false;
+            try
+            {
+                await _context.Database.OpenConnectionAsync();
+                connectionOpened = true;
+
+                using var reader = await command.ExecuteReaderAsync();
+                rawTable.Load(reader);
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            AddSelectedFieldAliases(rawTable, source, selectedFields);
+            return rawTable;
+        }
+
+        private static void AddSelectedFieldAliases(
+            DataTable table,
+            MetadataObject source,
+            IEnumerable<ReportField> selectedFields)
+        {
+            foreach (var reportField in selectedFields)
+            {
+                var metadataField = FindMetadataField(source, reportField.FieldName);
+                var sourceColumnName = metadataField?.DbColumnName ?? NormalizeLegacyReportFieldName(reportField.FieldName);
+                if (string.IsNullOrWhiteSpace(sourceColumnName) || !table.Columns.Contains(sourceColumnName))
+                    continue;
+
+                var displayName = string.IsNullOrWhiteSpace(reportField.DisplayName)
+                    ? metadataField?.Name ?? reportField.FieldName
+                    : reportField.DisplayName;
+                if (string.IsNullOrWhiteSpace(displayName) || table.Columns.Contains(displayName))
+                    continue;
+
+                var sourceColumn = table.Columns[sourceColumnName]!;
+                table.Columns.Add(displayName, sourceColumn.DataType);
+                foreach (DataRow row in table.Rows)
+                    row[displayName] = row[sourceColumnName];
+            }
+        }
         private async Task AddDefaultFixedAssetSnapshotFilterAsync(
             System.Data.Common.DbCommand command,
             MetadataObject source,
@@ -189,6 +374,11 @@ namespace BIS.ERP.Services
 
         private static bool IsFixedAssetPeriodBalanceSource(MetadataObject source) =>
             source.TableName.Equals("FixedAssetPeriodBalances", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsCashOrderTurnoverReportSource(MetadataObject source) =>
+            string.Equals(source.ObjectType, "ReportSource", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(source.Name, MetadataService.CashOrderTurnoverReportSourceName, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(source.TableName, MetadataService.CashOrderTurnoverReportSourceTableName, StringComparison.OrdinalIgnoreCase));
 
         private static bool HasExplicitSnapshotPeriodFilter(IEnumerable<string> whereClauses) =>
             whereClauses.Any(clause =>
@@ -251,6 +441,27 @@ namespace BIS.ERP.Services
             return false;
         }
 
+        private static bool TryGetNonEmptyStringParameter(
+            IReadOnlyDictionary<string, object>? parameters,
+            out string value,
+            params string[] keys)
+        {
+            value = string.Empty;
+            if (parameters == null)
+                return false;
+
+            foreach (var key in keys)
+            {
+                if (!parameters.TryGetValue(key, out var raw) || raw == null)
+                    continue;
+
+                value = raw.ToString()?.Trim() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(value))
+                    return true;
+            }
+
+            return false;
+        }
         private static MetadataField? FindMetadataField(MetadataObject source, string fieldName)
         {
             return source.Fields.FirstOrDefault(field =>
@@ -266,31 +477,67 @@ namespace BIS.ERP.Services
         {
             selectExpression = string.Empty;
 
-            if (!IsFoxProLayoutReport(report) || !IsPostingsSource(source))
+            if (!IsFoxProLayoutReport(report))
                 return false;
 
             var fieldName = NormalizeLegacyReportFieldName(field.FieldName);
-            var expression = fieldName switch
-            {
-                "date" or "d_oper" or "d_doc" => QuoteIdentifier("posting_date"),
-                "dok" or "doc" or "nomdok" or "nom_doc" => QuoteIdentifier("doc_number"),
-                "schet" or "sch" or "debet" or "debit" => QuoteIdentifier("debit_account"),
-                "kor_sch" or "korschet" or "credit" or "kredit" => QuoteIdentifier("credit_account"),
-                "debsum" or "sumdt" or "sum_debit" => QuoteIdentifier("amount_kgs"),
-                "credsum" or "sumkt" or "sum_credit" => QuoteIdentifier("amount_kgs"),
-                "debsum_v" or "sumdt_v" or "sum_debit_currency" => QuoteIdentifier("amount_currency"),
-                "credsum_v" or "sumkt_v" or "sum_credit_currency" => QuoteIdentifier("amount_currency"),
-                "tex" or "text" or "txt" or "sod" or "note" => QuoteIdentifier("description"),
-                "prs" or "module" or "module_code" => QuoteIdentifier("module_code"),
-                "name_kod" or "name_sch" or "account_name" => BuildPostingAccountDisplayExpression(),
-                _ => "NULL::text"
-            };
+            var expression = IsPostingsSource(source)
+                ? BuildPostingsCompatibleFieldExpression(fieldName)
+                : IsCashOrderSource(source)
+                    ? BuildCashOrderCompatibleFieldExpression(fieldName)
+                    : null;
+
+            if (expression == null)
+                return false;
 
             var displayName = string.IsNullOrWhiteSpace(field.DisplayName)
                 ? field.FieldName
                 : field.DisplayName;
             selectExpression = $"{expression} AS {QuoteIdentifier(displayName)}";
             return true;
+        }
+
+        private static string BuildPostingsCompatibleFieldExpression(string fieldName) => fieldName switch
+        {
+            "date" or "d_oper" or "d_doc" => QuoteIdentifier("posting_date"),
+            "dok" or "doc" or "nomdok" or "nom_doc" => QuoteIdentifier("doc_number"),
+            "schet" or "sch" or "debet" or "debit" => QuoteIdentifier("debit_account"),
+            "kor_sch" or "korschet" or "credit" or "kredit" => QuoteIdentifier("credit_account"),
+            "debsum" or "sumdt" or "sum_debit" => QuoteIdentifier("amount_kgs"),
+            "credsum" or "sumkt" or "sum_credit" => QuoteIdentifier("amount_kgs"),
+            "debsum_v" or "sumdt_v" or "sum_debit_currency" => QuoteIdentifier("amount_currency"),
+            "credsum_v" or "sumkt_v" or "sum_credit_currency" => QuoteIdentifier("amount_currency"),
+            "tex" or "text" or "txt" or "sod" or "note" => QuoteIdentifier("description"),
+            "prs" or "module" or "module_code" => QuoteIdentifier("module_code"),
+            "name_kod" or "name_sch" or "account_name" => BuildPostingAccountDisplayExpression(),
+            _ => "NULL::text"
+        };
+
+        private static string BuildCashOrderCompatibleFieldExpression(string fieldName) => fieldName switch
+        {
+            "date" or "d_xls" or "d_oper" or "d_doc" => QuoteIdentifier("doc_date"),
+            "dok" or "doc" or "nuch" or "d_nuch" or "nomdok" or "nom_doc" => QuoteIdentifier("doc_number"),
+            "schet" or "sch" or "debet" or "debit" => QuoteIdentifier("debit_account"),
+            "kor_sch" or "korsch" or "korschet" or "credit" or "kredit" => QuoteIdentifier("credit_account"),
+            "deb" or "debsum" or "sumdt" or "sum_debet" or "sum_debit" => BuildCashOrderAmountByKindExpression(receipt: true),
+            "cred" or "credsum" or "sumkt" or "sum_credit" => BuildCashOrderAmountByKindExpression(receipt: false),
+            "sum" or "amount" => QuoteIdentifier("amount"),
+            "debsum_v" or "credsum_v" or "sum_v" or "sumdt_v" or "sumkt_v" or "sum_debit_currency" or "sum_credit_currency" => QuoteIdentifier("amount_currency"),
+            "tex" or "text" or "txt" or "sod" or "note" => QuoteIdentifier("description"),
+            "basis" or "osn" or "osnov" => QuoteIdentifier("basis"),
+            "prs" or "module" or "module_code" => "'Финансы'::text",
+            "name_kod" or "dovf" or "cash_desk" or "cashdesk" => "CAST(" + QuoteIdentifier("cash_desk_id") + " AS text)",
+            _ => "NULL::text"
+        };
+
+        private static string BuildCashOrderAmountByKindExpression(bool receipt)
+        {
+            var orderKind = QuoteIdentifier("order_kind");
+            var amount = QuoteIdentifier("amount");
+            var receiptCondition = $"LOWER(COALESCE({orderKind}::text, '')) = 'receipt' OR LOWER(COALESCE({orderKind}::text, '')) LIKE '%приход%'";
+            return receipt
+                ? $"CASE WHEN {receiptCondition} THEN COALESCE({amount}, 0) ELSE 0 END"
+                : $"CASE WHEN {receiptCondition} THEN 0 ELSE COALESCE({amount}, 0) END";
         }
 
         private static bool IsFoxProLayoutReport(Report report) =>
@@ -301,6 +548,9 @@ namespace BIS.ERP.Services
             string.Equals(source.Name, "Проводки", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(source.TableName, "doc_postings", StringComparison.OrdinalIgnoreCase);
 
+        private static bool IsCashOrderSource(MetadataObject source) =>
+            string.Equals(source.Name, "Расходный/Приходный КО", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source.TableName, "doc_cash_orders", StringComparison.OrdinalIgnoreCase);
         private static string NormalizeLegacyReportFieldName(string fieldName)
         {
             var normalized = (fieldName ?? string.Empty)
@@ -524,7 +774,8 @@ namespace BIS.ERP.Services
         public byte[] ExportToExcel(DataTable dataTable, Report report)
         {
             using var workbook = new XLWorkbook();
-            var worksheet = workbook.Worksheets.Add(report.Name);
+            var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
+            worksheet.ShowGridLines = report.ShowGridLines;
 
             // Заголовок отчета
             var titleRow = worksheet.Cell(1, 1);
@@ -537,7 +788,7 @@ namespace BIS.ERP.Services
 
             // Таблица данных
             var table = worksheet.Cell(4, 1).InsertTable(dataTable);
-            table.Theme = XLTableTheme.TableStyleMedium2;
+            table.Theme = report.ShowGridLines ? XLTableTheme.TableStyleMedium2 : XLTableTheme.None;
 
             // Автоширина колонок
             worksheet.Columns().AdjustToContents();
@@ -547,6 +798,19 @@ namespace BIS.ERP.Services
             return stream.ToArray();
         }
 
+        private static string BuildSafeExcelWorksheetName(string? name)
+        {
+            var invalidChars = new HashSet<char>(new[] { '[', ']', ':', '*', '?', '/', '\\' });
+            var safeName = new string((name ?? string.Empty)
+                .Select(ch => invalidChars.Contains(ch) || char.IsControl(ch) ? ' ' : ch)
+                .ToArray())
+                .Trim();
+
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "Report";
+
+            return safeName.Length <= 31 ? safeName : safeName[..31].Trim();
+        }
         public byte[] ExportToPdf(DataTable dataTable, Report report)
         {
             QuestPDF.Settings.License = LicenseType.Community;
@@ -733,7 +997,7 @@ namespace BIS.ERP.Services
             var html = new StringBuilder();
 
             // Простые настройки           
-            bool showGridLines = true;          
+            bool showGridLines = report.ShowGridLines;          
 
             html.AppendLine("<!DOCTYPE html>");
             html.AppendLine("<html>");
@@ -1030,11 +1294,8 @@ namespace BIS.ERP.Services
                 }
                 else
                 {
-                    // Существующий отчет - обновляем
+                    // Существующий отчет - обновляем без удаления самой записи отчета.
                     var existingReport = await _context.Reports
-                        .Include(r => r.Fields)
-                        .Include(r => r.Filters)
-                        .Include(r => r.ElementMappings)
                         .FirstOrDefaultAsync(r => r.Id == report.Id);
 
                     if (existingReport != null)
@@ -1050,32 +1311,77 @@ namespace BIS.ERP.Services
                         CopyReportLayout(report, existingReport);
                         existingReport.UpdatedAt = DateTime.UtcNow;
 
-                        // Обновляем поля
-                        _context.ReportFields.RemoveRange(existingReport.Fields);
-                        foreach (var field in report.Fields)
-                        {
-                            field.Id = Guid.NewGuid();
-                            field.ReportId = report.Id;
-                            existingReport.Fields.Add(field);
-                        }
+                        // Дочерние настройки пересобираются целиком. Удаляем по ReportId,
+                        // чтобы не ловить optimistic concurrency на устаревших tracked-строках.
+                        await _context.ReportFields
+                            .Where(field => field.ReportId == report.Id)
+                            .ExecuteDeleteAsync();
+                        await _context.ReportFilters
+                            .Where(filter => filter.ReportId == report.Id)
+                            .ExecuteDeleteAsync();
+                        await _context.ReportElementMappings
+                            .Where(mapping => mapping.ReportId == report.Id)
+                            .ExecuteDeleteAsync();
 
-                        // Обновляем фильтры
-                        _context.ReportFilters.RemoveRange(existingReport.Filters);
-                        foreach (var filter in report.Filters)
+                        var newFields = report.Fields.Select(field => new ReportField
                         {
-                            filter.Id = Guid.NewGuid();
-                            filter.ReportId = report.Id;
-                            existingReport.Filters.Add(filter);
-                        }
+                            Id = Guid.NewGuid(),
+                            ReportId = report.Id,
+                            FieldName = field.FieldName,
+                            DisplayName = field.DisplayName,
+                            AggregateType = field.AggregateType,
+                            Order = field.Order,
+                            Width = field.Width,
+                            Alignment = field.Alignment,
+                            Format = field.Format,
+                            IsVisible = field.IsVisible
+                        }).ToList();
 
-                        _context.ReportElementMappings.RemoveRange(existingReport.ElementMappings);
-                        foreach (var mapping in report.ElementMappings)
+                        var newFilters = report.Filters.Select(filter => new ReportFilter
                         {
-                            mapping.Id = Guid.NewGuid();
-                            mapping.ReportId = report.Id;
-                            existingReport.ElementMappings.Add(mapping);
-                        }
+                            Id = Guid.NewGuid(),
+                            ReportId = report.Id,
+                            FieldName = filter.FieldName,
+                            Operation = filter.Operation,
+                            Value = filter.Value,
+                            Value2 = filter.Value2,
+                            Order = filter.Order
+                        }).ToList();
 
+                        var newMappings = report.ElementMappings.Select(mapping => new ReportElementMapping
+                        {
+                            Id = Guid.NewGuid(),
+                            ReportId = report.Id,
+                            ElementOrder = mapping.ElementOrder,
+                            ElementType = mapping.ElementType,
+                            ElementText = mapping.ElementText,
+                            ElementExpression = mapping.ElementExpression,
+                            BandType = mapping.BandType,
+                            Left = mapping.Left,
+                            Top = mapping.Top,
+                            Width = mapping.Width,
+                            Height = mapping.Height,
+                            FontName = mapping.FontName,
+                            FontSize = mapping.FontSize,
+                            Bold = mapping.Bold,
+                            Italic = mapping.Italic,
+                            Alignment = mapping.Alignment,
+                            Order = mapping.Order,
+                            MappedFieldName = mapping.MappedFieldName,
+                            MappedDisplayName = mapping.MappedDisplayName,
+                            DataSource = mapping.DataSource,
+                            FormatString = mapping.FormatString,
+                            IsVisible = mapping.IsVisible,
+                            CustomText = mapping.CustomText
+                        }).ToList();
+
+                        await _context.ReportFields.AddRangeAsync(newFields);
+                        await _context.ReportFilters.AddRangeAsync(newFilters);
+                        await _context.ReportElementMappings.AddRangeAsync(newMappings);
+
+                        report.Fields = newFields;
+                        report.Filters = newFilters;
+                        report.ElementMappings = newMappings;
                         _context.Reports.Update(existingReport);
                     }
                     else
@@ -1148,9 +1454,13 @@ namespace BIS.ERP.Services
         public async Task<List<Report>> GetNavigationReportsAsync()
         {
             var query = _context.Set<Report>().AsNoTracking()
-                .Where(report => report.IsActive && !report.IsPrintForm);
+                .Where(report => report.IsActive && !report.IsPrintForm)
+                .Where(report => !(report.SourceFormat == "Native" && EF.Functions.Like(report.Code, "standard.%")));
 
-            return await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
+            var reports = await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
+            return reports
+                .Where(report => !ReportClassificationService.IsReconciliationReport(report))
+                .ToList();
         }
 
         public async Task<Report?> GetReportAsync(Guid reportId)
@@ -1284,11 +1594,21 @@ namespace BIS.ERP.Services
             target.Settings = source.Settings;
         }
         // Удаление отчета
-        // Удаление отчета
         public async Task DeleteReportAsync(Guid reportId)
         {
+            var report = await _context.Reports
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == reportId);
+            if (report == null)
+                throw new InvalidOperationException($"Отчет с ID {reportId} не найден");
+
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
+            await new StandardReportDeletionService(_context).MarkDeletedAsync(report.Code, report.Name);
+
+            await _context.MetadataModuleItems
+                .Where(item => item.ObjectType == "Report" && item.ObjectId == reportId)
+                .ExecuteDeleteAsync();
             await _context.ReportFields
                 .Where(item => item.ReportId == reportId)
                 .ExecuteDeleteAsync();
@@ -1304,11 +1624,16 @@ namespace BIS.ERP.Services
             await _context.Set<ReportHeaderFooter>()
                 .Where(item => item.ReportId == reportId)
                 .ExecuteDeleteAsync();
-            await _context.Reports
+            var deletedReports = await _context.Reports
                 .Where(item => item.Id == reportId)
                 .ExecuteDeleteAsync();
+            if (deletedReports == 0)
+                throw new InvalidOperationException($"Отчет \"{report.Name}\" уже удален или не найден");
 
             await transaction.CommitAsync();
         }
     }
 }
+
+
+

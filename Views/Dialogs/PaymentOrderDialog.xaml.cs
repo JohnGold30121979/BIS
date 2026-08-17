@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -40,6 +40,7 @@ namespace BIS.ERP.Views
             DialogTitle.Text = $"Добавление: {document.Name}";
             DatePicker.SelectedDate = DateTime.Today;
             TypeCombo.SelectedIndex = 0;
+            SetDescriptionVisibility(false);
 
             this.ContentRendered += async (s, e) => await InitializeAsync();
         }
@@ -51,6 +52,7 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _editId = editId;
             DialogTitle.Text = $"Редактирование: {document.Name}";
+            SetDescriptionVisibility(false);
 
             this.ContentRendered += async (s, e) => await InitializeAsync(editId);
         }
@@ -81,7 +83,7 @@ namespace BIS.ERP.Views
                     {
                         try
                         {
-                            return await _metadataService.GetNextDocumentNumberAsync(_document.Name);
+                            return await _metadataService.GetNextDocumentNumberAsync(_document);
                         }
                         catch
                         {
@@ -125,7 +127,18 @@ namespace BIS.ERP.Views
                 }).ToList();
 
                 // Обновляем UI в UI потоке
-                Dispatcher.Invoke(() => OrganizationCombo.ItemsSource = _organizations);
+                Dispatcher.Invoke(() =>
+                {
+                    ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
+                    ReferencePickerControlFactory.AttachEditor(
+                        OrganizationCombo,
+                        _metadataService,
+                        orgCatalog,
+                        this,
+                        items => _organizations = items,
+                        "Код организации",
+                        "Наименование");
+                });
             }
 
             // Загружаем банки
@@ -138,7 +151,18 @@ namespace BIS.ERP.Views
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = d.ContainsKey("Наименование банка") ? d["Наименование банка"].ToString() : d["name"].ToString()
                 }).ToList();
-                Dispatcher.Invoke(() => BankCombo.ItemsSource = _banks);
+                Dispatcher.Invoke(() =>
+                {
+                    ReferenceComboBoxSearchHelper.Attach(BankCombo, _banks);
+                    ReferencePickerControlFactory.AttachEditor(
+                        BankCombo,
+                        _metadataService,
+                        bankCatalog,
+                        this,
+                        items => _banks = items,
+                        "Код",
+                        "Наименование банка");
+                });
             }
 
             // Загружаем наши расчетные счета
@@ -186,14 +210,55 @@ namespace BIS.ERP.Views
                     Id = Guid.Parse(d["Id"].ToString()),
                     DisplayName = $"{d["Код"]} - {d["Наименование"]}"
                 }).ToList();
-                Dispatcher.Invoke(() => CurrencyCombo.ItemsSource = _currencies);
+                Dispatcher.Invoke(() =>
+                {
+                    ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, _currencies);
+                    ReferencePickerControlFactory.AttachEditor(
+                        CurrencyCombo,
+                        _metadataService,
+                        currencyCatalog,
+                        this,
+                        items => _currencies = items,
+                        "Код",
+                        "Наименование");
+                });
             }
 
             _employees = await LoadReferenceItemsAsync(allCatalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
-            Dispatcher.Invoke(() => EmployeeCombo.ItemsSource = _employees);
+            var employeeCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Сотрудники (Списочный состав)");
+            Dispatcher.Invoke(() =>
+            {
+                ReferenceComboBoxSearchHelper.Attach(EmployeeCombo, _employees);
+                if (employeeCatalog != null)
+                {
+                    ReferencePickerControlFactory.AttachEditor(
+                        EmployeeCombo,
+                        _metadataService,
+                        employeeCatalog,
+                        this,
+                        items => _employees = items,
+                        "Табельный номер",
+                        "ФИО");
+                }
+            });
 
             _materials = await LoadReferenceItemsAsync(allCatalogs, "Справочник материалов", "Код", "Наименование материала");
-            Dispatcher.Invoke(() => MaterialCombo.ItemsSource = _materials);
+            var materialCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Справочник материалов");
+            Dispatcher.Invoke(() =>
+            {
+                ReferenceComboBoxSearchHelper.Attach(MaterialCombo, _materials);
+                if (materialCatalog != null)
+                {
+                    ReferencePickerControlFactory.AttachEditor(
+                        MaterialCombo,
+                        _metadataService,
+                        materialCatalog,
+                        this,
+                        items => _materials = items,
+                        "Код",
+                        "Наименование материала");
+                }
+            });
 
             var paymentClassificationCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Классификация платежей");
             _paymentClassificationRows = paymentClassificationCatalog == null
@@ -220,9 +285,12 @@ namespace BIS.ERP.Views
                     if (record.ContainsKey("Курс")) ExchangeRateBox.Text = record["Курс"].ToString();
                     if (record.ContainsKey("Назначение платежа")) PurposeBox.Text = record["Назначение платежа"].ToString();
                     if (record.ContainsKey("Примечание")) DescriptionBox.Text = record["Примечание"].ToString();
-                    if (record.TryGetValue("Наш счет", out var ourAccountValue))
+                    var hasDescription = !string.IsNullOrWhiteSpace(DescriptionBox.Text);
+                    ShowDescriptionCheckBox.IsChecked = hasDescription;
+                    SetDescriptionVisibility(hasDescription);
+                    if (TryGetRecordValue(record, out var ourAccountValue, "Наш счет", "our_account_id", "Дебет", "debit_account"))
                         ApplySelectedOurAccount(ourAccountValue);
-                    if (record.TryGetValue("Корр. счет", out var accountValue))
+                    if (TryGetRecordValue(record, out var accountValue, "Корр. счет", "correspondent_account", "Кредит", "credit_account"))
                         ApplySelectedCorrAccount(accountValue);
 
                     SelectComboByRecordValue(OrganizationCombo, record, "Организация");
@@ -306,7 +374,7 @@ namespace BIS.ERP.Views
                     var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
                     var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
                     if (Guid.TryParse(dialog.SelectedAccount["Id"].ToString(), out var accountId))
-                        applySelection(accountId, $"{accountCode} - {accountName}");
+                        applySelection(accountId, BuildAccountCodeDisplay(accountCode, accountName));
                 }
             }
             catch (Exception ex)
@@ -402,15 +470,23 @@ namespace BIS.ERP.Views
 
                 if (_selectedOurAccountId == Guid.Empty)
                 {
-                    MessageBox.Show("Укажите наш счет для формирования проводки.", "Проверка",
+                    MessageBox.Show("Укажите счет дебета для формирования проводки.", "Проверка",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
                 if (_selectedCorrAccountId == Guid.Empty)
                 {
-                    MessageBox.Show("Укажите корреспондирующий счет для формирования проводки.", "Проверка",
+                    MessageBox.Show("Укажите счет кредита для формирования проводки.", "Проверка",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (!TryReadDecimal(AmountBox.Text, out var amount) || amount <= 0)
+                {
+                    MessageBox.Show("Сумма должна быть больше 0.", "Проверка",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    AmountBox.Focus();
                     return;
                 }
 
@@ -419,7 +495,7 @@ namespace BIS.ERP.Views
                     ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
                     ["Тип"] = documentType,  
-                    ["Сумма"] = TryReadDecimal(AmountBox.Text, out var amount) ? amount : 0,
+                    ["Сумма"] = amount,
                     ["Назначение платежа"] = PurposeBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
                     ["Проведён"] = false
@@ -432,6 +508,7 @@ namespace BIS.ERP.Views
                 SetFieldValueIfExists(itemData, "Контрагент", string.Empty);
                 SetFieldValueIfExists(itemData, "Банк", string.Empty);
                 SetFieldValueIfExists(itemData, "Наш счет", _selectedOurAccountId);
+                SetFieldValueIfExists(itemData, "Дебет", _selectedOurAccountId);
                 SetFieldValueIfExists(itemData, "Расчетный счет контрагента", string.Empty);
                 SetFieldValueIfExists(itemData, "Счет контрагента", string.Empty);
                 SetFieldValueIfExists(itemData, "Валюта",
@@ -452,9 +529,8 @@ namespace BIS.ERP.Views
                         : string.Empty);
                 SetFieldValueIfExists(itemData, "Корр. счет",
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
-                SetFieldValueIfExists(itemData, "Классификация платежа",
-                    _selectedPaymentClassificationId != Guid.Empty ? _selectedPaymentClassificationId : string.Empty);
-
+                SetFieldValueIfExists(itemData, "Кредит",
+                    _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
                 if (_editId.HasValue)
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
                 else
@@ -473,6 +549,22 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void OnShowDescriptionChanged(object sender, RoutedEventArgs e)
+        {
+            var isVisible = ShowDescriptionCheckBox?.IsChecked == true;
+            SetDescriptionVisibility(isVisible);
+            if (!isVisible && DescriptionBox != null)
+                DescriptionBox.Text = string.Empty;
+        }
+
+        private void SetDescriptionVisibility(bool isVisible)
+        {
+            var visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (DescriptionLabel != null)
+                DescriptionLabel.Visibility = visibility;
+            if (DescriptionBox != null)
+                DescriptionBox.Visibility = visibility;
+        }
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
             DialogResult = false;
@@ -486,7 +578,7 @@ namespace BIS.ERP.Views
                 return;
 
             _selectedOurAccountId = account.Id;
-            OurAccountBox.Text = account.DisplayName;
+            OurAccountBox.Text = account.Code;
         }
 
         private void ApplySelectedCorrAccount(object accountValue)
@@ -496,7 +588,7 @@ namespace BIS.ERP.Views
                 return;
 
             _selectedCorrAccountId = account.Id;
-            CorrAccountBox.Text = account.DisplayName;
+            CorrAccountBox.Text = account.Code;
         }
 
         private void ApplySelectedPaymentClassification(object value)
@@ -574,6 +666,34 @@ namespace BIS.ERP.Views
                     showUnmappedFields: false));
         }
 
+        private static string BuildAccountCodeDisplay(string? accountCode, string? accountName = null)
+        {
+            if (!string.IsNullOrWhiteSpace(accountCode))
+                return accountCode.Trim();
+
+            if (string.IsNullOrWhiteSpace(accountName))
+                return string.Empty;
+
+            var separatorIndex = accountName.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? accountName[..separatorIndex].Trim()
+                : accountName.Trim();
+        }
+
+        private static bool TryGetRecordValue(
+            Dictionary<string, object> record,
+            out object value,
+            params string[] fieldNames)
+        {
+            foreach (var fieldName in fieldNames)
+            {
+                if (record.TryGetValue(fieldName, out value) && value != null && value != DBNull.Value)
+                    return true;
+            }
+
+            value = string.Empty;
+            return false;
+        }
         private void SetFieldValueIfExists(Dictionary<string, object> itemData, string fieldName, object value)
         {
             if (_document.Fields.Any(field => field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))

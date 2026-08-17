@@ -12,20 +12,26 @@ namespace BIS.ERP.Views
     {
         private readonly AppSettings _settings;
         private readonly SystemConfigurationService _systemConfigurationService = new();
+        private readonly bool _allowSystemLogoManagement;
+        private byte[]? systemLogoImage;
+        private string? systemLogoContentType;
+        private string? systemLogoFileName;
 
-        public SettingsWindow()
+        public SettingsWindow(bool allowSystemLogoManagement = false)
         {
             InitializeComponent();
             _settings = AppSettings.Instance;
+            _allowSystemLogoManagement = allowSystemLogoManagement;
+            LoadSystemLogoButton.IsEnabled = _allowSystemLogoManagement;
+            ClearSystemLogoButton.IsEnabled = _allowSystemLogoManagement;
+            SystemLogoRestrictionText.Visibility = _allowSystemLogoManagement
+                ? Visibility.Collapsed
+                : Visibility.Visible;
 
-            if (_settings.Theme == "Dark")
-            {
-                ThemeComboBox.SelectedIndex = 1;
-            }
-            else
-            {
-                ThemeComboBox.SelectedIndex = 0;
-            }
+            ThemeComboBox.SelectedItem = ThemeComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => item.Tag?.ToString() == _settings.Theme)
+                ?? ThemeComboBox.Items[0];
 
             LanguageComboBox.SelectedValue = _settings.Language;
 
@@ -35,12 +41,59 @@ namespace BIS.ERP.Views
                 var configuration = await _systemConfigurationService.GetAsync();
                 SystemNameBox.Text = configuration.SystemName;
                 SystemIconBox.Text = configuration.Icon;
+                systemLogoImage = configuration.LogoImage;
+                systemLogoContentType = configuration.LogoContentType;
+                systemLogoFileName = configuration.LogoFileName;
+                UpdateSystemLogoPreview();
                 DescriptionBox.Text = configuration.Description;
                 CompanyDetailsBox.Text = configuration.CompanyDetails;
                 EmailBox.Text = configuration.Email;
                 PhoneBox.Text = configuration.Phone;
                 AppUpdateUrlBox.Text = configuration.AppUpdateUrl;
             };
+        }
+
+        private void OnLoadSystemLogoClick(object sender, RoutedEventArgs e)
+        {
+            if (!_allowSystemLogoManagement)
+                return;
+
+            if (!LogoFileService.TryPickLogo(this, out var logo, out var error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                    MessageBox.Show(error, "Логотип системы", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            systemLogoImage = logo!.ImageBytes;
+            systemLogoContentType = logo.ContentType;
+            systemLogoFileName = logo.FileName;
+            UpdateSystemLogoPreview();
+        }
+
+        private void OnClearSystemLogoClick(object sender, RoutedEventArgs e)
+        {
+            if (!_allowSystemLogoManagement)
+                return;
+
+            systemLogoImage = null;
+            systemLogoContentType = null;
+            systemLogoFileName = null;
+            UpdateSystemLogoPreview();
+        }
+
+        private void UpdateSystemLogoPreview()
+        {
+            var imageSource = LogoFileService.CreateImageSource(systemLogoImage);
+            SystemLogoPreviewImage.Source = imageSource;
+            SystemLogoPreviewImage.Visibility = imageSource == null ? Visibility.Collapsed : Visibility.Visible;
+            SystemLogoPlaceholderText.Text = string.IsNullOrWhiteSpace(SystemIconBox.Text)
+                ? "🏢"
+                : SystemIconBox.Text.Trim();
+            SystemLogoPlaceholderText.Visibility = imageSource == null ? Visibility.Visible : Visibility.Collapsed;
+            SystemLogoNameText.Text = string.IsNullOrWhiteSpace(systemLogoFileName)
+                ? "Логотип не загружен"
+                : $"Загружен: {systemLogoFileName}";
         }
 
         private async void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
@@ -80,8 +133,14 @@ namespace BIS.ERP.Views
 
         private void UpdateCurrentThemeText()
         {
-            var themeName = _settings.Theme == "Dark" ? "Темная" : "Светлая";
+            var themeName = ThemeService.GetDisplayName(_settings.Theme);
             CurrentThemeText.Text = $"Текущая тема: {themeName}";
+        }
+
+        private void OnSystemIconTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (SystemLogoPreviewImage != null && SystemLogoPreviewImage.Visibility != Visibility.Visible)
+                UpdateSystemLogoPreview();
         }
 
         private async void OnLoadNationalBankRatesClick(object sender, RoutedEventArgs e)
@@ -127,7 +186,11 @@ namespace BIS.ERP.Views
                 CompanyDetailsBox.Text,
                 EmailBox.Text,
                 PhoneBox.Text,
-                AppUpdateUrlBox.Text);
+                AppUpdateUrlBox.Text,
+                systemLogoImage,
+                systemLogoContentType,
+                systemLogoFileName,
+                updateLogo: _allowSystemLogoManagement);
             _settings.Save();
             DialogResult = true;
             Close();

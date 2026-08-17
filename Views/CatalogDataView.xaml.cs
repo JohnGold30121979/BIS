@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -37,7 +37,10 @@ namespace BIS.ERP.Views
 
             TitleText.Text = $"{catalog.Icon} {catalog.Name}";
             DescriptionText.Text = catalog.Description;
-            SearchPanel.Visibility = IsChartOfAccountsCatalog ? Visibility.Visible : Visibility.Collapsed;
+            SearchPanel.Visibility = Visibility.Visible;
+            SearchBox.ToolTip = IsChartOfAccountsCatalog
+                ? "Поиск по коду и наименованию счета"
+                : "Поиск по всем видимым колонкам справочника";
             ImportDbfButton.Visibility = CanImportDbf ? Visibility.Visible : Visibility.Collapsed;
             ImportDbfButton.Content = IsPaymentClassificationCatalog
                 ? "📥 Загрузить классификацию"
@@ -53,6 +56,7 @@ namespace BIS.ERP.Views
         private bool CanImportDbf => IsChartOfAccountsCatalog || IsPaymentClassificationCatalog;
 
         private bool IsAdvancePaymentsCatalog =>
+            string.Equals(_catalog.Name, "Пары счетов", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
@@ -75,10 +79,12 @@ namespace BIS.ERP.Views
                 ProgressText.Text = "⏳ Загрузка...";
 
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+                if (IsAdvancePaymentsCatalog)
+                    data = SortRowsByNumericCode(data).ToList();
 
                 // Загружаем все справочники один раз
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
-                _catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+                _catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
                 _dataTable = new DataTable();
                 _dataTable.TableName = _catalog.Name;
@@ -139,7 +145,7 @@ namespace BIS.ERP.Views
                 {
                     Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
-                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 125 : 150,
+                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -147,7 +153,7 @@ namespace BIS.ERP.Views
                 {
                     Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
-                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 125 : 150,
+                    Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -168,6 +174,31 @@ namespace BIS.ERP.Views
             }
         }
 
+
+        private static IEnumerable<Dictionary<string, object>> SortRowsByNumericCode(IEnumerable<Dictionary<string, object>> rows)
+        {
+            return rows
+                .OrderBy(row => TryGetNumericCode(row, out var _) ? 0 : 1)
+                .ThenBy(row => TryGetNumericCode(row, out var code) ? code : int.MaxValue)
+                .ThenBy(row => GetCodeText(row), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static bool TryGetNumericCode(IReadOnlyDictionary<string, object> row, out int code)
+        {
+            code = 0;
+            return int.TryParse(GetCodeText(row), NumberStyles.Integer, CultureInfo.InvariantCulture, out code);
+        }
+
+        private static string GetCodeText(IReadOnlyDictionary<string, object> row)
+        {
+            if (row.TryGetValue("Код", out var localized) && localized != null && localized != DBNull.Value)
+                return localized.ToString()?.Trim() ?? string.Empty;
+
+            if (row.TryGetValue("code", out var raw) && raw != null && raw != DBNull.Value)
+                return raw.ToString()?.Trim() ?? string.Empty;
+
+            return string.Empty;
+        }
         /// <summary>
         /// Универсальная загрузка данных для всех Reference полей
         /// </summary>
@@ -418,19 +449,19 @@ namespace BIS.ERP.Views
             {
                 var advanceWidth = field.Name switch
                 {
-                    "Код" => 70,
-                    "Орг" => 55,
-                    "Таб №" => 60,
-                    "Валюта" => 70,
-                    "Остаток брать из модуля" => 90,
-                    "Дебет" => 130,
-                    "Кредит" => 130,
-                    "Участвует во взаиморасчетах" => 85,
-                    "Формировать проводки авансовых платежей" => 85,
-                    "Участвует во внутренних взаиморасчетах" => 90,
-                    "Вид расчета" => 260,
-                    "Активен" => 70,
-                    _ => field.FieldType == "Bool" ? 65 : 120
+                    "Код" => 56,
+                    "Орг" => 48,
+                    "Таб №" => 54,
+                    "Валюта" => 62,
+                    "Остаток брать из модуля" => 78,
+                    "Дебет" => 112,
+                    "Кредит" => 112,
+                    "Участвует во взаиморасчетах" => 74,
+                    "Формировать проводки авансовых платежей" => 74,
+                    "Участвует во внутренних взаиморасчетах" => 78,
+                    "Вид расчета" => 220,
+                    "Активен" => 62,
+                    _ => field.FieldType == "Bool" ? 56 : 105
                 };
 
                 return new DataGridLength(advanceWidth, DataGridLengthUnitType.Pixel);
@@ -441,26 +472,26 @@ namespace BIS.ERP.Views
 
             var width = field.Name switch
             {
-                "Код" => 78,
-                "Наименование" => 185,
-                "Тип счета" => 96,
-                "Описание" => 150,
-                "Уровень" => 48,
-                "Активен" => 58,
-                "Закрывает модуль" => 78,
-                "Группа аналитических статей" => 92,
-                "Признак печати" => 72,
-                "Сохранять остатки" => 82,
-                "Связь с организациями" => 48,
-                "Связь со списочным составом" => 48,
-                "Связь с валютами" => 48,
-                "Связь с лицевыми счетами" => 56,
-                "Связь с материалами" => 56,
-                "Связь с объектами строительства" => 62,
-                "Связь с участками" => 52,
-                "Код налога" => 58,
-                "Валюта счета" => 92,
-                _ => field.FieldType == "Bool" ? 48 : 96
+                "Код" => 70,
+                "Наименование" => 165,
+                "Тип счета" => 86,
+                "Описание" => 130,
+                "Уровень" => 42,
+                "Активен" => 52,
+                "Закрывает модуль" => 70,
+                "Группа аналитических статей" => 82,
+                "Признак печати" => 64,
+                "Сохранять остатки" => 72,
+                "Связь с организациями" => 42,
+                "Связь со списочным составом" => 42,
+                "Связь с валютами" => 42,
+                "Связь с лицевыми счетами" => 48,
+                "Связь с материалами" => 48,
+                "Связь с объектами строительства" => 54,
+                "Связь с участками" => 46,
+                "Код налога" => 46,
+                "Валюта счета" => 82,
+                _ => field.FieldType == "Bool" ? 42 : 86
             };
 
             return new DataGridLength(width, DataGridLengthUnitType.Pixel);
@@ -469,26 +500,26 @@ namespace BIS.ERP.Views
         private double GetColumnMinWidth(MetadataField field)
         {
             if (IsAdvancePaymentsCatalog)
-                return field.FieldType == "Bool" ? 45 : 70;
+                return field.FieldType == "Bool" ? 40 : 62;
 
             if (!IsChartOfAccountsCatalog)
-                return 100;
+                return 88;
 
             return field.Name switch
             {
-                "Код" => 62,
-                "Наименование" => 135,
-                "Тип счета" => 80,
-                "Описание" => 105,
-                "Уровень" => 40,
-                "Активен" => 50,
-                "Закрывает модуль" => 68,
-                "Группа аналитических статей" => 80,
-                "Признак печати" => 62,
-                "Сохранять остатки" => 68,
-                "Код налога" => 52,
-                "Валюта счета" => 78,
-                _ => field.FieldType == "Bool" ? 40 : 56
+                "Код" => 56,
+                "Наименование" => 118,
+                "Тип счета" => 72,
+                "Описание" => 92,
+                "Уровень" => 36,
+                "Активен" => 44,
+                "Закрывает модуль" => 60,
+                "Группа аналитических статей" => 70,
+                "Признак печати" => 54,
+                "Сохранять остатки" => 60,
+                "Код налога" => 46,
+                "Валюта счета" => 68,
+                _ => field.FieldType == "Bool" ? 36 : 50
             };
         }
 
@@ -603,7 +634,7 @@ namespace BIS.ERP.Views
 
         private void ApplySearchFilter()
         {
-            if (!IsChartOfAccountsCatalog || _dataTable?.DefaultView == null)
+            if (_dataTable?.DefaultView == null)
                 return;
 
             var searchText = SearchBox.Text?.Trim();
@@ -614,12 +645,90 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var escapedValue = EscapeRowFilterValue(searchText);
-            _dataTable.DefaultView.RowFilter =
-                $"[Код] LIKE '%{escapedValue}%' OR [Наименование] LIKE '%{escapedValue}%'";
+            if (IsChartOfAccountsCatalog)
+            {
+                ApplyChartOfAccountsSearchFilter(searchText);
+            }
+            else
+            {
+                var escapedValue = EscapeRowFilterValue(searchText);
+                var filterParts = _dataTable.Columns
+                    .Cast<DataColumn>()
+                    .Where(column => !column.ColumnName.Equals("Id", StringComparison.OrdinalIgnoreCase))
+                    .Select(column => $"CONVERT([{EscapeColumnName(column.ColumnName)}], 'System.String') LIKE '%{escapedValue}%'")
+                    .ToList();
 
-            StatusText.Text = $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}";
+                _dataTable.DefaultView.RowFilter = string.Join(" OR ", filterParts);
+            }
+
+            StatusText.Text = IsChartOfAccountsCatalog
+                ? $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}"
+                : $"🔍 Найдено записей: {_dataTable.DefaultView.Count}";
         }
+
+        private void ApplyChartOfAccountsSearchFilter(string searchText)
+        {
+            const string markerColumn = "__search_match";
+            if (!_dataTable.Columns.Contains(markerColumn))
+                _dataTable.Columns.Add(markerColumn, typeof(bool));
+
+            foreach (DataRow row in _dataTable.Rows)
+                row[markerColumn] = MatchesChartOfAccountsSearch(row, searchText);
+
+            _dataTable.DefaultView.RowFilter = $"[{markerColumn}] = true";
+        }
+
+        private static bool MatchesChartOfAccountsSearch(DataRow row, string searchText)
+        {
+            var code = GetRowText(row, "Код", "code");
+            var name = GetRowText(row, "Наименование", "name");
+            var type = GetRowText(row, "Тип счета", "account_type");
+            var digitSearch = ExtractDigits(searchText);
+
+            if (!string.IsNullOrEmpty(digitSearch))
+                return ExtractDigits(code).StartsWith(digitSearch, StringComparison.Ordinal);
+
+            return name.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                   type.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                   code.Contains(searchText, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetRowText(DataRow row, params string[] columns)
+        {
+            foreach (var column in columns)
+            {
+                if (row.Table.Columns.Contains(column))
+                    return row[column]?.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static bool ContainsDigitsInOrder(string valueDigits, string searchDigits)
+        {
+            if (string.IsNullOrEmpty(searchDigits))
+                return true;
+
+            var searchIndex = 0;
+            foreach (var digit in valueDigits)
+            {
+                if (digit != searchDigits[searchIndex])
+                    continue;
+
+                searchIndex++;
+                if (searchIndex == searchDigits.Length)
+                    return true;
+            }
+
+            return false;
+        }
+        private static string EscapeColumnName(string value) =>
+            value.Replace("]", "]]");
 
         private static string EscapeRowFilterValue(string value)
         {

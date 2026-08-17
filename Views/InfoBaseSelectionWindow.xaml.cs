@@ -61,7 +61,7 @@ namespace BIS.ERP.Views
         {
             var configuration = await new SystemConfigurationService().GetAsync();
             SystemNameText.Text = configuration.SystemName;
-            SystemIconText.Text = configuration.Icon;
+            LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, configuration.LogoImage, configuration.Icon);
             Title = $"Запуск {configuration.SystemName}";
             await _viewModel.LoadAsync();
         }

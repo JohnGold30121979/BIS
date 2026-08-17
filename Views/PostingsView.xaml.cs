@@ -17,6 +17,8 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
         private ObservableCollection<Dictionary<string, object>> _postings;
+        private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
+        private AccountAnalyticsRegistry _accountAnalytics = new();
 
         public PostingsView(MetadataObject document, MetadataService metadataService)
         {
@@ -25,6 +27,7 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _postings = new ObservableCollection<Dictionary<string, object>>();
             PostingsGrid.ItemsSource = _postings;
+            PostingDetailsGrid.ItemsSource = _postingDetails;
 
             // Привязываем горячие клавиши
             this.Loaded += OnLoaded;
@@ -41,7 +44,7 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "Загрузка...";
                 var data = await _metadataService.GetCatalogDataAsync(_document.Id);
-                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
                 var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(_document, _metadataService);
                 var displayData = ReferenceDisplayHelper.ResolveRows(data, referenceMaps);
 
@@ -63,7 +66,8 @@ namespace BIS.ERP.Views
                     _postings.Add(row);
                 }
 
-                UpdateAnalyticColumns(data, accountAnalytics);
+                UpdateAnalyticColumns(data, _accountAnalytics);
+                UpdateSelectedPostingDetails();
 
                 StatusText.Text = $"📊 Загружено проводок: {_postings.Count}";
             }
@@ -84,10 +88,7 @@ namespace BIS.ERP.Views
 
             AmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             CurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
-            OrganizationColumn.Visibility = GetAnalyticColumnVisibility(
-                "Организация", "Организации", rawRows, accountFields, accountAnalytics);
-            EmployeeColumn.Visibility = GetAnalyticColumnVisibility(
-                "Сотрудник", "Сотрудники (Списочный состав)", rawRows, accountFields, accountAnalytics);
+            ApplyAnalyticsColumnVisibility();
             MaterialColumn.Visibility = GetAnalyticColumnVisibility(
                 "Материал", "Справочник материалов", rawRows, accountFields, accountAnalytics);
         }
@@ -105,13 +106,122 @@ namespace BIS.ERP.Views
                 : Visibility.Collapsed;
         }
 
+        private void OnColumnVisibilityChanged(object sender, RoutedEventArgs e)
+        {
+            ApplyAnalyticsColumnVisibility();
+        }
+
+        private void ApplyAnalyticsColumnVisibility()
+        {
+            OrganizationColumn.Visibility = IsOrganizationColumnVisible()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            EmployeeColumn.Visibility = IsEmployeeColumnVisible()
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private bool IsOrganizationColumnVisible() => ShowOrganizationColumnCheckBox?.IsChecked == true;
+
+        private bool IsEmployeeColumnVisible() => ShowEmployeeColumnCheckBox?.IsChecked == true;
         private void PostingsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             bool hasSelection = PostingsGrid.SelectedItem != null;
             EditButton.IsEnabled = hasSelection;
             DeleteButton.IsEnabled = hasSelection;
+            UpdateSelectedPostingDetails();
         }
 
+        private void UpdateSelectedPostingDetails()
+        {
+            _postingDetails.Clear();
+
+            if (PostingsGrid?.SelectedItem is not Dictionary<string, object> selected)
+            {
+                SetDetailColumnsVisibility(false, false, false, false);
+                _postingDetails.Add(PostingDetailRowFactory.Create(("Документ", "Выберите проводку в списке выше")));
+                return;
+            }
+
+            var posting = BuildPostingViewModel(selected);
+            var module = GetRowString(selected, "Модуль", "module_code");
+            var selectedSettings = new[]
+            {
+                _accountAnalytics.GetSettingsByCode(posting.DebitAccount),
+                _accountAnalytics.GetSettingsByCode(posting.CreditAccount)
+            };
+
+            var showCurrency = ShouldShowPostingAnalytic("Валюта", "Справочник валют", selectedSettings);
+            var showOrganization = ShouldShowPostingAnalytic("Организация", "Организации", selectedSettings);
+            var showEmployee = ShouldShowPostingAnalytic("Сотрудник", "Сотрудники (Списочный состав)", selectedSettings);
+            var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
+            SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
+
+            var detail = PostingDetailRowFactory.Create();
+            SetPostingDetail(detail, "Документ", posting.DocumentNumber);
+            SetPostingDetail(detail, "Тип документа", posting.DocumentType);
+            SetPostingDetail(detail, "Дата", posting.Date.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Модуль", module);
+            SetPostingDetail(detail, "Дебет", FormatAccountCode(posting.DebitAccount));
+            SetPostingDetail(detail, "Кредит", FormatAccountCode(posting.CreditAccount));
+            SetPostingDetail(detail, "Сумма", posting.Amount.ToString("N2"));
+
+            if (showCurrency)
+            {
+                SetPostingDetail(detail, "Сумма вал.", posting.AmountCurrency != 0m ? posting.AmountCurrency.ToString("N2") : null);
+                SetPostingDetail(detail, "Валюта", posting.Currency);
+            }
+
+            if (showOrganization)
+                SetPostingDetail(detail, "Организация", posting.Organization);
+
+            if (showEmployee)
+                SetPostingDetail(detail, "Сотрудник", posting.Employee);
+
+            if (showMaterial)
+                SetPostingDetail(detail, "Материал", GetRowString(selected, "Материал", "material_id"));
+
+            SetPostingDetail(detail, "Статус", posting.IsActive ? "Активна" : "Отключена");
+            SetPostingDetail(detail, "Примечание", posting.Note);
+            _postingDetails.Add(detail);
+        }
+
+        private bool ShouldShowPostingAnalytic(
+            string fieldName,
+            string referenceCatalog,
+            IEnumerable<AccountAnalyticsSettings?> selectedSettings)
+        {
+            return AccountAnalyticsRules.ShouldShowField(
+                fieldName,
+                selectedSettings,
+                _accountAnalytics.Definitions,
+                referenceCatalog,
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
+        }
+
+        private void SetDetailColumnsVisibility(bool showCurrency, bool showOrganization, bool showEmployee, bool showMaterial)
+        {
+            DetailAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailOrganizationColumn.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
+            DetailEmployeeColumn.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
+            DetailMaterialColumn.Visibility = showMaterial ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) => 
+            PostingDetailRowFactory.Set(detail, field, value);
+
+        private static string FormatAccountCode(string accountValue)
+        {
+            if (string.IsNullOrWhiteSpace(accountValue))
+                return string.Empty;
+
+            var separatorIndex = accountValue.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0
+                ? accountValue[..separatorIndex].Trim()
+                : accountValue.Trim();
+        }
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
             var dialog = new PostingEditDialog(_document, _metadataService);

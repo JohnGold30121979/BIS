@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using System;
@@ -47,7 +47,7 @@ namespace BIS.ERP.Views.Dialogs
         private async Task BuildFormAsync()
         {
             var allCatalogs = await _metadataService.GetCatalogsAsync();
-            var catalogsDict = allCatalogs.ToDictionary(c => c.Name, c => c);
+            var catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
             _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
             _existingData = await LoadExistingDataAsync();
             _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_metadata.Id, _metadata.ObjectType);
@@ -82,7 +82,7 @@ namespace BIS.ERP.Views.Dialogs
 
                     try
                     {
-                        numberTextBox.Text = await _metadataService.GetNextDocumentNumberAsync(_metadata.Name);
+                        numberTextBox.Text = await _metadataService.GetNextDocumentNumberAsync(_metadata);
                     }
                     catch
                     {
@@ -145,23 +145,23 @@ namespace BIS.ERP.Views.Dialogs
             return CreateRegularControl(field, safeName, currentValue);
         }
 
-        private async Task<ComboBox> CreateReferenceControlAsync(
+        private async Task<Control> CreateReferenceControlAsync(
             MetadataField field,
             Dictionary<string, MetadataObject> catalogsDict,
             string safeName,
             object? currentValue)
         {
-            var comboBox = new ComboBox
-            {
-                Height = 30,
-                Name = safeName,
-                DisplayMemberPath = "DisplayName",
-                SelectedValuePath = "Id",
-                MinWidth = 200
-            };
-
             if (!catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
             {
+                var comboBox = new ComboBox
+                {
+                    Height = 30,
+                    Name = safeName,
+                    DisplayMemberPath = "DisplayName",
+                    SelectedValuePath = "Id",
+                    MinWidth = 200
+                };
+
                 comboBox.ItemsSource = new List<BIS.ERP.Models.ReferenceItem>
                 {
                     new BIS.ERP.Models.ReferenceItem
@@ -173,49 +173,13 @@ namespace BIS.ERP.Views.Dialogs
                 return comboBox;
             }
 
-            var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
-            var items = refData
-                .Where(row => row.ContainsKey("Id") && Guid.TryParse(row["Id"]?.ToString(), out _))
-                .Select(row => new BIS.ERP.Models.ReferenceItem
-                {
-                    Id = Guid.Parse(row["Id"].ToString()),
-                    DisplayName = GetDisplayValue(row, field)
-                })
-                .ToList();
-
-            foreach (var item in items)
-            {
-                var row = refData.FirstOrDefault(candidate =>
-                    candidate.ContainsKey("Id") &&
-                    Guid.TryParse(candidate["Id"]?.ToString(), out var candidateId) &&
-                    candidateId == item.Id);
-                if (row == null)
-                    continue;
-
-                foreach (var key in GetReferenceLookupKeys(row, item.DisplayName))
-                    item.LookupKeys.Add(key);
-            }
-
-            comboBox.ItemsSource = items;
-
-            var currentText = currentValue?.ToString();
-            if (currentValue != null && Guid.TryParse(currentText, out var currentGuid))
-            {
-                var selected = items.FirstOrDefault(item => item.Id == currentGuid);
-                if (selected != null)
-                    comboBox.SelectedItem = selected;
-            }
-            else if (!string.IsNullOrWhiteSpace(currentText))
-            {
-                var normalizedCurrent = NormalizeReferenceLookupKey(currentText);
-                var selected = items.FirstOrDefault(item =>
-                    item.LookupKeys.Contains(currentText.Trim()) ||
-                    item.LookupKeys.Contains(normalizedCurrent));
-                if (selected != null)
-                    comboBox.SelectedItem = selected;
-            }
-
-            return comboBox;
+            return await ReferencePickerControlFactory.CreateAsync(
+                _metadataService,
+                field,
+                refCatalog,
+                currentValue,
+                this,
+                UpdateAccountControlledFieldsVisibility);
         }
 
         private static IEnumerable<string> GetReferenceLookupKeys(
@@ -225,6 +189,7 @@ namespace BIS.ERP.Views.Dialogs
             foreach (var keyName in new[]
                      {
                          "Id", "Код", "code", "Code", "Счет", "account_code",
+                         "Код организации", "organization_code",
                          "Наименование", "name", "ФИО", "full_name"
                      })
             {
@@ -242,6 +207,13 @@ namespace BIS.ERP.Views.Dialogs
             var displayKey = NormalizeReferenceLookupKey(displayName);
             if (!string.IsNullOrWhiteSpace(displayKey))
                 yield return displayKey;
+
+            foreach (var value in row.Values)
+            {
+                var normalized = NormalizeReferenceLookupKey(value?.ToString());
+                if (!string.IsNullOrWhiteSpace(normalized))
+                    yield return normalized;
+            }
         }
 
         private static string NormalizeReferenceLookupKey(string? value)
@@ -386,6 +358,9 @@ namespace BIS.ERP.Views.Dialogs
                 case ComboBox comboBox:
                     comboBox.SelectedItem = null;
                     break;
+                case ReferencePickerControl referencePicker:
+                    referencePicker.ClearSelection();
+                    break;
                 case TextBox textBox:
                     textBox.Clear();
                     break;
@@ -457,6 +432,10 @@ namespace BIS.ERP.Views.Dialogs
             {
                 case UserControl when AccountPickerControlFactory.GetSelectedAccount(control) != null:
                     return AccountPickerControlFactory.GetSelectedAccountValue(field, control);
+                case ReferencePickerControl referencePicker when referencePicker.SelectedReferenceItem is BIS.ERP.Models.ReferenceItem selectedReference:
+                    return selectedReference.Id == Guid.Empty ? string.Empty : selectedReference.Id.ToString();
+                case ReferencePickerControl:
+                    return string.Empty;
                 case ComboBox comboBox when comboBox.SelectedItem is AccountReferenceItem account:
                     return AccountAnalyticsRules.GetAccountValueForField(field, account);
                 case ComboBox comboBox when comboBox.SelectedItem is BIS.ERP.Models.ReferenceItem selectedItem:

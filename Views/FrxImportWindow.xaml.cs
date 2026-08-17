@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.Win32;
 using System;
@@ -196,9 +196,9 @@ namespace BIS.ERP.Views
         {
             var normalized = Path.GetFileNameWithoutExtension(fileName).ToLowerInvariant();
             if (normalized.Contains("pri") || normalized.Contains("pko") || normalized.Contains("при"))
-                return documents.FirstOrDefault(item => item.Name == "Приходный кассовый ордер");
+                return documents.FirstOrDefault(item => item.Name == "Расходный/Приходный КО" || item.TableName == "doc_cash_orders");
             if (normalized.Contains("ras") || normalized.Contains("rko") || normalized.Contains("рас"))
-                return documents.FirstOrDefault(item => item.Name == "Расходный кассовый ордер");
+                return documents.FirstOrDefault(item => item.Name == "Расходный/Приходный КО" || item.TableName == "doc_cash_orders");
             return null;
         }
 
@@ -217,3 +217,4 @@ namespace BIS.ERP.Views
         public DateTime Modified { get; set; }
     }
 }
+

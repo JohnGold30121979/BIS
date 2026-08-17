@@ -7,11 +7,11 @@ namespace BIS.ERP.Views
 {
     public partial class LoginWindow : Window
     {
-        public LoginWindow(string selectedInfoBaseText = "")
+        public LoginWindow(string selectedInfoBaseText = "", string selectedModeText = "")
         {
             InitializeComponent();
 
-            var viewModel = new LoginViewModel(ServiceLocator.AuthService, selectedInfoBaseText);
+            var viewModel = new LoginViewModel(ServiceLocator.AuthService, selectedInfoBaseText, selectedModeText);
             viewModel.LoginSucceeded += (_, _) =>
             {
                 DialogResult = true;
@@ -37,9 +37,26 @@ namespace BIS.ERP.Views
             };
 
             DataContext = viewModel;
-            Loaded += (_, _) => LoginBox.Focus();
+            Loaded += async (_, _) =>
+            {
+                await ApplyInfoBaseLogoAsync();
+                LoginBox.Focus();
+            };
             AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(OnWindowPreviewKeyDown), true);
             AddHandler(Keyboard.KeyDownEvent, new KeyEventHandler(OnWindowPreviewKeyDown), true);
+        }
+
+        private async System.Threading.Tasks.Task ApplyInfoBaseLogoAsync()
+        {
+            var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            if (currentInfoBase == null)
+                return;
+
+            LogoDisplayHelper.Apply(
+                InfoBaseLogoImage,
+                InfoBaseIconText,
+                currentInfoBase.LogoImage,
+                currentInfoBase.DisplayIcon);
         }
 
         private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
@@ -87,3 +104,4 @@ namespace BIS.ERP.Views
         private static bool IsEnterKey(Key key) => key is Key.Enter or Key.Return;
     }
 }
+

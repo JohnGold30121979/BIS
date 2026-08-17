@@ -22,56 +22,48 @@
             </StackPanel>
         </Border>
 
-        <!-- Панель фильтров -->
+        <!-- Панель периода и действий -->
         <Border Grid.Row="1" Background="White" CornerRadius="5" Padding="10" Margin="0,0,0,10">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Период -->
-                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Margin="5">
+                <WrapPanel Grid.Column="0" Orientation="Horizontal" Margin="5">
                     <TextBlock Text="Период:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="Bold"/>
                     <DatePicker x:Name="dpStartDate" Width="120"/>
                     <TextBlock Text="—" VerticalAlignment="Center" Margin="5,0"/>
-                    <DatePicker x:Name="dpEndDate" Width="120"/>
-                </StackPanel>
-
-                <!-- Быстрый поиск -->
-                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="5">
-                    <TextBlock Text="Быстрый поиск:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="Bold"/>
-                    <TextBox x:Name="txtQuickSearch" Width="150" TextChanged="OnQuickSearchChanged"/>
-                </StackPanel>
-
-                <!-- Кнопки -->
-                <StackPanel Grid.Row="0" Grid.Column="3" Orientation="Horizontal" Margin="5">
-                    <Button Content="🔍 Обновить" Click="OnRefreshClick" 
-                            Background="#3498DB" Foreground="White" Padding="15,8" Margin="5"/>
-                    <Button Content="📊 Обороты по счету" Click="OnTurnoversClick" 
-                            Background="#9B59B6" Foreground="White" Padding="15,8" Margin="5"/>
-                    <Button Content="📈 Сводные обороты" Click="OnSummaryClick" 
-                            Background="#27AE60" Foreground="White" Padding="15,8" Margin="5"/>
-                </StackPanel>
-
-                <!-- Детальные фильтры -->
-                <Border Grid.Row="1" Grid.ColumnSpan="4" Background="#F8F9FA" CornerRadius="5" Padding="10" Margin="5">
-                    <WrapPanel>
-                        <TextBox x:Name="txtDebetFilter" Width="100" Margin="5" Tag="Счет Дебет"/>
-                        <TextBox x:Name="txtCreditFilter" Width="100" Margin="5" Tag="Счет Кредит"/>
-                        <TextBox x:Name="txtOrganizationFilter" Width="150" Margin="5" Tag="Организация"/>
-                        <TextBox x:Name="txtEmployeeFilter" Width="120" Margin="5" Tag="Сотрудник"/>
-                        <TextBox x:Name="txtDocumentFilter" Width="120" Margin="5" Tag="№ документа"/>
-                        <Button Content="✖ Сбросить" Click="OnClearFiltersClick" 
-                                Background="#E74C3C" Foreground="White" Padding="10,5" Margin="5"/>
-                    </WrapPanel>
-                </Border>
+                    <DatePicker x:Name="dpEndDate" Width="120"/>                    
+                    <Button Content="🔍 Поиск" Click="OnRefreshClick"
+                             Background="#3498DB" Foreground="White" 
+                              Padding="15,8" Margin="5"/>
+                                        <Button Content="📊 Обороты по счету" Click="OnTurnoversClick" 
+                           Background="#9B59B6" Foreground="White" Padding="15,8" Margin="5"/>
+                    <Button Content="🧾 Первичный документ" Click="OnOpenSourceDocumentClick"
+                            Background="#16A085" Foreground="White" Padding="15,8" Margin="5"
+                            ToolTip="Открыть первичный документ выбранной проводки на изменение"/>
+                                        <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
+                    <TextBlock Text="Отчет:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <ComboBox x:Name="JournalReportKindComboBox" Width="155" Height="30" SelectedIndex="0" Margin="0,0,5,0">
+                        <ComboBoxItem Content="Полная" Tag="Full"/>
+                        <ComboBoxItem Content="Краткая" Tag="Brief"/>
+                        <ComboBoxItem Content="Итоги по статьям" Tag="ByArticle"/>
+                        <ComboBoxItem Content="Итоги по субсчетам" Tag="BySubaccount"/>
+                    </ComboBox>
+                    <Button Content="Показать/печать" Click="OnOpenJournalReportClick"
+                            Background="#1E7D4D" Foreground="White" Padding="15,8" Margin="5"
+                            ToolTip="Открыть Excel-отчет по текущему журналу для просмотра и печати"/>
+                    <TextBlock Text="Показать поля:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+                    <CheckBox x:Name="ShowOrganizationColumnCheckBox" Content="Организация" IsChecked="False"
+                              VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
+                    <CheckBox x:Name="ShowEmployeeColumnCheckBox" Content="Сотрудник" IsChecked="False"
+                              VerticalAlignment="Center" Margin="4,0" Checked="OnColumnVisibilityChanged" Unchecked="OnColumnVisibilityChanged"/>
+                </WrapPanel>
+              
             </Grid>
         </Border>
 
@@ -87,8 +79,7 @@
                   AlternatingRowBackground="#F8F9FA"
                   Background="White"
                   BorderBrush="#E0E0E0"
-                  BorderThickness="1"
-                  RowHeight="35"
+                  BorderThickness="1" 
                   FontSize="12"
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling" 
@@ -97,47 +88,144 @@
 
             <DataGrid.Resources>
                 <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3498DB" Opacity="0.3"/>
+                <Style x:Key="ColumnFilterTextBoxStyle" TargetType="TextBox">
+                    <Setter Property="MinWidth" Value="70"/>
+                    <Setter Property="Height" Value="22"/>
+                    <Setter Property="Margin" Value="0,4,0,0"/>
+                    <Setter Property="Padding" Value="3,1"/>
+                    <Setter Property="FontSize" Value="11"/>
+                </Style>
             </DataGrid.Resources>
 
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="100"/>
-                <DataGridTextColumn Header="Документ" Binding="{Binding DocumentNumber}" Width="120"/>
-                <DataGridTextColumn Header="Тип" Binding="{Binding DocumentType}" Width="180"/>
-                <DataGridTextColumn Header="Модуль" Binding="{Binding ModuleName}" Width="140"/>
-                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="100">
+                <DataGridTextColumn Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="110">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Дата"/>
+                            <TextBox x:Name="DateFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding DocumentNumber}" Width="130">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Документ"/>
+                            <TextBox x:Name="DocumentFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding DocumentType}" Width="180">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Тип"/>
+                            <TextBox x:Name="DocumentTypeFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding ModuleName}" Width="140">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Модуль"/>
+                            <TextBox x:Name="ModuleFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding DebitAccount}" Width="110">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Дебет"/>
+                            <TextBox x:Name="DebitFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="#2980B9"/>
                             <Setter Property="FontWeight" Value="Bold"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True">
+                                    <Setter Property="Foreground" Value="White"/>
+                                </DataTrigger>
+                            </Style.Triggers>
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="100">
+                <DataGridTextColumn Binding="{Binding CreditAccount}" Width="110">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Кредит"/>
+                            <TextBox x:Name="CreditFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="#C0392B"/>
                             <Setter Property="FontWeight" Value="Bold"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True">
+                                    <Setter Property="Foreground" Value="White"/>
+                                </DataTrigger>
+                            </Style.Triggers>
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Сумма в сомах" Binding="{Binding Amount, StringFormat=N2}" Width="120">
+                <DataGridTextColumn Binding="{Binding Amount, StringFormat=N2}" Width="130">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Сумма в сомах"/>
+                            <TextBox x:Name="AmountFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="HorizontalAlignment" Value="Right"/>
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Сумма в валюте" Binding="{Binding AmountCurrency, StringFormat=N2}" Width="120">
+                <DataGridTextColumn Binding="{Binding AmountCurrency, StringFormat=N2}" Width="130">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Сумма в валюте"/>
+                            <TextBox x:Name="AmountCurrencyFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="HorizontalAlignment" Value="Right"/>
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Валюта" Binding="{Binding Currency}" Width="80"/>
-                <DataGridTextColumn Header="Организация" Binding="{Binding Organization}" Width="150"/>
-                <DataGridTextColumn Header="Сотрудник" Binding="{Binding Employee}" Width="120"/>
-                <DataGridTextColumn Header="Примечание" Binding="{Binding Note}" Width="*" MinWidth="150"/>
+                <DataGridTextColumn Binding="{Binding Currency}" Width="90">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Валюта"/>
+                            <TextBox x:Name="CurrencyFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn x:Name="OrganizationColumn" Binding="{Binding Organization}" Width="150" Visibility="Collapsed">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Организация"/>
+                            <TextBox x:Name="OrganizationFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn x:Name="EmployeeColumn" Binding="{Binding Employee}" Width="120" Visibility="Collapsed">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Сотрудник"/>
+                            <TextBox x:Name="EmployeeFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding Note}" Width="*" MinWidth="170">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Примечание"/>
+                            <TextBox x:Name="NoteFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
             </DataGrid.Columns>
         </DataGrid>
 

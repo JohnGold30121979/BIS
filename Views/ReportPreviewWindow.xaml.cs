@@ -4,6 +4,8 @@ using Microsoft.Win32;
 using System;
 using System.Data;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -185,32 +187,74 @@ namespace BIS.ERP.Views
             PreviewGrid.FontSize = _report.FontSize > 0 ? _report.FontSize : 10;
         }
 
-        private void OnExportExcelClick(object sender, RoutedEventArgs e)
+        private async void OnExportExcelClick(object sender, RoutedEventArgs e)
         {
-            var saveDialog = new SaveFileDialog
+            try
             {
-                Title = "Сохранить Excel файл",
-                Filter = "Excel файлы (*.xlsx)|*.xlsx",
-                DefaultExt = "xlsx",
-                FileName = $"{_report.Name}_{DateTime.Now:yyyyMMdd_HHmmss}"
-            };
+                var outputPath = BuildTemporaryExcelPath(_report.Name, "xlsx");
+                byte[] data;
 
-            if (saveDialog.ShowDialog() == true)
-            {
-                try
+                if (HasFoxProTemplate(_report))
                 {
-                    var data = _reportService.ExportToExcel(_data, _report);
-                    File.WriteAllBytes(saveDialog.FileName, data);
+                    var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                    var ruleService = new FoxProReportFieldRuleService(context);
+                    await ruleService.SeedDefaultRulesAsync();
+                    var rules = await ruleService.GetRulesAsync(includeInactive: false);
+                    var dataSnapshot = _data.Copy();
+                    var printFormService = new PrintFormService(context);
+                    data = await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, _report, rules));
+                }
+                else
+                {
+                    data = await Task.Run(() => _reportService.ExportToExcel(_data, _report));
+                }
 
-                    MessageBox.Show($"Отчет сохранен: {saveDialog.FileName}", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                File.WriteAllBytes(outputPath, data);
+                OpenGeneratedFile(outputPath);
             }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия Excel: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static bool HasFoxProTemplate(Report report) =>
+            !string.IsNullOrWhiteSpace(report.Template) &&
+            (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));
+
+        private static string BuildTemporaryExcelPath(string baseName, string extension)
+        {
+            var safeName = SanitizeFileName(baseName);
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "report";
+
+            var normalizedExtension = (extension ?? "xlsx").Trim().TrimStart('.');
+            if (string.IsNullOrWhiteSpace(normalizedExtension))
+                normalizedExtension = "xlsx";
+
+            var directory = Path.Combine(Path.GetTempPath(), "BIS.ERP", "ExcelPreview");
+            Directory.CreateDirectory(directory);
+            return Path.Combine(directory, $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.{normalizedExtension}");
+        }
+
+        private static string SanitizeFileName(string value)
+        {
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var chars = (value ?? string.Empty)
+                .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
+                .ToArray();
+            return new string(chars).Trim(' ', '.', '_');
+        }
+
+        private static void OpenGeneratedFile(string filePath)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = filePath,
+                UseShellExecute = true
+            });
         }
 
         private void OnExportHtmlClick(object sender, RoutedEventArgs e)

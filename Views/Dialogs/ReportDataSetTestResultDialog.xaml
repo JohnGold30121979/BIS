@@ -1,0 +1,78 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.ReportDataSetTestResultDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Результат теста SQL-набора"
+        Width="980"
+        Height="620"
+        MinWidth="760"
+        MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        Background="#F4F7FB">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Background="White"
+                BorderBrush="#D5DEE8"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="12"
+                Margin="0,0,0,10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="TitleText"
+                           FontSize="18"
+                           FontWeight="Bold"
+                           Foreground="#0B2D4D"
+                           Text="Результат выполнения запроса"/>
+                <WrapPanel Grid.Row="1" Margin="0,8,0,0">
+                    <TextBlock Text="Колонок:" FontWeight="Bold" Margin="0,0,4,0"/>
+                    <TextBlock x:Name="ColumnCountText" MinWidth="45"/>
+                    <TextBlock Text="Строк:" FontWeight="Bold" Margin="14,0,4,0"/>
+                    <TextBlock x:Name="RowCountText" MinWidth="45"/>
+                    <TextBlock Text="Лимит теста:" FontWeight="Bold" Margin="14,0,4,0"/>
+                    <TextBlock x:Name="LimitText" MinWidth="45"/>
+                </WrapPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Background="White"
+                BorderBrush="#D5DEE8"
+                BorderThickness="1">
+            <DataGrid x:Name="ResultGrid"
+                      AutoGenerateColumns="True"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      HeadersVisibility="Column"
+                      RowHeight="26"
+                      GridLinesVisibility="All"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"/>
+        </Border>
+
+        <DockPanel Grid.Row="2" Margin="0,12,0,0">
+            <TextBlock x:Name="StatusText"
+                       DockPanel.Dock="Left"
+                       VerticalAlignment="Center"
+                       Foreground="#425466"/>
+            <Button Content="Закрыть"
+                    DockPanel.Dock="Right"
+                    Width="120"
+                    Height="34"
+                    HorizontalAlignment="Right"
+                    Background="#2F80C9"
+                    Foreground="White"
+                    Click="OnCloseClick"/>
+        </DockPanel>
+    </Grid>
+</Window>

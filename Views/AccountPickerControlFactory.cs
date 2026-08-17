@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -103,7 +103,7 @@ namespace BIS.ERP.Views
                 ["Id"] = account.Id,
                 ["Код"] = account.Code,
                 ["Наименование"] = GetAccountName(account),
-                ["Тип счета"] = string.Empty,
+                ["Тип счета"] = account.AccountType,
                 ["Активен"] = true
             }).ToList();
         }

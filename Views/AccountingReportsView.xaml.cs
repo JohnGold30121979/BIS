@@ -14,6 +14,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using BIS.ERP.Views.Dialogs;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace BIS.ERP.Views
 {
@@ -30,6 +31,13 @@ namespace BIS.ERP.Views
         private Report? _currentReport;
         private AccountingPeriod? _currentPeriod;
         private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
+        private bool _reconciliationVariantsLoaded;
+        private bool _trialBalanceVariantsLoaded;
+        private Guid? _selectedOrganizationId;
+        private string? _selectedOrganizationName;
+        private string _trialBalanceAccountCode = string.Empty;
+        private string _trialBalanceAccountName = string.Empty;
+        private IReadOnlyList<OrganizationSelectionItem> _organizationSelectionItems = Array.Empty<OrganizationSelectionItem>();
 
         public AccountingReportsView(AppDbContext context)
         {
@@ -43,6 +51,274 @@ namespace BIS.ERP.Views
             _metadataService = new MetadataService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
+            Loaded += async (_, _) =>
+            {
+                await LoadReconciliationReportVariantsAsync();
+                await LoadTrialBalanceReportVariantsAsync();
+                await LoadOrganizationsAsync();
+            };
+            UpdateReconciliationVariantVisibility();
+        }
+
+        private void OnOrganizationSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (OrganizationCombo.SelectedItem is OrganizationSelectionItem org && !org.IsAll)
+            {
+                _selectedOrganizationId = org.Id;
+                _selectedOrganizationName = org.Name;
+                return;
+            }
+
+            _selectedOrganizationId = null;
+            _selectedOrganizationName = null;
+        }
+
+        private void OnClearOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            OrganizationCombo.SelectedIndex = OrganizationCombo.Items.Count > 0 ? 0 : -1;
+            _selectedOrganizationId = null;
+            _selectedOrganizationName = null;
+        }
+
+        private async void OnSelectTrialBalanceAccountClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Загрузка плана счетов...";
+                var accounts = await LoadTrialBalanceAccountSelectionDataAsync();
+                if (accounts.Count == 0)
+                {
+                    MessageBox.Show("План счетов пуст или недоступен.", "План счетов",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var dialog = new AccountSelectionDialog(accounts)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+
+                if (dialog.ShowDialog() != true || dialog.SelectedAccount == null)
+                    return;
+
+                _trialBalanceAccountCode = ReadReportString(dialog.SelectedAccount, "Код", "code", "Code", "Счет", "account_code");
+                _trialBalanceAccountName = ReadReportString(dialog.SelectedAccount, "Наименование", "name", "Name");
+                UpdateTrialBalanceAccountText();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка выбора счета: {ex.Message}", "План счетов",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+                StatusText.Text = "Выберите отчет и период";
+            }
+        }
+
+        private void OnClearTrialBalanceAccountClick(object sender, RoutedEventArgs e)
+        {
+            _trialBalanceAccountCode = string.Empty;
+            _trialBalanceAccountName = string.Empty;
+            UpdateTrialBalanceAccountText();
+        }
+
+        private void UpdateTrialBalanceAccountText()
+        {
+            if (TrialBalanceAccountTextBox == null)
+                return;
+
+            TrialBalanceAccountTextBox.Text = string.IsNullOrWhiteSpace(_trialBalanceAccountCode)
+                ? string.Empty
+                : string.IsNullOrWhiteSpace(_trialBalanceAccountName)
+                    ? _trialBalanceAccountCode
+                    : $"{_trialBalanceAccountCode} - {_trialBalanceAccountName}";
+        }
+
+        private async void OnSelectOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Загрузка организаций...";
+
+                var organizations = (await LoadOrganizationSelectionItemsAsync(false)).ToList();
+                if (organizations.Count == 0)
+                {
+                    MessageBox.Show(
+                        "В справочнике организаций нет записей. Проверьте catalog_organizations или системный справочник Organizations.",
+                        "Организации", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var rows = organizations.Select(org => new Dictionary<string, object>
+                {
+                    ["Id"] = org.Id ?? Guid.Empty,
+                    ["Код"] = org.Code,
+                    ["Наименование"] = org.Name,
+                    ["Полное наименование"] = org.FullName,
+                    ["Активна"] = LocalizationService.DisplayValue(org.IsActive),
+                    ["Первичная"] = LocalizationService.DisplayValue(org.IsPrimary)
+                }).ToList();
+
+                var dialog = new ReferenceSelectionDialog(rows, "Код", "Наименование")
+                {
+                    Owner = Window.GetWindow(this),
+                    Title = $"Выбор: Организации ({organizations.Count})"
+                };
+                if (dialog.ShowDialog() != true || dialog.SelectedItem == null)
+                    return;
+
+                var selectedOrg = TryReadGuid(dialog.SelectedItem, out var selectedId, "Id")
+                    ? organizations.FirstOrDefault(org => org.Id == selectedId)
+                    : null;
+                if (selectedOrg == null)
+                {
+                    var selectedCode = ReadReportString(dialog.SelectedItem, "Код", "code");
+                    var selectedName = ReadReportString(dialog.SelectedItem, "Наименование", "name");
+                    selectedOrg = organizations.FirstOrDefault(org =>
+                        org.Code.Equals(selectedCode, StringComparison.OrdinalIgnoreCase) &&
+                        org.Name.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
+                }
+                if (selectedOrg == null)
+                    return;
+
+                if (_organizationSelectionItems.All(item => item.Id != selectedOrg.Id))
+                    await LoadOrganizationsAsync();
+
+                OrganizationCombo.SelectedItem = _organizationSelectionItems.FirstOrDefault(item => item.Id == selectedOrg.Id) ?? selectedOrg;
+                _selectedOrganizationId = selectedOrg.Id;
+                _selectedOrganizationName = selectedOrg.Name;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при выборе организации: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+                StatusText.Text = "Выберите отчет и период";
+            }
+        }
+        private async Task LoadOrganizationsAsync()
+        {
+            try
+            {
+                _organizationSelectionItems = await LoadOrganizationSelectionItemsAsync(true);
+                OrganizationCombo.ItemsSource = _organizationSelectionItems;
+                OrganizationCombo.SelectedIndex = _organizationSelectionItems.Count > 0 ? 0 : -1;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки организаций: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task<IReadOnlyList<OrganizationSelectionItem>> LoadOrganizationSelectionItemsAsync(bool includeAll)
+        {
+            var organizations = new List<OrganizationSelectionItem>();
+            if (includeAll)
+                organizations.Add(OrganizationSelectionItem.CreateAll());
+
+            try
+            {
+                var metadataRows = await LoadMetadataOrganizationsAsync();
+                organizations.AddRange(metadataRows.Select(BuildOrganizationSelectionItem)
+                    .Where(org => org.Id.HasValue || !string.IsNullOrWhiteSpace(org.Name)));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки catalog_organizations: {ex.Message}");
+            }
+
+            if (organizations.Count == (includeAll ? 1 : 0))
+                organizations.AddRange(await LoadEfOrganizationsAsync());
+
+            return DeduplicateOrganizationSelectionItems(organizations)
+                .OrderByDescending(org => org.IsAll)
+                .ThenByDescending(org => org.IsPrimary)
+                .ThenBy(org => org.Code, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(org => org.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
+        private async Task<List<Dictionary<string, object>>> LoadMetadataOrganizationsAsync()
+        {
+            var organizationCatalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Организации");
+            return organizationCatalog == null
+                ? new List<Dictionary<string, object>>()
+                : await _metadataService.GetCatalogDataAsync(organizationCatalog.Id);
+        }
+
+        private async Task<List<OrganizationSelectionItem>> LoadEfOrganizationsAsync()
+        {
+            try
+            {
+                return await _context.Organizations.AsNoTracking()
+                    .OrderByDescending(org => org.IsActive)
+                    .ThenBy(org => org.Code)
+                    .Select(org => new OrganizationSelectionItem
+                    {
+                        Id = org.Id,
+                        Code = org.Code ?? string.Empty,
+                        Name = org.Name ?? string.Empty,
+                        FullName = org.FullName ?? string.Empty,
+                        IsActive = org.IsActive,
+                        IsPrimary = false
+                    }).ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки Organizations: {ex.Message}");
+                return new List<OrganizationSelectionItem>();
+            }
+        }
+
+        private static OrganizationSelectionItem BuildOrganizationSelectionItem(Dictionary<string, object> row)
+        {
+            var id = TryReadGuid(row, out var organizationId, "Id") ? organizationId : (Guid?)null;
+            var code = ReadReportString(row, "Код", "code");
+            var name = ReadReportString(row, "Наименование", "name");
+            var fullName = ReadReportString(row, "Полное наименование", "full_name");
+            if (string.IsNullOrWhiteSpace(name))
+                name = string.IsNullOrWhiteSpace(fullName) ? code : fullName;
+
+            return new OrganizationSelectionItem
+            {
+                Id = id,
+                Code = code,
+                Name = name,
+                FullName = fullName,
+                IsActive = !TryGetReportValue(row, out var activeValue, "Активна", "is_active") || ReadReportBoolValue(activeValue, true),
+                IsPrimary = TryGetReportValue(row, out var primaryValue, "Первичная", "Первичная организация", "is_primary") && ReadReportBoolValue(primaryValue, false)
+            };
+        }
+
+        private static IReadOnlyList<OrganizationSelectionItem> DeduplicateOrganizationSelectionItems(IEnumerable<OrganizationSelectionItem> organizations)
+        {
+            return organizations
+                .Where(org => org.IsAll || org.Id.HasValue || !string.IsNullOrWhiteSpace(org.Name))
+                .GroupBy(org => org.Id.HasValue ? $"id:{org.Id}" : $"name:{org.Code}:{org.Name}", StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+        }
+        public void SelectReportType(string reportType)
+        {
+            foreach (var item in ReportTypeCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (!string.Equals(item.Tag?.ToString(), reportType, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                ReportTypeCombo.SelectedItem = item;
+                break;
+            }
+
+            UpdateReconciliationVariantVisibility();
         }
 
         private async void OnGenerateClick(object sender, RoutedEventArgs e)
@@ -67,16 +343,13 @@ namespace BIS.ERP.Views
                     "PurchaseSalesJournal" => await BuildPurchaseSalesJournalAsync(start, end),
                     "OrganizationBalances" => await BuildOrganizationBalancesAsync(start, end),
                     "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
-                    "CashBook" => await BuildCashBookAsync(start, end),
                     "PaymentOrderRegister" => await BuildPaymentOrderRegisterAsync(start, end),
-                    "BankStatement" => await BuildBankStatementAsync(start, end),
                     "OrganizationReconciliation" => await BuildOrganizationReconciliationAsync(start, end),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
 
                 ReportGrid.ItemsSource = _currentData.DefaultView;
                 SearchBox.Clear();
-                ExportPdfButton.IsEnabled = _currentData.Columns.Count > 0;
                 await UpdatePeriodStateAsync(start, end);
                 StatusText.Text = $"Сформировано строк: {_currentData.Rows.Count}";
             }
@@ -99,7 +372,7 @@ namespace BIS.ERP.Views
                 var (start, end) = GetPeriod();
                 _currentPeriod = await _periodService.CollectAsync(start, end);
                 await UpdatePeriodStateAsync(start, end);
-                StatusText.Text = "Информация за период собрана и контрольные остатки сохранены";
+                StatusText.Text = "Информация за периода собрана и контрольные остатки сохранены";
             }
             catch (Exception ex)
             {
@@ -281,11 +554,22 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildTrialBalanceAsync(DateTime start, DateTime end)
         {
-            var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
+            if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
+                throw new InvalidOperationException("Для оборотно-сальдовой ведомости выберите счет.");
+
+            var variant = GetSelectedTrialBalanceReportVariant();
+            var selectedOrganization = GetSelectedOrganizationScope();
+            var side = GetSelectedTrialBalanceSide();
+            var balances = await BuildTrialBalanceByAccountAsync(start, end, _trialBalanceAccountCode, side, selectedOrganization);
+            balances = balances
+                .Where(HasTurnover)
+                .OrderBy(item => item.AccountCode, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
             var table = new DataTable("Оборотно-сальдовая ведомость");
             table.Columns.Add("Счет", typeof(string));
             table.Columns.Add("Наименование", typeof(string));
-            foreach (var name in new[] { "Сальдо нач. Дт", "Сальдо нач. Кт", "Оборот Дт", "Оборот Кт", "Сальдо кон. Дт", "Сальдо кон. Кт" })
+            foreach (var name in new[] { "Сальдо на начало Дт", "Сальдо на начало Кт", "Оборот Дт", "Оборот Кт", "Сальдо на конец Дт", "Сальдо на конец Кт" })
                 table.Columns.Add(name, typeof(decimal));
 
             foreach (var item in balances)
@@ -293,47 +577,173 @@ namespace BIS.ERP.Views
                     item.TurnoverDebit, item.TurnoverCredit, item.ClosingDebit, item.ClosingCredit);
 
             AddTotalsRow(table, 2);
-            return (table, CreateReport(table, $"Оборотно-сальдовая ведомость за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
+            var sideTitle = side == TrialBalanceAccountSide.Credit ? "кредиту" : "дебету";
+            var organizationSuffix = selectedOrganization == null
+                ? string.Empty
+                : $", организация: {ResolveOrganizationTitle(selectedOrganization.Id, selectedOrganization.Name)}";
+            var reportTitle = $"Оборотно-сальдовая ведомость по {sideTitle} счета {_trialBalanceAccountCode} за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{organizationSuffix}";
+            var report = CreateReport(table, reportTitle, true);
+            report.ReportType = "TrialBalance";
+            report.SubtitleText = variant?.IsStandard == false
+                ? $"Вид ОСВ: {variant.DisplayName}"
+                : $"Счет {_trialBalanceAccountCode}, сторона отбора: {sideTitle}";
+            if (variant?.IsStandard == false)
+                report.FooterText = $"Выбран FRX-макет ОСВ: {variant.DisplayName}.";
+            await ApplyTrialBalanceVariantLayoutAsync(report, variant);
+            return (table, report);
         }
 
-        private async Task<(DataTable, Report)> BuildCashBookAsync(DateTime start, DateTime end)
+        private async Task<List<TurnoverBalance>> BuildTrialBalanceByAccountAsync(
+            DateTime start,
+            DateTime end,
+            string accountCode,
+            TrialBalanceAccountSide side,
+            OrganizationSelectionItem? organization)
         {
-            var receiptType = "Приходный кассовый ордер";
-            var paymentType = "Расходный кассовый ордер";
-            var allPostings = await _postingService.GetAllPostingsAsync(null, end);
-            var cashPostings = allPostings
-                .Where(posting => posting.DocumentType == receiptType || posting.DocumentType == paymentType)
+            var periodStart = start.Date;
+            var periodEndExclusive = end.Date.AddDays(1);
+            var postings = (await _postingService.GetAllPostingsAsync(null, periodEndExclusive.AddTicks(-1)))
+                .Where(posting => posting.Date < periodEndExclusive)
+                .Where(posting => MatchesTrialBalanceOrganization(posting, organization))
                 .ToList();
-            var openingRows = cashPostings.Where(posting => posting.Date < start).ToList();
-            var balance = openingRows.Sum(posting => posting.DocumentType == receiptType ? posting.Amount : -posting.Amount);
-            var rows = cashPostings.Where(posting => posting.Date >= start && posting.Date <= end.Date.AddDays(1).AddTicks(-1))
-                .OrderBy(posting => posting.Date).ThenBy(posting => posting.DocumentNumber).ToList();
+            var periodPostings = postings
+                .Where(posting => posting.Date >= periodStart && AccountMatchesSelectedSide(posting, accountCode, side))
+                .ToList();
+            var accountNames = await LoadTrialBalanceAccountNamesAsync();
+            var accountCodes = periodPostings
+                .SelectMany(posting => new[] { posting.DebitAccount, posting.CreditAccount })
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            var table = new DataTable("Кассовая книга");
-            table.Columns.Add("Дата", typeof(DateTime));
-            table.Columns.Add("Номер", typeof(string));
-            table.Columns.Add("Документ", typeof(string));
-            table.Columns.Add("Содержание", typeof(string));
-            table.Columns.Add("Приход", typeof(decimal));
-            table.Columns.Add("Расход", typeof(decimal));
-            table.Columns.Add("Остаток", typeof(decimal));
-            table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, 0m, 0m, balance);
-
-            decimal totalReceipt = 0;
-            decimal totalPayment = 0;
-            foreach (var posting in rows)
+            return accountCodes.Select(code =>
             {
-                var receipt = posting.DocumentType == receiptType ? posting.Amount : 0m;
-                var payment = posting.DocumentType == paymentType ? posting.Amount : 0m;
-                totalReceipt += receipt;
-                totalPayment += payment;
-                balance += receipt - payment;
-                table.Rows.Add(posting.Date, posting.DocumentNumber, posting.DocumentType, posting.Note,
-                    receipt, payment, balance);
+                var openingDebit = postings
+                    .Where(posting => posting.Date < periodStart && SameAccount(posting.DebitAccount, code))
+                    .Sum(posting => posting.Amount);
+                var openingCredit = postings
+                    .Where(posting => posting.Date < periodStart && SameAccount(posting.CreditAccount, code))
+                    .Sum(posting => posting.Amount);
+                var turnoverDebit = periodPostings
+                    .Where(posting => SameAccount(posting.DebitAccount, code))
+                    .Sum(posting => posting.Amount);
+                var turnoverCredit = periodPostings
+                    .Where(posting => SameAccount(posting.CreditAccount, code))
+                    .Sum(posting => posting.Amount);
+                var openingNet = openingDebit - openingCredit;
+                var closingNet = openingNet + turnoverDebit - turnoverCredit;
+
+                return new TurnoverBalance
+                {
+                    AccountCode = code,
+                    AccountName = accountNames.TryGetValue(code, out var accountName) ? accountName : code,
+                    OpeningDebit = Math.Max(openingNet, 0),
+                    OpeningCredit = Math.Max(-openingNet, 0),
+                    TurnoverDebit = turnoverDebit,
+                    TurnoverCredit = turnoverCredit,
+                    ClosingDebit = Math.Max(closingNet, 0),
+                    ClosingCredit = Math.Max(-closingNet, 0)
+                };
+            }).ToList();
+        }
+
+        private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync()
+        {
+            var metadata = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
+            return metadata == null
+                ? new List<Dictionary<string, object>>()
+                : await _metadataService.GetCatalogDataAsync(metadata.Id);
+        }
+
+        private async Task<Dictionary<string, string>> LoadTrialBalanceAccountNamesAsync()
+        {
+            try
+            {
+                var rows = await LoadTrialBalanceAccountSelectionDataAsync();
+                return rows
+                    .Select(row => new
+                    {
+                        Code = ReadReportString(row, "Код", "code", "Code", "Счет", "account_code"),
+                        Name = ReadReportString(row, "Наименование", "name", "Name")
+                    })
+                    .Where(account => !string.IsNullOrWhiteSpace(account.Code))
+                    .GroupBy(account => account.Code, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => string.IsNullOrWhiteSpace(group.First().Name) ? group.Key : group.First().Name,
+                        StringComparer.OrdinalIgnoreCase);
             }
-            table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty,
-                totalReceipt, totalPayment, balance);
-            return (table, CreateReport(table, $"Кассовая книга за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true));
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки плана счетов для ОСВ: {ex.Message}");
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        private OrganizationSelectionItem? GetSelectedOrganizationScope()
+        {
+            if (!_selectedOrganizationId.HasValue || _selectedOrganizationId.Value == Guid.Empty)
+                return null;
+
+            return _organizationSelectionItems.FirstOrDefault(item => item.Id == _selectedOrganizationId.Value)
+                ?? new OrganizationSelectionItem
+                {
+                    Id = _selectedOrganizationId,
+                    Name = _selectedOrganizationName ?? string.Empty
+                };
+        }
+
+        private TrialBalanceAccountSide GetSelectedTrialBalanceSide()
+        {
+            var side = (TrialBalanceSideCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
+            return string.Equals(side, "Credit", StringComparison.OrdinalIgnoreCase)
+                ? TrialBalanceAccountSide.Credit
+                : TrialBalanceAccountSide.Debit;
+        }
+
+        private static bool AccountMatchesSelectedSide(PostingViewModel posting, string accountCode, TrialBalanceAccountSide side)
+        {
+            return side == TrialBalanceAccountSide.Credit
+                ? SameAccount(posting.CreditAccount, accountCode)
+                : SameAccount(posting.DebitAccount, accountCode);
+        }
+
+        private static bool MatchesTrialBalanceOrganization(PostingViewModel posting, OrganizationSelectionItem? organization)
+        {
+            if (organization == null || organization.IsAll)
+                return true;
+
+            var postingOrganization = posting.Organization?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(postingOrganization))
+                return false;
+            if (organization.Id.HasValue && organization.Id.Value != Guid.Empty &&
+                postingOrganization.Equals(organization.Id.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var postingName = NormalizeOrganizationLookupValue(postingOrganization);
+            var candidates = new[] { organization.DisplayName, organization.Name, organization.FullName, organization.Code }
+                .Select(NormalizeOrganizationLookupValue)
+                .Where(value => !string.IsNullOrWhiteSpace(value));
+
+            return candidates.Any(candidate =>
+                postingOrganization.Equals(candidate, StringComparison.CurrentCultureIgnoreCase) ||
+                postingName.Equals(candidate, StringComparison.CurrentCultureIgnoreCase));
+        }
+
+        private static string NormalizeOrganizationLookupValue(string? value) =>
+            NormalizeOrganizationName(value)
+                .Replace(" (неактивна)", string.Empty, StringComparison.CurrentCultureIgnoreCase)
+                .Trim();
+
+        private static bool HasTurnover(TurnoverBalance balance) =>
+            balance.TurnoverDebit != 0m || balance.TurnoverCredit != 0m;
+
+        private enum TrialBalanceAccountSide
+        {
+            Debit,
+            Credit
         }
 
         private async Task<(DataTable, Report)> BuildPaymentOrderRegisterAsync(DateTime start, DateTime end)
@@ -373,94 +783,383 @@ namespace BIS.ERP.Views
             return (table, report);
         }
 
-        private async Task<(DataTable, Report)> BuildBankStatementAsync(DateTime start, DateTime end)
-        {
-            var allRows = await LoadPaymentOrderReportRowsAsync(null, end);
-            var openingRows = allRows.Where(row => row.Date.Date < start.Date).ToList();
-            var balance = openingRows.Sum(GetBankStatementSignedAmount);
-            var rows = allRows
-                .Where(row => row.Date.Date >= start.Date && row.Date.Date <= end.Date)
-                .OrderBy(row => row.Date)
-                .ThenBy(row => row.Number, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-
-            var table = new DataTable("Выписка банка");
-            table.Columns.Add("Дата", typeof(DateTime));
-            table.Columns.Add("Номер", typeof(string));
-            table.Columns.Add("Операция", typeof(string));
-            table.Columns.Add("Наш счет", typeof(string));
-            table.Columns.Add("Корр. счет", typeof(string));
-            table.Columns.Add("Организация", typeof(string));
-            table.Columns.Add("Приход", typeof(decimal));
-            table.Columns.Add("Расход", typeof(decimal));
-            table.Columns.Add("Остаток", typeof(decimal));
-            table.Columns.Add("Сумма в валюте", typeof(decimal));
-            table.Columns.Add("Валюта", typeof(string));
-            table.Columns.Add("Классификация платежа", typeof(string));
-            table.Columns.Add("Назначение платежа", typeof(string));
-
-            table.Rows.Add(start.Date, string.Empty, "Остаток на начало", string.Empty, string.Empty,
-                string.Empty, 0m, 0m, balance, 0m, string.Empty, string.Empty, string.Empty);
-
-            decimal totalIncome = 0m;
-            decimal totalExpense = 0m;
-            foreach (var row in rows)
-            {
-                var income = row.IsIncoming ? row.Amount : 0m;
-                var expense = row.IsOutgoing || !row.IsIncoming ? row.Amount : 0m;
-                totalIncome += income;
-                totalExpense += expense;
-                balance += income - expense;
-
-                table.Rows.Add(row.Date, row.Number, row.OrderType, row.OurAccount, row.CorrespondentAccount,
-                    row.Organization, income, expense, balance, row.AmountCurrency, row.Currency,
-                    row.PaymentClassification, row.Purpose);
-            }
-
-            table.Rows.Add(end.Date, string.Empty, "ИТОГО ЗА ПЕРИОД", string.Empty, string.Empty,
-                string.Empty, totalIncome, totalExpense, balance, rows.Sum(row => row.AmountCurrency),
-                string.Empty, string.Empty, string.Empty);
-
-            var report = CreateReport(table,
-                $"Выписка банка за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
-            report.ShowGrandTotal = true;
-            report.SummaryText = "Остаток рассчитывается по платежным поручениям: входящие увеличивают остаток, исходящие уменьшают.";
-            return (table, report);
-        }
-
         private async Task<(DataTable, Report)> BuildOrganizationReconciliationAsync(DateTime start, DateTime end)
         {
-            var calculation = await _organizationBalanceService.CalculateAsync(start, end);
-            var table = new DataTable("Акт сверки");
-            table.Columns.Add("Организация", typeof(string));
-            table.Columns.Add("Вид расчета", typeof(string));
-            table.Columns.Add("Счет", typeof(string));
-            table.Columns.Add("Счет корр.", typeof(string));
-            table.Columns.Add("Сальдо нач. Дт", typeof(decimal));
-            table.Columns.Add("Сальдо нач. Кт", typeof(decimal));
-            table.Columns.Add("Оборот Дт", typeof(decimal));
-            table.Columns.Add("Оборот Кт", typeof(decimal));
-            table.Columns.Add("Сальдо кон. Дт", typeof(decimal));
-            table.Columns.Add("Сальдо кон. Кт", typeof(decimal));
-            table.Columns.Add("Сальдо", typeof(decimal));
-            table.Columns.Add("Модуль", typeof(string));
+            var variant = GetSelectedReconciliationReportVariant();
+            var selectedOrganizationId = _selectedOrganizationId.GetValueOrDefault();
+            var scoped = selectedOrganizationId != Guid.Empty;
+            Guid? selectedFilterId = scoped ? selectedOrganizationId : null;
+            var selected = scoped ? _organizationSelectionItems.FirstOrDefault(org => org.Id == selectedOrganizationId) : null;
+            var filterName = !string.IsNullOrWhiteSpace(selected?.Name) ? selected!.Name : NormalizeOrganizationName(_selectedOrganizationName);
+            var titleName = scoped ? ResolveOrganizationTitle(selectedFilterId, filterName) : "Все организации";
 
-            foreach (var row in calculation.Rows)
+            var calc = await _organizationBalanceService.CalculateAsync(start, end);
+            var pairs = calc.Rows
+                .Where(row => !row.IsOrganizationTotal && MatchesSelectedOrganization(row, selectedFilterId, filterName))
+                .OrderBy(row => row.OrganizationName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(row => row.AccountCode, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => row.CounterAccountCode, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var totals = calc.Rows
+                .Where(row => row.IsOrganizationTotal && MatchesSelectedOrganization(row, selectedFilterId, filterName))
+                .ToList();
+            var movements = await LoadReconciliationMovementRowsAsync(selectedFilterId, start, end);
+
+            var table = CreateReconciliationTable();
+            AddReconciliationRow(table, scoped ? $"АКТ СВЕРКИ между нашей организацией и \"{titleName}\"" : "АКТЫ СВЕРКИ ПО ВСЕМ ОРГАНИЗАЦИЯМ");
+            AddReconciliationRow(table, $"Период: {start:dd.MM.yyyy} - {end:dd.MM.yyyy}");
+            AddReconciliationRow(table, string.Empty);
+
+            if (pairs.Count == 0)
             {
-                table.Rows.Add(row.OrganizationName, row.IsOrganizationTotal ? "ИТОГО" : row.AccountPairName,
-                    row.AccountCode, row.CounterAccountCode, row.OpeningDebit, row.OpeningCredit,
-                    row.TurnoverDebit, row.TurnoverCredit, row.ClosingDebit, row.ClosingCredit,
-                    row.Balance, row.ModuleCode);
+                AddReconciliationRow(table, scoped
+                    ? "Данных по выбранной организации и активным парам счетов за период не найдено."
+                    : "Данных по организациям и активным парам счетов за период не найдено.");
+            }
+            else if (scoped)
+            {
+                var total = totals.FirstOrDefault(row => MatchesSelectedOrganization(row, selectedFilterId, filterName));
+                AddReconciliationSection(table, titleName, pairs, total, movements, start, end, false);
+            }
+            else
+            {
+                foreach (var group in pairs.GroupBy(row => new { row.OrganizationId, Name = NormalizeOrganizationName(row.OrganizationName) }).OrderBy(group => group.Key.Name, StringComparer.CurrentCultureIgnoreCase))
+                {
+                    var groupName = string.IsNullOrWhiteSpace(group.Key.Name) ? "Без организации" : group.Key.Name;
+                    var groupTitle = ResolveOrganizationTitle(group.Key.OrganizationId, groupName);
+                    var total = totals.FirstOrDefault(row => SameOrganization(row, group.Key.OrganizationId, groupName));
+                    var groupMovements = movements.Where(movement => MatchesMovementOrganization(movement, group.Key.OrganizationId, groupName)).ToList();
+                    AddReconciliationSection(table, groupTitle, group.ToList(), total, groupMovements, start, end, true);
+                    AddReconciliationRow(table, string.Empty);
+                }
             }
 
-            var report = CreateReport(table,
-                $"Акт сверки за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
-            report.SummaryText = calculation.Warnings.Count == 0
-                ? "Акт сверки построен по активным настройкам взаиморасчетов с организациями."
-                : string.Join(Environment.NewLine, calculation.Warnings);
+            var balance = scoped
+                ? totals.FirstOrDefault(row => MatchesSelectedOrganization(row, selectedFilterId, filterName))?.Balance ?? pairs.Sum(row => row.Balance)
+                : totals.Sum(row => row.Balance);
+            var summary = scoped ? BuildDebtSummary(titleName, balance) : BuildAllOrganizationsDebtSummary(totals.Count, balance);
+            AddReconciliationRow(table, summary);
+
+            var titlePrefix = variant?.IsStandard == false ? variant.DisplayName : "Акт сверки";
+            var report = CreateReport(table, scoped ? $"{titlePrefix}: {titleName} на {end:dd.MM.yyyy}" : $"{titlePrefix}: все организации на {end:dd.MM.yyyy}", true);
+            report.ReportType = "ReconciliationAct";
+            report.SubtitleText = $"Период: {start:dd.MM.yyyy} - {end:dd.MM.yyyy}";
+            report.ShowGrandTotal = false;
+            report.AlternateRowColors = false;
+            report.FontSize = 8;
+            report.SummaryText = summary;
+            report.FooterSignature = "Руководитель ____________________    Главный бухгалтер ____________________";
+            if (calc.Warnings.Count > 0)
+                report.FooterText = string.Join(Environment.NewLine, calc.Warnings);
+            if (variant?.IsStandard == false)
+            {
+                var variantText = $"Выбран вариант печатной формы из метаданных: {variant.DisplayName}.";
+                report.FooterText = string.IsNullOrWhiteSpace(report.FooterText) ? variantText : report.FooterText + Environment.NewLine + variantText;
+            }
+
+            SetReportFieldWidth(report, "Наименование материала, вид операции", 280);
+            SetReportFieldWidth(report, "Дебет", 75);
+            SetReportFieldWidth(report, "Кредит", 75);
+            SetReportFieldWidth(report, "Сумма Дт", 90, "Right", "N2");
+            SetReportFieldWidth(report, "Сумма Кт", 90, "Right", "N2");
+            SetReportFieldWidth(report, "N докум", 70);
+            SetReportFieldWidth(report, "Дата", 70);
+            SetReportFieldWidth(report, "Модуль", 45);
+            await ApplyReconciliationVariantLayoutAsync(report, variant);
             return (table, report);
         }
+        private async Task ApplyReconciliationVariantLayoutAsync(Report report, ReconciliationReportVariant? variant)
+        {
+            if (variant?.ReportId == null)
+                return;
 
+            var templateReport = await _reportService.GetReportAsync(variant.ReportId.Value);
+            if (templateReport == null || string.IsNullOrWhiteSpace(templateReport.Template))
+                return;
+
+            report.SourceFormat = templateReport.SourceFormat;
+            report.Template = templateReport.Template;
+            report.TemplateVersion = templateReport.TemplateVersion;
+            report.PageOrientation = templateReport.PageOrientation;
+            report.PageWidth = templateReport.PageWidth;
+            report.PageHeight = templateReport.PageHeight;
+            report.LeftMargin = templateReport.LeftMargin;
+            report.RightMargin = templateReport.RightMargin;
+            report.TopMargin = templateReport.TopMargin;
+            report.BottomMargin = templateReport.BottomMargin;
+            report.FontName = templateReport.FontName;
+            report.ShowHeader = templateReport.ShowHeader;
+            report.ShowFooter = templateReport.ShowFooter;
+            report.ShowPageNumbers = templateReport.ShowPageNumbers;
+            report.ShowGridLines = templateReport.ShowGridLines;
+            report.AlternateRowColors = templateReport.AlternateRowColors;
+            report.AlternateRowColor = templateReport.AlternateRowColor;
+            report.HeaderColor = templateReport.HeaderColor;
+            report.ElementMappings = templateReport.ElementMappings.Select(mapping => new ReportElementMapping
+            {
+                ReportId = report.Id,
+                ElementOrder = mapping.ElementOrder,
+                ElementType = mapping.ElementType,
+                ElementText = mapping.ElementText,
+                ElementExpression = mapping.ElementExpression,
+                BandType = mapping.BandType,
+                Left = mapping.Left,
+                Top = mapping.Top,
+                Width = mapping.Width,
+                Height = mapping.Height,
+                FontName = mapping.FontName,
+                FontSize = mapping.FontSize,
+                Bold = mapping.Bold,
+                Italic = mapping.Italic,
+                Alignment = mapping.Alignment,
+                Order = mapping.Order,
+                MappedFieldName = mapping.MappedFieldName,
+                MappedDisplayName = mapping.MappedDisplayName,
+                DataSource = mapping.DataSource,
+                FormatString = mapping.FormatString,
+                IsVisible = mapping.IsVisible,
+                CustomText = mapping.CustomText
+            }).ToList();
+        }
+        private Task ApplyTrialBalanceVariantLayoutAsync(Report report, TrialBalanceReportVariant? variant)
+        {
+            if (variant?.ReportId == null)
+                return Task.CompletedTask;
+
+            return ApplyReconciliationVariantLayoutAsync(report, new ReconciliationReportVariant
+            {
+                ReportId = variant.ReportId,
+                DisplayName = variant.DisplayName,
+                Description = variant.Description,
+                Code = variant.Code,
+                IsStandard = variant.IsStandard
+            });
+        }
+
+        private async Task LoadTrialBalanceReportVariantsAsync()
+        {
+            if (_trialBalanceVariantsLoaded)
+                return;
+
+            _trialBalanceVariantsLoaded = true;
+            var variants = new List<TrialBalanceReportVariant>
+            {
+                new()
+                {
+                    DisplayName = "Программная ОСВ",
+                    Description = "Расчетный вариант BIS ERP.",
+                    IsStandard = true
+                }
+            };
+            var variantsLoadError = string.Empty;
+
+            try
+            {
+                var reports = await _context.Reports.AsNoTracking()
+                    .Where(report => report.IsActive && EF.Functions.Like(report.Code, "standard.frx.finance.trial-balance.%"))
+                    .OrderBy(report => report.Order)
+                    .ThenBy(report => report.Name)
+                    .Select(report => new
+                    {
+                        report.Id,
+                        report.Name,
+                        report.Description,
+                        report.Code,
+                        report.SourceFormat,
+                        report.ReportType
+                    })
+                    .ToListAsync();
+
+                foreach (var report in reports)
+                {
+                    if (variants.Any(item => item.ReportId == report.Id))
+                        continue;
+
+                    variants.Add(new TrialBalanceReportVariant
+                    {
+                        ReportId = report.Id,
+                        DisplayName = BuildTrialBalanceVariantDisplayName(report.Name, report.SourceFormat, report.ReportType),
+                        Description = report.Description,
+                        Code = report.Code,
+                        IsStandard = false
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                variantsLoadError = $"Макеты ОСВ не загружены: {ex.Message}";
+            }
+
+            TrialBalanceVariantCombo.ItemsSource = variants;
+            TrialBalanceVariantCombo.SelectedIndex = variants.Count > 1 ? 1 : 0;
+            TrialBalanceVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
+                ? variantsLoadError
+                : variants.Count == 1
+                    ? "FRX-варианты ОСВ в метаданных не найдены"
+                    : $"Доступно вариантов: {variants.Count - 1}";
+            UpdateReconciliationVariantVisibility();
+        }
+
+        private async Task LoadReconciliationReportVariantsAsync()
+        {
+            if (_reconciliationVariantsLoaded)
+                return;
+
+            _reconciliationVariantsLoaded = true;
+            var variants = new List<ReconciliationReportVariant>
+            {
+                new()
+                {
+                    DisplayName = "Акт сверки",
+                    Description = "Стандартный расчетный вариант BIS ERP.",
+                    IsStandard = true
+                }
+            };
+            var variantsLoadError = string.Empty;
+
+            try
+            {
+                var reports = await _context.Reports.AsNoTracking()
+                    .Where(report => report.IsActive)
+                    .OrderBy(report => report.Order)
+                    .ThenBy(report => report.Name)
+                    .Select(report => new
+                    {
+                        report.Id,
+                        report.Name,
+                        report.Description,
+                        report.Code,
+                        report.SourceFormat,
+                        report.ReportType,
+                        report.Template
+                    })
+                    .ToListAsync();
+
+                var candidateReports = reports
+                    .Where(report => ReportClassificationService.IsReconciliationReport(new Report
+                    {
+                        Id = report.Id,
+                        Name = report.Name,
+                        Description = report.Description,
+                        Code = report.Code,
+                        SourceFormat = report.SourceFormat,
+                        ReportType = report.ReportType,
+                        Template = report.Template
+                    }))
+                    .ToList();
+                if (candidateReports.Count == 0)
+                    candidateReports = reports
+                        .Where(report =>
+                            string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                foreach (var report in candidateReports)
+                {
+                    var displayName = BuildReconciliationVariantDisplayName(report.Name, report.SourceFormat, report.ReportType);
+                    if (variants.Any(item => item.ReportId == report.Id))
+                        continue;
+
+                    variants.Add(new ReconciliationReportVariant
+                    {
+                        ReportId = report.Id,
+                        DisplayName = displayName,
+                        Description = report.Description,
+                        Code = report.Code,
+                        IsStandard = false
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                variantsLoadError = $"Макеты акта сверки не загружены: {ex.Message}";
+            }
+
+            ReconciliationVariantCombo.ItemsSource = variants;
+            ReconciliationVariantCombo.SelectedIndex = 0;
+            ReconciliationVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
+                ? variantsLoadError
+                : variants.Count == 1
+                    ? "Макеты акта сверки в метаданных не найдены"
+                    : $"Доступно вариантов: {variants.Count}";
+            UpdateReconciliationVariantVisibility();
+        }
+
+        private void OnReportTypeSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateReconciliationVariantVisibility();
+        }
+
+        private void UpdateReconciliationVariantVisibility()
+        {
+            if (ReportTypeCombo == null)
+                return;
+
+            if (ReconciliationVariantPanel != null)
+            {
+                ReconciliationVariantPanel.Visibility = IsOrganizationReconciliationSelected()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (TrialBalanceFilterPanel != null)
+            {
+                TrialBalanceFilterPanel.Visibility = IsTrialBalanceSelected()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+
+        private bool IsTrialBalanceSelected() =>
+            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
+                "TrialBalance", StringComparison.OrdinalIgnoreCase);
+
+        private bool IsOrganizationReconciliationSelected() =>
+            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
+                "OrganizationReconciliation", StringComparison.OrdinalIgnoreCase);
+
+        private ReconciliationReportVariant? GetSelectedReconciliationReportVariant() =>
+            ReconciliationVariantCombo?.SelectedItem as ReconciliationReportVariant;
+
+        private TrialBalanceReportVariant? GetSelectedTrialBalanceReportVariant() =>
+            TrialBalanceVariantCombo?.SelectedItem as TrialBalanceReportVariant;
+
+        private static string BuildTrialBalanceVariantDisplayName(string name, string sourceFormat, string reportType)
+        {
+            var cleanName = CleanTrialBalanceVariantName(name);
+            var sourceLabel = GetReconciliationVariantSourceLabel(sourceFormat, reportType);
+            return string.IsNullOrWhiteSpace(sourceLabel) ? cleanName : $"{cleanName} [{sourceLabel}]";
+        }
+
+        private static string BuildReconciliationVariantDisplayName(string name, string sourceFormat, string reportType)
+        {
+            var cleanName = CleanReconciliationVariantName(name);
+            var sourceLabel = GetReconciliationVariantSourceLabel(sourceFormat, reportType);
+            return string.IsNullOrWhiteSpace(sourceLabel) ? cleanName : $"{cleanName} [{sourceLabel}]";
+        }
+
+        private static string GetReconciliationVariantSourceLabel(string? sourceFormat, string? reportType)
+        {
+            if (string.Equals(sourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(reportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase))
+                return "FRX";
+            if (string.Equals(sourceFormat, "Native", StringComparison.OrdinalIgnoreCase))
+                return "Нативный";
+            return string.Empty;
+        }
+
+        private static string CleanTrialBalanceVariantName(string name) =>
+            (name ?? string.Empty)
+                .Replace("Оборотно-сальдовая ведомость", "ОСВ", StringComparison.OrdinalIgnoreCase)
+                .Replace(" (FRX FoxPro)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace(" (FoxPro report template)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim();
+
+        private static string CleanReconciliationVariantName(string name) =>
+            (name ?? string.Empty)
+                .Replace(" (FRX FoxPro)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace(" (FoxPro report template)", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Trim();
         private async Task<List<PaymentOrderReportRow>> LoadPaymentOrderReportRowsAsync(DateTime? start, DateTime end)
         {
             var document = await _context.MetadataObjects
@@ -511,13 +1210,6 @@ namespace BIS.ERP.Views
                 .OrderBy(row => row.Date)
                 .ThenBy(row => row.Number, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
-        }
-
-        private static decimal GetBankStatementSignedAmount(PaymentOrderReportRow row)
-        {
-            if (row.IsIncoming)
-                return row.Amount;
-            return -row.Amount;
         }
 
         private static string ResolveReportReference(
@@ -586,7 +1278,7 @@ namespace BIS.ERP.Views
                 if (value is double doubleValue)
                     return Convert.ToDecimal(doubleValue);
                 if (value is int intValue)
-                    return intValue;
+                    return Convert.ToDecimal(intValue);
                 if (decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.CurrentCulture, out var parsed) ||
                     decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out parsed))
                 {
@@ -632,6 +1324,430 @@ namespace BIS.ERP.Views
 
             value = null;
             return false;
+        }
+
+        private async Task<List<ReconciliationMovementRow>> LoadReconciliationMovementRowsAsync(Guid? organizationId, DateTime start, DateTime end)
+        {
+            var rows = new List<ReconciliationMovementRow>();
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync(@"
+                    DO $$
+                    BEGIN
+                        IF to_regclass('public.doc_postings') IS NOT NULL THEN
+                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
+                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2) NOT NULL DEFAULT 0;
+                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
+                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS organization_id uuid;
+                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS description text;
+                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+                        END IF;
+                    END $$;");
+            }
+            catch (PostgresException ex) when (ex.SqlState == "42P01")
+            {
+                return rows;
+            }
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                SELECT p.posting_date, p.doc_number, COALESCE(p.document_type, 'Проводка') AS document_type,
+                       COALESCE(p.module_code, '') AS module_code,
+                       p.debit_account, p.credit_account, COALESCE(p.amount_kgs, 0) AS amount_kgs,
+                       COALESCE(p.description, '') AS description,
+                       CASE
+                           WHEN COALESCE(p.organization_id::text, '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                           THEN p.organization_id::text
+                           ELSE NULL
+                       END AS organization_id_text,
+                       COALESCE(NULLIF(o.""name"", ''), 'Без организации') AS organization_name
+                FROM doc_postings p
+                LEFT JOIN catalog_organizations o ON p.organization_id::text = o.""Id""::text
+                WHERE COALESCE(p.is_active, true) = true
+                  AND (COALESCE(@organizationId, '') = '' OR p.organization_id::text = @organizationId)
+                  AND p.posting_date >= @startDate
+                  AND p.posting_date < @endDateExclusive
+                ORDER BY organization_name, p.posting_date, p.doc_number, p.debit_account, p.credit_account";
+            command.Parameters.Add(new NpgsqlParameter("@organizationId", organizationId.HasValue && organizationId.Value != Guid.Empty ? organizationId.Value.ToString() : string.Empty));
+            command.Parameters.Add(new NpgsqlParameter("@startDate", DateTime.SpecifyKind(start.Date, DateTimeKind.Utc)));
+            command.Parameters.Add(new NpgsqlParameter("@endDateExclusive", DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc)));
+
+            try
+            {
+                await _context.Database.OpenConnectionAsync();
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var postingDate = reader["posting_date"] is DateTime date ? date : Convert.ToDateTime(reader["posting_date"], CultureInfo.InvariantCulture);
+                    rows.Add(new ReconciliationMovementRow
+                    {
+                        Date = postingDate,
+                        OrganizationId = Guid.TryParse(reader["organization_id_text"]?.ToString(), out var movementOrganizationId) ? movementOrganizationId : null,
+                        OrganizationName = reader["organization_name"]?.ToString() ?? "Без организации",
+                        DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(reader["doc_number"]?.ToString()),
+                        DocumentType = reader["document_type"]?.ToString() ?? string.Empty,
+                        ModuleCode = reader["module_code"]?.ToString() ?? string.Empty,
+                        DebitAccount = reader["debit_account"]?.ToString() ?? string.Empty,
+                        CreditAccount = reader["credit_account"]?.ToString() ?? string.Empty,
+                        Amount = ReadDbDecimal(reader["amount_kgs"]),
+                        Description = reader["description"]?.ToString() ?? string.Empty
+                    });
+                }
+            }
+            catch (PostgresException ex) when (ex.SqlState is "42P01" or "42703")
+            {
+                rows.Clear();
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+
+            return rows;
+        }
+        private static DataTable CreateReconciliationTable()
+        {
+            var table = new DataTable("Акт сверки");
+            table.Columns.Add("Наименование материала, вид операции", typeof(string));
+            table.Columns.Add("Дебет", typeof(string));
+            table.Columns.Add("Кредит", typeof(string));
+            table.Columns.Add("Сумма Дт", typeof(decimal));
+            table.Columns.Add("Сумма Кт", typeof(decimal));
+            table.Columns.Add("N докум", typeof(string));
+            table.Columns.Add("Дата", typeof(string));
+            table.Columns.Add("Модуль", typeof(string));
+            return table;
+        }
+
+        private static void AddReconciliationSection(DataTable table, string organizationTitle, IReadOnlyList<OrganizationBalanceRow> pairs, OrganizationBalanceRow? total, IReadOnlyList<ReconciliationMovementRow> movements, DateTime start, DateTime end, bool showOrganizationHeader)
+        {
+            if (showOrganizationHeader)
+                AddReconciliationRow(table, $"Организация: {organizationTitle}");
+
+            var firstPair = true;
+            foreach (var pair in pairs)
+            {
+                if (!firstPair)
+                    AddReconciliationRow(table, string.Empty);
+                firstPair = false;
+
+                var pairName = string.IsNullOrWhiteSpace(pair.AccountPairName) ? pair.CounterAccountName : pair.AccountPairName;
+                AddReconciliationRow(table, $"Пара счетов : {pair.AccountCode} - {pair.CounterAccountCode} ({pairName})");
+                AddReconciliationRow(table, $"САЛЬДО НА {start:dd.MM.yyyy}", debitAmount: NonZeroAmount(pair.OpeningDebit), creditAmount: NonZeroAmount(pair.OpeningCredit));
+
+                var pairMovements = movements
+                    .Where(movement => AccountInPair(movement.DebitAccount, pair) || AccountInPair(movement.CreditAccount, pair))
+                    .OrderBy(movement => movement.Date)
+                    .ThenBy(movement => movement.DocumentNumber, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList();
+                if (pairMovements.Count == 0 && (pair.TurnoverDebit != 0 || pair.TurnoverCredit != 0))
+                    AddReconciliationRow(table, "Движения найдены в остатках, но детализация проводок недоступна.");
+
+                foreach (var movement in pairMovements)
+                {
+                    AddReconciliationRow(
+                        table,
+                        BuildMovementDescription(movement),
+                        movement.DebitAccount,
+                        movement.CreditAccount,
+                        AccountInPair(movement.DebitAccount, pair) ? (decimal?)movement.Amount : null,
+                        AccountInPair(movement.CreditAccount, pair) ? (decimal?)movement.Amount : null,
+                        movement.DocumentNumber,
+                        movement.Date.ToString("dd.MM.yyyy"),
+                        movement.ModuleCode);
+                }
+
+                AddReconciliationRow(table, "ИТОГО ОБОРОТОВ", debitAmount: NonZeroAmount(pair.TurnoverDebit), creditAmount: NonZeroAmount(pair.TurnoverCredit));
+                AddReconciliationRow(table, $"САЛЬДО НА {end:dd.MM.yyyy}", debitAmount: NonZeroAmount(pair.ClosingDebit), creditAmount: NonZeroAmount(pair.ClosingCredit));
+            }
+
+            if (total != null && pairs.Count > 1)
+            {
+                AddReconciliationRow(table, string.Empty);
+                AddReconciliationRow(table, "ИТОГО ОБОРОТОВ ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.TurnoverDebit), creditAmount: NonZeroAmount(total.TurnoverCredit));
+                AddReconciliationRow(table, $"САЛЬДО НА {end:dd.MM.yyyy} ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.ClosingDebit), creditAmount: NonZeroAmount(total.ClosingCredit));
+            }
+
+            AddReconciliationRow(table, BuildDebtSummary(organizationTitle, total?.Balance ?? pairs.Sum(row => row.Balance)));
+        }
+
+        private static void AddReconciliationRow(DataTable table, string operation, string debit = "", string credit = "", decimal? debitAmount = null, decimal? creditAmount = null, string documentNumber = "", string date = "", string moduleCode = "")
+        {
+            var row = table.NewRow();
+            row["Наименование материала, вид операции"] = operation;
+            row["Дебет"] = debit;
+            row["Кредит"] = credit;
+            row["Сумма Дт"] = debitAmount.HasValue ? debitAmount.Value : DBNull.Value;
+            row["Сумма Кт"] = creditAmount.HasValue ? creditAmount.Value : DBNull.Value;
+            row["N докум"] = documentNumber;
+            row["Дата"] = date;
+            row["Модуль"] = moduleCode;
+            table.Rows.Add(row);
+        }
+
+        private static void SetReportFieldWidth(Report report, string fieldName, int width, string alignment = "Left", string format = "")
+        {
+            var field = report.Fields.FirstOrDefault(item => item.FieldName == fieldName);
+            if (field == null)
+                return;
+            field.Width = width;
+            field.Alignment = alignment;
+            field.Format = format;
+        }
+        private string ResolveOrganizationTitle(Guid? organizationId, string? organizationName)
+        {
+            var organization = organizationId.HasValue && organizationId.Value != Guid.Empty
+                ? _organizationSelectionItems.FirstOrDefault(item => item.Id == organizationId.Value)
+                : null;
+            if (organization != null)
+                return string.IsNullOrWhiteSpace(organization.FullName) ? organization.Name : organization.FullName;
+
+            var normalized = NormalizeOrganizationName(organizationName);
+            return string.IsNullOrWhiteSpace(normalized) ? "Без организации" : normalized;
+        }
+
+        private static bool SameOrganization(OrganizationBalanceRow row, Guid? organizationId, string? organizationName)
+        {
+            if (organizationId.HasValue && organizationId.Value != Guid.Empty)
+                return row.OrganizationId.HasValue && row.OrganizationId.Value == organizationId.Value;
+
+            var rowName = NormalizeOrganizationName(row.OrganizationName);
+            var filterName = NormalizeOrganizationName(organizationName);
+            return rowName.Equals(string.IsNullOrWhiteSpace(filterName) ? "Без организации" : filterName,
+                StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private static bool MatchesMovementOrganization(ReconciliationMovementRow movement, Guid? organizationId, string? organizationName)
+        {
+            if (organizationId.HasValue && organizationId.Value != Guid.Empty)
+                return movement.OrganizationId.HasValue && movement.OrganizationId.Value == organizationId.Value;
+
+            var movementName = NormalizeOrganizationName(movement.OrganizationName);
+            var filterName = NormalizeOrganizationName(organizationName);
+            return movementName.Equals(string.IsNullOrWhiteSpace(filterName) ? "Без организации" : filterName,
+                StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private static bool MatchesSelectedOrganization(OrganizationBalanceRow row, Guid? selectedId, string? selectedName)
+        {
+            if (!selectedId.HasValue || selectedId.Value == Guid.Empty)
+                return true;
+            if (row.OrganizationId.HasValue && row.OrganizationId.Value == selectedId.Value)
+                return true;
+
+            var rowName = NormalizeOrganizationName(row.OrganizationName);
+            var filterName = NormalizeOrganizationName(selectedName);
+            return !string.IsNullOrWhiteSpace(filterName) &&
+                   rowName.Equals(filterName, StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        private static string NormalizeOrganizationName(string? value)
+        {
+            var text = (value ?? string.Empty).Trim();
+            var separatorIndex = text.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex >= 0 ? text.Substring(separatorIndex + 3).Trim() : text;
+        }
+
+        private static bool AccountInPair(string accountCode, OrganizationBalanceRow pair)
+        {
+            return SameAccount(accountCode, pair.AccountCode) || SameAccount(accountCode, pair.CounterAccountCode);
+        }
+
+        private static bool SameAccount(string left, string right) =>
+            left.Trim().Equals(right.Trim(), StringComparison.OrdinalIgnoreCase);
+
+        private static decimal? NonZeroAmount(decimal value) => value == 0m ? null : value;
+
+        private static string BuildMovementDescription(ReconciliationMovementRow movement)
+        {
+            if (!string.IsNullOrWhiteSpace(movement.Description))
+                return movement.Description;
+            return string.IsNullOrWhiteSpace(movement.DocumentType) ? "Проводка" : movement.DocumentType;
+        }
+
+        private static string BuildDebtSummary(string organizationName, decimal balance)
+        {
+            if (balance > 0m)
+                return $"Задолженность \"{organizationName}\" перед нами составляет {balance:N2}";
+            if (balance < 0m)
+                return $"Наша задолженность перед \"{organizationName}\" составляет {Math.Abs(balance):N2}";
+            return $"Задолженность с \"{organizationName}\" отсутствует.";
+        }
+
+        private static string BuildAllOrganizationsDebtSummary(int organizationCount, decimal balance)
+        {
+            if (balance > 0m)
+                return $"Сформировано актов по организациям: {organizationCount}. Итоговая задолженность организаций перед нами составляет {balance:N2}";
+            if (balance < 0m)
+                return $"Сформировано актов по организациям: {organizationCount}. Итоговая наша задолженность перед организациями составляет {Math.Abs(balance):N2}";
+            return $"Сформировано актов по организациям: {organizationCount}. Итоговая задолженность отсутствует.";
+        }
+
+        private static bool HasFoxProTemplate(Report report) =>
+            !string.IsNullOrWhiteSpace(report.Template) &&
+            (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));
+
+        private static bool HasNativeTemplate(Report report) =>
+            !string.IsNullOrWhiteSpace(report.Template) &&
+            string.Equals(report.SourceFormat, "Native", StringComparison.OrdinalIgnoreCase);
+
+        private bool ShouldUseFoxProExcelLayout(Report report) =>
+            HasFoxProTemplate(report) && IsFoxProExcelFormat(GetSelectedReportOutputFormat());
+
+        private string GetSelectedReportOutputFormat() =>
+            (ReportOutputFormatCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ProgramExcel";
+
+        private static bool IsProgrammaticExcelFormat(string format) =>
+            FormatIs(format, "ProgramExcel", "ExcelNative");
+
+        private static bool IsProgrammaticPdfFormat(string format) =>
+            FormatIs(format, "ProgramPdf");
+
+        private static bool IsNativeExcelFormat(string format) =>
+            FormatIs(format, "NativeExcel");
+
+        private static bool IsNativePdfFormat(string format) =>
+            FormatIs(format, "NativePdf");
+
+        private static bool IsFoxProExcelFormat(string format) =>
+            FormatIs(format, "FoxProExcel", "ExcelFoxPro");
+
+        private static bool IsFoxProPdfFormat(string format) =>
+            FormatIs(format, "FoxProPdf", "PdfFoxPro");
+
+        private static bool IsTaxExcelFormat(string format) =>
+            FormatIs(format, "TaxExcel");
+
+        private static bool FormatIs(string format, params string[] expected) =>
+            expected.Any(value => string.Equals(format, value, StringComparison.OrdinalIgnoreCase));
+
+        private static bool IsReconciliationActReport(DataTable? dataTable, Report? report)
+        {
+            if (report == null)
+                return false;
+
+            return string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
+                   ContainsIgnoreCase(report.Name, "Акт сверки") ||
+                   (dataTable != null && ContainsIgnoreCase(dataTable.TableName, "Акт сверки"));
+        }
+
+        private static bool ContainsIgnoreCase(string? value, string fragment) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(fragment, StringComparison.OrdinalIgnoreCase);
+
+        private static bool TryReadGuid(Dictionary<string, object> row, out Guid id, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!TryGetReportValue(row, out var value, key) || value == null || value == DBNull.Value)
+                    continue;
+                if (value is Guid guid)
+                {
+                    id = guid;
+                    return true;
+                }
+                if (Guid.TryParse(value.ToString(), out id))
+                    return true;
+            }
+
+            id = Guid.Empty;
+            return false;
+        }
+
+        private static bool ReadReportBoolValue(object? value, bool defaultValue)
+        {
+            if (value == null || value == DBNull.Value)
+                return defaultValue;
+            if (value is bool boolValue)
+                return boolValue;
+            if (bool.TryParse(value.ToString(), out var parsedBool))
+                return parsedBool;
+            if (int.TryParse(value.ToString(), out var intValue))
+                return intValue != 0;
+            var text = value.ToString()?.Trim() ?? string.Empty;
+            if (text.Equals("да", StringComparison.OrdinalIgnoreCase) || text.Equals("истина", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (text.Equals("нет", StringComparison.OrdinalIgnoreCase) || text.Equals("ложь", StringComparison.OrdinalIgnoreCase))
+                return false;
+            return defaultValue;
+        }
+
+        private static decimal ReadDbDecimal(object? value)
+        {
+            if (value == null || value == DBNull.Value)
+                return 0m;
+            if (value is decimal decimalValue)
+                return decimalValue;
+            if (value is double doubleValue)
+                return Convert.ToDecimal(doubleValue);
+            if (value is float floatValue)
+                return Convert.ToDecimal(floatValue);
+            if (value is int intValue)
+                return intValue;
+            if (value is long longValue)
+                return longValue;
+            return decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) ||
+                   decimal.TryParse(value.ToString(), NumberStyles.Any, CultureInfo.CurrentCulture, out parsed)
+                ? parsed
+                : 0m;
+        }
+        private sealed class OrganizationSelectionItem
+        {
+            public Guid? Id { get; init; }
+            public string Code { get; init; } = string.Empty;
+            public string Name { get; init; } = string.Empty;
+            public string FullName { get; init; } = string.Empty;
+            public bool IsActive { get; init; } = true;
+            public bool IsPrimary { get; init; }
+            public bool IsAll => !Id.HasValue || Id.Value == Guid.Empty;
+            public string DisplayName
+            {
+                get
+                {
+                    if (IsAll)
+                        return "Все организации";
+                    var name = string.IsNullOrWhiteSpace(Name) ? FullName : Name;
+                    var display = string.IsNullOrWhiteSpace(Code) ? name : $"{Code} - {name}";
+                    return IsActive ? display : $"{display} (неактивна)";
+                }
+            }
+
+            public static OrganizationSelectionItem CreateAll() => new()
+            {
+                Id = Guid.Empty,
+                Name = "Все организации"
+            };
+        }
+        private sealed class ReconciliationMovementRow
+        {
+            public DateTime Date { get; init; }
+            public Guid? OrganizationId { get; init; }
+            public string OrganizationName { get; init; } = string.Empty;
+            public string DocumentNumber { get; init; } = string.Empty;
+            public string DocumentType { get; init; } = string.Empty;
+            public string ModuleCode { get; init; } = string.Empty;
+            public string DebitAccount { get; init; } = string.Empty;
+            public string CreditAccount { get; init; } = string.Empty;
+            public decimal Amount { get; init; }
+            public string Description { get; init; } = string.Empty;
+        }
+        private sealed class ReconciliationReportVariant
+        {
+            public Guid? ReportId { get; init; }
+            public string DisplayName { get; init; } = string.Empty;
+            public string Description { get; init; } = string.Empty;
+            public string Code { get; init; } = string.Empty;
+            public bool IsStandard { get; init; }
+        }
+
+        private sealed class TrialBalanceReportVariant
+        {
+            public Guid? ReportId { get; init; }
+            public string DisplayName { get; init; } = string.Empty;
+            public string Description { get; init; } = string.Empty;
+            public string Code { get; init; } = string.Empty;
+            public bool IsStandard { get; init; }
         }
 
         private sealed class PaymentOrderReportRow
@@ -818,7 +1934,11 @@ namespace BIS.ERP.Views
             table.Columns.Add("Сальдо", typeof(decimal));
             table.Columns.Add("Модуль", typeof(string));
 
-            foreach (var row in calculation.Rows)
+            var rowsToAdd = calculation.Rows.AsEnumerable();
+            if (_selectedOrganizationId.HasValue && _selectedOrganizationId.Value != Guid.Empty)
+                rowsToAdd = rowsToAdd.Where(row => MatchesSelectedOrganization(row, _selectedOrganizationId, _selectedOrganizationName));
+
+            foreach (var row in rowsToAdd)
             {
                 table.Rows.Add(
                     row.OrganizationName,
@@ -835,8 +1955,11 @@ namespace BIS.ERP.Views
                     row.ModuleCode);
             }
 
+            var titleSuffix = _selectedOrganizationId.HasValue
+                ? $", фильтр: {_selectedOrganizationName}"
+                : string.Empty;
             var report = CreateReport(table,
-                $"Сальдо по организациям за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+                $"Сальдо по организациям за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{titleSuffix}", true);
             report.SummaryText = calculation.Warnings.Count == 0
                 ? "Расчет выполнен по активным парам счетов справочника авансовых платежей."
                 : string.Join(Environment.NewLine, calculation.Warnings);
@@ -847,7 +1970,7 @@ namespace BIS.ERP.Views
         {
             var collection = await _balanceService.CollectPeriodInformationAsync(start, end);
             var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
-            var table = new DataTable("Сбор информации за период");
+            var table = new DataTable("Сбор информации за периода");
             table.Columns.Add("Показатель", typeof(string));
             table.Columns.Add("Всего", typeof(int));
             table.Columns.Add("Проведено", typeof(int));
@@ -874,7 +1997,7 @@ namespace BIS.ERP.Views
                 closingDebit, closingCredit, closingDebit - closingCredit);
 
             var report = CreateReport(table,
-                $"Сбор информации за период {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
+                $"Сбор информации за периода {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
             var isBalanced = collection.IsBalanced && Math.Abs(openingDebit - openingCredit) < 0.01m &&
                              Math.Abs(closingDebit - closingCredit) < 0.01m;
             report.SummaryText = isBalanced
@@ -923,31 +2046,386 @@ namespace BIS.ERP.Views
             table.Rows.Add(row);
         }
 
-        private void OnExportPdfClick(object sender, RoutedEventArgs e)
+        private void OnOpenReportClick(object sender, RoutedEventArgs e)
+        {
+            var format = GetSelectedReportOutputFormat();
+            if (IsTaxExcelFormat(format))
+            {
+                OnExportVatClick(sender, e);
+                return;
+            }
+
+            if (_currentData == null || _currentReport == null)
+            {
+                MessageBox.Show("Сначала сформируйте отчет.", "Отчет",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (IsProgrammaticPdfFormat(format))
+            {
+                OnExportProgrammaticPdfClick(sender, e);
+                return;
+            }
+
+            if (IsNativePdfFormat(format))
+            {
+                OnExportNativePdfClick(sender, e);
+                return;
+            }
+
+            if (IsFoxProPdfFormat(format))
+            {
+                OnExportFrxPdfClick(sender, e);
+                return;
+            }
+
+            OnExportExcelClick(sender, e);
+        }
+
+        private static Report CloneReportForBackgroundPreview(Report source)
+        {
+            var report = new Report
+            {
+                Id = source.Id,
+                Name = source.Name,
+                Description = source.Description,
+                DataSourceType = source.DataSourceType,
+                DataSourceId = source.DataSourceId,
+                ReportType = source.ReportType,
+                Template = source.Template,
+                Settings = source.Settings,
+                Icon = source.Icon,
+                Code = source.Code,
+                IsActive = source.IsActive,
+                IsPrintForm = source.IsPrintForm,
+                IsDefault = source.IsDefault,
+                SourceFormat = source.SourceFormat,
+                TemplateVersion = source.TemplateVersion,
+                Order = source.Order,
+                CreatedAt = source.CreatedAt,
+                UpdatedAt = source.UpdatedAt,
+                PageTitle = source.PageTitle,
+                PageOrientation = source.PageOrientation,
+                PageWidth = source.PageWidth,
+                PageHeight = source.PageHeight,
+                LeftMargin = source.LeftMargin,
+                RightMargin = source.RightMargin,
+                TopMargin = source.TopMargin,
+                BottomMargin = source.BottomMargin,
+                FontName = source.FontName,
+                FontSize = source.FontSize,
+                ShowHeader = source.ShowHeader,
+                ShowFooter = source.ShowFooter,
+                ShowPageNumbers = source.ShowPageNumbers,
+                ShowGridLines = source.ShowGridLines,
+                AlternateRowColor = source.AlternateRowColor,
+                HeaderTitle = source.HeaderTitle,
+                HeaderSubtitle = source.HeaderSubtitle,
+                HeaderLogo = source.HeaderLogo,
+                HeaderText = source.HeaderText,
+                FooterText = source.FooterText,
+                FooterTotalText = source.FooterTotalText,
+                FooterSignature = source.FooterSignature,
+                TitleText = source.TitleText,
+                SubtitleText = source.SubtitleText,
+                SummaryText = source.SummaryText,
+                AlternateRowColors = source.AlternateRowColors,
+                ShowGrandTotal = source.ShowGrandTotal,
+                HeaderColor = source.HeaderColor
+            };
+
+            report.Fields = source.Fields.Select(field => new ReportField
+            {
+                Id = field.Id,
+                ReportId = field.ReportId,
+                FieldName = field.FieldName,
+                DisplayName = field.DisplayName,
+                AggregateType = field.AggregateType,
+                Order = field.Order,
+                Width = field.Width,
+                Alignment = field.Alignment,
+                Format = field.Format,
+                IsVisible = field.IsVisible
+            }).ToList();
+
+            report.ElementMappings = source.ElementMappings.Select(mapping => new ReportElementMapping
+            {
+                Id = mapping.Id,
+                ReportId = mapping.ReportId,
+                ElementOrder = mapping.ElementOrder,
+                ElementType = mapping.ElementType,
+                ElementText = mapping.ElementText,
+                ElementExpression = mapping.ElementExpression,
+                BandType = mapping.BandType,
+                Left = mapping.Left,
+                Top = mapping.Top,
+                Width = mapping.Width,
+                Height = mapping.Height,
+                FontName = mapping.FontName,
+                FontSize = mapping.FontSize,
+                Bold = mapping.Bold,
+                Italic = mapping.Italic,
+                Alignment = mapping.Alignment,
+                Order = mapping.Order,
+                MappedFieldName = mapping.MappedFieldName,
+                MappedDisplayName = mapping.MappedDisplayName,
+                DataSource = mapping.DataSource,
+                FormatString = mapping.FormatString,
+                IsVisible = mapping.IsVisible,
+                CustomText = mapping.CustomText
+            }).ToList();
+
+            return report;
+        }
+
+        private async void OnExportProgrammaticPdfClick(object sender, RoutedEventArgs e)
         {
             if (_currentData == null || _currentReport == null)
-                return;
-
-            var dialog = new SaveFileDialog
             {
-                Title = "Сохранить бухгалтерский отчет",
-                Filter = "PDF файлы (*.pdf)|*.pdf",
-                DefaultExt = "pdf",
-                FileName = $"{_currentData.TableName}_{DateTime.Now:yyyyMMdd_HHmmss}.pdf"
-            };
-            if (dialog.ShowDialog() != true)
+                MessageBox.Show("Сначала сформируйте отчет.", "Программный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
+            }
 
             try
             {
-                File.WriteAllBytes(dialog.FileName, _reportService.ExportToPdf(_currentData, _currentReport));
-                MessageBox.Show("PDF-отчет сформирован.", "Отчет",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                IsEnabled = false;
+                StatusText.Text = "Открытие программного PDF...";
+
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                byte[] pdfBytes;
+                if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
+                {
+                    var printFormService = new PrintFormService(_context);
+                    pdfBytes = await Task.Run(() =>
+                        printFormService.ExportProgrammaticReconciliationActPreview(dataSnapshot, reportSnapshot));
+                }
+                else
+                {
+                    pdfBytes = await Task.Run(() => _reportService.ExportToPdf(dataSnapshot, reportSnapshot));
+                }
+
+                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_PROGRAM", "pdf");
+                File.WriteAllBytes(outputPath, pdfBytes);
+                OpenGeneratedFile(outputPath);
+                StatusText.Text = $"Программный PDF открыт: {Path.GetFileName(outputPath)}";
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка экспорта PDF: {ex.Message}", "Ошибка",
+                StatusText.Text = "Ошибка открытия программного PDF";
+                MessageBox.Show($"Ошибка открытия программного PDF: {ex.Message}", "Программный PDF",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
+        }
+
+        private async void OnExportNativePdfClick(object sender, RoutedEventArgs e)
+        {
+            if (_currentData == null || _currentReport == null)
+            {
+                MessageBox.Show("Сначала сформируйте отчет.", "Нативный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!HasNativeTemplate(_currentReport))
+            {
+                MessageBox.Show(
+                    "Для выбранного отчета нет нативного макета конструктора. Откройте конструктор и сохраните макет либо выберите программный или FRX-формат.",
+                    "Нативный PDF", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Открытие PDF по нативному макету конструктора...";
+
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                var printFormService = new PrintFormService(_context);
+                var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot));
+                var completedTask = await Task.WhenAny(pdfTask, Task.Delay(TimeSpan.FromSeconds(20)));
+                if (completedTask != pdfTask)
+                {
+                    _ = pdfTask.ContinueWith(task =>
+                    {
+                        if (task.Exception != null)
+                            System.Diagnostics.Debug.WriteLine(task.Exception.GetBaseException().Message);
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+
+                    StatusText.Text = "Нативный PDF обрабатывается слишком долго.";
+                    MessageBox.Show(
+                        "Нативный макет обрабатывается слишком долго. Операция остановлена, приложение не будет ждать бесконечно.",
+                        "Нативный PDF", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_NATIVE", "pdf");
+                File.WriteAllBytes(outputPath, await pdfTask);
+                OpenGeneratedFile(outputPath);
+                StatusText.Text = $"Нативный PDF открыт: {Path.GetFileName(outputPath)}";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка открытия нативного PDF";
+                MessageBox.Show($"Ошибка открытия нативного PDF: {ex.Message}", "Нативный PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
+        }
+
+        private async void OnExportFrxPdfClick(object sender, RoutedEventArgs e)
+        {
+            if (_currentData == null || _currentReport == null)
+            {
+                MessageBox.Show("Сначала сформируйте отчет.", "PDF по FRX-макету",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!HasFoxProTemplate(_currentReport))
+            {
+                MessageBox.Show(
+                    "Для выбранного отчета не подключен FRX-шаблон. Выберите FRX-вариант отчета или подключите макет в конфигураторе.",
+                    "PDF по FRX-макету", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                IsEnabled = false;
+                StatusText.Text = "Открытие PDF по старому FRX-макету FoxPro...";
+
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                var ruleService = new FoxProReportFieldRuleService(_context);
+                await ruleService.SeedDefaultRulesAsync();
+                var rules = await ruleService.GetRulesAsync(includeInactive: false);
+                var printFormService = new PrintFormService(_context);
+                var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot, rules));
+                var completedTask = await Task.WhenAny(pdfTask, Task.Delay(TimeSpan.FromSeconds(20)));
+                if (completedTask != pdfTask)
+                {
+                    _ = pdfTask.ContinueWith(task =>
+                    {
+                        if (task.Exception != null)
+                            System.Diagnostics.Debug.WriteLine(task.Exception.GetBaseException().Message);
+                    }, TaskContinuationOptions.OnlyOnFaulted);
+
+                    StatusText.Text = "FRX PDF обрабатывается слишком долго.";
+                    MessageBox.Show(
+                        "FRX-макет обрабатывается слишком долго. Операция остановлена, приложение не будет ждать бесконечно.",
+                        "PDF по FRX-макету", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_FRX", "pdf");
+                File.WriteAllBytes(outputPath, await pdfTask);
+                OpenGeneratedFile(outputPath);
+                StatusText.Text = $"PDF по FRX-макету открыт: {Path.GetFileName(outputPath)}";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка открытия PDF по FRX";
+                MessageBox.Show($"Ошибка открытия PDF по FRX-макету: {ex.Message}", "PDF по FRX-макету",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
+        }
+        private async void OnExportExcelClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentData == null || _currentReport == null)
+                {
+                    MessageBox.Show("Сначала сформируйте отчет.", "Excel",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var format = GetSelectedReportOutputFormat();
+                if (IsTaxExcelFormat(format))
+                {
+                    OnExportVatClick(sender, e);
+                    return;
+                }
+
+                var useFoxProExcelLayout = IsFoxProExcelFormat(format);
+                var useNativeExcelLayout = IsNativeExcelFormat(format);
+                if (useFoxProExcelLayout && !HasFoxProTemplate(_currentReport))
+                {
+                    MessageBox.Show(
+                        "Для выбранного отчета не подключен FRX-шаблон. Выберите FRX-вариант отчета или откройте программный формат.",
+                        "FRX FoxPro Excel", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (useNativeExcelLayout && !HasNativeTemplate(_currentReport))
+                {
+                    MessageBox.Show(
+                        "Для выбранного отчета нет нативного макета конструктора. Откройте конструктор и сохраните макет либо выберите программный или FRX-формат.",
+                        "Нативный Excel", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                IsEnabled = false;
+                var formatTitle = useFoxProExcelLayout
+                    ? "FRX FoxPro Excel"
+                    : useNativeExcelLayout
+                        ? "Нативный Excel"
+                        : "Программный Excel";
+                StatusText.Text = $"Открытие {formatTitle}...";
+
+                var suffix = useFoxProExcelLayout ? "FRX" : useNativeExcelLayout ? "NATIVE" : "PROGRAM";
+                var outputPath = BuildTemporaryExcelPath($"{_currentReport.Name}_{suffix}", "xlsx");
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                byte[] excelBytes;
+                if (useFoxProExcelLayout || useNativeExcelLayout)
+                {
+                    var ruleService = new FoxProReportFieldRuleService(_context);
+                    await ruleService.SeedDefaultRulesAsync();
+                    var rules = await ruleService.GetRulesAsync(includeInactive: false);
+                    var printFormService = new PrintFormService(_context);
+                    excelBytes = await Task.Run(() =>
+                        printFormService.ExportReportTemplateExcel(dataSnapshot, reportSnapshot, rules));
+                }
+                else if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
+                {
+                    var printFormService = new PrintFormService(_context);
+                    excelBytes = await Task.Run(() =>
+                        printFormService.ExportProgrammaticReconciliationActExcel(dataSnapshot, reportSnapshot));
+                }
+                else
+                {
+                    excelBytes = await Task.Run(() => _reportService.ExportToExcel(dataSnapshot, reportSnapshot));
+                }
+
+                File.WriteAllBytes(outputPath, excelBytes);
+                OpenGeneratedFile(outputPath);
+                StatusText.Text = $"{formatTitle} открыт: {Path.GetFileName(outputPath)}";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка открытия Excel";
+                MessageBox.Show($"Ошибка открытия бухгалтерского отчета в Excel: {ex.Message}", "Excel",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
             }
         }
 
@@ -959,8 +2437,8 @@ namespace BIS.ERP.Views
                 if (start.Year != end.Year || start.Month != end.Month)
                 {
                     if (MessageBox.Show(
-                            "Для налогового отчета по НДС обычно выбирается один календарный месяц. Продолжить выгрузку для выбранного диапазона?",
-                            "Экспорт НДС",
+                            "Для налогового отчета обычно выбирается один календарный месяц. Продолжить выгрузку для выбранного диапазона?",
+                            "Tax Excel",
                             MessageBoxButton.YesNo,
                             MessageBoxImage.Question) != MessageBoxResult.Yes)
                     {
@@ -977,43 +2455,67 @@ namespace BIS.ERP.Views
                 var defaultExtension = string.Equals(templateExtension, ".xls", StringComparison.OrdinalIgnoreCase)
                     ? "xls"
                     : "xlsx";
-                var saveDialog = new SaveFileDialog
-                {
-                    Title = "Сохранить налоговый отчет по НДС",
-                    Filter = "Excel файлы (*.xlsx)|*.xlsx|Excel 97-2003 (*.xls)|*.xls",
-                    DefaultExt = defaultExtension,
-                    FileName = $"STI062_НДС_{start:yyyyMM}.{defaultExtension}"
-                };
-                if (saveDialog.ShowDialog() != true)
-                    return;
+                var outputPath = BuildTemporaryExcelPath($"STI062_tax_{start:yyyyMM}", defaultExtension);
 
                 IsEnabled = false;
                 StatusText.Text = activeTemplate == null
-                    ? "Формирование внутреннего XLSX-отчета по НДС..."
-                    : $"Заполнение шаблона {activeTemplate.Code} из БД...";
+                    ? "Формирование внутреннего налогового Excel-отчета..."
+                    : $"Заполнение шаблона {activeTemplate.Code} из базы данных...";
 
                 var exportService = new VatTaxReportExportService(_context);
-                var exportResult = await exportService.ExportMonthlyVatReportAsync(start, end, saveDialog.FileName);
+                var exportResult = await exportService.ExportMonthlyVatReportAsync(start, end, outputPath);
+                OpenGeneratedFile(outputPath);
 
-                StatusText.Text = "Отчет по НДС выгружен";
-                MessageBox.Show(
-                    exportResult.UsedOfficialTemplate
-                        ? $"Шаблон {exportResult.TemplateCode} взят из БД, заполнен и сохранен."
-                        : "Активный шаблон STI-062_7 в БД не найден. Сформирован внутренний Excel-отчет по НДС.",
-                    "Экспорт НДС",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                StatusText.Text = exportResult.UsedOfficialTemplate
+                    ? $"Налоговый Excel открыт. Шаблон: {exportResult.TemplateCode}."
+                    : "Налоговый Excel открыт. Активный официальный шаблон не найден, использован внутренний отчет.";
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка экспорта НДС";
-                MessageBox.Show($"Ошибка экспорта НДС: {ex.Message}", "Экспорт НДС",
+                StatusText.Text = "Ошибка открытия налогового Excel";
+                MessageBox.Show($"Ошибка открытия налогового Excel: {ex.Message}", "Tax Excel",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
                 IsEnabled = true;
             }
+        }
+
+        private static string BuildTemporaryExcelPath(string baseName, string extension) =>
+            BuildTemporaryReportPath(baseName, extension);
+
+        private static string BuildTemporaryReportPath(string baseName, string extension)
+        {
+            var safeName = SanitizeFileName(baseName);
+            if (string.IsNullOrWhiteSpace(safeName))
+                safeName = "report";
+
+            var normalizedExtension = (extension ?? "xlsx").Trim().TrimStart('.');
+            if (string.IsNullOrWhiteSpace(normalizedExtension))
+                normalizedExtension = "xlsx";
+
+            var directory = Path.Combine(Path.GetTempPath(), "BIS.ERP", "ReportOutput");
+            Directory.CreateDirectory(directory);
+            return Path.Combine(directory, $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.{normalizedExtension}");
+        }
+
+        private static string SanitizeFileName(string value)
+        {
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var chars = (value ?? string.Empty)
+                .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
+                .ToArray();
+            return new string(chars).Trim(' ', '.', '_');
+        }
+
+        private static void OpenGeneratedFile(string filePath)
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = filePath,
+                UseShellExecute = true
+            });
         }
     }
 }

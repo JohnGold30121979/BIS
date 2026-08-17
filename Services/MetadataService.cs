@@ -15,12 +15,12 @@ namespace BIS.ERP.Services
     public partial class MetadataService
     {
         private readonly AppDbContext _context;
-        private const string GlobalDocumentNumberingKey = "Все документы";
-        private static readonly HashSet<string> IndependentDocumentNumberingNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Приходный кассовый ордер",
-            "Расходный кассовый ордер"
-        };
+        private const string CashOrderDocumentName = "Расходный/Приходный КО";
+        private const string CashOrderReceiptDocumentType = "Приходный кассовый ордер";
+        private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
+        private const string CashOrderReceiptKind = "Receipt";
+        private const string CashOrderPaymentKind = "Payment";
+        private const long MaxDocumentNumberUsedForCounter = 999_999_999;
 
         public MetadataService(AppDbContext context)
         {
@@ -106,36 +106,21 @@ namespace BIS.ERP.Services
                 documents.Add(postingsDoc);
                 // =================================================
 
-                var cashReceiptdoc = new MetadataObject
+                var cashOrderDocument = new MetadataObject
                 {
                     Id = Guid.NewGuid(),
-                    Name = "Приходный кассовый ордер",
-                    TableName = "doc_cash_receipt",
+                    Name = CashOrderDocumentName,
+                    TableName = "doc_cash_orders",
                     ObjectType = "Document",
-                    Description = "Приходный кассовый ордер",
-                    Icon = "📥",
+                    Description = "Единый журнал приходных и расходных кассовых ордеров",
+                    Icon = "💵",
                     Order = 4,
                     IsSystem = true,
+                    UsePostings = true,
                     MetadataConfigId = config.Id
                 };
-                cashReceiptdoc.Fields = GetCashReceiptFields(cashReceiptdoc.Id);
-                documents.Add(cashReceiptdoc);
-
-                var cashPaymentdoc = new MetadataObject
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Расходный кассовый ордер",
-                    TableName = "doc_cash_payment",
-                    ObjectType = "Document",
-                    Description = "Расходный кассовый ордер",
-                    Icon = "📤",
-                    Order = 5,
-                    IsSystem = true,
-                    MetadataConfigId = config.Id,
-
-                };
-                cashPaymentdoc.Fields = GetCashPaymentFields(cashPaymentdoc.Id);
-                documents.Add(cashPaymentdoc);
+                cashOrderDocument.Fields = GetCashOrderFields(cashOrderDocument.Id);
+                documents.Add(cashOrderDocument);
          
                 var paymentOrderdocument = new MetadataObject
                 {
@@ -200,9 +185,7 @@ namespace BIS.ERP.Services
             }
 
             var result = new List<Dictionary<string, object>>();
-            var sql = catalog.Name == "Организации"
-                ? $"SELECT * FROM \"{catalog.TableName}\" ORDER BY COALESCE(\"is_primary\", false) DESC, \"code\", \"CreatedAt\""
-                : $"SELECT * FROM \"{catalog.TableName}\" ORDER BY \"CreatedAt\"";
+            var sql = await BuildCatalogDataSelectSqlAsync(catalog);
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
@@ -259,6 +242,70 @@ namespace BIS.ERP.Services
             return result;
         }
 
+
+
+        private async Task<string> BuildCatalogDataSelectSqlAsync(MetadataObject catalog)
+        {
+            var safeTableName = QuoteIdentifier(catalog.TableName);
+            var sql = $"SELECT * FROM {safeTableName}";
+            var columns = await GetExistingColumnNamesAsync(catalog.TableName);
+            var orderParts = new List<string>();
+
+            if (string.Equals(catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase))
+            {
+                if (columns.Contains("is_primary"))
+                    orderParts.Add("COALESCE(\"is_primary\", false) DESC");
+                if (columns.Contains("code"))
+                    orderParts.Add("\"code\"");
+            }
+
+            if (columns.Contains("CreatedAt"))
+                orderParts.Add("\"CreatedAt\"");
+            else if (columns.Contains("Id"))
+                orderParts.Add("\"Id\"");
+
+            return orderParts.Count == 0
+                ? sql
+                : $"{sql} ORDER BY {string.Join(", ", orderParts)}";
+        }
+
+        private async Task<HashSet<string>> GetExistingColumnNamesAsync(string tableName)
+        {
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = @tableName";
+            var tableNameParameter = command.CreateParameter();
+            tableNameParameter.ParameterName = "@tableName";
+            tableNameParameter.Value = tableName;
+            command.Parameters.Add(tableNameParameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    if (!reader.IsDBNull(0))
+                        columns.Add(reader.GetString(0));
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            return columns;
+        }
 
         private async Task<Dictionary<Guid, string>> LoadReferenceDictionaryAsync(string catalogName)
         {
@@ -531,7 +578,7 @@ namespace BIS.ERP.Services
             {
                 var sqlBuilder = new StringBuilder();
 
-                sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
+                sqlBuilder.AppendLine($"CREATE TABLE IF NOT EXISTS \"{catalog.TableName}\" (");
                 sqlBuilder.AppendLine("    \"Id\" UUID PRIMARY KEY DEFAULT gen_random_uuid(),");
 
                 foreach (var field in catalog.Fields.OrderBy(f => f.Order))
@@ -557,7 +604,6 @@ namespace BIS.ERP.Services
         {
             try
             {
-                await RemoveTestPostingArtifactsAsync();
                 await EnsureTaxCatalogStructureAsync();
                 await EnsurePaymentKindCatalogStructureAsync();
                 await EnsureChartOfAccountsCatalogStructureAsync();
@@ -581,10 +627,47 @@ namespace BIS.ERP.Services
                 .OrderBy(m => m.Order)
                 .ToListAsync();
 
+            catalogs = CollapseDuplicateCatalogsForNavigation(catalogs);
+
             foreach (var catalog in catalogs)
                 await RemoveDuplicateMetadataFieldsAsync(catalog);
 
             return catalogs;
+        }
+
+        public static List<MetadataObject> CollapseDuplicateCatalogsForNavigation(IEnumerable<MetadataObject> catalogs)
+        {
+            return catalogs
+                .GroupBy(GetCatalogNavigationKey, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderByDescending(item => item.TableName.Equals("catalog_esf_xml_tags", StringComparison.OrdinalIgnoreCase))
+                    .ThenByDescending(item => IsPreferredAccountPairsCatalog(item))
+                    .ThenByDescending(item => !string.IsNullOrWhiteSpace(item.TableName))
+                    .ThenByDescending(item => item.IsSystem)
+                    .ThenBy(item => item.Order)
+                    .ThenBy(item => item.Name)
+                    .First())
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Name)
+                .ToList();
+        }
+
+        private static bool IsPreferredAccountPairsCatalog(MetadataObject catalog)
+        {
+            return catalog.TableName.Equals(AccountPairsCatalogTableName, StringComparison.OrdinalIgnoreCase) &&
+                   catalog.Name.Equals(AccountPairsCatalogName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetCatalogNavigationKey(MetadataObject catalog)
+        {
+            if (catalog.TableName.Equals("catalog_esf_xml_tags", StringComparison.OrdinalIgnoreCase) ||
+                catalog.Name.Contains("Настройки XML ЭСФ", StringComparison.OrdinalIgnoreCase))
+                return "catalog:esf_xml_settings";
+
+            if (!string.IsNullOrWhiteSpace(catalog.TableName))
+                return $"table:{catalog.TableName.Trim()}";
+
+            return $"name:{catalog.Name.Trim()}";
         }
 
         public async Task<List<MetadataModule>> GetModulesAsync(bool includeInactive = false)
@@ -687,12 +770,24 @@ namespace BIS.ERP.Services
                 .ToListAsync();
         }
 
+        private async Task<MetadataObject?> LoadDocumentByNameAsync(string documentName)
+        {
+            var normalizedName = documentName.Trim();
+            var normalizedNameLower = normalizedName.ToLower();
+
+            return await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Document" &&
+                    item.Name.ToLower() == normalizedNameLower);
+        }
+
         private async Task UpdateTableStructureAsync(MetadataObject catalog)
         {
             var sqlBuilder = new StringBuilder();
 
             sqlBuilder.AppendLine($"DROP TABLE IF EXISTS \"{catalog.TableName}\" CASCADE;");
-            sqlBuilder.AppendLine($"CREATE TABLE \"{catalog.TableName}\" (");
+            sqlBuilder.AppendLine($"CREATE TABLE IF NOT EXISTS \"{catalog.TableName}\" (");
             sqlBuilder.AppendLine("    \"Id\" uuid PRIMARY KEY DEFAULT gen_random_uuid(),");
 
             foreach (var field in catalog.Fields.OrderBy(f => f.Order))
@@ -784,162 +879,6 @@ namespace BIS.ERP.Services
             };
         }
 
-        private async Task RemoveTestPostingArtifactsAsync()
-        {
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync(@"
-DO $$
-DECLARE
-    marker text := 'Тестовая проводка при создании инфобазы';
-BEGIN
-    IF to_regclass('public.catalog_cash_desks') IS NOT NULL
-       AND to_regclass('public.doc_cash_receipt') IS NOT NULL
-       AND EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'catalog_cash_desks' AND column_name = 'current_balance')
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('description'), ('cash_desk_id'), ('amount'), ('is_posted')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_cash_receipt'
-                 AND column_name = required.column_name)) THEN
-        UPDATE catalog_cash_desks cd
-        SET current_balance = COALESCE(cd.current_balance, 0) - src.amount
-        FROM (
-            SELECT cash_desk_id::text::uuid AS cash_desk_id, SUM(amount) AS amount
-            FROM doc_cash_receipt
-            WHERE description = marker
-              AND COALESCE(is_posted, false) = true
-              AND cash_desk_id IS NOT NULL
-              AND cash_desk_id::text ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-            GROUP BY cash_desk_id::text
-        ) src
-        WHERE cd.""Id"" = src.cash_desk_id;
-    END IF;
-
-    IF to_regclass('public.catalog_cash_desks') IS NOT NULL
-       AND to_regclass('public.doc_cash_payment') IS NOT NULL
-       AND EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'catalog_cash_desks' AND column_name = 'current_balance')
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('description'), ('cash_desk_id'), ('amount'), ('is_posted')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_cash_payment'
-                 AND column_name = required.column_name)) THEN
-        UPDATE catalog_cash_desks cd
-        SET current_balance = COALESCE(cd.current_balance, 0) + src.amount
-        FROM (
-            SELECT cash_desk_id::text::uuid AS cash_desk_id, SUM(amount) AS amount
-            FROM doc_cash_payment
-            WHERE description = marker
-              AND COALESCE(is_posted, false) = true
-              AND cash_desk_id IS NOT NULL
-              AND cash_desk_id::text ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'
-            GROUP BY cash_desk_id::text
-        ) src
-        WHERE cd.""Id"" = src.cash_desk_id;
-    END IF;
-
-    IF to_regclass('public.doc_postings') IS NOT NULL
-       AND to_regclass('public.doc_cash_receipt') IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('doc_number'), ('document_type')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_postings'
-                 AND column_name = required.column_name))
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('doc_number'), ('description')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_cash_receipt'
-                 AND column_name = required.column_name)) THEN
-        DELETE FROM doc_postings p
-        USING doc_cash_receipt d
-        WHERE p.document_type = 'Приходный кассовый ордер'
-          AND p.doc_number = d.doc_number
-          AND d.description = marker;
-    END IF;
-
-    IF to_regclass('public.doc_postings') IS NOT NULL
-       AND to_regclass('public.doc_cash_payment') IS NOT NULL
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('doc_number'), ('document_type')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_postings'
-                 AND column_name = required.column_name))
-       AND NOT EXISTS (
-           SELECT 1
-           FROM (VALUES ('doc_number'), ('description')) required(column_name)
-           WHERE NOT EXISTS (
-               SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'public'
-                 AND table_name = 'doc_cash_payment'
-                 AND column_name = required.column_name)) THEN
-        DELETE FROM doc_postings p
-        USING doc_cash_payment d
-        WHERE p.document_type = 'Расходный кассовый ордер'
-          AND p.doc_number = d.doc_number
-          AND d.description = marker;
-    END IF;
-
-    IF to_regclass('public.doc_cash_receipt') IS NOT NULL
-       AND EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'doc_cash_receipt' AND column_name = 'description') THEN
-        DELETE FROM doc_cash_receipt WHERE description = marker;
-    END IF;
-
-    IF to_regclass('public.doc_cash_payment') IS NOT NULL
-       AND EXISTS (
-           SELECT 1 FROM information_schema.columns
-           WHERE table_schema = 'public' AND table_name = 'doc_cash_payment' AND column_name = 'description') THEN
-        DELETE FROM doc_cash_payment WHERE description = marker;
-    END IF;
-END $$;");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка очистки тестовых проводок: {ex.Message}");
-            }
-
-            try
-            {
-                var catalog = await _context.MetadataObjects
-                    .Include(item => item.Fields)
-                    .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Тестовые сценарии проводок");
-
-                if (catalog == null)
-                    return;
-
-                if (!string.IsNullOrWhiteSpace(catalog.TableName))
-                    await _context.Database.ExecuteSqlRawAsync($"DROP TABLE IF EXISTS {QuoteIdentifier(catalog.TableName)} CASCADE;");
-
-                _context.MetadataFields.RemoveRange(catalog.Fields);
-                _context.MetadataObjects.Remove(catalog);
-                await _context.SaveChangesAsync();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка удаления тестового справочника проводок: {ex.Message}");
-            }
-        }
-
-
         // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
 
         public async Task InitializePredefinedCatalogsAsync(Guid infoBaseId)
@@ -965,7 +904,6 @@ END $$;");
                     await _context.SaveChangesAsync();
                 }
 
-                await RemoveTestPostingArtifactsAsync();
 
                 // Проверяем существующие справочники
                 var existingCatalogs = await _context.MetadataObjects
@@ -980,6 +918,7 @@ END $$;");
                     .ToListAsync();
 
                 // Создаём  справочники
+                await EnsureUnifiedCashOrderDocumentAsync(config);
                 var existingDocumentsWithFields = await _context.MetadataObjects
                     .Include(m => m.Fields)
                     .Where(m => m.ObjectType == "Document")
@@ -1006,6 +945,7 @@ END $$;");
 
                 if (!existingCatalogs.Contains("Расчетные счета организаций"))
                     await CreateBankAccountsCatalog(config);
+                await EnsureBankAccountsCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("План счетов"))
                     await CreateChartOfAccountsCatalog(config);
@@ -1069,7 +1009,8 @@ END $$;");
                 if (!existingCatalogs.Contains("Должности"))
                     await CreatePositionsCatalog(config);
 
-                if (!existingCatalogs.Contains("Авансовые платежи"))
+                if (!existingCatalogs.Contains(AccountPairsCatalogName) &&
+                    !existingCatalogs.Contains(LegacyAdvancePaymentsCatalogName))
                     await CreateAdvancePaymentsCatalog(config);
                 await EnsureAdvancePaymentsCatalogStructureAsync();
 
@@ -1103,10 +1044,12 @@ END $$;");
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
+            ApplyCreateRecordDefaults(metadata, data);
 
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
@@ -1138,6 +1081,9 @@ END $$;");
 
             var recordId = Guid.Parse(newId.ToString());
 
+            if (ShouldIncrementDocumentNumberAfterCreate(metadata, data))
+                await IncrementDocumentNumberAfterCreateAsync(metadata, data);
+
             // Выполняем автоматические расчеты
             await ExecuteAutoCalculationsAsync(metadataId, recordId);
             if (IsPostingsDocument(metadata))
@@ -1166,6 +1112,7 @@ END $$;");
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
@@ -1224,6 +1171,38 @@ END $$;");
                 new { Number = GetDocumentNumberFromData(data) });
         }
 
+        private static void ApplyCreateRecordDefaults(MetadataObject metadata, Dictionary<string, object> data)
+        {
+            if (!IsBankAccountsCatalog(metadata))
+                return;
+
+            SetDefaultIfMissing(data, metadata, "current_balance", 0m);
+            SetDefaultIfMissing(data, metadata, "is_main", false);
+            SetDefaultIfMissing(data, metadata, "is_active", true);
+        }
+
+        private static void SetDefaultIfMissing(
+            Dictionary<string, object> data,
+            MetadataObject metadata,
+            string dbColumnName,
+            object value)
+        {
+            var field = metadata.Fields
+                .OrderBy(item => item.Order)
+                .FirstOrDefault(item => string.Equals(item.DbColumnName, dbColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (field == null || data.ContainsKey(field.Name))
+                return;
+
+            data[field.Name] = value;
+        }
+
+        private static bool IsBankAccountsCatalog(MetadataObject metadata)
+        {
+            return string.Equals(metadata.ObjectType, "Catalog", StringComparison.OrdinalIgnoreCase) &&
+                   (string.Equals(metadata.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(metadata.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase));
+        }
         private static List<MetadataField> SelectFieldsForWrite(
             MetadataObject metadata,
             Dictionary<string, object> data)
@@ -1284,6 +1263,34 @@ END $$;");
             await _context.SaveChangesAsync();
         }
 
+        private async Task EnsureLargeDynamicTextColumnsAsync(MetadataObject metadata)
+        {
+            if (!string.Equals(metadata.ObjectType, "Document", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(metadata.TableName))
+                return;
+
+            var largeTextColumns = metadata.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                                field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase))
+                .Select(field => field.DbColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (largeTextColumns.Count == 0)
+                return;
+
+            var tableName = QuoteIdentifier(metadata.TableName);
+            foreach (var column in largeTextColumns)
+            {
+                var columnName = QuoteIdentifier(column);
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    ALTER TABLE {tableName} ADD COLUMN IF NOT EXISTS {columnName} text;
+                    ALTER TABLE {tableName} ALTER COLUMN {columnName} TYPE text;");
+            }
+
+            foreach (var field in metadata.Fields.Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName) &&
+                                                          field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase)))
+                field.Length = Math.Max(field.Length, 4000);
+        }
         private async Task EnsureSingleCatalogDefaultsAsync(
             MetadataObject metadata,
             IReadOnlyDictionary<string, object> data,
@@ -1407,10 +1414,12 @@ END $$;");
                 return;
             }
 
-            var documents = await LoadDocumentMetadataAsync();
-            var documentsToCheck = UsesIndependentDocumentNumbering(metadata.Name)
-                ? documents.Where(document => document.Id == metadata.Id)
-                : documents.Where(document => !UsesIndependentDocumentNumbering(document.Name));
+            if (IsCashOrderDocument(metadata))
+            {
+                await EnsureCashOrderDocumentNumberIsUniqueAsync(metadata, data, documentNumber, currentRecordId);
+                return;
+            }
+            var documentsToCheck = new[] { metadata };
             var connection = _context.Database.GetDbConnection();
             var connectionOpened = false;
 
@@ -1476,6 +1485,73 @@ END $$;");
             }
         }
 
+        private async Task EnsureCashOrderDocumentNumberIsUniqueAsync(
+            MetadataObject metadata,
+            IReadOnlyDictionary<string, object> data,
+            string documentNumber,
+            Guid? currentRecordId)
+        {
+            var orderKind = GetCashOrderKindFromData(data);
+            var quotedTableName = DelimitIdentifier(metadata.TableName);
+            var numberField = FindDocumentNumberField(metadata);
+            if (numberField == null || string.IsNullOrWhiteSpace(numberField.DbColumnName))
+                return;
+
+            var quotedNumberColumn = DelimitIdentifier(numberField.DbColumnName);
+            var connection = _context.Database.GetDbConnection();
+            var connectionOpened = false;
+
+            try
+            {
+                if (connection.State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var command = connection.CreateCommand();
+                command.CommandText = $@"
+                    SELECT COUNT(*)
+                    FROM {quotedTableName}
+                    WHERE REGEXP_REPLACE(COALESCE({quotedNumberColumn}::text, ''), '\D', '', 'g') = @documentNumber
+                      AND LOWER(COALESCE(""order_kind""::text, '')) = LOWER(@orderKind)";
+
+                var documentNumberParameter = command.CreateParameter();
+                documentNumberParameter.ParameterName = "@documentNumber";
+                documentNumberParameter.Value = documentNumber;
+                command.Parameters.Add(documentNumberParameter);
+
+                var orderKindParameter = command.CreateParameter();
+                orderKindParameter.ParameterName = "@orderKind";
+                orderKindParameter.Value = orderKind;
+                command.Parameters.Add(orderKindParameter);
+
+                if (currentRecordId.HasValue)
+                {
+                    command.CommandText += @" AND ""Id"" <> @recordId";
+
+                    var recordIdParameter = command.CreateParameter();
+                    recordIdParameter.ParameterName = "@recordId";
+                    recordIdParameter.Value = currentRecordId.Value;
+                    command.Parameters.Add(recordIdParameter);
+                }
+
+                var matches = Convert.ToInt32(await command.ExecuteScalarAsync());
+                if (matches > 0)
+                {
+                    var kindDisplay = orderKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase)
+                        ? "приходного кассового ордера"
+                        : "расходного кассового ордера";
+                    throw new Exception($"Номер {kindDisplay} {documentNumber} уже используется.");
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
         private static string? GetDocumentNumberFromData(Dictionary<string, object> data)
         {
             foreach (var fieldName in new[] { "Номер", "Номер документа", "doc_number", "number" })
@@ -1502,16 +1578,18 @@ END $$;");
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            Dictionary<string, object>? documentRecord = null;
             if (metadata.ObjectType == "Document")
             {
-                var recordData = await GetRecordDataAsync(metadata.TableName, recordId);
-                await EnsureDocumentDateCanBeModifiedAsync(metadata, recordData);
+                documentRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+                await EnsureDocumentDateCanBeModifiedAsync(metadata, documentRecord);
+                await DeleteDocumentPostingsAsync(metadata, documentRecord);
             }
 
             Dictionary<string, object>? previousRecord = null;
             if (IsPostingsDocument(metadata))
             {
-                previousRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+                previousRecord = documentRecord ?? await GetRecordDataAsync(metadata.TableName, recordId);
             }
 
             var sql = $"DELETE FROM \"{metadata.TableName}\" WHERE \"Id\" = '{recordId}'";
@@ -1529,6 +1607,63 @@ END $$;");
                 metadata.ObjectType,
                 metadata.Name,
                 recordId);
+        }
+
+        private async Task DeleteDocumentPostingsAsync(MetadataObject document, Dictionary<string, object> record)
+        {
+            var documentNumber = NormalizeLegacyDocumentNumber(GetDocumentNumberFromData(record));
+            if (string.IsNullOrWhiteSpace(documentNumber))
+                return;
+
+            var documentTypes = GetPostingDocumentTypesForDocument(document, record)
+                .Where(type => !string.IsNullOrWhiteSpace(type))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (documentTypes.Count == 0)
+                return;
+
+            var parameters = new List<NpgsqlParameter>
+            {
+                new("@number", documentNumber)
+            };
+            var typeParameterNames = new List<string>();
+            for (var index = 0; index < documentTypes.Count; index++)
+            {
+                var parameterName = $"@type{index}";
+                typeParameterNames.Add(parameterName);
+                parameters.Add(new NpgsqlParameter(parameterName, documentTypes[index]));
+            }
+
+            var sql = $@"
+                DELETE FROM doc_postings
+                WHERE doc_number = @number
+                  AND document_type IN ({string.Join(", ", typeParameterNames)});";
+            await _context.Database.ExecuteSqlRawAsync(sql, parameters.ToArray());
+        }
+
+        private static IEnumerable<string> GetPostingDocumentTypesForDocument(
+            MetadataObject document,
+            Dictionary<string, object> record)
+        {
+            yield return document.Name;
+
+            if (document.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return "Исходящее платежное поручение";
+                yield return "Входящее платежное поручение";
+                var orderType = GetStringValue(record, "order_type", "Тип");
+                if (!string.IsNullOrWhiteSpace(orderType))
+                    yield return orderType.Contains("Вход", StringComparison.OrdinalIgnoreCase)
+                        ? "Входящее платежное поручение"
+                        : "Исходящее платежное поручение";
+            }
+
+            if (IsCashOrderDocumentName(document.Name))
+            {
+                yield return CashOrderReceiptDocumentType;
+                yield return CashOrderPaymentDocumentType;
+                yield return GetCashOrderPostingDocumentType(ResolveCashOrderKind(record, document.Name));
+            }
         }
 
         private decimal CalculateDepreciation(MetadataCalculation calc, Dictionary<string, object> data)
@@ -1928,6 +2063,9 @@ END $$;");
 
                 await _context.SaveChangesAsync();
 
+                if (obj.ObjectType == "Document")
+                    await EnsureDocumentNumberConfigurationAsync(obj);
+
                 System.Diagnostics.Debug.WriteLine($"Объект {obj.Name} обновлен. Добавлено {newFields.Count} новых полей.");
             }
             catch (Exception ex)
@@ -2034,6 +2172,16 @@ END $$;");
             sql.AppendLine(");");
 
             await _context.Database.ExecuteSqlRawAsync(sql.ToString());
+
+            foreach (var field in obj.Fields.OrderBy(f => f.Order))
+            {
+                if (string.IsNullOrWhiteSpace(field.DbColumnName))
+                    continue;
+
+                var sqlType = GetSqlTypeForField(field);
+                await _context.Database.ExecuteSqlRawAsync(
+                    $"ALTER TABLE \"{obj.TableName}\" ADD COLUMN IF NOT EXISTS \"{field.DbColumnName}\" {sqlType};");
+            }
         }
 
         public async Task UpdateDynamicTableAsync(MetadataObject obj)
@@ -2081,6 +2229,9 @@ END $$;");
         {
             await _context.MetadataObjects.AddAsync(obj);
             await _context.SaveChangesAsync();
+
+            if (obj.ObjectType == "Document")
+                await EnsureDocumentNumberConfigurationAsync(obj);
         }
 
         public async Task DeleteMetadataObjectAsync(Guid id)
@@ -2088,6 +2239,9 @@ END $$;");
             var obj = await _context.MetadataObjects.FindAsync(id);
             if (obj != null)
             {
+                if (obj.ObjectType == "Document")
+                    await DeleteDocumentNumberingConfigurationAsync(obj);
+
                 _context.MetadataObjects.Remove(obj);
                 await _context.SaveChangesAsync();
             }
@@ -2124,9 +2278,20 @@ END $$;");
                 }
 
                 // 3. Проверяем, не проведён ли уже документ
+                var isAdvanceDocument = document.Name == "Авансовый отчет" || document.Name == "Авансовые платежи";
                 if (recordData.ContainsKey("is_posted") && recordData["is_posted"] is bool isPosted && isPosted)
                 {
-                    throw new Exception("Документ уже проведён!");
+                    if (isAdvanceDocument)
+                    {
+                        await DeleteDocumentPostingsAsync(document, recordData);
+                        recordData["is_posted"] = false;
+                        if (recordData.ContainsKey("Проведен"))
+                            recordData["Проведен"] = false;
+                    }
+                    else
+                    {
+                        throw new Exception("Документ уже проведён!");
+                    }
                 }
 
                 // 4. Получаем сумму
@@ -2139,7 +2304,7 @@ END $$;");
                     throw new Exception("Для данного документа сумма не может быть нулевой");
 
                 // 5. Определяем тип документа и обрабатываем
-                if (document.Name == "Приходный кассовый ордер" || document.Name == "Расходный кассовый ордер")
+                if (IsCashOrderDocumentName(document.Name))
                 {
                     await ProcessCashOrderAsync(document, recordData, recordId, amount);
                 }
@@ -2147,13 +2312,9 @@ END $$;");
                 {
                     await ProcessPaymentOrderAsync(document, recordData, recordId, amount);
                 }
-                else if (document.Name == "Авансовый отчет")
+                else if (isAdvanceDocument)
                 {
                     await ProcessAdvanceReportAsync(document, recordData, recordId, amount);
-                }
-                else if (document.Name == "Доверенность")
-                {
-                    await ProcessPowerOfAttorneyAsync(document, recordData, recordId);
                 }
                 else if (document.Name == "Платежная ведомость")
                 {
@@ -2259,10 +2420,11 @@ END $$;");
                 var document = await _context.MetadataObjects.Include(item => item.Fields)
                     .FirstOrDefaultAsync(item => item.Id == documentId)
                     ?? throw new InvalidOperationException("Документ не найден.");
-                var isCashOrder = document.Name == "Приходный кассовый ордер" || document.Name == "Расходный кассовый ордер";
+                var isCashOrder = IsCashOrderDocumentName(document.Name);
                 var isFixedAssetDocument = ModuleMetadataService.FixedAssetDocumentNames.Contains(document.Name);
-                if (!isCashOrder && !isFixedAssetDocument)
-                    throw new InvalidOperationException("Отмена проведения поддерживается для кассовых документов и документов основных средств.");
+                var isPaymentOrder = document.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase);
+                if (!isCashOrder && !isFixedAssetDocument && !isPaymentOrder)
+                    throw new InvalidOperationException("Отмена проведения поддерживается для кассовых документов, платежных поручений и документов основных средств.");
 
                 var record = await GetRecordDataAsync(document.TableName, recordId);
                 await EnsureDocumentDateCanBeModifiedAsync(document, record);
@@ -2270,22 +2432,13 @@ END $$;");
                     throw new InvalidOperationException("Документ не проведен.");
 
                 var amount = Convert.ToDecimal(record.GetValueOrDefault("amount") ?? 0m);
-                var documentNumber = NormalizeLegacyDocumentNumber(record.GetValueOrDefault("doc_number")?.ToString());
-                if (isCashOrder && TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса", "cashdesk_id", "cashdesk"))
-                {
-                    var wasReceipt = document.Name == "Приходный кассовый ордер";
-                    await UpdateCashDeskBalance(cashDeskId, amount, !wasReceipt);
-                }
-                else if (isFixedAssetDocument)
+                var documentNumber = NormalizeLegacyDocumentNumber(GetDocumentNumberFromData(record));
+                if (isFixedAssetDocument)
                 {
                     await ReverseFixedAssetDocumentAsync(document, record, recordId);
                 }
 
-                await _context.Database.ExecuteSqlRawAsync(@"
-                    DELETE FROM doc_postings
-                    WHERE doc_number = @number AND document_type = @type;",
-                    new NpgsqlParameter("@number", documentNumber),
-                    new NpgsqlParameter("@type", document.Name));
+                await DeleteDocumentPostingsAsync(document, record);
 
                 var tableName = QuoteIdentifier(document.TableName);
                 await _context.Database.ExecuteSqlRawAsync($@"
@@ -2306,6 +2459,14 @@ END $$;");
                 await transaction.RollbackAsync();
                 throw;
             }
+        }
+
+        public Task<List<PostingViewModel>> GetPostingsByDocumentAsync(
+            string documentType,
+            string documentNumber,
+            DateTime? documentDate = null)
+        {
+            return new PostingService(_context).GetPostingsByDocumentAsync(documentType, documentNumber, documentDate);
         }
 
         private async Task ProcessDocumentByPostingRulesAsync(
@@ -3247,7 +3408,8 @@ END $$;");
 
         private async Task ProcessCashOrderAsync(MetadataObject document, Dictionary<string, object> recordData, Guid recordId, decimal amount)
         {
-            bool isReceipt = document.Name.Contains("Приходный");
+            var cashOrderKind = ResolveCashOrderKind(recordData, document.Name);
+            bool isReceipt = IsReceiptCashOrder(cashOrderKind);
             System.Diagnostics.Debug.WriteLine($"IsReceipt: {isReceipt}");
 
             // Получаем ID кассы
@@ -3265,13 +3427,7 @@ END $$;");
             if (string.IsNullOrWhiteSpace(cashAccountCode))
                 throw new Exception("У выбранной кассы не указан счет. Откройте справочник касс и заполните поле \"Счет\".");
 
-            // Старые записи могут содержать конкретную кассу. Новые документы работают по счету,
-            // поэтому остаток справочника касс обновляем только когда касса явно указана.
-            if (cashDeskId != Guid.Empty)
-            {
-                await UpdateCashDeskBalance(cashDeskId, amount, isReceipt);
-                System.Diagnostics.Debug.WriteLine("Cash desk balance updated");
-            }
+            // Остаток кассы не пересчитывается в справочнике. Движение кассы считается по проводкам и отчетам.
 
             // Получаем данные документа
             string? docNumber = recordData.ContainsKey("doc_number") ? recordData["doc_number"].ToString() : (recordData.ContainsKey("Номер") ? recordData["Номер"].ToString() : "");
@@ -3283,7 +3439,7 @@ END $$;");
 
             string debitAccount = "";
             string creditAccount = "";
-            string documentType = isReceipt ? "Приходный кассовый ордер" : "Расходный кассовый ордер";
+            string documentType = GetCashOrderPostingDocumentType(cashOrderKind);
 
             if (isReceipt)
             {
@@ -3301,8 +3457,20 @@ END $$;");
                 throw new Exception($"Для проведения кассового документа укажите корреспондирующий счет. Приход увеличивает кассу: Дт {cashAccountCode} / Кт корр.счет; расход уменьшает кассу: Дт корр.счет / Кт {cashAccountCode}.");
             }
 
+            var organizationId = GetNullableGuid(recordData, "organization_id", "Организация");
+            var employeeId = GetNullableGuid(recordData, "employee_id", "Сотрудник");
+
             // Создаём проводку с указанием типа документа
-            await CreatePosting(docNumber!, postingDate, debitAccount, creditAccount, amount, description!, documentType);            
+            await CreatePosting(
+                docNumber!,
+                postingDate,
+                debitAccount,
+                creditAccount,
+                amount,
+                description!,
+                documentType,
+                organizationId: organizationId,
+                employeeId: employeeId);            
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
@@ -3359,82 +3527,47 @@ END $$;");
             if (amountCurrency <= 0 && amount > 0 && exchangeRate > 0)
                 amountCurrency = Math.Round(amount / exchangeRate, 2, MidpointRounding.AwayFromZero);
 
-            // Получаем код нашего счёта
-            string ourAccountCode = string.Empty;
-            if (recordData.ContainsKey("our_account_id") && recordData["our_account_id"] != null)
+            async Task<string> ResolvePaymentAccountCodeAsync(params string[] keys)
             {
-                if (Guid.TryParse(recordData["our_account_id"].ToString(), out var ourAccountId))
-                {
-                    ourAccountCode = await GetAccountCodeById(ourAccountId);
-                }
-                else
-                {
-                    ourAccountCode = recordData["our_account_id"].ToString();
-                }
+                var rawValue = GetStringValue(recordData, keys);
+                if (string.IsNullOrWhiteSpace(rawValue))
+                    return string.Empty;
+
+                return Guid.TryParse(rawValue, out var accountId)
+                    ? await GetAccountCodeById(accountId)
+                    : rawValue;
             }
-            else if (recordData.ContainsKey("Наш счет") && recordData["Наш счет"] != null)
-            {
-                if (Guid.TryParse(recordData["Наш счет"].ToString(), out var ourAccountId))
-                {
-                    ourAccountCode = await GetAccountCodeById(ourAccountId);
-                }
-                else
-                {
-                    ourAccountCode = recordData["Наш счет"].ToString();
-                }
-            }
+
+            // Наш счет всегда идет в дебет платежного поручения.
+            var ourAccountCode = await ResolvePaymentAccountCodeAsync("our_account_id", "Наш счет", "Дебет", "debit_account");
             if (string.IsNullOrWhiteSpace(ourAccountCode))
-                throw new Exception("Для платежного поручения укажите наш счет.");
+                throw new Exception("Для платежного поручения укажите счет дебета.");
 
-            // Получаем корреспондирующий счёт
-            string corrAccountCode = "";
-            if (recordData.ContainsKey("correspondent_account") && recordData["correspondent_account"] != null)
-            {
-                if (Guid.TryParse(recordData["correspondent_account"].ToString(), out var corrAccountId))
-                {
-                    corrAccountCode = await GetAccountCodeById(corrAccountId);
-                }
-                else
-                {
-                    corrAccountCode = recordData["correspondent_account"].ToString();
-                }
-            }
-            else if (recordData.ContainsKey("Корр. счет") && recordData["Корр. счет"] != null)
-            {
-                if (Guid.TryParse(recordData["Корр. счет"].ToString(), out var corrAccountId))
-                {
-                    corrAccountCode = await GetAccountCodeById(corrAccountId);
-                }
-                else
-                {
-                    corrAccountCode = recordData["Корр. счет"].ToString();
-                }
-            }
-
-            if (string.IsNullOrEmpty(corrAccountCode))
-            {
-                throw new Exception("Для платежного поручения укажите корреспондирующий счет.");
-            }
-
-            // Определяем счета для проводки
-            string debitAccount, creditAccount;
-            if (isOutgoing)
-            {
-                // Исходящее: Дт (корр. счёт) — Кт (наш счёт)
-                debitAccount = corrAccountCode;
-                creditAccount = ourAccountCode;
-            }
-            else
-            {
-                // Входящее: Дт (наш счёт) — Кт (корр. счёт)
-                debitAccount = ourAccountCode;
-                creditAccount = corrAccountCode;
-            }
-
+            // Корреспондирующий счет всегда идет в кредит платежного поручения.
+            var corrAccountCode = await ResolvePaymentAccountCodeAsync("correspondent_account", "Корр. счет", "Корр счет", "Коррсчет", "Кредит", "credit_account");
+            if (string.IsNullOrWhiteSpace(corrAccountCode))
+                throw new Exception("Для платежного поручения укажите счет кредита.");
+            // Платежное поручение в этой системе: дебет и кредит берутся из одноименных полей.
+            var debitAccount = ourAccountCode;
+            var creditAccount = corrAccountCode;
             System.Diagnostics.Debug.WriteLine($"debitAccount: {debitAccount}, creditAccount: {creditAccount}");
 
+            var organizationId = GetNullableGuid(recordData, "organization_id", "Организация");
+            var employeeId = GetNullableGuid(recordData, "employee_id", "Сотрудник");
+
             // Создаём проводку с указанием типа документа
-            await CreatePosting(docNumber, postingDate, debitAccount, creditAccount, amount, description, documentType, amountCurrency, currencyId);
+            await CreatePosting(
+                docNumber,
+                postingDate,
+                debitAccount,
+                creditAccount,
+                amount,
+                description,
+                documentType,
+                amountCurrency,
+                currencyId,
+                organizationId,
+                employeeId);
 
             // Обновляем статус документа
             await UpdateDocumentPostedStatus(document.TableName, recordId);
@@ -3504,7 +3637,9 @@ END $$;");
             string? description,
             string documentType = "",
             decimal amountCurrency = 0m,
-            string? currencyId = null)
+            string? currencyId = null,
+            Guid? organizationId = null,
+            Guid? employeeId = null)
         {
             try
             {
@@ -3520,7 +3655,7 @@ END $$;");
                 var sql = @"
                     INSERT INTO doc_postings 
                     (""Id"", posting_date, doc_number, document_type, module_code, debit_account, credit_account, 
-                     amount_kgs, amount_currency, currency_id, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
+                     amount_kgs, amount_currency, currency_id, organization_id, employee_id, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
                     VALUES (
                         @id,
                         @postingDate,
@@ -3532,6 +3667,8 @@ END $$;");
                         @amount,
                         @amountCurrency,
                         @currencyId,
+                        @organizationId,
+                        @employeeId,
                         @description,
                         @isActive,
                         NOW(),
@@ -3549,6 +3686,8 @@ END $$;");
                     new NpgsqlParameter("@amount", amount),
                     new NpgsqlParameter("@amountCurrency", amountCurrency),
                     new NpgsqlParameter("@currencyId", string.IsNullOrWhiteSpace(currencyId) ? DBNull.Value : (object)currencyId),
+                    new NpgsqlParameter("@organizationId", (object?)organizationId ?? DBNull.Value),
+                    new NpgsqlParameter("@employeeId", (object?)employeeId ?? DBNull.Value),
                     new NpgsqlParameter("@description", (object?)description ?? DBNull.Value),
                     new NpgsqlParameter("@documentType", documentType),
                     new NpgsqlParameter("@isActive", true));
@@ -3570,6 +3709,8 @@ END $$;");
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2);
                         ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS organization_id uuid;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS employee_id uuid;
                     END IF;
                 END $$;");
         }
@@ -3663,67 +3804,14 @@ END $$;");
             await _context.Database.ExecuteSqlRawAsync(updateSql, new NpgsqlParameter("@recordId", recordId));
         }
 
-        private async Task UpdateCashDeskBalance(Guid cashDeskId, decimal amount, bool isIncrease)
-        {
-            var sql = $@"
-            UPDATE ""catalog_cash_desks"" 
-            SET ""current_balance"" = COALESCE(""current_balance"", 0) {(isIncrease ? "+" : "-")} @amount,
-                ""UpdatedAt"" = NOW()
-            WHERE ""Id"" = @cashDeskId";
-
-            await _context.Database.ExecuteSqlRawAsync(
-                sql,
-                new NpgsqlParameter("@amount", amount),
-                new NpgsqlParameter("@cashDeskId", cashDeskId));
-        }
-
-        private async Task SyncManualPostingCashBalanceAsync(
+        private Task SyncManualPostingCashBalanceAsync(
             MetadataObject metadata,
             Dictionary<string, object>? previousRecord,
             Dictionary<string, object>? currentRecord)
         {
-            if (!IsPostingsDocument(metadata))
-                return;
-
-            if (previousRecord != null)
-                await ApplyManualPostingCashBalanceDeltaAsync(previousRecord, reverse: true);
-
-            if (currentRecord != null)
-                await ApplyManualPostingCashBalanceDeltaAsync(currentRecord, reverse: false);
+            // Остаток кассы не хранится расчетным полем справочника. Ручные проводки влияют только на журнал проводок.
+            return Task.CompletedTask;
         }
-
-        private async Task ApplyManualPostingCashBalanceDeltaAsync(
-            Dictionary<string, object> record,
-            bool reverse)
-        {
-            if (!IsRecordActive(record))
-                return;
-
-            if (!TryGetGuid(record, out var cashDeskId, "cash_desk_id", "Касса"))
-                return;
-
-            var amount = GetDecimalValue(record, "amount_kgs", "Сумма в сом", "amount", "Сумма");
-            if (amount == 0)
-                return;
-
-            var cashAccountCode = await GetCashDeskAccountCodeAsync(cashDeskId);
-            if (string.IsNullOrWhiteSpace(cashAccountCode))
-                return;
-
-            var debitAccount = GetStringValue(record, "debit_account", "Дебет");
-            var creditAccount = GetStringValue(record, "credit_account", "Кредит");
-            var accountType = await GetAccountTypeByCodeAsync(cashAccountCode);
-            var delta = CalculateAccountBalanceDelta(cashAccountCode, accountType, debitAccount, creditAccount, amount);
-
-            if (delta == 0)
-                return;
-
-            if (reverse)
-                delta = -delta;
-
-            await UpdateCashDeskBalanceDeltaAsync(cashDeskId, delta);
-        }
-
         private async Task<string> GetCashDeskAccountCodeAsync(Guid cashDeskId)
         {
             const string sql = @"
@@ -3775,35 +3863,41 @@ END $$;");
             if (string.IsNullOrWhiteSpace(accountCode))
                 return;
 
-            var documents = await _context.MetadataObjects
-                .Where(item => item.ObjectType == "Document" &&
-                    (item.Name == "Приходный кассовый ордер" || item.Name == "Расходный кассовый ордер"))
-                .ToListAsync();
+            var document = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == CashOrderDocumentName);
+            if (document == null)
+                return;
 
-            foreach (var document in documents)
-            {
-                var isReceipt = document.Name == "Приходный кассовый ордер";
-                var accountColumn = isReceipt ? "debit_account" : "credit_account";
-                var tableName = QuoteIdentifier(document.TableName);
+            var tableName = QuoteIdentifier(document.TableName);
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE {tableName}
+                SET ""debit_account"" = CASE WHEN ""order_kind"" = @receiptKind THEN @accountCode ELSE ""debit_account"" END,
+                    ""credit_account"" = CASE WHEN ""order_kind"" = @paymentKind THEN @accountCode ELSE ""credit_account"" END,
+                    ""UpdatedAt"" = NOW()
+                WHERE ""cash_desk_id"" = @cashDeskId;",
+                new NpgsqlParameter("@accountCode", accountCode),
+                new NpgsqlParameter("@cashDeskId", cashDeskId.ToString()),
+                new NpgsqlParameter("@receiptKind", CashOrderReceiptKind),
+                new NpgsqlParameter("@paymentKind", CashOrderPaymentKind));
 
-                await _context.Database.ExecuteSqlRawAsync($@"
-                    UPDATE {tableName}
-                    SET ""{accountColumn}"" = @accountCode, ""UpdatedAt"" = NOW()
-                    WHERE ""cash_desk_id"" = @cashDeskId;",
-                    new NpgsqlParameter("@accountCode", accountCode),
-                    new NpgsqlParameter("@cashDeskId", cashDeskId));
-
-                await _context.Database.ExecuteSqlRawAsync($@"
-                    UPDATE doc_postings AS posting
-                    SET {accountColumn} = @accountCode, ""UpdatedAt"" = NOW()
-                    FROM {tableName} AS document
-                    WHERE posting.document_type = @documentType
-                      AND posting.doc_number = document.""doc_number""
-                      AND document.""cash_desk_id"" = @cashDeskId;",
-                    new NpgsqlParameter("@accountCode", accountCode),
-                    new NpgsqlParameter("@documentType", document.Name),
-                    new NpgsqlParameter("@cashDeskId", cashDeskId));
-            }
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE doc_postings AS posting
+                SET debit_account = CASE WHEN document.""order_kind"" = @receiptKind THEN @accountCode ELSE posting.debit_account END,
+                    credit_account = CASE WHEN document.""order_kind"" = @paymentKind THEN @accountCode ELSE posting.credit_account END,
+                    ""UpdatedAt"" = NOW()
+                FROM {tableName} AS document
+                WHERE posting.doc_number = document.""doc_number""
+                  AND posting.document_type = CASE
+                        WHEN document.""order_kind"" = @receiptKind THEN @receiptDocumentType
+                        ELSE @paymentDocumentType
+                      END
+                  AND document.""cash_desk_id"" = @cashDeskId;",
+                new NpgsqlParameter("@accountCode", accountCode),
+                new NpgsqlParameter("@cashDeskId", cashDeskId.ToString()),
+                new NpgsqlParameter("@receiptKind", CashOrderReceiptKind),
+                new NpgsqlParameter("@paymentKind", CashOrderPaymentKind),
+                new NpgsqlParameter("@receiptDocumentType", CashOrderReceiptDocumentType),
+                new NpgsqlParameter("@paymentDocumentType", CashOrderPaymentDocumentType));
         }
 
         private async Task<string> GetAccountTypeByCodeAsync(string accountCode)
@@ -3845,46 +3939,6 @@ END $$;");
             }
         }
 
-        private async Task UpdateCashDeskBalanceDeltaAsync(Guid cashDeskId, decimal delta)
-        {
-            const string sql = @"
-                UPDATE ""catalog_cash_desks""
-                SET ""current_balance"" = COALESCE(""current_balance"", 0) + @delta,
-                    ""UpdatedAt"" = NOW()
-                WHERE ""Id"" = @cashDeskId;";
-
-            await _context.Database.ExecuteSqlRawAsync(
-                sql,
-                new NpgsqlParameter("@delta", delta),
-                new NpgsqlParameter("@cashDeskId", cashDeskId));
-        }
-
-        private static decimal CalculateAccountBalanceDelta(
-            string cashAccountCode,
-            string accountType,
-            string debitAccount,
-            string creditAccount,
-            decimal amount)
-        {
-            var isDebit = debitAccount.Equals(cashAccountCode, StringComparison.OrdinalIgnoreCase);
-            var isCredit = creditAccount.Equals(cashAccountCode, StringComparison.OrdinalIgnoreCase);
-
-            if (isDebit == isCredit)
-                return 0m;
-
-            var passive = IsPassiveAccountType(accountType);
-            if (passive)
-                return isCredit ? amount : -amount;
-
-            return isDebit ? amount : -amount;
-        }
-
-        private static bool IsPassiveAccountType(string accountType)
-        {
-            return accountType.Equals("Passive", StringComparison.OrdinalIgnoreCase) ||
-                   accountType.Equals("Пассивный", StringComparison.OrdinalIgnoreCase);
-        }
-
         private static decimal ResolveDocumentAmount(Dictionary<string, object> data)
         {
             var amount = GetDecimalValue(data,
@@ -3902,6 +3956,45 @@ END $$;");
                 : amount;
         }
 
+        private static bool IsCashOrderDocumentName(string documentName)
+        {
+            return documentName.Equals(CashOrderDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                   documentName.Equals(CashOrderReceiptDocumentType, StringComparison.OrdinalIgnoreCase) ||
+                   documentName.Equals(CashOrderPaymentDocumentType, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ResolveCashOrderKind(Dictionary<string, object> recordData, string documentName)
+        {
+            var rawKind = GetStringValue(recordData, "order_kind", "Тип КО", "cash_order_kind", "order_type");
+            if (rawKind.Contains("приход", StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase))
+            {
+                return CashOrderReceiptKind;
+            }
+
+            if (rawKind.Contains("расход", StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderPaymentKind, StringComparison.OrdinalIgnoreCase))
+            {
+                return CashOrderPaymentKind;
+            }
+
+            if (documentName.Equals(CashOrderReceiptDocumentType, StringComparison.OrdinalIgnoreCase))
+                return CashOrderReceiptKind;
+
+            return CashOrderPaymentKind;
+        }
+
+        private static bool IsReceiptCashOrder(string cashOrderKind)
+        {
+            return cashOrderKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetCashOrderPostingDocumentType(string cashOrderKind)
+        {
+            return IsReceiptCashOrder(cashOrderKind)
+                ? CashOrderReceiptDocumentType
+                : CashOrderPaymentDocumentType;
+        }
         private static bool RequiresPositiveDocumentAmount(string documentName)
         {
             return !documentName.Equals("Начисление амортизации", StringComparison.OrdinalIgnoreCase) &&
@@ -3911,7 +4004,6 @@ END $$;");
                    !documentName.Equals("Смена затратного счета", StringComparison.OrdinalIgnoreCase) &&
                    !documentName.Equals("Ликвидация ОС", StringComparison.OrdinalIgnoreCase) &&
                    !documentName.Equals("Переоценка ОС", StringComparison.OrdinalIgnoreCase) &&
-                   !documentName.Equals("Доверенность", StringComparison.OrdinalIgnoreCase) &&
                    !documentName.Equals("Расчет курсовой разницы", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -4045,6 +4137,12 @@ END $$;");
             return code;
         }
 
+        private static Guid? GetNullableGuid(Dictionary<string, object> data, params string[] keys)
+        {
+            return TryGetGuid(data, out var value, keys) && value != Guid.Empty
+                ? value
+                : null;
+        }
         private static bool TryGetGuid(Dictionary<string, object> data, out Guid value, params string[] keys)
         {
             foreach (var key in keys)
@@ -4155,36 +4253,183 @@ END $$;");
             }
         }
 
-        private async Task AddDefaultNumberingRecordsAsync()
-        {
-            const string insertSql = @"
-                INSERT INTO doc_numbering (document_type, current_number, prefix) 
-                VALUES (@documentType, 1, '')
-                ON CONFLICT (document_type) DO NOTHING";
+        private Task AddDefaultNumberingRecordsAsync() => Task.CompletedTask;
 
-            await _context.Database.ExecuteSqlRawAsync(
-                insertSql,
-                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey));
-        }       
+        public Task<string> GetNextCashOrderDocumentNumberAsync(string orderKind)
+        {
+            return GetNextCashOrderDocumentNumberByKindAsync(orderKind);
+        }
 
         public async Task<string> GetNextDocumentNumberAsync(string documentName)
         {
+            var document = await LoadDocumentByNameAsync(documentName);
+            if (document != null)
+                return await GetNextDocumentNumberAsync(document);
+
+            return await GetNextDocumentNumberByKeyAsync(documentName, GetDocumentNumberingKey(documentName));
+        }
+
+        public Task<string> GetNextDocumentNumberAsync(MetadataObject document)
+        {
+            return GetNextDocumentNumberByKeyAsync(document.Name, GetDocumentNumberingKey(document), document);
+        }
+
+        /// <summary>
+        /// Возвращает текущий номер документа БЕЗ увеличения счетчика.
+        /// Используется для отображения предлагаемого номера в диалоге,
+        /// чтобы счетчик не расходовался при отмене ввода.
+        /// </summary>
+        public async Task<string> GetCurrentDocumentNumberAsync(MetadataObject document)
+        {
+            await EnsureDocumentNumberConfigurationAsync(document);
+
+            var numberingKey = GetDocumentNumberingKey(document);
+            var documentName = document.Name;
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                SELECT current_number
+                FROM doc_numbering
+                WHERE document_type = @documentType1
+                   OR document_type = @documentType2
+                LIMIT 1";
+
+            var documentTypeParameter1 = command.CreateParameter();
+            documentTypeParameter1.ParameterName = "@documentType1";
+            documentTypeParameter1.Value = numberingKey;
+            command.Parameters.Add(documentTypeParameter1);
+
+            var documentTypeParameter2 = command.CreateParameter();
+            documentTypeParameter2.ParameterName = "@documentType2";
+            documentTypeParameter2.Value = $"doc:{documentName}";
+            command.Parameters.Add(documentTypeParameter2);
+
+            var connectionOpened = false;
             try
             {
-                var numberingKey = GetDocumentNumberingKey(documentName);
-                await EnsureDocumentNumberConfigurationAsync(documentName);
+                await _context.Database.OpenConnectionAsync();
+                connectionOpened = true;
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    var currentNumber = reader.GetInt32(0);
+                    await reader.CloseAsync();
+
+                    // Номер для документа = текущий - 1 (потому что в БД хранится следующий)
+                    var documentNumber = currentNumber > 1 ? currentNumber - 1 : 1;
+                    return documentNumber.ToString();
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            return GenerateFallbackDocumentNumber();
+        }
+
+        /// <summary>
+        /// Увеличивает счетчик номеров документа.
+        /// Вызывается ТОЛЬКО после успешного сохранения нового документа,
+        /// чтобы не расходовать номера при отмене ввода.
+        /// </summary>
+        public async Task IncrementDocumentNumberAsync(MetadataObject document)
+        {
+            await EnsureDocumentNumberConfigurationAsync(document);
+            await IncrementDocumentNumberByKeyAsync(GetDocumentNumberingKey(document), document.Name);
+        }
+
+        private async Task IncrementDocumentNumberAfterCreateAsync(
+            MetadataObject document,
+            IReadOnlyDictionary<string, object> data)
+        {
+            if (IsCashOrderDocument(document))
+            {
+                await EnsureCashOrderDocumentNumberConfigurationsAsync();
+                await IncrementDocumentNumberByKeyAsync(GetCashOrderNumberingKey(GetCashOrderKindFromData(data)));
+                return;
+            }
+
+            await EnsureDocumentNumberConfigurationAsync(document);
+            await IncrementDocumentNumberByKeyAsync(GetDocumentNumberingKey(document), document.Name);
+        }
+
+        private async Task IncrementDocumentNumberByKeyAsync(string numberingKey, string? documentName = null)
+        {
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = @"
+                UPDATE doc_numbering
+                SET current_number = CASE
+                        WHEN current_number >= @maxNumber THEN 1
+                        ELSE current_number + 1
+                    END,
+                    UpdatedAt = NOW()
+                WHERE document_type = @documentType1
+                   OR document_type = @documentType2";
+
+            var documentTypeParameter1 = command.CreateParameter();
+            documentTypeParameter1.ParameterName = "@documentType1";
+            documentTypeParameter1.Value = numberingKey;
+            command.Parameters.Add(documentTypeParameter1);
+
+            var documentTypeParameter2 = command.CreateParameter();
+            documentTypeParameter2.ParameterName = "@documentType2";
+            documentTypeParameter2.Value = string.IsNullOrWhiteSpace(documentName)
+                ? $"__unused_{Guid.NewGuid():N}"
+                : $"doc:{documentName}";
+            command.Parameters.Add(documentTypeParameter2);
+
+            var maxNumberParam = command.CreateParameter();
+            maxNumberParam.ParameterName = "@maxNumber";
+            maxNumberParam.Value = MaxDocumentNumberUsedForCounter;
+            command.Parameters.Add(maxNumberParam);
+
+            var connectionOpened = false;
+            try
+            {
+                await _context.Database.OpenConnectionAsync();
+                connectionOpened = true;
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private async Task<string> GetNextDocumentNumberByKeyAsync(
+            string documentName,
+            string numberingKey,
+            MetadataObject? document = null)
+        {
+            try
+            {
+                if (document != null)
+                    await EnsureDocumentNumberConfigurationAsync(document);
+                else
+                    await EnsureDocumentNumberConfigurationAsync(documentName);
 
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = @"
-                UPDATE doc_numbering
-                SET current_number = current_number + 1, UpdatedAt = NOW()
-                WHERE document_type = @documentType
-                RETURNING current_number - 1";
+                SELECT current_number, document_type
+                FROM doc_numbering
+                WHERE document_type = @documentType1
+                   OR document_type = @documentType2
+                LIMIT 1";
 
-                var documentTypeParameter = command.CreateParameter();
-                documentTypeParameter.ParameterName = "@documentType";
-                documentTypeParameter.Value = numberingKey;
-                command.Parameters.Add(documentTypeParameter);
+                var documentTypeParameter1 = command.CreateParameter();
+                documentTypeParameter1.ParameterName = "@documentType1";
+                documentTypeParameter1.Value = numberingKey;
+                command.Parameters.Add(documentTypeParameter1);
+
+                var documentTypeParameter2 = command.CreateParameter();
+                documentTypeParameter2.ParameterName = "@documentType2";
+                // Also try with doc: prefix for backward compatibility
+                documentTypeParameter2.Value = $"doc:{documentName}";
+                command.Parameters.Add(documentTypeParameter2);
 
                 var connectionOpened = false;
 
@@ -4196,7 +4441,8 @@ END $$;");
                     using var reader = await command.ExecuteReaderAsync();
                     if (await reader.ReadAsync())
                     {
-                        return reader.GetInt32(0).ToString();
+                        var currentNumber = reader.GetInt32(0);
+                        return Math.Max(1, currentNumber).ToString();
                     }
                 }
                 finally
@@ -4216,11 +4462,95 @@ END $$;");
             }
         }
 
+        private async Task<string> GetNextCashOrderDocumentNumberByKindAsync(string orderKind)
+        {
+            try
+            {
+                await CreateDocumentNumberingTableAsync();
+
+                var documents = await LoadDocumentMetadataAsync();
+                var cashOrderDocument = documents.FirstOrDefault(IsCashOrderDocument);
+                if (cashOrderDocument == null)
+                    return await GetNextDocumentNumberByKeyAsync(CashOrderDocumentName, GetCashOrderNumberingKey(orderKind));
+
+                var normalizedOrderKind = NormalizeCashOrderKind(orderKind);
+                var numberingKey = GetCashOrderNumberingKey(normalizedOrderKind);
+                var suggestedNumber = await GetSuggestedNextCashOrderDocumentNumberAsync(cashOrderDocument, normalizedOrderKind);
+
+                const string syncSql = @"
+                    INSERT INTO doc_numbering (document_type, current_number, prefix)
+                    VALUES (@documentType, @currentNumber, '')
+                    ON CONFLICT (document_type) DO UPDATE
+                    SET current_number = @currentNumber,
+                        prefix = '',
+                        UpdatedAt = NOW()";
+
+                await _context.Database.ExecuteSqlRawAsync(
+                    syncSql,
+                    new NpgsqlParameter("@documentType", numberingKey),
+                    new NpgsqlParameter("@currentNumber", suggestedNumber));
+
+                return suggestedNumber.ToString();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка получения номера кассового ордера: {ex.Message}");
+                return GenerateFallbackDocumentNumber();
+            }
+        }
+
         private async Task EnsureGlobalDocumentNumberConfigurationAsync(List<MetadataObject>? documents = null)
         {
             await CreateDocumentNumberingTableAsync();
             documents ??= await LoadDocumentMetadataAsync();
-            var nextNumber = await GetSuggestedNextGlobalDocumentNumberAsync(documents);
+
+            var cashOrderNumberingEnsured = false;
+            foreach (var document in documents.Where(IsManagedDocument))
+            {
+                if (IsCashOrderDocument(document))
+                {
+                    if (!cashOrderNumberingEnsured)
+                    {
+                        await EnsureCashOrderDocumentNumberConfigurationsAsync(documents);
+                        cashOrderNumberingEnsured = true;
+                    }
+
+                    continue;
+                }
+
+                await EnsureDocumentNumberConfigurationAsync(document);
+            }
+        }
+
+        private async Task EnsureDocumentNumberConfigurationAsync(string documentName)
+        {
+            var document = await LoadDocumentByNameAsync(documentName);
+            if (document != null)
+            {
+                await EnsureDocumentNumberConfigurationAsync(document);
+                return;
+            }
+
+            await EnsureLegacyDocumentNumberConfigurationAsync(documentName);
+        }
+
+        private async Task EnsureDocumentNumberConfigurationAsync(MetadataObject document)
+        {
+            if (IsCashOrderDocument(document))
+            {
+                await EnsureCashOrderDocumentNumberConfigurationsAsync();
+                return;
+            }
+
+            await EnsureDocumentNumberConfigurationForDocumentAsync(document);
+        }
+
+        private async Task EnsureDocumentNumberConfigurationForDocumentAsync(MetadataObject document)
+        {
+            await CreateDocumentNumberingTableAsync();
+
+            var suggestedNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
+            var numberingKey = GetDocumentNumberingKey(document);
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4229,45 +4559,44 @@ END $$;");
 
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
-                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@documentType", numberingKey),
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
 
+            // Только увеличиваем счетчик, никогда не уменьшаем!
+            // GetSuggestedNextDocumentNumberAsync сканирует таблицу документов и может вернуть меньше,
+            // чем уже записано в счетчике. Это привело бы к "затиранию" и сбросу нумерации.
             const string updateSql = @"
                 UPDATE doc_numbering
-                SET prefix = '', current_number = GREATEST(current_number, @currentNumber), UpdatedAt = NOW()
+                SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
                   AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
-                new NpgsqlParameter("@documentType", GlobalDocumentNumberingKey),
-                new NpgsqlParameter("@currentNumber", nextNumber));
-
-            foreach (var documentName in IndependentDocumentNumberingNames)
-                await EnsureIndependentDocumentNumberConfigurationAsync(documentName, documents);
+                new NpgsqlParameter("@documentType", numberingKey),
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
         }
 
-        private async Task EnsureDocumentNumberConfigurationAsync(string documentName)
-        {
-            if (UsesIndependentDocumentNumbering(documentName))
-                await EnsureIndependentDocumentNumberConfigurationAsync(documentName);
-            else
-                await EnsureGlobalDocumentNumberConfigurationAsync();
-        }
-
-        private async Task EnsureIndependentDocumentNumberConfigurationAsync(
+        private async Task EnsureLegacyDocumentNumberConfigurationAsync(
             string documentName,
             List<MetadataObject>? documents = null)
         {
             await CreateDocumentNumberingTableAsync();
             documents ??= await LoadDocumentMetadataAsync();
+
+            if (IsCashOrderDocumentName(documentName))
+            {
+                await EnsureCashOrderDocumentNumberConfigurationsAsync(documents);
+                return;
+            }
+
             var document = documents.FirstOrDefault(item =>
                 item.ObjectType == "Document" &&
                 item.Name.Equals(documentName, StringComparison.OrdinalIgnoreCase));
             if (document == null)
                 return;
 
-            var nextNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document }, documentName);
+            var suggestedNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4277,33 +4606,156 @@ END $$;");
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
                 new NpgsqlParameter("@documentType", documentName),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
 
+            // Только увеличиваем счетчик, никогда не уменьшаем!
             const string updateSql = @"
                 UPDATE doc_numbering
-                SET prefix = '', current_number = GREATEST(current_number, @currentNumber), UpdatedAt = NOW()
+                SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
                 WHERE document_type = @documentType
                   AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
                 new NpgsqlParameter("@documentType", documentName),
-                new NpgsqlParameter("@currentNumber", nextNumber));
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
         }
 
-        private Task<int> GetSuggestedNextGlobalDocumentNumberAsync(IEnumerable<MetadataObject> documents)
+        private async Task DeleteDocumentNumberingConfigurationAsync(MetadataObject document)
         {
-            return GetSuggestedNextDocumentNumberAsync(
-                documents.Where(document => !UsesIndependentDocumentNumbering(document.Name)),
-                GlobalDocumentNumberingKey);
+            await CreateDocumentNumberingTableAsync();
+
+            if (IsCashOrderDocument(document))
+            {
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"DELETE FROM doc_numbering
+                      WHERE document_type IN (@receiptDocumentType, @paymentDocumentType, @legacyDocumentName)",
+                    new NpgsqlParameter("@receiptDocumentType", CashOrderReceiptDocumentType),
+                    new NpgsqlParameter("@paymentDocumentType", CashOrderPaymentDocumentType),
+                    new NpgsqlParameter("@legacyDocumentName", document.Name));
+                return;
+            }
+
+            await _context.Database.ExecuteSqlRawAsync(
+                @"DELETE FROM doc_numbering
+                  WHERE document_type = @documentKey
+                     OR document_type = @legacyDocumentName",
+                new NpgsqlParameter("@documentKey", GetDocumentNumberingKey(document)),
+                new NpgsqlParameter("@legacyDocumentName", document.Name));
+        }
+
+        private async Task EnsureCashOrderDocumentNumberConfigurationsAsync(List<MetadataObject>? documents = null)
+        {
+            await CreateDocumentNumberingTableAsync();
+            documents ??= await LoadDocumentMetadataAsync();
+
+            var cashOrderDocument = documents.FirstOrDefault(IsCashOrderDocument);
+            if (cashOrderDocument == null)
+                return;
+
+            await EnsureCashOrderDocumentNumberConfigurationAsync(
+                cashOrderDocument,
+                CashOrderReceiptKind,
+                CashOrderReceiptDocumentType);
+
+            await EnsureCashOrderDocumentNumberConfigurationAsync(
+                cashOrderDocument,
+                CashOrderPaymentKind,
+                CashOrderPaymentDocumentType);
+        }
+
+        private async Task EnsureCashOrderDocumentNumberConfigurationAsync(
+            MetadataObject cashOrderDocument,
+            string orderKind,
+            string numberingKey)
+        {
+            var suggestedNumber = await GetSuggestedNextCashOrderDocumentNumberAsync(cashOrderDocument, orderKind);
+
+            const string insertSql = @"
+                INSERT INTO doc_numbering (document_type, current_number, prefix)
+                VALUES (@documentType, @currentNumber, '')
+                ON CONFLICT (document_type) DO NOTHING";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                insertSql,
+                new NpgsqlParameter("@documentType", numberingKey),
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
+
+            // Только увеличиваем счетчик, никогда не уменьшаем!
+            const string updateSql = @"
+                UPDATE doc_numbering
+                SET prefix = '', current_number = @currentNumber, UpdatedAt = NOW()
+                WHERE document_type = @documentType
+                  AND (COALESCE(prefix, '') <> '' OR current_number < @currentNumber)";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                updateSql,
+                new NpgsqlParameter("@documentType", numberingKey),
+                new NpgsqlParameter("@currentNumber", suggestedNumber));
+        }
+
+        private async Task<int> GetSuggestedNextCashOrderDocumentNumberAsync(MetadataObject document, string orderKind)
+        {
+            long maxDocumentNumber = 0;
+            var connectionOpened = false;
+            var connection = _context.Database.GetDbConnection();
+
+            try
+            {
+                if (connection.State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                var numberField = FindDocumentNumberField(document);
+                if (numberField == null ||
+                    string.IsNullOrWhiteSpace(document.TableName) ||
+                    string.IsNullOrWhiteSpace(numberField.DbColumnName))
+                {
+                    return 1;
+                }
+
+                var quotedTableName = DelimitIdentifier(document.TableName);
+                var quotedColumnName = DelimitIdentifier(numberField.DbColumnName);
+
+                using var command = connection.CreateCommand();
+                command.CommandText = $@"
+                    SELECT COALESCE(MAX(digits::BIGINT), 0)
+                    FROM (
+                        SELECT NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), '') AS digits
+                        FROM {quotedTableName}
+                        WHERE LOWER(COALESCE(""order_kind""::text, '')) = LOWER(@orderKind)
+                    ) normalized_numbers
+                    WHERE digits ~ '^\d{{1,9}}$'";
+                var orderKindParameter = command.CreateParameter();
+                orderKindParameter.ParameterName = "@orderKind";
+                orderKindParameter.Value = NormalizeCashOrderKind(orderKind);
+                command.Parameters.Add(orderKindParameter);
+
+                var maxValue = await command.ExecuteScalarAsync();
+                if (maxValue != null && maxValue != DBNull.Value)
+                    maxDocumentNumber = Convert.ToInt64(maxValue);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка расчета номера кассового ордера {orderKind}: {ex.Message}");
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+
+            var nextNumber = maxDocumentNumber + 1;
+            return nextNumber > MaxDocumentNumberUsedForCounter ? 1 : (int)nextNumber;
         }
 
         private async Task<int> GetSuggestedNextDocumentNumberAsync(
-            IEnumerable<MetadataObject> documents,
-            string counterKey)
+            IEnumerable<MetadataObject> documents)
         {
             long maxDocumentNumber = 0;
-            long maxCounterNumber = 1;
             var connectionOpened = false;
             var connection = _context.Database.GetDbConnection();
 
@@ -4336,11 +4788,12 @@ END $$;");
 
                         using var maxCommand = connection.CreateCommand();
                         maxCommand.CommandText = $@"
-                            SELECT COALESCE(
-                                MAX(COALESCE(NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), ''), '0')::BIGINT),
-                                0)
-                            FROM {quotedTableName}";
-
+                            SELECT COALESCE(MAX(digits::BIGINT), 0)
+                            FROM (
+                                SELECT NULLIF(REGEXP_REPLACE(COALESCE({quotedColumnName}::text, ''), '\D', '', 'g'), '') AS digits
+                                FROM {quotedTableName}
+                            ) normalized_numbers
+                            WHERE digits ~ '^\d{{1,9}}$'";
                         var maxValue = await maxCommand.ExecuteScalarAsync();
                         if (maxValue != null && maxValue != DBNull.Value)
                         {
@@ -4354,20 +4807,6 @@ END $$;");
                     }
                 }
 
-                using var counterCommand = connection.CreateCommand();
-                counterCommand.CommandText = @"
-                    SELECT COALESCE(MAX(current_number), 1)
-                    FROM doc_numbering
-                    WHERE document_type = @documentType";
-                var counterDocumentTypeParameter = counterCommand.CreateParameter();
-                counterDocumentTypeParameter.ParameterName = "@documentType";
-                counterDocumentTypeParameter.Value = counterKey;
-                counterCommand.Parameters.Add(counterDocumentTypeParameter);
-                var counterValue = await counterCommand.ExecuteScalarAsync();
-                if (counterValue != null && counterValue != DBNull.Value)
-                {
-                    maxCounterNumber = Convert.ToInt64(counterValue);
-                }
             }
             finally
             {
@@ -4377,8 +4816,8 @@ END $$;");
                 }
             }
 
-            var nextNumber = Math.Max(maxCounterNumber, maxDocumentNumber + 1);
-            return nextNumber > int.MaxValue ? int.MaxValue : (int)nextNumber;
+            var nextNumber = maxDocumentNumber + 1;
+            return nextNumber > MaxDocumentNumberUsedForCounter ? 1 : (int)nextNumber;
         }
 
         private async Task NormalizeDocumentTableNumbersAsync(MetadataObject document)
@@ -4410,16 +4849,63 @@ END $$;");
             return metadata.ObjectType == "Document" && FindDocumentNumberField(metadata) != null;
         }
 
-        private static bool UsesIndependentDocumentNumbering(string documentName)
+        private static bool IsCashOrderDocument(MetadataObject metadata)
         {
-            return IndependentDocumentNumberingNames.Contains(documentName);
+            return metadata.ObjectType == "Document" &&
+                   (metadata.Name.Equals(CashOrderDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                    metadata.TableName.Equals("doc_cash_orders", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string GetCashOrderNumberingKey(string orderKind)
+        {
+            return NormalizeCashOrderKind(orderKind).Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase)
+                ? CashOrderReceiptDocumentType
+                : CashOrderPaymentDocumentType;
+        }
+
+        private static string GetCashOrderKindFromData(IReadOnlyDictionary<string, object> data)
+        {
+            foreach (var fieldName in new[] { "Тип КО", "order_kind", "cash_order_kind", "Тип", "document_type" })
+            {
+                if (data.TryGetValue(fieldName, out var value) && value != null && value != DBNull.Value)
+                    return NormalizeCashOrderKind(value.ToString());
+            }
+
+            return CashOrderPaymentKind;
+        }
+
+        private static string NormalizeCashOrderKind(string? value)
+        {
+            var rawKind = value ?? string.Empty;
+            if (rawKind.Contains("приход", StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase) ||
+                rawKind.Equals(CashOrderReceiptDocumentType, StringComparison.OrdinalIgnoreCase))
+            {
+                return CashOrderReceiptKind;
+            }
+
+            return CashOrderPaymentKind;
+        }
+
+        private static string GetDocumentNumberingKey(MetadataObject document)
+        {
+            if (IsCashOrderDocument(document))
+                return CashOrderPaymentDocumentType;
+
+            return document.Name;
+        }
+
+        private static string GetDocumentNumberingKey(Guid documentId)
+        {
+            return $"doc:{documentId:N}";
         }
 
         private static string GetDocumentNumberingKey(string documentName)
         {
-            return UsesIndependentDocumentNumbering(documentName)
-                ? documentName
-                : GlobalDocumentNumberingKey;
+            if (IsCashOrderDocumentName(documentName))
+                return CashOrderPaymentDocumentType;
+
+            return documentName;
         }
 
         private static bool IsPostingsDocument(MetadataObject metadata)
@@ -4434,6 +4920,35 @@ END $$;");
                    metadata.Name.Equals("Кассы", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool ShouldIncrementDocumentNumberAfterCreate(
+            MetadataObject metadata,
+            IReadOnlyDictionary<string, object> data)
+        {
+            if (!IsManagedDocument(metadata) || IsInvoiceDocument(metadata))
+                return false;
+
+            var number = NormalizeLegacyDocumentNumber(ReadDocumentNumberFromData(data));
+            return !string.IsNullOrWhiteSpace(number);
+        }
+
+        private static string ReadDocumentNumberFromData(IReadOnlyDictionary<string, object> data)
+        {
+            foreach (var key in new[] { "Номер", "Номер документа", "doc_number", "number" })
+            {
+                if (data.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value.ToString() ?? string.Empty;
+            }
+
+            return string.Empty;
+        }
+
+        private static bool IsInvoiceDocument(MetadataObject metadata)
+        {
+            return metadata.ObjectType == "Document" &&
+                   (InvoiceDocumentTypes.IsSales(metadata.Name) ||
+                    InvoiceDocumentTypes.IsPurchase(metadata.Name) ||
+                    metadata.TableName.Equals("doc_invoices", StringComparison.OrdinalIgnoreCase));
+        }
         private static MetadataField? FindDocumentNumberField(MetadataObject metadata)
         {
             return metadata.Fields.FirstOrDefault(field =>
@@ -4475,7 +4990,7 @@ END $$;");
 
         internal static string GenerateFallbackDocumentNumber()
         {
-            return DateTime.Now.ToString("yyyyMMddHHmmssfff");
+            return "1";
         }
 
         private static string QuoteIdentifier(string identifier)

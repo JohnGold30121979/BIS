@@ -65,6 +65,15 @@ namespace BIS.ERP.Views.Dialogs
             StatusText.Text = "Все рабочие модули отмечены как доступные.";
         }
 
+
+        private void OnDisableDevelopmentModulesClick(object sender, RoutedEventArgs e)
+        {
+            foreach (var module in _modules.Where(module => ModuleMetadataService.IsDevelopmentDisabledModuleCode(module.Code)))
+                module.IsActive = false;
+
+            ModulesGrid.Items.Refresh();
+            StatusText.Text = "Отключены модули этапа разработки: Основные средства и Материалы.";
+        }
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
             SaveButton.IsEnabled = false;

@@ -60,6 +60,8 @@ namespace BIS.ERP.Services
                     PassportNumber = GetStringValue(row, "Паспорт №/ID"),
                     PassportIssuedBy = GetStringValue(row, "Кем выдан"),
                     PassportIssueDate = GetDateValue(row, "Дата выдачи"),
+                    Gender = GetStringValue(row, "Пол"),
+                    MaritalStatus = GetStringValue(row, "Семейное положение"),
                     BirthDate = GetDateValue(row, "Дата рождения"),
                     Address = GetStringValue(row, "Адрес"),
                     Notes = GetStringValue(row, "Примечание"),
@@ -108,6 +110,8 @@ namespace BIS.ERP.Services
                 ["Наименование"] = employee.FullName,
                 ["Табельный номер"] = employee.PersonnelNumber,
                 ["ФИО"] = employee.FullName,
+                ["Пол"] = ToDbNullIfWhiteSpace(employee.Gender),
+                ["Семейное положение"] = ToDbNullIfWhiteSpace(employee.MaritalStatus),
                 ["Должность (справочник)"] = employee.PositionId ?? (object)DBNull.Value,
                 ["Должность (текст)"] = GetPositionTextForStorage(employee),
                 ["Подразделение"] = employee.DepartmentId ?? (object)DBNull.Value,
@@ -142,6 +146,8 @@ namespace BIS.ERP.Services
                 ["Наименование"] = employee.FullName,
                 ["Табельный номер"] = employee.PersonnelNumber,
                 ["ФИО"] = employee.FullName,
+                ["Пол"] = ToDbNullIfWhiteSpace(employee.Gender),
+                ["Семейное положение"] = ToDbNullIfWhiteSpace(employee.MaritalStatus),
                 ["Должность (справочник)"] = employee.PositionId ?? (object)DBNull.Value,
                 ["Должность (текст)"] = GetPositionTextForStorage(employee),
                 ["Подразделение"] = employee.DepartmentId ?? (object)DBNull.Value,
@@ -198,6 +204,8 @@ namespace BIS.ERP.Services
                 e.FullName.Contains(searchText) ||
                 e.Position.Contains(searchText) ||
                 e.Department.Contains(searchText) ||
+                e.Gender.Contains(searchText) ||
+                e.MaritalStatus.Contains(searchText) ||
                 e.PassportNumber.Contains(searchText) ||
                 e.PassportIssuedBy.Contains(searchText)
             ).ToList();
@@ -246,6 +254,11 @@ namespace BIS.ERP.Services
                 text = employee.PositionDisplay;
 
             return string.IsNullOrWhiteSpace(text) ? DBNull.Value : text;
+        }
+
+        private static object ToDbNullIfWhiteSpace(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
         }
 
         private static object ToUpperOrDbNull(string value)

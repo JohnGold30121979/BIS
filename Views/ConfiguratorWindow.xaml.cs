@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Configurator.Views;
+using BIS.ERP.Configurator.Views;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -32,6 +32,14 @@ namespace BIS.ERP.Views
         private AppDbContext _context;
         private bool _closeForModeSwitch;
         private FrameworkElement? _fixedPropertiesContent;
+        private string _metadataSearchText = string.Empty;
+        private string _catalogSearchText = string.Empty;
+        private string _documentSearchText = string.Empty;
+        private string _reportSearchText = string.Empty;
+        private string _metadataViewMode = "Категории";
+        private string _catalogViewMode = "Плитки";
+        private string _documentViewMode = "Плитки";
+        private string _reportViewMode = "Плитки";
 
         public ConfiguratorWindow()
         {
@@ -72,8 +80,10 @@ namespace BIS.ERP.Views
 
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
-                SystemIconText.Text = GetSystemIcon(systemConfiguration.Icon);
+                LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, GetSystemIcon(systemConfiguration.Icon));
                 var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+                if (currentInfoBase != null)
+                    LogoDisplayHelper.Apply(InfoBaseLogoImage, InfoBaseIconText, currentInfoBase.LogoImage, currentInfoBase.DisplayIcon);
                 InfoBaseNameText.Text = currentInfoBase == null
                     ? "Инфобаза: не выбрана"
                     : $"Инфобаза: {currentInfoBase.Name}";
@@ -98,6 +108,7 @@ namespace BIS.ERP.Views
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
+                await new FoxProReportFieldRuleService(_context).EnsureSchemaAsync();
                 _regulatedTemplateService = new RegulatedReportTemplateService(_context);
                 await _regulatedTemplateService.EnsureSchemaAsync();
                 await new DocumentationMetadataSeedService(_context).EnsureAsync();
@@ -111,11 +122,17 @@ namespace BIS.ERP.Views
                 _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Name).ToList();
                 _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
                 BuildMetadataTree();
-                ShowCatalogsList();
+                ShowMetadataOverview();
+                await LogConfiguratorEventAsync(
+                    "ConfiguratorLoad",
+                    "Configurator",
+                    currentInfoBase?.Name ?? "Инфобаза не выбрана",
+                    details: new { Catalogs = _catalogs.Count, Documents = _documents.Count, Reports = _reports.Count });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки метаданных: {ex.Message}", "Ошибка",
+                await LogConfiguratorErrorAsync("ConfiguratorLoad", "Configurator", Title, ex);
+                MessageBox.Show($"Ошибка загрузки метаданных: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -125,6 +142,65 @@ namespace BIS.ERP.Views
             }
         }
 
+        private static string GetFullExceptionMessage(Exception exception)
+        {
+            var messages = new List<string>();
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message))
+                    messages.Add(current.Message);
+            }
+
+            return string.Join(Environment.NewLine, messages);
+        }
+
+        private async Task LogConfiguratorEventAsync(
+            string action,
+            string entityType,
+            string entityName,
+            Guid? recordId = null,
+            object? details = null)
+        {
+            try
+            {
+                SystemLogService.Info($"{action}: {entityType} \"{entityName}\"", "Configurator");
+                if (_context != null)
+                {
+                    await new EventLogService(_context).LogAsync(action, entityType, entityName, recordId, details);
+                }
+            }
+            catch (Exception logException)
+            {
+                SystemLogService.Warning("Ошибка записи события конфигуратора.", "Configurator.LogEvent", logException);
+            }
+        }
+
+        private async Task LogConfiguratorErrorAsync(
+            string action,
+            string entityType,
+            string entityName,
+            Exception exception,
+            Guid? recordId = null,
+            object? details = null)
+        {
+            try
+            {
+                SystemLogService.Error($"{action}: {entityType} \"{entityName}\"", "Configurator", exception);
+                if (_context != null)
+                {
+                    await new EventLogService(_context).LogAsync(
+                        $"{action}Error",
+                        entityType,
+                        entityName,
+                        recordId,
+                        new { Error = GetFullExceptionMessage(exception), Details = details });
+                }
+            }
+            catch (Exception logException)
+            {
+                SystemLogService.Warning("Ошибка записи ошибки конфигуратора.", "Configurator.LogError", logException);
+            }
+        }
         private Report? _selectedReport;
         private TreeViewItem? _selectedReportTreeItem;
 
@@ -136,6 +212,11 @@ namespace BIS.ERP.Views
             {
                 Header = "📁 Метаданные",
                 IsExpanded = true
+            };
+            rootItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowMetadataOverview();
             };
 
             // Справочники
@@ -203,6 +284,11 @@ namespace BIS.ERP.Views
             {
                 Header = "📊 Отчеты и печатные формы",
                 IsExpanded = true
+            };
+            reportsItem.Selected += (s, e) =>
+            {
+                e.Handled = true;
+                ShowReportsList();
             };
 
             if (_reports != null && _reports.Any())
@@ -316,6 +402,30 @@ namespace BIS.ERP.Views
                 new UserAccessManagementView(_context, BuildUserAccessNavigationItems(), ServiceLocator.AuthService.CurrentUser)));
         }
 
+        private void ShowSystemLogsViewer()
+        {
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Просмотр логов";
+            EditorDescription.Text = "Основной системный лог и служебные файлы журнала приложения";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new SystemLogViewerView()));
+        }
+
+        private void ShowReportDataSetsEditor()
+        {
+            if (_context == null)
+                return;
+            SetPropertiesScrollEnabled(false);
+            EditorTitle.Text = "Наборы данных отчетов";
+            EditorDescription.Text = "SQL-источники для отчетов, которые администратор может менять без перекомпиляции";
+            PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateFixedPropertiesHost(new ReportDataSetManagementView(_context)));
+        }
+
+        private void OnReportDataSetsClick(object sender, RoutedEventArgs e)
+        {
+            ShowReportDataSetsEditor();
+        }
         private IEnumerable<BIS.ERP.NavigationItem> BuildUserAccessNavigationItems()
         {
             var items = new List<BIS.ERP.NavigationItem>();
@@ -406,6 +516,8 @@ namespace BIS.ERP.Views
         private void OnAccountingSetupClick(object sender, RoutedEventArgs e) => ShowAccountingSetupEditor();
 
         private void OnUsersClick(object sender, RoutedEventArgs e) => ShowUsersEditor();
+
+        private void OnSystemLogsClick(object sender, RoutedEventArgs e) => ShowSystemLogsViewer();
 
         private async void OnRegulatedTemplatesClick(object sender, RoutedEventArgs e) =>
             await ShowRegulatedTemplatesEditorAsync();
@@ -573,7 +685,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка загрузки шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка загрузки шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -604,7 +716,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка активации шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка активации шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -653,7 +765,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка изменения реквизитов: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка изменения реквизитов: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -697,7 +809,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка выгрузки шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка выгрузки шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -737,7 +849,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка удаления шаблона: {ex.Message}", "Шаблоны",
+                    MessageBox.Show($"Ошибка удаления шаблона: {GetFullExceptionMessage(ex)}", "Шаблоны",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -817,7 +929,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка создания: {ex.Message}", "Ошибка",
+                    MessageBox.Show($"Ошибка создания: {GetFullExceptionMessage(ex)}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -872,7 +984,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка создания: {ex.Message}", "Ошибка",
+                    MessageBox.Show($"Ошибка создания: {GetFullExceptionMessage(ex)}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
@@ -885,6 +997,481 @@ namespace BIS.ERP.Views
 
 
         // ОТОБРАЖЕНИЕ СПИСКОВ
+        private void ShowMetadataOverview()
+        {
+            SetPropertiesScrollEnabled(true);
+            _selectedReport = null;
+            _selectedReportTreeItem = null;
+            DeleteReportMenuItem.IsEnabled = false;
+
+            EditorTitle.Text = "📁 Метаданные";
+            EditorDescription.Text = "Общий список справочников, документов, отчетов и печатных форм";
+            PropertiesPanel.Children.Clear();
+
+            var stackPanel = new StackPanel();
+            var contentPanel = new StackPanel();
+            var toolbar = CreateSearchAndViewToolbar(
+                _metadataSearchText,
+                _metadataViewMode,
+                new[] { "Категории", "Список" },
+                (search, viewMode) =>
+                {
+                    _metadataSearchText = search;
+                    _metadataViewMode = viewMode;
+                    FillMetadataOverview(contentPanel);
+                });
+            stackPanel.Children.Add(toolbar);
+            stackPanel.Children.Add(contentPanel);
+            FillMetadataOverview(contentPanel);
+
+            PropertiesPanel.Children.Add(stackPanel);
+        }
+
+        private void FillMetadataOverview(Panel target)
+        {
+            target.Children.Clear();
+
+            var catalogs = (_catalogs ?? new List<MetadataObject>())
+                .Where(item => MatchesSearch(item.Name, item.TableName, item.Description, _metadataSearchText))
+                .OrderBy(item => item.Name)
+                .ToList();
+            var documents = (_documents ?? new List<MetadataObject>())
+                .Where(item => MatchesSearch(item.Name, item.TableName, item.Description, _metadataSearchText))
+                .OrderBy(item => item.Name)
+                .ToList();
+            var reports = (_reports ?? new List<Report>())
+                .Where(item => !item.IsPrintForm)
+                .Where(item => MatchesSearch(item.Name, item.Description, item.Code, _metadataSearchText))
+                .OrderBy(item => item.Name)
+                .ToList();
+            var printForms = (_reports ?? new List<Report>())
+                .Where(item => item.IsPrintForm)
+                .Where(item => MatchesSearch(item.Name, item.Description, item.Code, _metadataSearchText))
+                .OrderBy(item => item.Name)
+                .ToList();
+
+            if (_metadataViewMode == "Список")
+            {
+                AddCompactSectionRows(target, "📚 Справочники", catalogs.Select(CreateCompactCatalogCard), "Справочники не найдены.");
+                AddCompactSectionRows(target, "📄 Документы", documents.Select(CreateCompactDocumentCard), "Документы не найдены.");
+                AddCompactSectionRows(target, "📊 Отчеты", reports.Select(CreateCompactReportCard), "Отчеты не найдены.");
+                AddCompactSectionRows(target, "🧾 Печатные формы", printForms.Select(CreateCompactReportCard), "Печатные формы не найдены.");
+                return;
+            }
+
+            var wrapPanel = new WrapPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            wrapPanel.Children.Add(CreateMetadataCategoryBlock("📚 Справочники", catalogs.Count, catalogs.Select(CreateCompactCatalogCard), "Справочники не найдены."));
+            wrapPanel.Children.Add(CreateMetadataCategoryBlock("📄 Документы", documents.Count, documents.Select(CreateCompactDocumentCard), "Документы не найдены."));
+            wrapPanel.Children.Add(CreateMetadataCategoryBlock("📊 Отчеты", reports.Count, reports.Select(CreateCompactReportCard), "Отчеты не найдены."));
+            wrapPanel.Children.Add(CreateMetadataCategoryBlock("🧾 Печатные формы", printForms.Count, printForms.Select(CreateCompactReportCard), "Печатные формы не найдены."));
+            target.Children.Add(wrapPanel);
+        }
+
+        private Border CreateMetadataCategoryBlock(
+            string title,
+            int count,
+            IEnumerable<UIElement> cards,
+            string emptyText)
+        {
+            var block = new Border
+            {
+                Width = 360,
+                MinHeight = 260,
+                MaxHeight = 520,
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, 14, 14),
+                BorderThickness = new Thickness(1)
+            };
+            block.SetResourceReference(Border.BackgroundProperty, "AppSurfaceBrush");
+            block.SetResourceReference(Border.BorderBrushProperty, "AppBorderBrush");
+
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var header = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
+            var titleText = new TextBlock
+            {
+                Text = $"{title}",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold
+            };
+            titleText.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            header.Children.Add(titleText);
+            var countText = new TextBlock
+            {
+                Text = $"{count}",
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            countText.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            DockPanel.SetDock(countText, Dock.Right);
+            header.Children.Add(countText);
+            Grid.SetRow(header, 0);
+            grid.Children.Add(header);
+
+            var stackPanel = new StackPanel();
+            var added = false;
+            foreach (var card in cards)
+            {
+                stackPanel.Children.Add(card);
+                added = true;
+            }
+
+            if (!added)
+            {
+                var emptyBlock = new TextBlock
+                {
+                    Text = emptyText,
+                    Margin = new Thickness(5, 18, 5, 5),
+                    TextAlignment = TextAlignment.Center
+                };
+                emptyBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+                stackPanel.Children.Add(emptyBlock);
+            }
+
+            var scrollViewer = new ScrollViewer
+            {
+                Content = stackPanel,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MaxHeight = 445
+            };
+            Grid.SetRow(scrollViewer, 1);
+            grid.Children.Add(scrollViewer);
+
+            block.Child = grid;
+            return block;
+        }
+
+        private static void AddCompactSectionRows(
+            Panel target,
+            string title,
+            IEnumerable<UIElement> cards,
+            string emptyText)
+        {
+            var titleBlock = new TextBlock
+            {
+                Text = title,
+                FontSize = 17,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 8, 0, 10)
+            };
+            titleBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            target.Children.Add(titleBlock);
+
+            var added = false;
+            foreach (var card in cards)
+            {
+                target.Children.Add(card);
+                added = true;
+            }
+
+            if (!added)
+            {
+                var emptyBlock = new TextBlock { Text = emptyText, Margin = new Thickness(8, 0, 0, 12) };
+                emptyBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+                target.Children.Add(emptyBlock);
+            }
+
+            target.Children.Add(new Border { Height = 12, Background = Brushes.Transparent });
+        }
+
+        private static void AddResponsiveTiles(
+            Panel target,
+            IEnumerable<UIElement> cards,
+            string emptyText)
+        {
+            var wrapPanel = new WrapPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+
+            var added = false;
+            foreach (var card in cards)
+            {
+                if (card is FrameworkElement element)
+                {
+                    element.Width = 360;
+                    element.Margin = new Thickness(0, 0, 14, 14);
+                }
+
+                wrapPanel.Children.Add(card);
+                added = true;
+            }
+
+            if (!added)
+            {
+                var emptyBlock = new TextBlock
+                {
+                    Text = emptyText,
+                    Margin = new Thickness(8, 18, 8, 18),
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                emptyBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+                target.Children.Add(emptyBlock);
+                return;
+            }
+
+            target.Children.Add(wrapPanel);
+        }
+
+        private static Grid CreateSearchAndViewToolbar(
+            string searchText,
+            string selectedViewMode,
+            IReadOnlyList<string> viewModes,
+            Action<string, string> onChanged)
+        {
+            var grid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var searchPanel = new DockPanel { LastChildFill = true };
+            var searchLabel = new TextBlock
+            {
+                Text = "Поиск:",
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            searchLabel.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            DockPanel.SetDock(searchLabel, Dock.Left);
+            searchPanel.Children.Add(searchLabel);
+
+            var searchBox = new TextBox
+            {
+                Text = searchText,
+                Height = 36,
+                MinWidth = 260,
+                Padding = new Thickness(10, 7, 10, 7),
+                ToolTip = "Поиск по названию, таблице, коду или описанию"
+            };
+            searchBox.SetResourceReference(Control.BackgroundProperty, "AppInputBackgroundBrush");
+            searchBox.SetResourceReference(Control.ForegroundProperty, "AppInputForegroundBrush");
+            searchBox.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
+            searchPanel.Children.Add(searchBox);
+            Grid.SetColumn(searchPanel, 0);
+            grid.Children.Add(searchPanel);
+
+            var viewCombo = new ComboBox
+            {
+                Height = 36,
+                Width = 190,
+                SelectedValuePath = "Content"
+            };
+            foreach (var mode in viewModes)
+                viewCombo.Items.Add(new ComboBoxItem { Content = mode });
+            var selectedIndex = viewModes.ToList().IndexOf(selectedViewMode);
+            viewCombo.SelectedIndex = Math.Max(0, selectedIndex);
+
+            var viewPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            viewPanel.Children.Add(new TextBlock
+            {
+                Text = "Вид:",
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            viewPanel.Children.Add(viewCombo);
+            Grid.SetColumn(viewPanel, 2);
+            grid.Children.Add(viewPanel);
+
+            var isApplying = false;
+            void RaiseChanged()
+            {
+                if (isApplying)
+                    return;
+
+                isApplying = true;
+                try
+                {
+                    var viewMode = (viewCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? selectedViewMode;
+                    onChanged(searchBox.Text, viewMode);
+                }
+                finally
+                {
+                    isApplying = false;
+                }
+            }
+
+            searchBox.TextChanged += (_, _) => RaiseChanged();
+            viewCombo.SelectionChanged += (_, _) => RaiseChanged();
+            return grid;
+        }
+
+        private static bool MatchesSearch(string? first, string? second, string? third, string searchText)
+        {
+            if (string.IsNullOrWhiteSpace(searchText))
+                return true;
+
+            var search = searchText.Trim();
+            return Contains(first, search) || Contains(second, search) || Contains(third, search);
+        }
+
+        private static bool Contains(string? value, string search) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(search, StringComparison.OrdinalIgnoreCase);
+
+        private Border CreateCompactCatalogCard(MetadataObject catalog) =>
+            CreateCompactMetadataObjectCard(
+                catalog.Icon,
+                catalog.Name,
+                catalog.TableName,
+                $"Полей: {catalog.Fields?.Count ?? 0}",
+                () => ShowCatalogEditor(catalog));
+
+        private Border CreateCompactDocumentCard(MetadataObject document) =>
+            CreateCompactMetadataObjectCard(
+                document.Icon,
+                document.Name,
+                document.TableName,
+                $"Полей: {document.Fields?.Count ?? 0}",
+                () => ShowDocumentEditor(document));
+
+        private Border CreateCompactImportedDocumentCard(DynamicDocument document) =>
+            CreateCompactCard(
+                "📄",
+                $"№{document.Number}",
+                $"{document.DocumentType}; {document.Date:dd.MM.yyyy}",
+                $"Строк: {document.TotalRows}; файл: {document.SourceFile}",
+                () => _ = ShowDynamicDocumentDetails(document),
+                "📋",
+                "Детали");
+
+        private Border CreateCompactReportCard(Report report)
+        {
+            var typeText = report.IsPrintForm ? "Печатная форма" : "Отчет";
+            var statusText = report.IsActive ? "Доступен" : "Отключен";
+            var card = CreateCompactCard(
+                string.IsNullOrWhiteSpace(report.Icon) ? "📊" : report.Icon,
+                report.Name,
+                $"{typeText}; {report.SourceFormat}",
+                statusText,
+                () => ShowReportEditor(report));
+
+            if (card.Child is Grid grid && grid.Children.OfType<StackPanel>().FirstOrDefault(panel => Grid.GetColumn(panel) == 2) is { } actions)
+            {
+                var availabilityButton = CreateCompactActionButton(report.IsActive ? "⏸" : "✓", report.IsActive ? "Отключить" : "Включить");
+                availabilityButton.Background = (Brush)new BrushConverter().ConvertFrom(report.IsActive ? "#D68910" : "#27AE60");
+                availabilityButton.Foreground = Brushes.White;
+                availabilityButton.Click += async (_, _) => await ToggleReportAvailabilityAndShowListAsync(report);
+                actions.Children.Add(availabilityButton);
+
+                var deleteButton = CreateCompactActionButton("🗑", "Удалить");
+                deleteButton.Background = (Brush)new BrushConverter().ConvertFrom("#E74C3C");
+                deleteButton.Foreground = Brushes.White;
+                deleteButton.Click += async (_, _) => await DeleteReportAndShowListAsync(report);
+                actions.Children.Add(deleteButton);
+            }
+
+            return card;
+        }
+
+        private Border CreateCompactMetadataObjectCard(
+            string icon,
+            string title,
+            string subtitle,
+            string detail,
+            Action editAction) =>
+            CreateCompactCard(icon, title, subtitle, detail, editAction);
+
+        private Border CreateCompactCard(
+            string icon,
+            string title,
+            string subtitle,
+            string detail,
+            Action editAction,
+            string actionContent = "✏",
+            string actionTooltip = "Редактировать")
+        {
+            var card = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10),
+                Margin = new Thickness(0, 0, 0, 8),
+                BorderThickness = new Thickness(1)
+            };
+            card.SetResourceReference(Border.BackgroundProperty, "AppSurfaceBrush");
+            card.SetResourceReference(Border.BorderBrushProperty, "AppBorderBrush");
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var iconText = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(icon) ? "📄" : icon,
+                FontSize = 22,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(iconText, 0);
+            grid.Children.Add(iconText);
+
+            var info = new StackPanel { Margin = new Thickness(8, 0, 8, 0) };
+            var titleBlock = new TextBlock
+            {
+                Text = title,
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            titleBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppBodyTextBrush");
+            info.Children.Add(titleBlock);
+
+            var subtitleBlock = new TextBlock
+            {
+                Text = subtitle,
+                FontSize = 10,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            subtitleBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            info.Children.Add(subtitleBlock);
+
+            var detailBlock = new TextBlock
+            {
+                Text = detail,
+                FontSize = 10,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            detailBlock.SetResourceReference(TextBlock.ForegroundProperty, "AppSecondaryTextBrush");
+            info.Children.Add(detailBlock);
+            Grid.SetColumn(info, 1);
+            grid.Children.Add(info);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var editButton = CreateCompactActionButton(actionContent, actionTooltip);
+            editButton.Background = (Brush)new BrushConverter().ConvertFrom("#3498DB");
+            editButton.Foreground = Brushes.White;
+            editButton.Click += (_, _) => editAction();
+            actions.Children.Add(editButton);
+            Grid.SetColumn(actions, 2);
+            grid.Children.Add(actions);
+
+            card.Child = grid;
+            return card;
+        }
+
+        private static Button CreateCompactActionButton(string content, string tooltip) =>
+            new()
+            {
+                Content = content,
+                Width = 30,
+                Height = 28,
+                Margin = new Thickness(4, 0, 0, 0),
+                ToolTip = tooltip,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+
         private void ShowCatalogsList()
         {
             SetPropertiesScrollEnabled(true);
@@ -893,30 +1480,47 @@ namespace BIS.ERP.Views
             PropertiesPanel.Children.Clear();
 
             var stackPanel = new StackPanel();
-
-            if (_catalogs != null && _catalogs.Any())
-            {
-                foreach (var catalog in _catalogs)
+            var contentPanel = new StackPanel();
+            var toolbar = CreateSearchAndViewToolbar(
+                _catalogSearchText,
+                _catalogViewMode,
+                new[] { "Плитки", "Список" },
+                (search, viewMode) =>
                 {
-                    var card = CreateCatalogCard(catalog);
-                    stackPanel.Children.Add(card);
-                }
-            }
-            else
-            {
-                stackPanel.Children.Add(new TextBlock
-                {
-                    Text = "Нет созданных справочников.",
-                    Foreground = Brushes.Gray,
-                    Margin = new Thickness(0, 50, 0, 0),
-                    HorizontalAlignment = HorizontalAlignment.Center
+                    _catalogSearchText = search;
+                    _catalogViewMode = viewMode;
+                    FillCatalogsList(contentPanel);
                 });
-            }
+            stackPanel.Children.Add(toolbar);
+            stackPanel.Children.Add(contentPanel);
+            FillCatalogsList(contentPanel);
 
             PropertiesPanel.Children.Add(stackPanel);
         }
 
-        // Добавьте отладку в метод ShowDocumentsList
+        private void FillCatalogsList(Panel target)
+        {
+            target.Children.Clear();
+
+            var catalogs = (_catalogs ?? new List<MetadataObject>())
+                .Where(item => MatchesSearch(item.Name, item.TableName, item.Description, _catalogSearchText))
+                .OrderBy(item => item.Name)
+                .ToList();
+
+            if (_catalogViewMode == "Список")
+            {
+                foreach (var catalog in catalogs)
+                    target.Children.Add(CreateCatalogCard(catalog));
+
+                if (!catalogs.Any())
+                    AddResponsiveTiles(target, Enumerable.Empty<UIElement>(), "Справочники не найдены.");
+
+                return;
+            }
+
+            AddResponsiveTiles(target, catalogs.Select(CreateCompactCatalogCard), "Справочники не найдены.");
+        }
+
         private async Task ShowDocumentsList()
         {
             SetPropertiesScrollEnabled(true);
@@ -925,93 +1529,377 @@ namespace BIS.ERP.Views
             PropertiesPanel.Children.Clear();
 
             var stackPanel = new StackPanel();
+            var contentPanel = new StackPanel();
+            var toolbar = CreateSearchAndViewToolbar(
+                _documentSearchText,
+                _documentViewMode,
+                new[] { "Плитки", "Список" },
+                (search, viewMode) =>
+                {
+                    _documentSearchText = search;
+                    _documentViewMode = viewMode;
+                    _ = FillDocumentsListAsync(contentPanel);
+                });
+            stackPanel.Children.Add(toolbar);
 
-            // Кнопка импорта DBF
             var importButton = new Button
             {
                 Content = "📁 Импорт из DBF",
                 Height = 40,
-                Margin = new Thickness(0, 0, 0, 20),
+                Margin = new Thickness(0, 0, 0, 14),
                 Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
                 Foreground = Brushes.White,
                 Cursor = Cursors.Hand
             };
             importButton.Click += (s, e) => OnImportDbfClick(s, e);
             stackPanel.Children.Add(importButton);
+            stackPanel.Children.Add(contentPanel);
+            PropertiesPanel.Children.Add(stackPanel);
 
-            // Разделитель
-            stackPanel.Children.Add(new TextBlock
-            {
-                Text = "--- Динамические документы (метаданные) ---",
-                Foreground = Brushes.Gray,
-                Margin = new Thickness(0, 10, 0, 5),
-                FontWeight = FontWeights.Bold
-            });
+            await FillDocumentsListAsync(contentPanel);
+        }
 
-            // Показываем динамические документы (метаданные)
-            if (_documents != null && _documents.Any())
+        private async Task FillDocumentsListAsync(Panel target)
+        {
+            target.Children.Clear();
+            var tileBlocks = _documentViewMode == "Плитки"
+                ? new WrapPanel { HorizontalAlignment = HorizontalAlignment.Stretch }
+                : null;
+            if (tileBlocks != null)
+                target.Children.Add(tileBlocks);
+
+            var metadataDocuments = (_documents ?? new List<MetadataObject>())
+                .Where(item => MatchesSearch(item.Name, item.TableName, item.Description, _documentSearchText))
+                .OrderBy(item => item.Name)
+                .ToList();
+
+            if (_documentViewMode == "Список")
             {
-                foreach (var doc in _documents)
-                {
-                    var card = CreateDynamicMetadataCard(doc);
-                    stackPanel.Children.Add(card);
-                }
+                AddCompactSectionRows(
+                    target,
+                    "📄 Документы из метаданных",
+                    metadataDocuments.Select(CreateDynamicMetadataCard),
+                    "Документы из метаданных не найдены.");
             }
             else
             {
-                stackPanel.Children.Add(new TextBlock
-                {
-                    Text = "Нет динамических документов. Нажмите 'Создать документ' в меню для добавления.",
-                    Foreground = Brushes.Gray,
-                    Margin = new Thickness(0, 5, 0, 5),
-                    FontSize = 11
-                });
+                tileBlocks!.Children.Add(CreateMetadataCategoryBlock(
+                    "📄 Документы из метаданных",
+                    metadataDocuments.Count,
+                    metadataDocuments.Select(CreateCompactDocumentCard),
+                    "Документы из метаданных не найдены."));
             }
 
-            // Разделитель
-            stackPanel.Children.Add(new TextBlock
-            {
-                Text = "--- Импортированные DBF документы (данные) ---",
-                Foreground = Brushes.Gray,
-                Margin = new Thickness(0, 15, 0, 5),
-                FontWeight = FontWeights.Bold
-            });
-
-            // Показываем импортированные DBF документы
             try
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var documentService = new DocumentService(context);
-                var documents = await documentService.GetDocumentsAsync();
+                var importedDocuments = (await documentService.GetDocumentsAsync())
+                    .Where(item => MatchesSearch(item.Number, item.DocumentType, item.SourceFile, _documentSearchText))
+                    .OrderByDescending(item => item.Date)
+                    .ToList();
 
-                foreach (var doc in documents.OrderByDescending(d => d.Date))
+                if (_documentViewMode == "Список")
                 {
-                    var card = CreateDynamicDocumentCard(doc);
-                    stackPanel.Children.Add(card);
+                    AddCompactSectionRows(
+                        target,
+                        "📥 Imported FoxPro documents",
+                        importedDocuments.Select(CreateDynamicDocumentCard),
+                        "Imported FoxPro documents not found.");
                 }
-
-                if (!documents.Any())
+                else
                 {
-                    stackPanel.Children.Add(new TextBlock
-                    {
-                        Text = "Нет импортированных DBF документов. Нажмите 'Импорт из DBF' для загрузки.",
-                        Foreground = Brushes.Gray,
-                        Margin = new Thickness(0, 50, 0, 0),
-                        HorizontalAlignment = HorizontalAlignment.Center
-                    });
+                    tileBlocks!.Children.Add(CreateMetadataCategoryBlock(
+                        "📥 Imported FoxPro documents",
+                        importedDocuments.Count,
+                        importedDocuments.Select(CreateCompactImportedDocumentCard),
+                        "Imported FoxPro documents not found."));
                 }
             }
             catch (Exception ex)
             {
-                stackPanel.Children.Add(new TextBlock
+                target.Children.Add(new TextBlock
                 {
-                    Text = $"Ошибка загрузки DBF документов: {ex.Message}",
+                    Text = $"Ошибка загрузки DBF документов: {GetFullExceptionMessage(ex)}",
                     Foreground = Brushes.Red,
                     Margin = new Thickness(10)
                 });
             }
+        }
+
+        private void ShowReportsList()
+        {
+            SetPropertiesScrollEnabled(true);
+            _selectedReport = null;
+            _selectedReportTreeItem = null;
+            DeleteReportMenuItem.IsEnabled = false;
+
+            EditorTitle.Text = "📊 Отчеты и печатные формы";
+            EditorDescription.Text = "Список отчетов и печатных форм в системе";
+            PropertiesPanel.Children.Clear();
+
+            var stackPanel = new StackPanel();
+            var contentPanel = new StackPanel();
+            var toolbar = CreateSearchAndViewToolbar(
+                _reportSearchText,
+                _reportViewMode,
+                new[] { "Плитки", "Список" },
+                (search, viewMode) =>
+                {
+                    _reportSearchText = search;
+                    _reportViewMode = viewMode;
+                    FillReportsList(contentPanel);
+                });
+            stackPanel.Children.Add(toolbar);
+
+            var createButton = new Button
+            {
+                Content = "➕ Создать отчет",
+                Height = 40,
+                Margin = new Thickness(0, 0, 0, 14),
+                Background = (Brush)new BrushConverter().ConvertFrom("#9B59B6"),
+                Foreground = Brushes.White,
+                Cursor = Cursors.Hand
+            };
+            createButton.Click += OnCreateReportClick;
+            stackPanel.Children.Add(createButton);
+            stackPanel.Children.Add(contentPanel);
+            FillReportsList(contentPanel);
 
             PropertiesPanel.Children.Add(stackPanel);
+        }
+
+        private void FillReportsList(Panel target)
+        {
+            target.Children.Clear();
+
+            var reports = (_reports ?? new List<Report>())
+                .Where(item => MatchesSearch(item.Name, item.Description, item.Code, _reportSearchText))
+                .OrderBy(item => item.IsPrintForm)
+                .ThenBy(item => item.Name)
+                .ToList();
+
+            if (_reportViewMode == "Список")
+            {
+                foreach (var report in reports)
+                    target.Children.Add(CreateReportCard(report));
+
+                if (!reports.Any())
+                    AddResponsiveTiles(target, Enumerable.Empty<UIElement>(), "Отчеты и печатные формы не найдены.");
+
+                return;
+            }
+
+            AddResponsiveTiles(
+                target,
+                reports.Select(CreateCompactReportCard),
+                "Отчеты и печатные формы не найдены.");
+        }
+
+        private Border CreateReportCard(Report report)
+        {
+            var card = new Border
+            {
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(15),
+                Margin = new Thickness(0, 0, 0, 10),
+                Tag = report,
+                Cursor = Cursors.Hand
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(60, GridUnitType.Pixel) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var icon = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(report.Icon) ? "📊" : report.Icon,
+                FontSize = 32,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            Grid.SetColumn(icon, 0);
+
+            var typeText = report.IsPrintForm ? "Печатная форма" : "Отчет";
+            var availabilityText = report.IsActive ? "Доступен" : "Отключен";
+            var infoStack = new StackPanel();
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = report.Name,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = $"{typeText}; формат: {report.SourceFormat}; статус: {availabilityText}",
+                FontSize = 11,
+                Foreground = Brushes.Gray
+            });
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(report.Description) ? "Описание не указано" : report.Description,
+                FontSize = 11,
+                Foreground = Brushes.Gray,
+                TextWrapping = TextWrapping.Wrap
+            });
+            Grid.SetColumn(infoStack, 1);
+
+            var actionsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var editButton = new Button
+            {
+                Content = "✏️ Редактировать",
+                Width = 120,
+                Height = 32,
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
+                Foreground = Brushes.White
+            };
+            editButton.Click += (_, _) => ShowReportEditor(report);
+            actionsPanel.Children.Add(editButton);
+
+            var availabilityButton = new Button
+            {
+                Content = report.IsActive ? "Отключить" : "Включить",
+                Width = 92,
+                Height = 32,
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom(report.IsActive ? "#D68910" : "#27AE60"),
+                Foreground = Brushes.White
+            };
+            availabilityButton.Click += async (_, _) => await ToggleReportAvailabilityAndShowListAsync(report);
+            actionsPanel.Children.Add(availabilityButton);
+
+            var deleteButton = new Button
+            {
+                Content = "🗑️",
+                Width = 42,
+                Height = 32,
+                Background = (Brush)new BrushConverter().ConvertFrom("#E74C3C"),
+                Foreground = Brushes.White,
+                ToolTip = "Удалить отчет"
+            };
+            deleteButton.Click += async (_, _) => await DeleteReportAndShowListAsync(report);
+            actionsPanel.Children.Add(deleteButton);
+
+            Grid.SetColumn(actionsPanel, 2);
+
+            grid.Children.Add(icon);
+            grid.Children.Add(infoStack);
+            grid.Children.Add(actionsPanel);
+            card.Child = grid;
+
+            return card;
+        }
+
+        private async Task RefreshReportsTreeAndListAsync()
+        {
+            _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
+            BuildMetadataTree();
+            ShowReportsList();
+        }
+
+        private async Task<Report?> RefreshReportsTreeAndSelectReportAsync(Guid reportId, bool showEditor)
+        {
+            _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
+            BuildMetadataTree();
+            var refreshedReport = _reports.FirstOrDefault(report => report.Id == reportId);
+            if (refreshedReport == null)
+            {
+                ShowReportsList();
+                return null;
+            }
+
+            if (showEditor)
+                ShowReportEditor(refreshedReport);
+            SelectReportTreeItem(reportId);
+            return refreshedReport;
+        }
+
+        private void SelectReportTreeItem(Guid reportId)
+        {
+            var item = FindReportTreeItem(MetadataTree, reportId);
+            if (item == null)
+                return;
+            item.IsSelected = true;
+            item.BringIntoView();
+            _selectedReportTreeItem = item;
+        }
+
+        private static TreeViewItem? FindReportTreeItem(ItemsControl parent, Guid reportId)
+        {
+            foreach (var item in parent.Items.OfType<TreeViewItem>())
+            {
+                if (item.Tag is Report report && report.Id == reportId)
+                    return item;
+                var nested = FindReportTreeItem(item, reportId);
+                if (nested != null)
+                    return nested;
+            }
+            return null;
+        }
+
+        private async Task ToggleReportAvailabilityAndShowListAsync(Report report)
+        {
+            await new PrintFormService(_context).SetAvailabilityAsync(report.Id, !report.IsActive);
+            await RefreshReportsTreeAndListAsync();
+        }
+
+        private async Task DeleteReportAndShowListAsync(Report report)
+        {
+            var result = MessageBox.Show(
+                $"Удалить отчет \"{report.Name}\"?\n\nЭто действие нельзя отменить.",
+                "Подтверждение удаления",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                await LogConfiguratorEventAsync(
+                    "ReportDeleteCancel",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                return;
+            }
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                await _reportService.DeleteReportAsync(report.Id);
+                await LogConfiguratorEventAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                await RefreshReportsTreeAndListAsync();
+                MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                await LogConfiguratorErrorAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    ex,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
         }
 
         // Карточка для динамического документа (метаданных)
@@ -1635,7 +2523,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка: {GetFullExceptionMessage(ex)}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
@@ -1721,14 +2609,26 @@ namespace BIS.ERP.Views
                 Background = (Brush)new BrushConverter().ConvertFrom("#3498DB"),
                 Foreground = Brushes.White
             };
-            designerButton.Click += async (s, e) =>
+            designerButton.Click += async (_, _) =>
             {
                 var fullReport = await LoadFullReportAsync(report);
                 var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
-                    await LoadMetadata();
+                    await RefreshReportsTreeAndSelectReportAsync(report.Id, showEditor: true);
             };
             mainPanel.Children.Add(designerButton);
+
+            var previewButton = new Button
+            {
+                Content = "Предпросмотр",
+                Height = 36,
+                MinWidth = 180,
+                Margin = new Thickness(0, 10, 0, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
+                Foreground = Brushes.White
+            };
+            previewButton.Click += async (_, _) => await PreviewReportDirectAsync(report);
+            mainPanel.Children.Add(previewButton);
 
             var availabilityButton = new Button
             {
@@ -1742,7 +2642,7 @@ namespace BIS.ERP.Views
             availabilityButton.Click += async (_, _) =>
             {
                 await new PrintFormService(_context).SetAvailabilityAsync(report.Id, !report.IsActive);
-                await LoadMetadata();
+                await RefreshReportsTreeAndSelectReportAsync(report.Id, showEditor: true);
             };
             mainPanel.Children.Add(availabilityButton);
 
@@ -1758,40 +2658,6 @@ namespace BIS.ERP.Views
             };
             deleteButton.Click += async (_, _) => await DeleteSelectedReport(report);
             mainPanel.Children.Add(deleteButton);
-
-            // Предпросмотр
-            if (report.SourceFormat == "FoxProFRX" && !string.IsNullOrWhiteSpace(report.Template))
-            {
-                var previewButton = new Button
-                {
-                    Content = "🚫 Предпросмотр печатной формы",
-                    Height = 36,
-                    MinWidth = 180,
-                    Margin = new Thickness(0, 10, 0, 0),
-                    Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
-                    Foreground = Brushes.White
-                };
-                previewButton.Click += (_, _) =>
-                {
-                    try
-                    {
-                        var pdf = new PrintFormService(_context).ExportTemplatePreview(report);
-                        var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.pdf");
-                        File.WriteAllBytes(tempFile, pdf);
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = tempFile,
-                            UseShellExecute = true
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
-                            MessageBoxButton.OK, MessageBoxImage.Error);
-                    }
-                };
-                mainPanel.Children.Add(previewButton);
-            }
 
             PropertiesPanel.Children.Add(mainPanel);
         }
@@ -1813,30 +2679,51 @@ namespace BIS.ERP.Views
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
 
-            if (result == MessageBoxResult.Yes)
+            if (result != MessageBoxResult.Yes)
             {
-                try
-                {
-                    Mouse.OverrideCursor = Cursors.Wait;
-                    await _reportService.DeleteReportAsync(report.Id);
-                    await LoadMetadata();
-                    PropertiesPanel.Children.Clear();
-                    EditorTitle.Text = "📊 Отчет удален";
-                    EditorDescription.Text = "";
-                    _selectedReport = null;
-                    DeleteReportMenuItem.IsEnabled = false;
-                    MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                finally
-                {
-                    Mouse.OverrideCursor = null;
-                }
+                await LogConfiguratorEventAsync(
+                    "ReportDeleteCancel",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                return;
+            }
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                await _reportService.DeleteReportAsync(report.Id);
+                await LogConfiguratorEventAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                await LoadMetadata();
+                PropertiesPanel.Children.Clear();
+                EditorTitle.Text = "📊 Отчет удален";
+                EditorDescription.Text = "";
+                _selectedReport = null;
+                DeleteReportMenuItem.IsEnabled = false;
+                MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                await LogConfiguratorErrorAsync(
+                    "ReportDelete",
+                    "Report",
+                    report.Name,
+                    ex,
+                    report.Id,
+                    new { report.Code, report.SourceFormat, report.ReportType });
+                MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
             }
         }
 
@@ -1893,7 +2780,7 @@ namespace BIS.ERP.Views
                 var fullReport = await LoadFullReportAsync(_selectedReport);
                 var designer = new ReportDesignerWindow(fullReport) { Owner = this };
                 if (designer.ShowDialog() == true)
-                    await LoadMetadata();
+                    await RefreshReportsTreeAndSelectReportAsync(_selectedReport.Id, showEditor: true);
             }
         }
 
@@ -1902,40 +2789,29 @@ namespace BIS.ERP.Views
             if (_selectedReport != null)
             {
                 await new PrintFormService(_context).SetAvailabilityAsync(_selectedReport.Id, !_selectedReport.IsActive);
-                await LoadMetadata();
+                await RefreshReportsTreeAndSelectReportAsync(_selectedReport.Id, showEditor: true);
             }
         }
 
         private async void OnPreviewReportPdfClick(object sender, RoutedEventArgs e)
         {
-            if (_selectedReport == null) return;
-            try
-            {
-                var fullReport = await LoadFullReportAsync(_selectedReport);
-                var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
-                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
-                File.WriteAllBytes(tempFile, pdf);
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = tempFile,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+            if (_selectedReport != null)
+                await PreviewReportDirectAsync(_selectedReport);
         }
 
         private async void OnPreviewReportClick(object sender, RoutedEventArgs e)
         {
-            if (_selectedReport == null) return;
+            if (_selectedReport != null)
+                await PreviewReportDirectAsync(_selectedReport);
+        }
+
+        private async Task PreviewReportDirectAsync(Report report)
+        {
             try
             {
-                var fullReport = await LoadFullReportAsync(_selectedReport);
+                var fullReport = await LoadFullReportAsync(report);
                 var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
-                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{_selectedReport.Id:N}.pdf");
+                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.pdf");
                 File.WriteAllBytes(tempFile, pdf);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
@@ -1945,7 +2821,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка предпросмотра: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -1963,12 +2839,9 @@ namespace BIS.ERP.Views
 
         private async void OnCreateReportClick(object sender, RoutedEventArgs e)
         {
-            var designer = new ReportDesignerWindow();
-            designer.Owner = this;
+            var designer = new ReportDesignerWindow { Owner = this };
             if (designer.ShowDialog() == true)
-            {
                 await LoadMetadata();
-            }
         }
 
         private async void OnImportFrxClick(object sender, RoutedEventArgs e)
@@ -2009,7 +2882,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка выгрузки конфигурации: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка выгрузки конфигурации: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -2055,7 +2928,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки конфигурации: {ex.Message}", "Ошибка",
+                MessageBox.Show($"Ошибка загрузки конфигурации: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -2077,7 +2950,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия патчей: {ex.Message}", "Патчи",
+                MessageBox.Show($"Ошибка открытия патчей: {GetFullExceptionMessage(ex)}", "Патчи",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2091,7 +2964,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия обновлений программы: {ex.Message}", "Обновления программы",
+                MessageBox.Show($"Ошибка открытия обновлений программы: {GetFullExceptionMessage(ex)}", "Обновления программы",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2105,7 +2978,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия анализа FoxPro: {ex.Message}", "Анализ FoxPro",
+                MessageBox.Show($"Ошибка открытия анализа FoxPro: {GetFullExceptionMessage(ex)}", "Анализ FoxPro",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -2149,13 +3022,15 @@ namespace BIS.ERP.Views
 
         private async void OnSettingsClick(object sender, RoutedEventArgs e)
         {
-            var dialog = new SettingsWindow { Owner = this };
+            var dialog = new SettingsWindow(allowSystemLogoManagement: true) { Owner = this };
             if (dialog.ShowDialog() != true)
                 return;
             var configuration = await new SystemConfigurationService().GetAsync();
             SystemNameText.Text = configuration.SystemName;
-            SystemIconText.Text = GetSystemIcon(configuration.Icon);
+            LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, configuration.LogoImage, GetSystemIcon(configuration.Icon));
             var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
+            if (currentInfoBase != null)
+                LogoDisplayHelper.Apply(InfoBaseLogoImage, InfoBaseIconText, currentInfoBase.LogoImage, currentInfoBase.DisplayIcon);
             InfoBaseNameText.Text = currentInfoBase == null
                 ? "Инфобаза: не выбрана"
                 : $"Инфобаза: {currentInfoBase.Name}";
@@ -2193,7 +3068,7 @@ namespace BIS.ERP.Views
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
@@ -2203,3 +3078,10 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+
+
+
+
+
+

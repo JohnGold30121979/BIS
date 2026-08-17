@@ -337,8 +337,9 @@ namespace BIS.ERP.Services
 
             var startRow = header.HeaderRow + header.HeaderHeight;
             var lastUsedRow = GetLastUsedRow(sheet);
-            var lastUsedColumn = Math.Max(GetLastUsedColumn(sheet), header.Columns.Values.DefaultIfEmpty(1).Max());
-            var footerRow = createdSheet ? null : FindFooterRow(sheet, startRow, lastUsedRow, lastUsedColumn);
+            var templateColumnCount = header.Columns.Count == 0 ? 1 : Enumerable.Max(header.Columns.Values);
+            var lastUsedColumn = Math.Max(GetLastUsedColumn(sheet), templateColumnCount);
+            int? footerRow = createdSheet ? null : FindFooterRow(sheet, startRow, lastUsedRow, lastUsedColumn);
             var clearToRow = footerRow.HasValue
                 ? footerRow.Value - 1
                 : Math.Max(lastUsedRow, startRow + Math.Max(rows.Count, 50));

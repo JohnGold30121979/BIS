@@ -82,8 +82,7 @@
                                 <ComboBoxItem Content="Список" Tag="List"/>
                                 <ComboBoxItem Content="Карточка" Tag="Card"/>
                                 <ComboBoxItem Content="Счет-фактура на материалы (КР)" Tag="InvoiceMaterialsKg"/>
-                                <ComboBoxItem Content="Приходный кассовый ордер" Tag="CashReceiptOrder"/>
-                                <ComboBoxItem Content="Расходный кассовый ордер" Tag="CashPaymentOrder"/>
+                                <ComboBoxItem Content="Расходный/Приходный КО" Tag="CashOrder"/>
                                 <ComboBoxItem Content="Макет Visual FoxPro FRX" Tag="FoxProLayout"/>
                             </ComboBox>
 
@@ -141,20 +140,27 @@
 
             <!-- Вкладка: Поля -->
             <TabItem Header="📊 Поля">
-                <Grid>
+                <Grid Margin="8">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="280"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="320" MinWidth="240"/>
+                        <ColumnDefinition Width="*" MinWidth="500"/>
                     </Grid.ColumnDefinitions>
 
                     <!-- Доступные поля -->
                     <Border Grid.Column="0" Background="#F0F4F8" Margin="0,0,10,0">
-                        <StackPanel Margin="10">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
                             <TextBlock Text="📋 Доступные поля" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
-                            <ListBox x:Name="AvailableFields" Height="500"
+                            <ListBox x:Name="AvailableFields" Grid.Row="1"
                                      ItemsSource="{Binding AvailableSourceFields}"
                                      MouseDoubleClick="OnFieldDoubleClick"
-                                     SelectionMode="Extended">
+                                     SelectionMode="Extended"
+                                     HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Border Padding="8" Margin="0,1" Background="White" CornerRadius="5">
@@ -169,27 +175,35 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
-                        </StackPanel>
+                        </Grid>
                     </Border>
 
                     <!-- Поля отчета -->
                     <Border Grid.Column="1" Background="White">
-                        <StackPanel Margin="10">
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
                             <TextBlock Text="📋 Поля отчета" FontWeight="Bold" FontSize="14" Margin="0,0,0,10"/>
-                            <DataGrid x:Name="ReportFieldsGrid" AutoGenerateColumns="False"
+                            <DataGrid x:Name="ReportFieldsGrid" Grid.Row="1" AutoGenerateColumns="False"
                                       CanUserAddRows="False" CanUserDeleteRows="False"
-                                      RowHeight="40" MaxHeight="450">
+                                      RowHeight="32" MinRowHeight="28"
+                                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Имя поля" Binding="{Binding FieldName}" Width="120" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Отображаемое имя" Binding="{Binding DisplayName}" Width="150"/>
-                                    <DataGridComboBoxColumn Header="Тип агрегации" Width="120"/>
-                                    <DataGridTextColumn Header="Ширина" Binding="{Binding Width}" Width="80"/>
-                                    <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="80"/>
-                                    <DataGridComboBoxColumn Header="Выравнивание" Width="100"/>
-                                    <DataGridTemplateColumn Header="Удалить" Width="50">
+                                    <DataGridTextColumn Header="Имя поля" Binding="{Binding FieldName}" Width="1.2*" MinWidth="120" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Отображаемое имя" Binding="{Binding DisplayName}" Width="1.5*" MinWidth="150"/>
+                                    <DataGridComboBoxColumn Header="Тип агрегации" Width="140"/>
+                                    <DataGridTextColumn Header="Ширина" Binding="{Binding Width}" Width="90"/>
+                                    <DataGridCheckBoxColumn Header="Видимость" Binding="{Binding IsVisible}" Width="90"/>
+                                    <DataGridComboBoxColumn Header="Выравнивание" Width="130"/>
+                                    <DataGridTemplateColumn Header="Удалить" Width="70">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <Button Content="❌" Width="30" Height="30"
+                                                <Button Content="❌" Width="30" Height="26"
                                                         Background="Transparent" Click="OnRemoveFieldClick"
                                                         Cursor="Hand"/>
                                             </DataTemplate>
@@ -198,17 +212,16 @@
                                 </DataGrid.Columns>
                             </DataGrid>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                                 <Button x:Name="MoveUpButton" Content="⬆ Вверх" Width="80" Height="30" Margin="0,0,5,0"
                                         Background="#3498DB" Foreground="White" Click="OnMoveUpClick"/>
                                 <Button x:Name="MoveDownButton" Content="⬇ Вниз" Width="80" Height="30"
                                         Background="#3498DB" Foreground="White" Click="OnMoveDownClick"/>
                             </StackPanel>
-                        </StackPanel>
+                        </Grid>
                     </Border>
                 </Grid>
             </TabItem>
-
             <!-- Вкладка: Соответствия полей (только для FRX) -->
             <TabItem Header="🔗 FRX поля" x:Name="FrXFieldsTab">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -243,6 +256,52 @@
                                 </DataGrid.Columns>
                             </DataGrid>
 
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Button Content="Применить общие правила" Width="170" Height="30" Margin="0,0,8,0"
+                                        Background="#2980B9" Foreground="White" Click="OnApplyFoxProRulesClick"/>
+                                <Button Content="Сохранить привязки как правила" Width="210" Height="30" Margin="0,0,8,0"
+                                        Background="#16A085" Foreground="White" Click="OnSaveMappedFoxProRulesClick"/>
+                                <Button Content="Сохранить список правил" Width="170" Height="30"
+                                        Background="#34495E" Foreground="White" Click="OnSaveFoxProRulesClick"/>
+                            </StackPanel>
+
+                            <TextBlock Text="💡 Для каждого элемента макета выберите поле данных. Если нажать 'Сохранить привязки как правила', такие же FoxPro-поля будут распознаваться автоматически в других похожих отчетах." 
+                                       FontSize="11" Foreground="Gray" Margin="0,0,0,10"/>
+
+                            <Expander Header="Общие правила распознавания FoxPro-полей" IsExpanded="False" Margin="0,0,0,12">
+                                <StackPanel Margin="0,8,0,0">
+                                    <DataGrid x:Name="FoxProRulesGrid" AutoGenerateColumns="False"
+                                              ItemsSource="{Binding FoxProRules}"
+                                              CanUserAddRows="False" CanUserDeleteRows="False"
+                                              RowHeight="34" MaxHeight="230" Margin="0,0,0,8">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="FoxPro поле/выражение" Binding="{Binding SourcePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="190"/>
+                                            <DataGridTextColumn Header="Каноническое поле" Binding="{Binding CanonicalField, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                                            <DataGridTemplateColumn Header="Поле данных" Width="180">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <ComboBox ItemsSource="{Binding DataContext.AvailableDataFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                  DisplayMemberPath="Name"
+                                                                  SelectedValuePath="DbColumnName"
+                                                                  SelectedValue="{Binding TargetFieldName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                  Height="25" Margin="2"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTextColumn Header="Профиль" Binding="{Binding ProfileCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                                            <DataGridTextColumn Header="Приоритет" Binding="{Binding Priority, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
+                                            <DataGridCheckBoxColumn Header="Regex" Binding="{Binding IsRegex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                                            <DataGridCheckBoxColumn Header="Активно" Binding="{Binding IsActive, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                                            <DataGridTextColumn Header="Комментарий" Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Добавить правило" Width="130" Height="28" Margin="0,0,8,0" Click="OnAddFoxProRuleClick"/>
+                                        <Button Content="Удалить правило" Width="130" Height="28" Click="OnDeleteFoxProRuleClick"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+
                             <TextBlock Text="💡 Для каждого элемента макета выберите, какое поле данных в него подставлять." 
                                        FontSize="11" Foreground="Gray" Margin="0,0,0,10"/>
 
@@ -275,6 +334,12 @@
                                 <ComboBoxItem Content="Header"/>
                                 <ComboBoxItem Content="Body"/>
                                 <ComboBoxItem Content="Footer"/>
+                                <ComboBoxItem Content="PageHeader"/>
+                                <ComboBoxItem Content="GroupHeader"/>
+                                <ComboBoxItem Content="Detail"/>
+                                <ComboBoxItem Content="GroupFooter"/>
+                                <ComboBoxItem Content="PageFooter"/>
+                                <ComboBoxItem Content="Summary"/>
                             </ComboBox>
 
                             <WrapPanel Margin="0,0,0,10">
@@ -284,6 +349,7 @@
                                         Background="#C0392B" Foreground="White" Click="OnDeleteNativeElementClick"/>
                                 <Button Content="Текст" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeTextClick"/>
                                 <Button Content="Поле" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeFieldClick"/>
+                                <Button Content="SUBSTR" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeSubstringClick"/>
                                 <Button Content="Линия" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeLineClick"/>
                                 <Button Content="Рамка" Width="78" Height="30" Margin="0,0,6,6" Click="OnAddNativeBoxClick"/>
                             </WrapPanel>
@@ -302,6 +368,7 @@
                                             <x:Array Type="{x:Type sys:String}" xmlns:sys="clr-namespace:System;assembly=mscorlib">
                                                 <sys:String>Text</sys:String>
                                                 <sys:String>Expression</sys:String>
+                                                <sys:String>SUBSTR</sys:String>
                                                 <sys:String>Line</sys:String>
                                                 <sys:String>Box</sys:String>
                                             </x:Array>
@@ -313,6 +380,12 @@
                                                 <sys:String>Header</sys:String>
                                                 <sys:String>Body</sys:String>
                                                 <sys:String>Footer</sys:String>
+                                                <sys:String>PageHeader</sys:String>
+                                                <sys:String>GroupHeader</sys:String>
+                                                <sys:String>Detail</sys:String>
+                                                <sys:String>GroupFooter</sys:String>
+                                                <sys:String>PageFooter</sys:String>
+                                                <sys:String>Summary</sys:String>
                                             </x:Array>
                                         </DataGridComboBoxColumn.ItemsSource>
                                     </DataGridComboBoxColumn>
@@ -320,7 +393,7 @@
                                     <DataGridTemplateColumn Header="Поле" Width="130">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <ComboBox ItemsSource="{Binding DataContext.AvailableDataFields, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                <ComboBox ItemsSource="{Binding DataContext.AvailableLayoutFields, RelativeSource={RelativeSource AncestorType=Window}}"
                                                           DisplayMemberPath="Name"
                                                           SelectedValuePath="DbColumnName"
                                                           SelectedValue="{Binding Expression, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -328,6 +401,7 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Expression" Binding="{Binding Expression, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="180"/>
                                     <DataGridTextColumn Header="X" Binding="{Binding Left, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
                                     <DataGridTextColumn Header="Y" Binding="{Binding Top, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
                                     <DataGridTextColumn Header="Ш" Binding="{Binding Width, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged, StringFormat=0}" Width="55"/>
@@ -354,6 +428,7 @@
                     <Border Grid.Column="2" Background="White" Margin="10,0,0,0" Padding="12">
                         <Grid PreviewKeyDown="OnNativePropertiesPreviewKeyDown">
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -407,11 +482,36 @@
                             <TextBox x:Name="NativeTextBox" Grid.Row="2" Grid.Column="1" Height="28" Margin="0,3"/>
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Поле:" VerticalAlignment="Center"/>
                             <ComboBox x:Name="NativeFieldCombo" Grid.Row="3" Grid.Column="1" Height="28" Margin="0,3"
-                                      ItemsSource="{Binding AvailableDataFields}"
+                                      ItemsSource="{Binding AvailableLayoutFields}"
                                       DisplayMemberPath="Name"
                                       SelectedValuePath="DbColumnName"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="X/Y:" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Expression:" VerticalAlignment="Center"/>
+                            <TextBox x:Name="NativeExpressionBox" Grid.Row="4" Grid.Column="1" Height="54" Margin="0,3"
+                                     TextWrapping="Wrap" AcceptsReturn="True"
+                                     FontFamily="Consolas" FontSize="11"
+                                     ToolTip="Полное FoxPro-выражение, например SUBSTR(ALLTRIM(field),1,6)"/>
+                            <Border Grid.Row="5" Grid.ColumnSpan="2" Background="#F8FAFC" BorderBrush="#D5DDE5" BorderThickness="1" Padding="6" Margin="0,6,0,6" CornerRadius="4">
+                                <StackPanel>
+                                    <TextBlock Text="SUBSTR: вырезать часть поля" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="54"/>
+                                            <ColumnDefinition Width="54"/>
+                                            <ColumnDefinition Width="78"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ComboBox x:Name="NativeSubstringFieldCombo" Grid.Column="0" Height="26" Margin="0,0,5,0"
+                                                  ItemsSource="{Binding AvailableLayoutFields}"
+                                                  DisplayMemberPath="Name"
+                                                  SelectedValuePath="DbColumnName"/>
+                                        <TextBox x:Name="NativeSubstringStartBox" Grid.Column="1" Height="26" Text="1" Margin="0,0,5,0" ToolTip="С какого символа, FoxPro считает с 1"/>
+                                        <TextBox x:Name="NativeSubstringLengthBox" Grid.Column="2" Height="26" Text="1" Margin="0,0,5,0" ToolTip="Сколько символов взять"/>
+                                        <Button Grid.Column="3" Content="Собрать" Height="26" Click="OnBuildNativeSubstringClick"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="X/Y:" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="6" Grid.Column="1" Orientation="Horizontal">
                                 <Grid Width="82" Height="30" Margin="0,3,8,3">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -435,8 +535,8 @@
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Ш/В:" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Ш/В:" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal">
                                 <Grid Width="82" Height="30" Margin="0,3,8,3">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -460,19 +560,19 @@
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Шрифт:" VerticalAlignment="Center"/>
-                            <TextBox x:Name="NativeFontBox" Grid.Row="6" Grid.Column="1" Height="28" Margin="0,3"/>
-                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Размер:" VerticalAlignment="Center"/>
-                            <TextBox x:Name="NativeFontSizeBox" Grid.Row="7" Grid.Column="1" Height="28" Margin="0,3"/>
-                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Выравн.:" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="NativeAlignmentCombo" Grid.Row="8" Grid.Column="1" Height="28" Margin="0,3">
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Шрифт:" VerticalAlignment="Center"/>
+                            <TextBox x:Name="NativeFontBox" Grid.Row="8" Grid.Column="1" Height="28" Margin="0,3"/>
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Размер:" VerticalAlignment="Center"/>
+                            <TextBox x:Name="NativeFontSizeBox" Grid.Row="9" Grid.Column="1" Height="28" Margin="0,3"/>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Выравн.:" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="NativeAlignmentCombo" Grid.Row="10" Grid.Column="1" Height="28" Margin="0,3">
                                 <ComboBoxItem Content="Left"/>
                                 <ComboBoxItem Content="Center"/>
                                 <ComboBoxItem Content="Right"/>
                             </ComboBox>
-                            <CheckBox x:Name="NativeBoldCheck" Grid.Row="9" Grid.Column="1" Content="Жирный" Margin="0,8,0,0"/>
-                            <CheckBox x:Name="NativeItalicCheck" Grid.Row="10" Grid.Column="1" Content="Курсив" Margin="0,4,0,0"/>
-                            <Button Grid.Row="11" Grid.ColumnSpan="2" Content="Применить свойства"
+                            <CheckBox x:Name="NativeBoldCheck" Grid.Row="11" Grid.Column="1" Content="Жирный" Margin="0,8,0,0"/>
+                            <CheckBox x:Name="NativeItalicCheck" Grid.Row="12" Grid.Column="1" Content="Курсив" Margin="0,4,0,0"/>
+                            <Button Grid.Row="13" Grid.ColumnSpan="2" Content="Применить свойства"
                                     Height="34" Margin="0,14,0,0"
                                     Background="#27AE60" Foreground="White"
                                     Click="OnApplyNativeElementPropertiesClick"/>
@@ -566,7 +666,7 @@
                           Content="✓ Чередовать цвета строк" Margin="5" IsChecked="True"/>
 
                             <CheckBox x:Name="ShowGridLinesCheck" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" 
-                          Content="✓ Показывать линии сетки" Margin="5" IsChecked="True"/>
+                          Content="✓ Показывать линии сетки" Margin="5" IsChecked="True" ToolTip="Для нативных PDF/Excel отчетов включает линии ячеек. В FRX линии задаются элементами Line/Box макета."/>
 
                             <CheckBox x:Name="ShowGrandTotalCheck" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="4" 
                           Content="✓ Показывать общий итог" Margin="5" IsChecked="True"/>

@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
@@ -21,6 +21,7 @@ namespace BIS.ERP.Views
         private ReportService _reportService;
         private PrintFormService _printFormService;
         private MetadataService _metadataService;
+        private FoxProReportFieldRuleService _foxProRuleService;
         private Report _currentReport;
         private List<MetadataObject> _availableCatalogs;
         private ObservableCollection<ReportField> _reportFields;
@@ -28,6 +29,8 @@ namespace BIS.ERP.Views
         public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
+        public ObservableCollection<FieldDef> AvailableLayoutFields { get; } = new();
+        public ObservableCollection<FoxProReportFieldRule> FoxProRules { get; } = new();
         private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
         public ReportDesignerWindow(Report report = null)
@@ -55,6 +58,9 @@ namespace BIS.ERP.Views
                 _reportService = new ReportService(context);
                 _printFormService = new PrintFormService(context);
                 _metadataService = new MetadataService(context);
+                _foxProRuleService = new FoxProReportFieldRuleService(context);
+                await _foxProRuleService.SeedDefaultRulesAsync();
+                await LoadFoxProRulesAsync();
 
                 await LoadDataSources();
 
@@ -74,11 +80,21 @@ namespace BIS.ERP.Views
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-
         private async Task LoadDataSources()
         {
             _availableCatalogs = await _metadataService.GetCatalogsAsync();
             _availableCatalogs.AddRange(await _metadataService.GetDocumentsAsync());
+
+            var reportSources = (await _metadataService.GetAllMetadataObjectsAsync())
+                .Where(item => item.ObjectType == "ReportSource")
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Name)
+                .ToList();
+            foreach (var source in reportSources)
+            {
+                if (_availableCatalogs.All(item => item.Id != source.Id))
+                    _availableCatalogs.Add(source);
+            }
 
             DataSourceCombo.Items.Clear();
             DataSourceCombo.Items.Add(new ComboBoxItem { Tag = null, Content = "-- Выберите источник данных --" });
@@ -88,13 +104,19 @@ namespace BIS.ERP.Views
                 DataSourceCombo.Items.Add(new ComboBoxItem
                 {
                     Tag = catalog,
-                    Content = $"{(catalog.ObjectType == "Document" ? "📄" : "📚")} {catalog.Name}"
+                    Content = $"{GetDataSourceIcon(catalog)} {catalog.Name}"
                 });
             }
 
             DataSourceCombo.SelectedIndex = 0;
         }
 
+        private static string GetDataSourceIcon(MetadataObject catalog) => catalog.ObjectType switch
+        {
+            "Document" => "📄",
+            "ReportSource" => "📌",
+            _ => "📚"
+        };
         private async void OnDataSourceChanged(object sender, SelectionChangedEventArgs e)
         {
             var selected = DataSourceCombo.SelectedItem as ComboBoxItem;
@@ -106,6 +128,9 @@ namespace BIS.ERP.Views
             {
                 AvailableSourceFields.Clear();
                 AvailableDataFields.Clear();
+                AvailableFilterFields.Clear();
+                AvailableLayoutFields.Clear();
+                AddComputedDataFields();
             }
         }
 
@@ -113,21 +138,21 @@ namespace BIS.ERP.Views
         {
             var addedFieldNames = _reportFields.Select(f => f.DisplayName).ToHashSet();
 
-            var fields = new List<FieldDef>();
+            var allFields = catalog.Fields
+                .OrderBy(f => f.Order)
+                .Select(field => new FieldDef { Name = field.Name, DbColumnName = field.DbColumnName, Type = field.FieldType })
+                .ToList();
 
-            foreach (var field in catalog.Fields.OrderBy(f => f.Order))
-            {
-                if (!addedFieldNames.Contains(field.Name))
-                {
-                    fields.Add(new FieldDef { Name = field.Name, DbColumnName = field.DbColumnName, Type = field.FieldType });
-                }
-            }
+            var fields = allFields
+                .Where(field => !addedFieldNames.Contains(field.Name))
+                .ToList();
 
             CommitDesignerGridEdits();
 
             AvailableSourceFields.Clear();
             AvailableDataFields.Clear();
             AvailableFilterFields.Clear();
+            AvailableLayoutFields.Clear();
 
             foreach (var field in fields)
             {
@@ -135,26 +160,38 @@ namespace BIS.ERP.Views
                 AvailableDataFields.Add(field);
             }
 
-            foreach (var field in GetPrintFormComputedFields())
-                AvailableDataFields.Add(field);
+            AddComputedDataFields();
 
-            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            foreach (var field in allFields)
             {
-                AvailableFilterFields.Add(new FieldDef
-                {
-                    Name = field.Name,
-                    DbColumnName = field.DbColumnName,
-                    Type = field.FieldType
-                });
+                AvailableFilterFields.Add(field);
+                AvailableLayoutFields.Add(field);
             }
 
             await Task.CompletedTask;
         }
 
+        private void AddComputedDataFields()
+        {
+            var existing = AvailableDataFields
+                .Select(field => field.DbColumnName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in GetPrintFormComputedFields())
+            {
+                if (string.IsNullOrWhiteSpace(field.DbColumnName) || existing.Contains(field.DbColumnName))
+                    continue;
+
+                AvailableDataFields.Add(field);
+                existing.Add(field.DbColumnName);
+            }
+        }
         private void CommitDesignerGridEdits()
         {
             TryCommitGrid(ReportFieldsGrid);
             TryCommitGrid(ElementMappingGrid);
+            TryCommitGrid(FoxProRulesGrid);
             TryCommitGrid(NativeElementsGrid);
         }
 
@@ -267,6 +304,74 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void SyncReportFieldsWithSourceIfStale(Report report, MetadataObject catalog)
+        {
+            if (catalog.ObjectType != "ReportSource" || catalog.Fields.Count == 0)
+                return;
+
+            var sourceFieldNames = catalog.Fields
+                .SelectMany(field => new[] { field.Name, field.DbColumnName })
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var mirrorSourceSchema = string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase);
+            var hasStaleFields = _reportFields.Any(field =>
+                !sourceFieldNames.Contains(field.FieldName) &&
+                !sourceFieldNames.Contains(field.DisplayName));
+
+            if (_reportFields.Count > 0 && !mirrorSourceSchema && !hasStaleFields)
+                return;
+
+            if (mirrorSourceSchema && _reportFields.Count == catalog.Fields.Count && !hasStaleFields)
+                return;
+
+            _reportFields.Clear();
+            var order = 1;
+            foreach (var field in catalog.Fields.OrderBy(field => field.Order))
+            {
+                var fieldName = string.IsNullOrWhiteSpace(field.DbColumnName)
+                    ? field.Name
+                    : field.DbColumnName;
+
+                _reportFields.Add(new ReportField
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = report.Id,
+                    FieldName = fieldName,
+                    DisplayName = field.Name,
+                    Order = order++,
+                    Width = GetDefaultReportFieldWidth(field.FieldType),
+                    IsVisible = true,
+                    Alignment = GetDefaultReportFieldAlignment(field.FieldType)
+                });
+            }
+        }
+
+        private static int GetDefaultReportFieldWidth(string fieldType)
+        {
+            return fieldType switch
+            {
+                "Decimal" => 100,
+                "Money" => 100,
+                "Int" => 80,
+                "Integer" => 80,
+                "Date" => 90,
+                "DateTime" => 100,
+                _ => 140
+            };
+        }
+
+        private static string GetDefaultReportFieldAlignment(string fieldType)
+        {
+            return fieldType switch
+            {
+                "Decimal" => "Right",
+                "Money" => "Right",
+                "Int" => "Right",
+                "Integer" => "Right",
+                _ => "Left"
+            };
+        }
         private async Task LoadReportAsync(Report report)
         {
             _currentReport = report;
@@ -338,6 +443,7 @@ namespace BIS.ERP.Views
                 var catalog = _availableCatalogs.FirstOrDefault(c => c.Id == report.DataSourceId);
                 if (catalog != null)
                 {
+                    SyncReportFieldsWithSourceIfStale(report, catalog);
                     await LoadAvailableFields(catalog);
                 }
             }
@@ -506,8 +612,8 @@ namespace BIS.ERP.Views
 
                 var data = await _reportService.GetReportDataAsync(tempReport);
 
-                var previewWindow = new ReportPreviewWindow(data, tempReport, _reportService);
-                previewWindow.Owner = this;
+                var pdfBytes = _reportService.ExportToPdf(data, tempReport);
+                var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
                 previewWindow.ShowDialog();
             }
             catch (Exception ex)
@@ -545,8 +651,11 @@ namespace BIS.ERP.Views
                     };
                 }
 
+                CommitDesignerGridEdits();
+
                 SyncNativeTemplateToTemplateBoxIfNeeded();
 
+                SyncFrxElementMappingsFromNativeTemplate();
                 // Заполняем данные
                 _currentReport.Name = ReportNameBox.Text;
                 _currentReport.Description = ReportDescBox.Text;
@@ -563,6 +672,7 @@ namespace BIS.ERP.Views
                 _currentReport.IsDefault = IsDefaultCheck.IsChecked ?? false;
                 _currentReport.SourceFormat = _currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native";
                 _currentReport.Template = TemplateTextBox?.Text ?? "";
+                _currentReport.TemplateVersion = Math.Max(_currentReport.TemplateVersion, 2);
                 _currentReport.Icon = "📊";
                 _currentReport.UpdatedAt = DateTime.UtcNow;
 
@@ -608,61 +718,13 @@ namespace BIS.ERP.Views
 
                 var mappingsToAdd = BuildReportElementMappings(_currentReport.Id);
 
+                _currentReport.Fields = fieldsToAdd;
+                _currentReport.Filters = filtersToAdd;
+                _currentReport.ElementMappings = mappingsToAdd;
+
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-
-                if (_currentReport.Id == Guid.Empty)
-                {
-                    _currentReport.Id = Guid.NewGuid();
-                    _currentReport.Fields = fieldsToAdd;
-                    _currentReport.Filters = filtersToAdd;
-                    foreach (var mapping in mappingsToAdd)
-                        mapping.ReportId = _currentReport.Id;
-                    _currentReport.ElementMappings = mappingsToAdd;
-                    context.Reports.Add(_currentReport);
-                }
-                else
-                {
-                    var existingReport = await context.Reports
-                        .Include(r => r.Fields)
-                        .Include(r => r.Filters)
-                        .Include(r => r.ElementMappings)
-                        .FirstOrDefaultAsync(r => r.Id == _currentReport.Id);
-
-                    if (existingReport == null)
-                    {
-                        _currentReport.Id = Guid.NewGuid();
-                        _currentReport.Fields = fieldsToAdd;
-                        _currentReport.Filters = filtersToAdd;
-                        foreach (var mapping in mappingsToAdd)
-                            mapping.ReportId = _currentReport.Id;
-                        _currentReport.ElementMappings = mappingsToAdd;
-                        context.Reports.Add(_currentReport);
-                    }
-                    else
-                    {
-                        // ✅ УДАЛЯЕМ СТАРЫЙ И СОЗДАЕМ НОВЫЙ
-                        var reportId = existingReport.Id;
-                        var createdAt = existingReport.CreatedAt;
-
-                        context.ReportFields.RemoveRange(existingReport.Fields);
-                        context.ReportFilters.RemoveRange(existingReport.Filters);
-                        context.ReportElementMappings.RemoveRange(existingReport.ElementMappings);
-                        context.Reports.Remove(existingReport);
-                        await context.SaveChangesAsync();
-
-                        _currentReport.Id = reportId;
-                        _currentReport.CreatedAt = createdAt;
-                        _currentReport.Fields = fieldsToAdd;
-                        _currentReport.Filters = filtersToAdd;
-                        foreach (var mapping in mappingsToAdd)
-                            mapping.ReportId = reportId;
-                        _currentReport.ElementMappings = mappingsToAdd;
-                        context.Reports.Add(_currentReport);
-                    }
-                }
-
-                await context.SaveChangesAsync();
-
+                var reportService = new ReportService(context);
+                _currentReport = await reportService.SaveReportAsync(_currentReport);
                 MessageBox.Show($"Отчет \"{_currentReport.Name}\" сохранен!", "Успех",
                     MessageBoxButton.OK, MessageBoxImage.Information);
 
@@ -711,8 +773,11 @@ namespace BIS.ERP.Views
                 return null;
             }
 
+            CommitDesignerGridEdits();
+
             SyncNativeTemplateToTemplateBoxIfNeeded();
 
+            SyncFrxElementMappingsFromNativeTemplate();
             var report = new Report
             {
                 Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? "Новый отчет" : ReportNameBox.Text.Trim(),
@@ -941,7 +1006,11 @@ namespace BIS.ERP.Views
                     ElementMappingGrid.ItemsSource = _frxElementMappings;
                 }
 
+                var autoApplied = ApplyFoxProRulesToEmptyMappings();
                 UpdateMappingPreview();
+
+                if (autoApplied > 0)
+                    StatusText.Text = $"FRX поля: автоматически применены правила: {autoApplied}.";
 
                 if (_frxElementMappings.Count > 0)
                     FrXFieldsTab.IsEnabled = true;
@@ -952,6 +1021,221 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async Task LoadFoxProRulesAsync()
+        {
+            if (_foxProRuleService == null)
+                return;
+
+            FoxProRules.Clear();
+            foreach (var rule in await _foxProRuleService.GetRulesAsync())
+                FoxProRules.Add(rule);
+        }
+
+        private void OnApplyFoxProRulesClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            var applied = ApplyFoxProRulesToEmptyMappings();
+            UpdateMappingPreview();
+            StatusText.Text = applied == 0
+                ? "Общие правила не нашли новых соответствий."
+                : $"Общие правила применены: {applied}.";
+        }
+
+        private int ApplyFoxProRulesToEmptyMappings()
+        {
+            var applied = 0;
+            foreach (var mapping in _frxElementMappings)
+            {
+                if (!string.IsNullOrWhiteSpace(mapping.MappedFieldName))
+                    continue;
+
+                var source = GetMappingSource(mapping);
+                var target = FindRuleTargetField(source);
+                if (string.IsNullOrWhiteSpace(target))
+                    continue;
+
+                mapping.MappedFieldName = target;
+                mapping.MappedDisplayName = ResolveFieldDisplayName(target);
+                applied++;
+            }
+
+            return applied;
+        }
+
+        private async void OnSaveMappedFoxProRulesClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CommitDesignerGridEdits();
+                var profileCode = GetCurrentRecognitionProfileCode();
+                var added = 0;
+                foreach (var mapping in _frxElementMappings.Where(item => !string.IsNullOrWhiteSpace(item.MappedFieldName)))
+                {
+                    var source = FoxProReportKnowledgeBase.NormalizeRuleSource(GetMappingSource(mapping));
+                    if (string.IsNullOrWhiteSpace(source))
+                        continue;
+
+                    var existing = FoxProRules.FirstOrDefault(rule =>
+                        !rule.IsRegex &&
+                        FoxProReportKnowledgeBase.RuleMatches(rule, source));
+                    if (existing == null)
+                    {
+                        existing = new FoxProReportFieldRule
+                        {
+                            Id = Guid.NewGuid(),
+                            SourcePattern = source,
+                            Priority = 100,
+                            IsActive = true
+                        };
+                        FoxProRules.Add(existing);
+                        added++;
+                    }
+
+                    existing.ProfileCode = profileCode;
+                    existing.SourcePattern = source;
+                    existing.CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
+                    existing.TargetFieldName = mapping.MappedFieldName;
+                    existing.TargetDisplayName = ResolveFieldDisplayName(mapping.MappedFieldName);
+                    existing.Description = string.IsNullOrWhiteSpace(existing.Description)
+                        ? "Создано из визуального конструктора отчетов."
+                        : existing.Description;
+                    existing.IsActive = true;
+                }
+
+                await SaveFoxProRulesAsync();
+                StatusText.Text = added == 0
+                    ? "Общие правила обновлены."
+                    : $"Общие правила сохранены. Новых: {added}.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сохранения правил FoxPro: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OnAddFoxProRuleClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            var mapping = ElementMappingGrid.SelectedItem as FrXElementMappingViewModel;
+            var source = mapping == null ? string.Empty : FoxProReportKnowledgeBase.NormalizeRuleSource(GetMappingSource(mapping));
+            var target = mapping?.MappedFieldName ?? string.Empty;
+            FoxProRules.Add(new FoxProReportFieldRule
+            {
+                Id = Guid.NewGuid(),
+                ProfileCode = GetCurrentRecognitionProfileCode(),
+                SourcePattern = source,
+                CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source),
+                TargetFieldName = target,
+                TargetDisplayName = ResolveFieldDisplayName(target),
+                Priority = 100,
+                IsActive = true,
+                Description = "Пользовательское правило распознавания."
+            });
+        }
+
+        private void OnDeleteFoxProRuleClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            if (FoxProRulesGrid.SelectedItem is FoxProReportFieldRule rule)
+                FoxProRules.Remove(rule);
+        }
+
+        private async void OnSaveFoxProRulesClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CommitDesignerGridEdits();
+                await SaveFoxProRulesAsync();
+                StatusText.Text = "Список общих правил FoxPro сохранен.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сохранения списка правил FoxPro: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task SaveFoxProRulesAsync()
+        {
+            if (_foxProRuleService == null)
+                return;
+
+            foreach (var rule in FoxProRules)
+            {
+                rule.SourcePattern = FoxProReportKnowledgeBase.NormalizeRuleSource(rule.SourcePattern);
+                if (string.IsNullOrWhiteSpace(rule.CanonicalField))
+                    rule.CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(rule.SourcePattern);
+                rule.TargetDisplayName = ResolveFieldDisplayName(rule.TargetFieldName);
+                rule.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _foxProRuleService.SaveRulesAsync(FoxProRules);
+            await LoadFoxProRulesAsync();
+        }
+
+        private string FindRuleTargetField(string source)
+        {
+            var savedRule = FoxProRules
+                .Where(rule => rule.IsActive)
+                .OrderBy(rule => rule.Priority)
+                .FirstOrDefault(rule => FoxProReportKnowledgeBase.RuleMatches(rule, source));
+            if (!string.IsNullOrWhiteSpace(savedRule?.TargetFieldName))
+                return savedRule.TargetFieldName;
+
+            var canonical = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
+            foreach (var candidate in FoxProReportKnowledgeBase.GetTargetFieldCandidates(canonical))
+            {
+                var field = FindAvailableDataField(candidate);
+                if (field != null)
+                    return field.DbColumnName;
+            }
+
+            return string.Empty;
+        }
+
+        private FieldDef? FindAvailableDataField(string candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+                return null;
+
+            var normalized = NormalizeDesignerFieldName(candidate);
+            return AvailableDataFields.FirstOrDefault(field =>
+                field.DbColumnName.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                field.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
+                NormalizeDesignerFieldName(field.DbColumnName) == normalized ||
+                NormalizeDesignerFieldName(field.Name) == normalized);
+        }
+
+        private string ResolveFieldDisplayName(string fieldName)
+        {
+            return FindAvailableDataField(fieldName)?.Name ?? string.Empty;
+        }
+
+        private string GetCurrentRecognitionProfileCode()
+        {
+            try
+            {
+                var template = PrintFormService.DeserializePrintTemplate(TemplateTextBox.Text);
+                return template.RecognitionProfileCode;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string GetMappingSource(FrXElementMappingViewModel mapping)
+        {
+            return string.IsNullOrWhiteSpace(mapping.ElementExpression)
+                ? mapping.ElementText
+                : mapping.ElementExpression;
+        }
+
+        private static string NormalizeDesignerFieldName(string value)
+        {
+            return System.Text.RegularExpressions.Regex.Replace((value ?? string.Empty).Trim().ToLowerInvariant(), @"[\s\.\-]+", "_");
+        }
         private void UpdateMappingPreview()
         {
             if (_frxElementMappings.Count == 0)
@@ -1051,3 +1335,5 @@ namespace BIS.ERP.Views
             PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
     }
 }
+
+

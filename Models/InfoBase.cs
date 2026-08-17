@@ -44,13 +44,37 @@ namespace BIS.ERP.Models
         [MaxLength(50)]
         public string? Version { get; set; }
 
+        [MaxLength(20)]
+        public string Icon { get; set; } = DefaultIcon;
+
+        public byte[]? LogoImage { get; set; }
+
+        [MaxLength(50)]
+        public string? LogoContentType { get; set; }
+
+        [MaxLength(260)]
+        public string? LogoFileName { get; set; }
+
+        public const string DefaultIcon = "🏢";
+
         // Строка подключения
         [NotMapped]
         public string ConnectionString =>
             $"Host={Host};Port={Port};Database={DatabaseName};Username={Username};Password={Password}";
 
         [NotMapped]
-        public string Icon => "📊";
+        public string DisplayIcon => string.IsNullOrWhiteSpace(Icon) ? DefaultIcon : Icon;
+
+        [NotMapped]
+        public bool HasLogoImage => LogoImage is { Length: > 0 };
+
+        [NotMapped]
+        public bool UsesTextIcon => !HasLogoImage;
+
+        public void NormalizeIcon()
+        {
+            Icon = string.IsNullOrWhiteSpace(Icon) ? DefaultIcon : Icon.Trim();
+        }
 
         [NotMapped]
         public string TypeName => string.IsNullOrEmpty(Type) ? "Универсальная" : Type;

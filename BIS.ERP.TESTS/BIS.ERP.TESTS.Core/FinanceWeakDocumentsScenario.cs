@@ -26,23 +26,6 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
                 "overrun_amount",
                 "return_amount"
             ],
-            ["Доверенность"] =
-            [
-                "representative_id",
-                "counterparty_id",
-                "bank_account",
-                "bank_name",
-                "identity_document_name",
-                "identity_document_number",
-                "identity_document_date",
-                "identity_document_issuer",
-                "valid_until",
-                "source_document_number",
-                "source_document_date",
-                "items_description",
-                "quantity",
-                "unit_name"
-            ],
             ["Платежная ведомость"] =
             [
                 "employee_id",
@@ -93,7 +76,7 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
     public override string Code => "finance-weak-documents";
     public override string Name => "Финансы: слабые документы";
     public override string Category => "Финансы";
-    public override string Description => "Проверяет, что авансовый отчет, доверенность, платежная ведомость и расчет курсовой разницы не остались универсальными документами.";
+    public override string Description => "Проверяет, что авансовый отчет, платежная ведомость и расчет курсовой разницы не остались универсальными документами.";
     public override bool SupportsCleanup => false;
 
     public override async Task<SmokeTestResult> ExecuteAsync(
@@ -159,7 +142,7 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
             var notReadyBlock = notReadyBlockEnd > notReadyBlockStart
                 ? mainWorkWindowSource[notReadyBlockStart..notReadyBlockEnd]
                 : string.Empty;
-            foreach (var documentName in new[] { "Авансовый отчет", "Доверенность", "Платежная ведомость" })
+            foreach (var documentName in new[] { "Авансовый отчет", "Платежная ведомость" })
             {
                 if (notReadyBlock.Contains(documentName, StringComparison.OrdinalIgnoreCase))
                     errors.Add($"Документ '{documentName}' все еще скрыт в NotReadyFinanceDocuments.");
@@ -170,7 +153,7 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
         var metadataServiceSource = File.Exists(metadataServicePath)
             ? File.ReadAllText(metadataServicePath)
             : string.Empty;
-        foreach (var handlerName in new[] { "ProcessAdvanceReportAsync", "ProcessPowerOfAttorneyAsync", "ProcessPayrollStatementAsync" })
+        foreach (var handlerName in new[] { "ProcessAdvanceReportAsync", "ProcessPayrollStatementAsync" })
         {
             if (!metadataServiceSource.Contains(handlerName, StringComparison.Ordinal) &&
                 !implementationSources.Any(source => source.Contains(handlerName, StringComparison.Ordinal)))
@@ -374,11 +357,11 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
                 errors.Add($"{databaseName}: в документе '{document.Name}' нет поля {column}.");
         }
 
-        if (document.Name == "Авансовый отчет" &&
+        if ((document.Name == "Авансовый отчет" || document.Name == "Авансовые платежи") &&
             fieldsByColumn.TryGetValue("advance_payment_id", out var advancePaymentField) &&
-            !string.Equals(advancePaymentField.ReferenceCatalog, "Авансовые платежи", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(advancePaymentField.ReferenceCatalog, "Пары счетов", StringComparison.OrdinalIgnoreCase))
         {
-            errors.Add($"{databaseName}: поле advance_payment_id должно ссылаться на справочник 'Авансовые платежи'.");
+            errors.Add($"{databaseName}: поле advance_payment_id должно ссылаться на справочник 'Пары счетов'.");
         }
 
         if (document.Name == "Расчет курсовой разницы")
@@ -513,3 +496,4 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
 
     private sealed record DbfHeaderInfo(uint RecordCount, HashSet<string> FieldNames);
 }
+

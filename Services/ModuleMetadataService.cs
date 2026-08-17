@@ -15,6 +15,13 @@ namespace BIS.ERP.Services
         public const string RawMaterialsCode = "RawMaterials";
         public const string CostAccountingCode = "CostAccounting";
         public const int FinalBalanceCloseOrder = 10000;
+        public const bool HideUnassignedObjectsInNavigationDuringDevelopment = true;
+
+        private static readonly HashSet<string> DevelopmentDisabledModuleCodes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            FixedAssetsCode,
+            InventoryCode
+        };
 
         private readonly AppDbContext _context;
 
@@ -244,6 +251,10 @@ namespace BIS.ERP.Services
             !string.IsNullOrWhiteSpace(moduleCode) &&
             moduleCode.Equals(BalanceCode, StringComparison.OrdinalIgnoreCase);
 
+        public static bool IsDevelopmentDisabledModuleCode(string? moduleCode) =>
+            !string.IsNullOrWhiteSpace(moduleCode) &&
+            DevelopmentDisabledModuleCodes.Contains(moduleCode);
+
         public static void ApplyFinalBalanceStageRules(MetadataModule module)
         {
             if (!IsFinalBalanceStageModule(module))
@@ -266,8 +277,8 @@ namespace BIS.ERP.Services
             var reports = await _context.Reports.AsNoTracking().ToListAsync();
 
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
-                "Проводки", "Приходный кассовый ордер", "Расходный кассовый ордер", "Платежное поручение",
-                "Платежная ведомость", "Доверенность", "Авансовый отчет", "Расчет курсовой разницы",
+                "Проводки", "Расходный/Приходный КО", "Платежное поручение",
+                "Авансовые платежи", "Расчет курсовой разницы",
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
             await MoveByNameToModuleAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
@@ -368,3 +379,5 @@ namespace BIS.ERP.Services
         };
     }
 }
+
+

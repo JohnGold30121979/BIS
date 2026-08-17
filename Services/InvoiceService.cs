@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -363,7 +363,10 @@ namespace BIS.ERP.Services
             if (metadata == null)
                 return DateTime.Today.ToString("yyMM") + "0001";
 
-            return await _metadataService.GetNextDocumentNumberAsync(metadata.Name);
+            // Используем GetCurrentDocumentNumberAsync (peek без увеличения счетчика),
+            // чтобы счетчик не расходовался при отмене ввода в диалоговом окне.
+            // Счетчик увеличивается в SaveInvoiceAsync после успешного сохранения.
+            return await _metadataService.GetCurrentDocumentNumberAsync(metadata);
         }
 
         public async Task<Guid?> FindInvoiceIdAsync(string documentNumber, DateTime? documentDate = null)
@@ -602,6 +605,31 @@ namespace BIS.ERP.Services
                 });
         }
 
+        public async Task UpdateEsfExchangeCodeAsync(Guid invoiceId, string exchangeCode)
+        {
+            var invoice = await GetInvoiceAsync(invoiceId)
+                ?? throw new InvalidOperationException("Документ не найден.");
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                UPDATE ""{HeaderTableName}""
+                SET ""exchange_code"" = @exchangeCode,
+                    ""UpdatedAt"" = NOW()
+                WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", invoiceId),
+                new NpgsqlParameter("@exchangeCode", exchangeCode.Trim()));
+
+            await new EventLogService(_context).LogAsync(
+                "UpdateEsfExchangeCode",
+                "Document",
+                DocumentName,
+                invoiceId,
+                new
+                {
+                    Number = invoice.DocNumber,
+                    ExchangeCode = exchangeCode.Trim()
+                });
+        }
+
         public async Task<Guid> SaveInvoiceAsync(InvoiceDocument invoice, Guid? existingId = null)
         {
             RecalculateTotals(invoice);
@@ -649,6 +677,13 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@currencyId", (object?)invoice.CurrencyId ?? DBNull.Value),
                         new NpgsqlParameter("@exchangeRate", invoice.ExchangeRate),
                         new NpgsqlParameter("@amountCurrency", invoice.AmountCurrency));
+
+                    // Увеличиваем счетчик номеров ТОЛЬКО после успешного сохранения нового документа.
+                    // Это предотвращает "потерю" номеров при отмене ввода в диалоговом окне.
+                    var documentMetadata = await _context.MetadataObjects.AsNoTracking()
+                        .FirstOrDefaultAsync(item => item.Name == DocumentName && item.ObjectType == "Document");
+                    if (documentMetadata != null)
+                        await _metadataService.IncrementDocumentNumberAsync(documentMetadata);
                 }
                 else
                 {

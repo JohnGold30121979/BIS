@@ -1,4 +1,5 @@
 using BIS.ERP.Models;
+using BIS.ERP.Services;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -10,6 +11,7 @@ namespace BIS.ERP.Views.Dialogs
     public partial class PrintFormSelectionDialog : Window
     {
         public Report? SelectedReport { get; private set; }
+        public PrintFormOutputFormat SelectedFormat { get; private set; } = PrintFormOutputFormat.Pdf;
 
         public PrintFormSelectionDialog(IEnumerable<Report> reports)
         {
@@ -23,21 +25,27 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            SelectButton.IsEnabled = FormsGrid.SelectedItem is Report { IsActive: true };
+            var canPrint = FormsGrid.SelectedItem is Report { IsActive: true };
+            PdfButton.IsEnabled = canPrint;
+            ExcelButton.IsEnabled = canPrint;
         }
 
         private void OnGridDoubleClick(object sender, MouseButtonEventArgs e)
         {
             if (FormsGrid.SelectedItem is Report { IsActive: true })
-                SelectCurrent();
+                SelectCurrent(PrintFormOutputFormat.Pdf);
         }
 
-        private void OnSelectClick(object sender, RoutedEventArgs e) => SelectCurrent();
+        private void OnPdfClick(object sender, RoutedEventArgs e) => SelectCurrent(PrintFormOutputFormat.Pdf);
 
-        private void SelectCurrent()
+        private void OnExcelClick(object sender, RoutedEventArgs e) => SelectCurrent(PrintFormOutputFormat.Excel);
+
+        private void SelectCurrent(PrintFormOutputFormat format)
         {
             if (FormsGrid.SelectedItem is not Report { IsActive: true } report)
                 return;
+
+            SelectedFormat = format;
             SelectedReport = report;
             DialogResult = true;
         }
