@@ -50,7 +50,7 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _editId = null;
             _orderKind = NormalizeOrderKind(orderKind, document.Name);
-            DialogTitle.Text = $"Добавление: {GetOrderKindDisplay(_orderKind)} КО";
+            DialogTitle.Text = BuildDialogTitle();
             DatePicker.SelectedDate = DateTime.Today;
 
             ContentRendered += async (s, e) => await InitializeAsync();
@@ -154,7 +154,7 @@ namespace BIS.ERP.Views
                     else if (data.Record != null)
                     {
                         _orderKind = ResolveOrderKind(data.Record, _document.Name);
-                        DialogTitle.Text = $"Редактирование: {GetOrderKindDisplay(_orderKind)} КО";
+                        DialogTitle.Text = BuildDialogTitle();
                         // Заполняем данные для редактирования
                         var rawNumber = data.Record.ContainsKey("Номер") ? data.Record["Номер"]?.ToString() :
                                        (data.Record.ContainsKey("doc_number") ? data.Record["doc_number"]?.ToString() : "");
@@ -201,6 +201,7 @@ namespace BIS.ERP.Views
                     AmountBox.SelectAll();
                 });
 
+                await UpdateDialogTitleWithOpenDayAsync();
                 _isDataLoaded = true;
             }
             catch (Exception ex)
@@ -388,6 +389,8 @@ namespace BIS.ERP.Views
                 MessageBox.Show("Касса сохранена, но не найдена после обновления списка.", "Кассы",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+
+            await UpdateDialogTitleWithOpenDayAsync();
         }
 
         private async void SelectCashDesk_Click(object sender, RoutedEventArgs e)
@@ -671,6 +674,11 @@ namespace BIS.ERP.Views
                 // Валюта
                 bool isCurrencyEnabled = IsCurrencyEnabledForAccount(corrAccountCode);
                 decimal amountInCurrency = isCurrencyEnabled ? amount : 0;
+                var counterpartyOrganizationId =
+                    OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem organization
+                        ? organization.Id.ToString()
+                        : string.Empty;
+                var primaryOrganizationId = await _metadataService.GetPrimaryOrganizationIdAsync();
 
                 var itemData = new Dictionary<string, object>
                 {
@@ -689,10 +697,9 @@ namespace BIS.ERP.Views
                 };
 
                 // Заполняем остальные поля (только если они видимы, иначе не сохраняем)
-                SetFieldValueIfExists(itemData, "Организация",
-                    OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem org
-                        ? org.Id.ToString()
-                        : string.Empty);
+                SetFieldValueIfExists(itemData, "Организация", counterpartyOrganizationId);
+                SetFieldValueIfExists(itemData, "Первичная организация", primaryOrganizationId);
+                SetFieldValueIfExists(itemData, "Организация Б", counterpartyOrganizationId);
 
                 SetFieldValueIfExists(itemData, "Валюта",
                     CurrencyPanel.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem is ReferenceItem currency
@@ -767,6 +774,7 @@ namespace BIS.ERP.Views
                     return false;
 
                 await cashDayService.OpenDayAsync(cashDeskId, documentDate, CurrentUserNameForAudit());
+                await UpdateDialogTitleWithOpenDayAsync();
                 MessageBox.Show("Кассовый день открыт. Можно продолжить сохранение документа.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                 return true;
             }
@@ -779,6 +787,39 @@ namespace BIS.ERP.Views
             {
                 MessageBox.Show($"Ошибка проверки кассового дня: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
+            }
+        }
+
+        private string BuildDialogTitle()
+        {
+            var action = _editId.HasValue ? "Редактирование" : "Добавление";
+            return $"{action}: {GetOrderKindDisplay(_orderKind)} КО";
+        }
+
+        private async Task UpdateDialogTitleWithOpenDayAsync()
+        {
+            if (DialogTitle == null)
+                return;
+
+            var title = BuildDialogTitle();
+            if (_selectedCashDeskId == Guid.Empty)
+            {
+                DialogTitle.Text = $"{title} | открытый день: касса не выбрана";
+                return;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var cashDayService = new CashDayClosureService(context);
+                var openDates = await cashDayService.GetOpenDayDatesAsync(_selectedCashDeskId);
+                var openDate = openDates.OrderByDescending(date => date).FirstOrDefault();
+                var openDayText = openDate == default ? "не открыт" : openDate.ToString("dd.MM.yyyy");
+                DialogTitle.Text = $"{title} | открытый день: {openDayText}";
+            }
+            catch
+            {
+                DialogTitle.Text = $"{title} | открытый день: не определен";
             }
         }
 
@@ -1216,7 +1257,7 @@ namespace BIS.ERP.Views
                 ? fullName
                 : personnelNumber;
         }
-        private void CashDeskCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void CashDeskCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (CashDeskCombo.SelectedItem is CashDeskItem selected)
             {
@@ -1225,6 +1266,15 @@ namespace BIS.ERP.Views
                 CashDeskAccountBox.Text = _selectedCashDeskCode;
                 RefreshPostingPreview();
             }
+            else
+            {
+                _selectedCashDeskId = Guid.Empty;
+                _selectedCashDeskCode = string.Empty;
+                CashDeskAccountBox.Text = string.Empty;
+                RefreshPostingPreview();
+            }
+
+            await UpdateDialogTitleWithOpenDayAsync();
         }
         private static bool IsReceiptOrder(string orderKind)
             => orderKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase);

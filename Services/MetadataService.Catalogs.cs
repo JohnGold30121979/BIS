@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
@@ -812,6 +812,61 @@ namespace BIS.ERP.Services
 
             await _context.SaveChangesAsync();
             await EnsurePrimaryOrganizationDataAsync(catalog);
+        }
+
+        public async Task<string> GetPrimaryOrganizationIdAsync()
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Организации");
+
+            if (catalog == null || string.IsNullOrWhiteSpace(catalog.TableName))
+                return string.Empty;
+
+            var tableName = QuoteIdentifier(catalog.TableName);
+            var preferredSql = $@"
+                SELECT ""Id""::text
+                FROM {tableName}
+                ORDER BY COALESCE(""is_primary"", false) DESC,
+                         CASE WHEN COALESCE(""group_code"", '') = 'OWN' THEN 0 ELSE 1 END,
+                         ""CreatedAt""
+                LIMIT 1";
+
+            var primaryId = await ExecuteScalarStringSafelyAsync(preferredSql);
+            if (!string.IsNullOrWhiteSpace(primaryId))
+                return primaryId;
+
+            return await ExecuteScalarStringSafelyAsync($@"
+                SELECT ""Id""::text
+                FROM {tableName}
+                ORDER BY ""CreatedAt""
+                LIMIT 1") ?? string.Empty;
+        }
+
+        private async Task<string?> ExecuteScalarStringSafelyAsync(string sql)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var wasClosed = connection.State != System.Data.ConnectionState.Open;
+
+            try
+            {
+                if (wasClosed)
+                    await connection.OpenAsync();
+
+                using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                var value = await command.ExecuteScalarAsync();
+                return value?.ToString();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка определения первичной организации: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                if (wasClosed && connection.State == System.Data.ConnectionState.Open)
+                    await connection.CloseAsync();
+            }
         }
 
         private async Task CreateBankAccountsCatalog(MetadataConfiguration config)
@@ -2369,6 +2424,8 @@ namespace BIS.ERP.Services
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""doc_date"" timestamp NOT NULL DEFAULT NOW();
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""order_kind"" varchar(20) NOT NULL DEFAULT 'Payment';
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""primary_organization_id"" text;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""counterparty_organization_id"" text;
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""amount"" decimal(18,2) NOT NULL DEFAULT 0;
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""basis"" varchar(500);

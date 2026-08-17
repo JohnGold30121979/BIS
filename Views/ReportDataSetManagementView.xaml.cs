@@ -1,6 +1,7 @@
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -105,17 +106,21 @@ namespace BIS.ERP.Views
 
         private async void OnTestClick(object sender, RoutedEventArgs e)
         {
+            const int testLimit = 50;
+
             try
             {
                 Mouse.OverrideCursor = Cursors.Wait;
                 var candidate = BuildFromEditor();
-                var table = await _service.TestAsync(candidate, 50);
+                var table = await _service.TestAsync(candidate, testLimit);
                 SetStatus($"Тест выполнен: колонок {table.Columns.Count}, строк {table.Rows.Count}.");
-                MessageBox.Show(
-                    $"SQL выполнен успешно.\nКолонок: {table.Columns.Count}\nСтрок теста: {table.Rows.Count}",
-                    "Тест набора данных",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                Mouse.OverrideCursor = null;
+
+                var dialog = new ReportDataSetTestResultDialog(candidate.Name, table, testLimit)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+                dialog.ShowDialog();
             }
             catch (Exception ex)
             {
@@ -207,4 +212,6 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+
 

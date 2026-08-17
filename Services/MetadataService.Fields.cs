@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 
 namespace BIS.ERP.Services;
 
@@ -2227,6 +2227,20 @@ public partial class MetadataService
                 Id = Guid.NewGuid(), Name = "Сумма в валюте", DbColumnName = "amount_currency",
                 FieldType = "Decimal", Precision = 18, Scale = 2,
                 Order = 18, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Первичная организация", DbColumnName = "primary_organization_id",
+                FieldType = "Reference", ReferenceCatalog = "Организации",
+                DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование",
+                Order = 19, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Организация Б", DbColumnName = "counterparty_organization_id",
+                FieldType = "Reference", ReferenceCatalog = "Организации",
+                DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование",
+                Order = 20, MetadataObjectId = metadataObjectId
             }
         };
     }
