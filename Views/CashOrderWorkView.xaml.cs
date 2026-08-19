@@ -1,4 +1,4 @@
-using BIS.ERP.Data;
+﻿using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -20,11 +20,11 @@ namespace BIS.ERP.Views
 {
     public partial class CashOrderWorkView : UserControl
     {
-        private const string CashOrderDocumentName = "Расходный/Приходный КО";
+        private const string CashOrderDocumentName = "Р Р°СЃС…РѕРґРЅС‹Р№/РџСЂРёС…РѕРґРЅС‹Р№ РљРћ";
         private const string CashOrderReceiptKind = "Receipt";
         private const string CashOrderPaymentKind = "Payment";
-        private const string CashOrderReceiptDocumentType = "Приходный кассовый ордер";
-        private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
+        private const string CashOrderReceiptDocumentType = "РџСЂРёС…РѕРґРЅС‹Р№ РєР°СЃСЃРѕРІС‹Р№ РѕСЂРґРµСЂ";
+        private const string CashOrderPaymentDocumentType = "Р Р°СЃС…РѕРґРЅС‹Р№ РєР°СЃСЃРѕРІС‹Р№ РѕСЂРґРµСЂ";
         private const string CashBookReportCode = "standard.frx.finance.cash.cash-book";
         private const string ReceiptExpenseRegisterReportCode = "standard.frx.finance.cash.receipts-expenses-register";
 
@@ -77,7 +77,7 @@ namespace BIS.ERP.Views
         {
             TitleText.Text = $"{icon} {title}";
             DescriptionText.Text = string.IsNullOrWhiteSpace(description)
-                ? "Список приходных и расходных кассовых ордеров"
+                ? "РЎРїРёСЃРѕРє РїСЂРёС…РѕРґРЅС‹С… Рё СЂР°СЃС…РѕРґРЅС‹С… РєР°СЃСЃРѕРІС‹С… РѕСЂРґРµСЂРѕРІ"
                 : description;
             Loaded += async (_, _) => await LoadData();
         }
@@ -90,7 +90,7 @@ namespace BIS.ERP.Views
             DeleteButton.IsEnabled = hasSelection && selected?.IsPosted != true;
             PostButton.IsEnabled = hasSelection;
             PrintButton.IsEnabled = hasSelection;
-            PostButton.Content = selected?.IsPosted == true ? "↩ Отменить проведение" : "✅ Провести";
+            PostButton.Content = selected?.IsPosted == true ? "в†© РћС‚РјРµРЅРёС‚СЊ РїСЂРѕРІРµРґРµРЅРёРµ" : "вњ… РџСЂРѕРІРµСЃС‚Рё";
             PostButton.Width = selected?.IsPosted == true ? 175 : 100;
             BatchPostButton.IsEnabled = GetCurrentFilteredRows().Any(row => row.CanBatchPost);
         }
@@ -102,8 +102,8 @@ namespace BIS.ERP.Views
             if (DataGrid.SelectedItem is CashOrderRow selected)
             {
                 StatusText.Text = selected.IsPosted
-                    ? $"Проведен: {selected.OrderTypeDisplay}; Дт {selected.DebitAccount} / Кт {selected.CreditAccount}, {selected.Amount:N2} сом. Двойной щелчок откроет проводку."
-                    : $"Не проведен: {selected.OrderTypeDisplay} {selected.DocNumber}, {selected.Amount:N2} сом.";
+                    ? $"РџСЂРѕРІРµРґРµРЅ: {selected.OrderTypeDisplay}; Р”С‚ {selected.DebitAccount} / РљС‚ {selected.CreditAccount}, {selected.Amount:N2} СЃРѕРј. Р”РІРѕР№РЅРѕР№ С‰РµР»С‡РѕРє РѕС‚РєСЂРѕРµС‚ РїСЂРѕРІРѕРґРєСѓ."
+                    : $"РќРµ РїСЂРѕРІРµРґРµРЅ: {selected.OrderTypeDisplay} {selected.DocNumber}, {selected.Amount:N2} СЃРѕРј.";
             }
         }
 
@@ -114,7 +114,7 @@ namespace BIS.ERP.Views
             if (DataGrid?.SelectedItem is not CashOrderRow row)
             {
                 SetDetailColumnsVisibility(false, false, false, false);
-                _postingDetails.Add(PostingDetailRowFactory.Create(("Документ", "Выберите кассовый ордер в списке выше")));
+                _postingDetails.Add(PostingDetailRowFactory.Create(("Р”РѕРєСѓРјРµРЅС‚", "Р’С‹Р±РµСЂРёС‚Рµ РєР°СЃСЃРѕРІС‹Р№ РѕСЂРґРµСЂ РІ СЃРїРёСЃРєРµ РІС‹С€Рµ")));
                 return;
             }
 
@@ -123,38 +123,38 @@ namespace BIS.ERP.Views
                 _accountAnalytics.GetSettingsByCode(row.DebitAccount),
                 _accountAnalytics.GetSettingsByCode(row.CreditAccount)
             };
-            var showCurrency = ShouldShowPostingAnalytic("Валюта", "Справочник валют", selectedSettings);
-            var showOrganization = ShouldShowPostingAnalytic("Организация", "Организации", selectedSettings);
-            var showEmployee = ShouldShowPostingAnalytic("Сотрудник", "Сотрудники (Списочный состав)", selectedSettings);
-            var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
+            var showCurrency = ShouldShowPostingAnalytic("Р’Р°Р»СЋС‚Р°", "РЎРїСЂР°РІРѕС‡РЅРёРє РІР°Р»СЋС‚", selectedSettings);
+            var showOrganization = ShouldShowPostingAnalytic("РћСЂРіР°РЅРёР·Р°С†РёСЏ", "РћСЂРіР°РЅРёР·Р°С†РёРё", selectedSettings);
+            var showEmployee = ShouldShowPostingAnalytic("РЎРѕС‚СЂСѓРґРЅРёРє", "РЎРѕС‚СЂСѓРґРЅРёРєРё (РЎРїРёСЃРѕС‡РЅС‹Р№ СЃРѕСЃС‚Р°РІ)", selectedSettings);
+            var showMaterial = ShouldShowPostingAnalytic("РњР°С‚РµСЂРёР°Р»", "РЎРїСЂР°РІРѕС‡РЅРёРє РјР°С‚РµСЂРёР°Р»РѕРІ", selectedSettings);
             SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
 
             var detail = PostingDetailRowFactory.Create();
-            SetPostingDetail(detail, "Документ", row.DocNumber);
-            SetPostingDetail(detail, "Тип документа", row.PostingDocumentType);
-            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd.MM.yyyy"));
-            SetPostingDetail(detail, "Модуль", _moduleName);
-            SetPostingDetail(detail, "Дебет", ExtractAccountCode(row.DebitAccount));
-            SetPostingDetail(detail, "Кредит", ExtractAccountCode(row.CreditAccount));
-            SetPostingDetail(detail, "Сумма", row.Amount.ToString("N2"));
+            SetPostingDetail(detail, "Р”РѕРєСѓРјРµРЅС‚", row.DocNumber);
+            SetPostingDetail(detail, "РўРёРї РґРѕРєСѓРјРµРЅС‚Р°", row.PostingDocumentType);
+            SetPostingDetail(detail, "Р”Р°С‚Р°", row.DocDate.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "РњРѕРґСѓР»СЊ", _moduleName);
+            SetPostingDetail(detail, "Р”РµР±РµС‚", ExtractAccountCode(row.DebitAccount));
+            SetPostingDetail(detail, "РљСЂРµРґРёС‚", ExtractAccountCode(row.CreditAccount));
+            SetPostingDetail(detail, "РЎСѓРјРјР°", row.Amount.ToString("N2"));
 
             if (showCurrency)
             {
-                SetPostingDetail(detail, "Сумма вал.", row.AmountInCurrency != 0m ? row.AmountInCurrency.ToString("N2") : null);
-                SetPostingDetail(detail, "Валюта", row.CurrencyName);
+                SetPostingDetail(detail, "РЎСѓРјРјР° РІР°Р».", row.AmountInCurrency != 0m ? row.AmountInCurrency.ToString("N2") : null);
+                SetPostingDetail(detail, "Р’Р°Р»СЋС‚Р°", row.CurrencyName);
             }
 
             if (showOrganization)
-                SetPostingDetail(detail, "Организация", row.OrganizationName);
+                SetPostingDetail(detail, "РћСЂРіР°РЅРёР·Р°С†РёСЏ", row.OrganizationName);
 
             if (showEmployee)
-                SetPostingDetail(detail, "Сотрудник", row.EmployeeName);
+                SetPostingDetail(detail, "РЎРѕС‚СЂСѓРґРЅРёРє", row.EmployeeName);
 
             if (showMaterial)
-                SetPostingDetail(detail, "Материал", row.MaterialName);
+                SetPostingDetail(detail, "РњР°С‚РµСЂРёР°Р»", row.MaterialName);
 
-            SetPostingDetail(detail, "Статус", row.IsPosted ? "Проведён" : "Не проведён");
-            SetPostingDetail(detail, "Примечание", row.Description);
+            SetPostingDetail(detail, "РЎС‚Р°С‚СѓСЃ", row.IsPosted ? "РџСЂРѕРІРµРґС‘РЅ" : "РќРµ РїСЂРѕРІРµРґС‘РЅ");
+            SetPostingDetail(detail, "РџСЂРёРјРµС‡Р°РЅРёРµ", row.Description);
             _postingDetails.Add(detail);
         }
 
@@ -202,7 +202,7 @@ namespace BIS.ERP.Views
             _isLoading = true;
             try
             {
-                StatusText.Text = "Загрузка данных...";
+                StatusText.Text = "Р—Р°РіСЂСѓР·РєР° РґР°РЅРЅС‹С…...";
 
                 var documentRows = (await _metadataService.GetCatalogDataAsync(_documentMetadata.Id))
                     .Select(row => (Document: _documentMetadata, Row: row))
@@ -225,9 +225,9 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                StatusText.Text = $"❌ Ошибка: {ex.Message}";
-                System.Diagnostics.Debug.WriteLine($"Ошибка LoadData: {ex.Message}");
-                MessageBox.Show($"Ошибка загрузки данных: {ex.Message}", "Ошибка",
+                StatusText.Text = $"вќЊ РћС€РёР±РєР°: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"РћС€РёР±РєР° LoadData: {ex.Message}");
+                MessageBox.Show($"РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РґР°РЅРЅС‹С…: {ex.Message}", "РћС€РёР±РєР°",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
@@ -243,10 +243,10 @@ namespace BIS.ERP.Views
             var selectedId = (CashDeskFilterCombo.SelectedItem as CashDeskItem)?.Id;
             var items = new List<CashDeskItem>
             {
-                new() { Id = Guid.Empty, DisplayName = "Все кассы" }
+                new() { Id = Guid.Empty, DisplayName = "Р’СЃРµ РєР°СЃСЃС‹" }
             };
 
-            if (catalogsByName.TryGetValue("Кассы", out var cashCatalog))
+            if (catalogsByName.TryGetValue("РљР°СЃСЃС‹", out var cashCatalog))
             {
                 var rows = await _metadataService.GetCatalogDataAsync(cashCatalog.Id);
                 items.AddRange(rows
@@ -268,12 +268,12 @@ namespace BIS.ERP.Views
             return new CashDeskItem
             {
                 Id = Guid.Parse(row["Id"].ToString()!),
-                DisplayName = GetRowString(row, "Наименование кассы", "Наименование", "name", "Код", "code"),
+                DisplayName = GetRowString(row, "РќР°РёРјРµРЅРѕРІР°РЅРёРµ РєР°СЃСЃС‹", "РќР°РёРјРµРЅРѕРІР°РЅРёРµ", "name", "РљРѕРґ", "code"),
                 AccountCode = CashOrderDialog.ResolveCashDeskAccountCode(
-                    GetRowString(row, "Счет", "Счет кассы", "account_code", "cash_account", "Код", "code"),
+                    GetRowString(row, "РЎС‡РµС‚", "РЎС‡РµС‚ РєР°СЃСЃС‹", "account_code", "cash_account", "РљРѕРґ", "code"),
                     accountAnalytics),
-                CashNumber = GetRowString(row, "Номер кассы", "cash_number"),
-                CurrencyName = GetRowString(row, "Валюта", "currency_id")
+                CashNumber = GetRowString(row, "РќРѕРјРµСЂ РєР°СЃСЃС‹", "cash_number"),
+                CurrencyName = GetRowString(row, "Р’Р°Р»СЋС‚Р°", "currency_id")
             };
         }
 
@@ -295,7 +295,7 @@ namespace BIS.ERP.Views
                         await ApplyCashDayStatusAsync(filteredRows, startDate, endDate);
             DataGrid.ItemsSource = filteredRows;
             DataGrid.Items.Refresh();
-            StatusText.Text = $"📊 Показано записей: {filteredRows.Count} из {_allRows.Count}";
+            StatusText.Text = $"рџ“Љ РџРѕРєР°Р·Р°РЅРѕ Р·Р°РїРёСЃРµР№: {filteredRows.Count} РёР· {_allRows.Count}";
             UpdateButtonsState();
             UpdateSelectedPostingDetails();
             await UpdateCashTurnoverSummaryAsync(startDate, endDate);
@@ -313,7 +313,7 @@ namespace BIS.ERP.Views
 
         private async Task ApplyCashDayStatusAsync(List<CashOrderRow> rows, DateTime? startDate, DateTime? endDate)
         {
-            ResetCashDayStatus(rows, "Не открыт", false);
+            ResetCashDayStatus(rows, "РќРµ РѕС‚РєСЂС‹С‚", false);
 
             if (rows.Count == 0)
                 return;
@@ -322,7 +322,7 @@ namespace BIS.ERP.Views
             var periodEnd = endDate ?? rows.Max(row => row.DocDate.Date);
             if (periodStart > periodEnd)
             {
-                ResetCashDayStatus(rows, "Период?", false);
+                ResetCashDayStatus(rows, "РџРµСЂРёРѕРґ?", false);
                 return;
             }
 
@@ -353,8 +353,8 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                ResetCashDayStatus(rows, "Неизвестно", false);
-                SystemLogService.Error("Ошибка загрузки статусов кассовых дней.", "CashOrderWorkView.ApplyCashDayStatusAsync", ex);
+                ResetCashDayStatus(rows, "РќРµРёР·РІРµСЃС‚РЅРѕ", false);
+                SystemLogService.Error("РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё СЃС‚Р°С‚СѓСЃРѕРІ РєР°СЃСЃРѕРІС‹С… РґРЅРµР№.", "CashOrderWorkView.ApplyCashDayStatusAsync", ex);
             }
         }
 
@@ -381,8 +381,8 @@ namespace BIS.ERP.Views
                 var rowDate = row.DocDate.Date;
                 row.IsCashDayClosed = closedSet.Contains(rowDate);
                 row.CashDayStatusDisplay = row.IsCashDayClosed
-                    ? "Закрыт"
-                    : openSet.Contains(rowDate) ? "Открыт" : "Не открыт";
+                    ? "Р—Р°РєСЂС‹С‚"
+                    : openSet.Contains(rowDate) ? "РћС‚РєСЂС‹С‚" : "РќРµ РѕС‚РєСЂС‹С‚";
                 if (!row.CanBatchPost)
                     row.IsSelectedForBatchPost = false;
             }
@@ -401,26 +401,26 @@ namespace BIS.ERP.Views
                 string.IsNullOrWhiteSpace(selectedCashDesk.AccountCode))
             {
                 _currentCashTurnover = await CalculateAllCashTurnoverSummaryAsync(periodStart, periodEnd);
-                DisplayCashTurnoverSummary(_currentCashTurnover, "Общие остатки за период по всем кассам");
+                DisplayCashTurnoverSummary(_currentCashTurnover, "РћР±С‰РёРµ РѕСЃС‚Р°С‚РєРё Р·Р° РїРµСЂРёРѕРґ РїРѕ РІСЃРµРј РєР°СЃСЃР°Рј");
                 return;
             }
             if (periodStart > periodEnd)
             {
                 _currentCashTurnover = CashTurnoverSummary.ForPeriod(periodStart, periodEnd, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                DisplayCashTurnoverSummary(_currentCashTurnover, "Общие остатки за период: исправьте период");
+                DisplayCashTurnoverSummary(_currentCashTurnover, "РћР±С‰РёРµ РѕСЃС‚Р°С‚РєРё Р·Р° РїРµСЂРёРѕРґ: РёСЃРїСЂР°РІСЊС‚Рµ РїРµСЂРёРѕРґ");
                 return;
             }
 
             try
             {
                 _currentCashTurnover = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, periodStart, periodEnd);
-                DisplayCashTurnoverSummary(_currentCashTurnover, $"Общие остатки за период по кассе {selectedCashDesk.DisplayNameWithAccount}");
+                DisplayCashTurnoverSummary(_currentCashTurnover, $"РћР±С‰РёРµ РѕСЃС‚Р°С‚РєРё Р·Р° РїРµСЂРёРѕРґ РїРѕ РєР°СЃСЃРµ {selectedCashDesk.DisplayNameWithAccount}");
             }
             catch (Exception ex)
             {
-                SystemLogService.Error("Ошибка расчета остатков и оборотов по кассе.", "CashOrderWorkView.CashTurnover", ex);
+                SystemLogService.Error("РћС€РёР±РєР° СЂР°СЃС‡РµС‚Р° РѕСЃС‚Р°С‚РєРѕРІ Рё РѕР±РѕСЂРѕС‚РѕРІ РїРѕ РєР°СЃСЃРµ.", "CashOrderWorkView.CashTurnover", ex);
                 _currentCashTurnover = CashTurnoverSummary.ForPeriod(periodStart, periodEnd, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                DisplayCashTurnoverSummary(_currentCashTurnover, "Общие остатки за период: ошибка расчета. Подробности в системном логе.");
+                DisplayCashTurnoverSummary(_currentCashTurnover, "РћР±С‰РёРµ РѕСЃС‚Р°С‚РєРё Р·Р° РїРµСЂРёРѕРґ: РѕС€РёР±РєР° СЂР°СЃС‡РµС‚Р°. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ СЃРёСЃС‚РµРјРЅРѕРј Р»РѕРіРµ.");
             }
         }
 
@@ -428,7 +428,7 @@ namespace BIS.ERP.Views
         {
             if (selectedCashDesk is null || selectedCashDesk.Id == Guid.Empty || string.IsNullOrWhiteSpace(selectedCashDesk.AccountCode))
             {
-                DisplayOpenCashDaySummary(CashTurnoverSummary.Empty, "Текущий открытый день: выберите конкретную кассу", "-");
+                DisplayOpenCashDaySummary(CashTurnoverSummary.Empty, "РўРµРєСѓС‰РёР№ РѕС‚РєСЂС‹С‚С‹Р№ РґРµРЅСЊ: РІС‹Р±РµСЂРёС‚Рµ РєРѕРЅРєСЂРµС‚РЅСѓСЋ РєР°СЃСЃСѓ", "-");
                 return;
             }
 
@@ -442,18 +442,18 @@ namespace BIS.ERP.Views
                 if (openDate == default)
                 {
                     var empty = CashTurnoverSummary.ForPeriod(DateTime.Today, DateTime.Today, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                    DisplayOpenCashDaySummary(empty, $"Текущий открытый день по кассе {selectedCashDesk.DisplayNameWithAccount}: открытых дней нет", "-");
+                    DisplayOpenCashDaySummary(empty, $"РўРµРєСѓС‰РёР№ РѕС‚РєСЂС‹С‚С‹Р№ РґРµРЅСЊ РїРѕ РєР°СЃСЃРµ {selectedCashDesk.DisplayNameWithAccount}: РѕС‚РєСЂС‹С‚С‹С… РґРЅРµР№ РЅРµС‚", "-");
                     return;
                 }
 
                 var openDaySummary = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, openDate.Date, openDate.Date);
-                DisplayOpenCashDaySummary(openDaySummary, $"Текущий открытый день по кассе {selectedCashDesk.DisplayNameWithAccount}", openDate.ToString("dd.MM.yyyy"));
+                DisplayOpenCashDaySummary(openDaySummary, $"РўРµРєСѓС‰РёР№ РѕС‚РєСЂС‹С‚С‹Р№ РґРµРЅСЊ РїРѕ РєР°СЃСЃРµ {selectedCashDesk.DisplayNameWithAccount}", openDate.ToString("dd.MM.yyyy"));
             }
             catch (Exception ex)
             {
-                SystemLogService.Error("Ошибка расчета текущего открытого кассового дня.", "CashOrderWorkView.OpenCashDaySummary", ex);
+                SystemLogService.Error("РћС€РёР±РєР° СЂР°СЃС‡РµС‚Р° С‚РµРєСѓС‰РµРіРѕ РѕС‚РєСЂС‹С‚РѕРіРѕ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ.", "CashOrderWorkView.OpenCashDaySummary", ex);
                 var fallback = CashTurnoverSummary.ForPeriod(DateTime.Today, DateTime.Today, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                DisplayOpenCashDaySummary(fallback, "Текущий открытый день: ошибка расчета. Подробности в системном логе.", "-");
+                DisplayOpenCashDaySummary(fallback, "РўРµРєСѓС‰РёР№ РѕС‚РєСЂС‹С‚С‹Р№ РґРµРЅСЊ: РѕС€РёР±РєР° СЂР°СЃС‡РµС‚Р°. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ СЃРёСЃС‚РµРјРЅРѕРј Р»РѕРіРµ.", "-");
             }
         }
 
@@ -471,7 +471,7 @@ namespace BIS.ERP.Views
 
         private void DisplayCashTurnoverSummary(CashTurnoverSummary summary, string? hint = null)
         {
-            CashTurnoverHintText.Text = hint ?? $"Остатки по кассе {summary.CashDeskName} (счет {summary.AccountCode})";
+            CashTurnoverHintText.Text = hint ?? $"РћСЃС‚Р°С‚РєРё РїРѕ РєР°СЃСЃРµ {summary.CashDeskName} (СЃС‡РµС‚ {summary.AccountCode})";
             CashTurnoverDateText.Text = summary.StartDate.Date == summary.EndDate.Date
                 ? summary.StartDate.ToString("dd.MM.yyyy")
                 : $"{summary.StartDate:dd.MM.yyyy}-{summary.EndDate:dd.MM.yyyy}";
@@ -505,13 +505,13 @@ namespace BIS.ERP.Views
                 .ToList();
 
             if (cashAccounts.Count == 0)
-                return CashTurnoverSummary.ForPeriod(startDate, endDate, "Все кассы", string.Empty);
+                return CashTurnoverSummary.ForPeriod(startDate, endDate, "Р’СЃРµ РєР°СЃСЃС‹", string.Empty);
 
             var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             var postingService = new PostingService(context);
             var postings = await postingService.GetAllPostingsAsync(null, endDate.Date);
             var summaries = cashAccounts
-                .Select(accountCode => CalculateCashTurnoverSummary("Все кассы", accountCode, startDate.Date, endDate.Date, postings))
+                .Select(accountCode => CalculateCashTurnoverSummary("Р’СЃРµ РєР°СЃСЃС‹", accountCode, startDate.Date, endDate.Date, postings))
                 .ToList();
 
             var openingNet = summaries.Sum(item => item.OpeningDebit - item.OpeningCredit);
@@ -519,7 +519,7 @@ namespace BIS.ERP.Views
 
             return new CashTurnoverSummary
             {
-                CashDeskName = "Все кассы",
+                CashDeskName = "Р’СЃРµ РєР°СЃСЃС‹",
                 AccountCode = string.Join(", ", cashAccounts),
                 StartDate = startDate.Date,
                 EndDate = endDate.Date,
@@ -590,12 +590,12 @@ namespace BIS.ERP.Views
         {
             return new[]
             {
-                new KeyValuePair<string, string>("ДН", FormatCashAmount(summary.OpeningDebit)),
-                new KeyValuePair<string, string>("КН", FormatCashAmount(summary.OpeningCredit)),
-                new KeyValuePair<string, string>("Дт оборот", FormatCashAmount(summary.DebitTurnover)),
-                new KeyValuePair<string, string>("Кт оборот", FormatCashAmount(summary.CreditTurnover)),
-                new KeyValuePair<string, string>("ДК", FormatCashAmount(summary.ClosingDebit)),
-                new KeyValuePair<string, string>("КК", FormatCashAmount(summary.ClosingCredit))
+                new KeyValuePair<string, string>("Р”Рќ", FormatCashAmount(summary.OpeningDebit)),
+                new KeyValuePair<string, string>("РљРќ", FormatCashAmount(summary.OpeningCredit)),
+                new KeyValuePair<string, string>("Р”С‚ РѕР±РѕСЂРѕС‚", FormatCashAmount(summary.DebitTurnover)),
+                new KeyValuePair<string, string>("РљС‚ РѕР±РѕСЂРѕС‚", FormatCashAmount(summary.CreditTurnover)),
+                new KeyValuePair<string, string>("Р”Рљ", FormatCashAmount(summary.ClosingDebit)),
+                new KeyValuePair<string, string>("РљРљ", FormatCashAmount(summary.ClosingCredit))
             };
         }
 
@@ -614,14 +614,14 @@ namespace BIS.ERP.Views
         {
             if (CashDeskFilterCombo.SelectedItem is not CashDeskItem selectedCashDesk || selectedCashDesk.Id == Guid.Empty)
             {
-                MessageBox.Show("Выберите конкретную кассу.", "Проводки по кассе",
+                MessageBox.Show("Р’С‹Р±РµСЂРёС‚Рµ РєРѕРЅРєСЂРµС‚РЅСѓСЋ РєР°СЃСЃСѓ.", "РџСЂРѕРІРѕРґРєРё РїРѕ РєР°СЃСЃРµ",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(selectedCashDesk.AccountCode))
             {
-                MessageBox.Show("У выбранной кассы не указан счет.", "Проводки по кассе",
+                MessageBox.Show("РЈ РІС‹Р±СЂР°РЅРЅРѕР№ РєР°СЃСЃС‹ РЅРµ СѓРєР°Р·Р°РЅ СЃС‡РµС‚.", "РџСЂРѕРІРѕРґРєРё РїРѕ РєР°СЃСЃРµ",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -630,32 +630,32 @@ namespace BIS.ERP.Views
             var endDate = PeriodEndDatePicker.SelectedDate?.Date ?? DateTime.Today;
             if (startDate > endDate)
             {
-                MessageBox.Show("Дата начала периода не может быть больше даты окончания.", "Проводки по кассе",
+                MessageBox.Show("Р”Р°С‚Р° РЅР°С‡Р°Р»Р° РїРµСЂРёРѕРґР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ Р±РѕР»СЊС€Рµ РґР°С‚С‹ РѕРєРѕРЅС‡Р°РЅРёСЏ.", "РџСЂРѕРІРѕРґРєРё РїРѕ РєР°СЃСЃРµ",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             try
             {
-                StatusText.Text = "Загрузка проводок по кассе...";
+                StatusText.Text = "Р—Р°РіСЂСѓР·РєР° РїСЂРѕРІРѕРґРѕРє РїРѕ РєР°СЃСЃРµ...";
                 var cashPostings = await LoadCashPostingsAsync(selectedCashDesk, startDate, endDate);
                 var turnoverSummary = await CalculateCashTurnoverSummaryAsync(selectedCashDesk, startDate, endDate);
 
                 var dialog = new DocumentPostingsDialog(
-                    "Проводки по кассе",
-                    $"{selectedCashDesk.DisplayNameWithAccount} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
+                    "РџСЂРѕРІРѕРґРєРё РїРѕ РєР°СЃСЃРµ",
+                    $"{selectedCashDesk.DisplayNameWithAccount} Р·Р° {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
                     cashPostings,
                     BuildCashTurnoverSummaryFields(turnoverSummary))
                 {
                     Owner = Window.GetWindow(this)
                 };
                 dialog.ShowDialog();
-                StatusText.Text = $"Проводок по кассе: {cashPostings.Count}";
+                StatusText.Text = $"РџСЂРѕРІРѕРґРѕРє РїРѕ РєР°СЃСЃРµ: {cashPostings.Count}";
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка загрузки проводок по кассе";
-                MessageBox.Show($"Ошибка загрузки проводок по кассе: {ex.Message}", "Проводки по кассе",
+                StatusText.Text = "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РїСЂРѕРІРѕРґРѕРє РїРѕ РєР°СЃСЃРµ";
+                MessageBox.Show($"РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РїСЂРѕРІРѕРґРѕРє РїРѕ РєР°СЃСЃРµ: {ex.Message}", "РџСЂРѕРІРѕРґРєРё РїРѕ РєР°СЃСЃРµ",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -714,7 +714,7 @@ namespace BIS.ERP.Views
             Dictionary<string, Dictionary<Guid, string>> referenceCache,
             Dictionary<string, MetadataObject> catalogsByName)
         {
-            var chartCatalog = catalogsByName.FirstOrDefault(item => item.Key.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase)).Value;
+            var chartCatalog = catalogsByName.FirstOrDefault(item => item.Key.StartsWith("РџР»Р°РЅ СЃС‡РµС‚РѕРІ", StringComparison.OrdinalIgnoreCase)).Value;
             if (chartCatalog == null)
                 return;
 
@@ -725,13 +725,13 @@ namespace BIS.ERP.Views
                 if (!account.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var id))
                     continue;
 
-                var code = GetRowString(account, "Код", "code");
-                var name = GetRowString(account, "Наименование", "name");
+                var code = GetRowString(account, "РљРѕРґ", "code");
+                var name = GetRowString(account, "РќР°РёРјРµРЅРѕРІР°РЅРёРµ", "name");
                 values[id] = string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}";
             }
 
             referenceCache["correspondent_account"] = values;
-            referenceCache["Корр. счет"] = values;
+            referenceCache["РљРѕСЂСЂ. СЃС‡РµС‚"] = values;
         }
 
         private async Task AddCashDeskReferenceCacheAsync(
@@ -739,7 +739,7 @@ namespace BIS.ERP.Views
             Dictionary<string, MetadataObject> catalogsByName,
             AccountAnalyticsRegistry accountAnalytics)
         {
-            if (!catalogsByName.TryGetValue("Кассы", out var cashCatalog))
+            if (!catalogsByName.TryGetValue("РљР°СЃСЃС‹", out var cashCatalog))
                 return;
 
             var cashRows = await _metadataService.GetCatalogDataAsync(cashCatalog.Id);
@@ -749,14 +749,14 @@ namespace BIS.ERP.Views
                 if (!cash.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var id))
                     continue;
 
-                var name = GetRowString(cash, "Наименование кассы", "Наименование", "name", "Код", "code");
+                var name = GetRowString(cash, "РќР°РёРјРµРЅРѕРІР°РЅРёРµ РєР°СЃСЃС‹", "РќР°РёРјРµРЅРѕРІР°РЅРёРµ", "name", "РљРѕРґ", "code");
                 var account = CashOrderDialog.ResolveCashDeskAccountCode(
-                    GetRowString(cash, "Счет", "Счет кассы", "code", "Код"),
+                    GetRowString(cash, "РЎС‡РµС‚", "РЎС‡РµС‚ РєР°СЃСЃС‹", "code", "РљРѕРґ"),
                     accountAnalytics);
-                values[id] = string.IsNullOrWhiteSpace(account) ? name : $"{name} (счет {account})";
+                values[id] = string.IsNullOrWhiteSpace(account) ? name : $"{name} (СЃС‡РµС‚ {account})";
             }
 
-            referenceCache["Касса"] = values;
+            referenceCache["РљР°СЃСЃР°"] = values;
             referenceCache["cash_desk_id"] = values;
         }
 
@@ -773,26 +773,26 @@ namespace BIS.ERP.Views
                 DocumentType = document.Name,
                 OrderKind = orderKind,
                 Id = ReadGuid(row, "Id") ?? Guid.NewGuid(),
-                DocNumber = GetRowString(row, "Номер", "doc_number", "Номер документа"),
-                DocDate = ReadDate(row, "Дата", "doc_date") ?? DateTime.Now,
-                Amount = ReadDecimal(row, "Сумма", "amount"),
-                Basis = GetRowString(row, "Основание", "basis"),
-                Description = GetRowString(row, "Примечание", "description"),
-                IsPosted = ReadBool(row, "Проведён", "is_posted"),
+                DocNumber = GetRowString(row, "РќРѕРјРµСЂ", "doc_number", "РќРѕРјРµСЂ РґРѕРєСѓРјРµРЅС‚Р°"),
+                DocDate = ReadDate(row, "Р”Р°С‚Р°", "doc_date") ?? DateTime.Now,
+                Amount = ReadDecimal(row, "РЎСѓРјРјР°", "amount"),
+                Basis = GetRowString(row, "РћСЃРЅРѕРІР°РЅРёРµ", "basis"),
+                Description = GetRowString(row, "РџСЂРёРјРµС‡Р°РЅРёРµ", "description"),
+                IsPosted = ReadBool(row, "РџСЂРѕРІРµРґС‘РЅ", "is_posted"),
                 CreatedAt = ReadDate(row, "CreatedAt") ?? DateTime.Now,
                 UpdatedAt = ReadDate(row, "UpdatedAt") ?? DateTime.Now,
-                DebitAccount = GetRowString(row, "Дебет", "debit_account"),
-                CreditAccount = GetRowString(row, "Кредит", "credit_account"),
-                AmountInCurrency = ReadDecimal(row, "Сумма в валюте", "amount_currency"),
-                CashDeskId = GetRowString(row, "Касса", "cash_desk_id")
+                DebitAccount = GetRowString(row, "Р”РµР±РµС‚", "debit_account"),
+                CreditAccount = GetRowString(row, "РљСЂРµРґРёС‚", "credit_account"),
+                AmountInCurrency = ReadDecimal(row, "РЎСѓРјРјР° РІ РІР°Р»СЋС‚Рµ", "amount_currency"),
+                CashDeskId = GetRowString(row, "РљР°СЃСЃР°", "cash_desk_id")
             };
 
-            result.OrganizationName = ResolveReference(row, referenceCache, "Организация", "organization_id");
-            result.CurrencyName = ResolveReference(row, referenceCache, "Валюта", "currency_id");
-            result.EmployeeName = ResolveReference(row, referenceCache, "Сотрудник", "employee_id");
-            result.MaterialName = ResolveReference(row, referenceCache, "Материал", "material_id");
-            result.CashDeskName = ResolveReference(row, referenceCache, "Касса", "cash_desk_id");
-            result.CorrespondentAccountName = ResolveReference(row, referenceCache, "Корр. счет", "correspondent_account");
+            result.OrganizationName = ResolveReference(row, referenceCache, "РћСЂРіР°РЅРёР·Р°С†РёСЏ", "organization_id");
+            result.CurrencyName = ResolveReference(row, referenceCache, "Р’Р°Р»СЋС‚Р°", "currency_id");
+            result.EmployeeName = ResolveReference(row, referenceCache, "РЎРѕС‚СЂСѓРґРЅРёРє", "employee_id");
+            result.MaterialName = ResolveReference(row, referenceCache, "РњР°С‚РµСЂРёР°Р»", "material_id");
+            result.CashDeskName = ResolveReference(row, referenceCache, "РљР°СЃСЃР°", "cash_desk_id");
+            result.CorrespondentAccountName = ResolveReference(row, referenceCache, "РљРѕСЂСЂ. СЃС‡РµС‚", "correspondent_account");
             return result;
         }
 
@@ -906,12 +906,12 @@ namespace BIS.ERP.Views
 
         private async void OnAddPaymentClick(object sender, RoutedEventArgs e)
         {
-            await CreateCashOrderAsync(CashOrderPaymentKind, "Расходный КО");
+            await CreateCashOrderAsync(CashOrderPaymentKind, "Р Р°СЃС…РѕРґРЅС‹Р№ РљРћ");
         }
 
         private async void OnAddReceiptClick(object sender, RoutedEventArgs e)
         {
-            await CreateCashOrderAsync(CashOrderReceiptKind, "Приходный КО");
+            await CreateCashOrderAsync(CashOrderReceiptKind, "РџСЂРёС…РѕРґРЅС‹Р№ РљРћ");
         }
 
         private async Task CreateCashOrderAsync(string orderKind, string title)
@@ -928,13 +928,13 @@ namespace BIS.ERP.Views
                 if (dialog.ShowDialog() == true)
                 {
                     await LoadData();
-                    MessageBox.Show("Документ успешно добавлен!", "Успех",
+                    MessageBox.Show("Р”РѕРєСѓРјРµРЅС‚ СѓСЃРїРµС€РЅРѕ РґРѕР±Р°РІР»РµРЅ!", "РЈСЃРїРµС…",
                         MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
+                MessageBox.Show($"РћС€РёР±РєР°: {ex.Message}", "РћС€РёР±РєР°",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -943,12 +943,12 @@ namespace BIS.ERP.Views
         {
             if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
-                MessageBox.Show("Выберите документ для редактирования!", "Внимание",
+                MessageBox.Show("Р’С‹Р±РµСЂРёС‚Рµ РґРѕРєСѓРјРµРЅС‚ РґР»СЏ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ!", "Р’РЅРёРјР°РЅРёРµ",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            if (!await EnsureCashDayAllowsDocumentAsync(selectedRow, "Редактирование кассового ордера"))
+            if (!await EnsureCashDayAllowsDocumentAsync(selectedRow, "Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РєР°СЃСЃРѕРІРѕРіРѕ РѕСЂРґРµСЂР°"))
                 return;
 
             try
@@ -962,13 +962,13 @@ namespace BIS.ERP.Views
                 if (dialog.ShowDialog() == true)
                 {
                     await LoadData();
-                    MessageBox.Show("Документ успешно обновлён!", "Успех",
+                    MessageBox.Show("Р”РѕРєСѓРјРµРЅС‚ СѓСЃРїРµС€РЅРѕ РѕР±РЅРѕРІР»С‘РЅ!", "РЈСЃРїРµС…",
                         MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка редактирования: {ex.Message}", "Ошибка",
+                MessageBox.Show($"РћС€РёР±РєР° СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ: {ex.Message}", "РћС€РёР±РєР°",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -977,15 +977,15 @@ namespace BIS.ERP.Views
         {
             if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
-                MessageBox.Show("Выберите документ для удаления!", "Внимание",
+                MessageBox.Show("Р’С‹Р±РµСЂРёС‚Рµ РґРѕРєСѓРјРµРЅС‚ РґР»СЏ СѓРґР°Р»РµРЅРёСЏ!", "Р’РЅРёРјР°РЅРёРµ",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            if (!await EnsureCashDayAllowsDocumentAsync(selectedRow, "Удаление кассового ордера"))
+            if (!await EnsureCashDayAllowsDocumentAsync(selectedRow, "РЈРґР°Р»РµРЅРёРµ РєР°СЃСЃРѕРІРѕРіРѕ РѕСЂРґРµСЂР°"))
                 return;
 
-            var result = MessageBox.Show("Удалить выбранный документ?", "Подтверждение",
+            var result = MessageBox.Show("РЈРґР°Р»РёС‚СЊ РІС‹Р±СЂР°РЅРЅС‹Р№ РґРѕРєСѓРјРµРЅС‚?", "РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result != MessageBoxResult.Yes)
                 return;
@@ -994,12 +994,12 @@ namespace BIS.ERP.Views
             {
                 await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, selectedRow.Id);
                 await LoadData();
-                MessageBox.Show("Документ успешно удалён!", "Успех",
+                MessageBox.Show("Р”РѕРєСѓРјРµРЅС‚ СѓСЃРїРµС€РЅРѕ СѓРґР°Р»С‘РЅ!", "РЈСЃРїРµС…",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
+                MessageBox.Show($"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ: {ex.Message}", "РћС€РёР±РєР°",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -1008,67 +1008,67 @@ namespace BIS.ERP.Views
         {
             if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
-                MessageBox.Show("Выберите документ для проведения!", "Внимание",
+                MessageBox.Show("Р’С‹Р±РµСЂРёС‚Рµ РґРѕРєСѓРјРµРЅС‚ РґР»СЏ РїСЂРѕРІРµРґРµРЅРёСЏ!", "Р’РЅРёРјР°РЅРёРµ",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             if (!await EnsureCashDayAllowsDocumentAsync(
                     selectedRow,
-                    selectedRow.IsPosted ? "Отмена проведения кассового ордера" : "Проведение кассового ордера",
+                    selectedRow.IsPosted ? "РћС‚РјРµРЅР° РїСЂРѕРІРµРґРµРЅРёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РѕСЂРґРµСЂР°" : "РџСЂРѕРІРµРґРµРЅРёРµ РєР°СЃСЃРѕРІРѕРіРѕ РѕСЂРґРµСЂР°",
                     offerOpenDay: !selectedRow.IsPosted))
                 return;
 
-            var actionText = selectedRow.IsPosted ? "Отменить проведение выбранного документа?" : "Провести выбранный документ?";
-            var result = MessageBox.Show(actionText, "Подтверждение",
+            var actionText = selectedRow.IsPosted ? "РћС‚РјРµРЅРёС‚СЊ РїСЂРѕРІРµРґРµРЅРёРµ РІС‹Р±СЂР°РЅРЅРѕРіРѕ РґРѕРєСѓРјРµРЅС‚Р°?" : "РџСЂРѕРІРµСЃС‚Рё РІС‹Р±СЂР°РЅРЅС‹Р№ РґРѕРєСѓРјРµРЅС‚?";
+            var result = MessageBox.Show(actionText, "РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result != MessageBoxResult.Yes)
                 return;
 
             try
             {
-                StatusText.Text = selectedRow.IsPosted ? "Отмена проведения..." : "Проведение...";
+                StatusText.Text = selectedRow.IsPosted ? "РћС‚РјРµРЅР° РїСЂРѕРІРµРґРµРЅРёСЏ..." : "РџСЂРѕРІРµРґРµРЅРёРµ...";
                 if (selectedRow.IsPosted)
                     await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
                 else
                     await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
 
                 await LoadData();
-                MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
+                MessageBox.Show(selectedRow.IsPosted ? "РџСЂРѕРІРµРґРµРЅРёРµ РґРѕРєСѓРјРµРЅС‚Р° РѕС‚РјРµРЅРµРЅРѕ." : "Р”РѕРєСѓРјРµРЅС‚ СѓСЃРїРµС€РЅРѕ РїСЂРѕРІРµРґС‘РЅ!", "РЈСЃРїРµС…",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка изменения проведения: {ex.Message}", "Ошибка",
+                MessageBox.Show($"РћС€РёР±РєР° РёР·РјРµРЅРµРЅРёСЏ РїСЂРѕРІРµРґРµРЅРёСЏ: {ex.Message}", "РћС€РёР±РєР°",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
-                StatusText.Text = "✅ Готово";
+                StatusText.Text = "вњ… Р“РѕС‚РѕРІРѕ";
             }
         }
 
         private async void OnBatchPostClick(object sender, RoutedEventArgs e)
         {
-            const string caption = "Массовое проведение кассовых ордеров";
+            const string caption = "РњР°СЃСЃРѕРІРѕРµ РїСЂРѕРІРµРґРµРЅРёРµ РєР°СЃСЃРѕРІС‹С… РѕСЂРґРµСЂРѕРІ";
             var selectedRows = GetCurrentFilteredRows()
                 .Where(row => row.IsSelectedForBatchPost)
                 .ToList();
 
             if (selectedRows.Count == 0)
             {
-                MessageBox.Show("Отметьте непроведенные документы для проведения.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("РћС‚РјРµС‚СЊС‚Рµ РЅРµРїСЂРѕРІРµРґРµРЅРЅС‹Рµ РґРѕРєСѓРјРµРЅС‚С‹ РґР»СЏ РїСЂРѕРІРµРґРµРЅРёСЏ.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
             var unavailableRows = selectedRows.Where(row => !row.CanBatchPost).ToList();
             if (unavailableRows.Count > 0)
             {
-                MessageBox.Show("Среди отмеченных есть уже проведенные документы или документы закрытого дня. Снимите отметки и повторите.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("РЎСЂРµРґРё РѕС‚РјРµС‡РµРЅРЅС‹С… РµСЃС‚СЊ СѓР¶Рµ РїСЂРѕРІРµРґРµРЅРЅС‹Рµ РґРѕРєСѓРјРµРЅС‚С‹ РёР»Рё РґРѕРєСѓРјРµРЅС‚С‹ Р·Р°РєСЂС‹С‚РѕРіРѕ РґРЅСЏ. РЎРЅРёРјРёС‚Рµ РѕС‚РјРµС‚РєРё Рё РїРѕРІС‚РѕСЂРёС‚Рµ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            var confirm = MessageBox.Show($"Провести выбранные документы: {selectedRows.Count}?", caption, MessageBoxButton.YesNo, MessageBoxImage.Question);
+            var confirm = MessageBox.Show($"РџСЂРѕРІРµСЃС‚Рё РІС‹Р±СЂР°РЅРЅС‹Рµ РґРѕРєСѓРјРµРЅС‚С‹: {selectedRows.Count}?", caption, MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (confirm != MessageBoxResult.Yes)
                 return;
 
@@ -1083,14 +1083,14 @@ namespace BIS.ERP.Views
 
                     try
                     {
-                        StatusText.Text = $"Проведение документа № {row.DocNumber}...";
+                        StatusText.Text = $"РџСЂРѕРІРµРґРµРЅРёРµ РґРѕРєСѓРјРµРЅС‚Р° в„– {row.DocNumber}...";
                         await _metadataService.PostDocumentAsync(_documentMetadata.Id, row.Id);
                         postedCount++;
                     }
                     catch (Exception ex)
                     {
-                        errors.Add($"№ {row.DocNumber}: {ex.Message}");
-                        SystemLogService.Error($"Ошибка массового проведения кассового документа № {row.DocNumber}.", "CashOrderWorkView.OnBatchPostClick", ex);
+                        errors.Add($"в„– {row.DocNumber}: {ex.Message}");
+                        SystemLogService.Error($"РћС€РёР±РєР° РјР°СЃСЃРѕРІРѕРіРѕ РїСЂРѕРІРµРґРµРЅРёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРѕРєСѓРјРµРЅС‚Р° в„– {row.DocNumber}.", "CashOrderWorkView.OnBatchPostClick", ex);
                     }
                 }
 
@@ -1100,16 +1100,16 @@ namespace BIS.ERP.Views
                 {
                     var details = string.Join(Environment.NewLine, errors.Take(5));
                     if (errors.Count > 5)
-                        details += Environment.NewLine + $"... и еще ошибок: {errors.Count - 5}";
-                    MessageBox.Show($"Проведено документов: {postedCount}. Ошибок: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                        details += Environment.NewLine + $"... Рё РµС‰Рµ РѕС€РёР±РѕРє: {errors.Count - 5}";
+                    MessageBox.Show($"РџСЂРѕРІРµРґРµРЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ: {postedCount}. РћС€РёР±РѕРє: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
-                MessageBox.Show($"Проведено документов: {postedCount}.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show($"РџСЂРѕРІРµРґРµРЅРѕ РґРѕРєСѓРјРµРЅС‚РѕРІ: {postedCount}.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             finally
             {
-                StatusText.Text = "✅ Готово";
+                StatusText.Text = "вњ… Р“РѕС‚РѕРІРѕ";
             }
         }
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
@@ -1129,14 +1129,14 @@ namespace BIS.ERP.Views
 
         private static string BuildUnpostedCashDayMessage(DateTime cashDate, List<CashOrderRow> rows)
         {
-            var documents = string.Join(", ", rows.Take(8).Select(row => $"{row.OrderTypeDisplay} № {row.DocNumber}"));
+            var documents = string.Join(", ", rows.Take(8).Select(row => $"{row.OrderTypeDisplay} в„– {row.DocNumber}"));
             if (rows.Count > 8)
-                documents += $", ... еще {rows.Count - 8}";
+                documents += $", ... РµС‰Рµ {rows.Count - 8}";
 
-            return $"Нельзя закрыть кассовый день {cashDate:dd.MM.yyyy}: есть непроведенные документы.{Environment.NewLine}" +
-                   $"Непроведенных документов: {rows.Count}.{Environment.NewLine}" +
-                   $"Документы: {documents}.{Environment.NewLine}" +
-                   "Сначала проведите документы или снимите лишние записи.";
+            return $"РќРµР»СЊР·СЏ Р·Р°РєСЂС‹С‚СЊ РєР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {cashDate:dd.MM.yyyy}: РµСЃС‚СЊ РЅРµРїСЂРѕРІРµРґРµРЅРЅС‹Рµ РґРѕРєСѓРјРµРЅС‚С‹.{Environment.NewLine}" +
+                   $"РќРµРїСЂРѕРІРµРґРµРЅРЅС‹С… РґРѕРєСѓРјРµРЅС‚РѕРІ: {rows.Count}.{Environment.NewLine}" +
+                   $"Р”РѕРєСѓРјРµРЅС‚С‹: {documents}.{Environment.NewLine}" +
+                   "РЎРЅР°С‡Р°Р»Р° РїСЂРѕРІРµРґРёС‚Рµ РґРѕРєСѓРјРµРЅС‚С‹ РёР»Рё СЃРЅРёРјРёС‚Рµ Р»РёС€РЅРёРµ Р·Р°РїРёСЃРё.";
         }
         private bool TryGetCurrentPeriod(string caption, out DateTime startDate, out DateTime endDate)
         {
@@ -1145,7 +1145,7 @@ namespace BIS.ERP.Views
 
             if (startDate > endDate)
             {
-                MessageBox.Show("Дата начала периода не может быть позже даты окончания.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("Р”Р°С‚Р° РЅР°С‡Р°Р»Р° РїРµСЂРёРѕРґР° РЅРµ РјРѕР¶РµС‚ Р±С‹С‚СЊ РїРѕР·Р¶Рµ РґР°С‚С‹ РѕРєРѕРЅС‡Р°РЅРёСЏ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -1157,13 +1157,13 @@ namespace BIS.ERP.Views
             cashDesk = CashDeskFilterCombo.SelectedItem as CashDeskItem ?? new CashDeskItem();
             if (cashDesk.Id == Guid.Empty)
             {
-                MessageBox.Show("Выберите конкретную кассу.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("Р’С‹Р±РµСЂРёС‚Рµ РєРѕРЅРєСЂРµС‚РЅСѓСЋ РєР°СЃСЃСѓ.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(cashDesk.AccountCode))
             {
-                MessageBox.Show("У выбранной кассы не заполнен счет. Обороты по кассе собрать нельзя.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("РЈ РІС‹Р±СЂР°РЅРЅРѕР№ РєР°СЃСЃС‹ РЅРµ Р·Р°РїРѕР»РЅРµРЅ СЃС‡РµС‚. РћР±РѕСЂРѕС‚С‹ РїРѕ РєР°СЃСЃРµ СЃРѕР±СЂР°С‚СЊ РЅРµР»СЊР·СЏ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -1174,7 +1174,7 @@ namespace BIS.ERP.Views
         {
             if (!Guid.TryParse(row.CashDeskId, out var cashDeskId) || cashDeskId == Guid.Empty)
             {
-                MessageBox.Show("У документа не определена касса. Операция с кассовым днем невозможна.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("РЈ РґРѕРєСѓРјРµРЅС‚Р° РЅРµ РѕРїСЂРµРґРµР»РµРЅР° РєР°СЃСЃР°. РћРїРµСЂР°С†РёСЏ СЃ РєР°СЃСЃРѕРІС‹Рј РґРЅРµРј РЅРµРІРѕР·РјРѕР¶РЅР°.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -1186,8 +1186,8 @@ namespace BIS.ERP.Views
                 if (await cashDayService.IsDayClosedAsync(cashDeskId, row.DocDate))
                 {
                     var closedMessage = offerOpenDay
-                        ? $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" закрыт. Создание, изменение и проведение проводок в закрытом дне запрещены."
-                        : $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" закрыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".";
+                        ? $"РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {row.DocDate:dd.MM.yyyy} РїРѕ РєР°СЃСЃРµ \"{row.CashDeskName}\" Р·Р°РєСЂС‹С‚. РЎРѕР·РґР°РЅРёРµ, РёР·РјРµРЅРµРЅРёРµ Рё РїСЂРѕРІРµРґРµРЅРёРµ РїСЂРѕРІРѕРґРѕРє РІ Р·Р°РєСЂС‹С‚РѕРј РґРЅРµ Р·Р°РїСЂРµС‰РµРЅС‹."
+                        : $"РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {row.DocDate:dd.MM.yyyy} РїРѕ РєР°СЃСЃРµ \"{row.CashDeskName}\" Р·Р°РєСЂС‹С‚. Р”Р»СЏ РѕС‚РјРµРЅС‹ РїСЂРѕРІРµРґРµРЅРёСЏ СЃРЅР°С‡Р°Р»Р° РѕС‚РєСЂРѕР№С‚Рµ РґРµРЅСЊ С€С‚Р°С‚РЅРѕР№ РєРЅРѕРїРєРѕР№ \"РћС‚РєСЂС‹С‚СЊ РґРµРЅСЊ\".";
                     MessageBox.Show(closedMessage,
                         caption,
                         MessageBoxButton.OK,
@@ -1195,30 +1195,6 @@ namespace BIS.ERP.Views
                     return false;
                 }
 
-                if (await cashDayService.IsDayOpenAsync(cashDeskId, row.DocDate))
-                    return true;
-
-                if (!offerOpenDay)
-                {
-                    MessageBox.Show(
-                        $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" не открыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".",
-                        caption,
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                    return false;
-                }
-
-                var answer = MessageBox.Show(
-                    $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" не открыт. Открыть новый день для работы?",
-                    caption,
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-                if (answer != MessageBoxResult.Yes)
-                    return false;
-
-                await cashDayService.OpenDayAsync(cashDeskId, row.DocDate, CurrentUserName());
-                await LoadData();
-                StatusText.Text = $"Кассовый день {row.DocDate:dd.MM.yyyy} открыт";
                 return true;
             }
             catch (InvalidOperationException ex)
@@ -1228,7 +1204,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка проверки кассового дня: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
                 return false;
             }
         }
@@ -1281,7 +1257,7 @@ namespace BIS.ERP.Views
             if (!string.IsNullOrWhiteSpace(row.Description))
                 return row.Description;
 
-            return $"{row.OrderTypeDisplay} КО № {row.DocNumber}";
+            return $"{row.OrderTypeDisplay} РљРћ в„– {row.DocNumber}";
         }
 
         private static bool IsWeakCashPostingNote(string? note)
@@ -1295,7 +1271,7 @@ namespace BIS.ERP.Views
                 return false;
 
             var prefix = trimmed[..colonIndex].Trim();
-            return prefix.StartsWith("Строка", StringComparison.OrdinalIgnoreCase) ||
+            return prefix.StartsWith("РЎС‚СЂРѕРєР°", StringComparison.OrdinalIgnoreCase) ||
                    prefix.StartsWith("Row", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -1306,25 +1282,25 @@ namespace BIS.ERP.Views
         {
             if (!ServiceLocator.AuthService.IsAdmin)
             {
-                MessageBox.Show("Открытие кассового дня доступно только администратору.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("РћС‚РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂСѓ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
             var login = ServiceLocator.AuthService.CurrentUser?.Login;
             if (string.IsNullOrWhiteSpace(login))
             {
-                MessageBox.Show("Не удалось определить текущего администратора.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСЂРµРґРµР»РёС‚СЊ С‚РµРєСѓС‰РµРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
-            var password = PromptPassword(Window.GetWindow(this), caption, "Введите пароль администратора для открытия кассового дня:");
+            var password = PromptPassword(Window.GetWindow(this), caption, "Р’РІРµРґРёС‚Рµ РїР°СЂРѕР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РґР»СЏ РѕС‚РєСЂС‹С‚РёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ:");
             if (password == null)
                 return false;
 
             var result = await ServiceLocator.AuthService.LoginAsync(login, password);
             if (!result.Success || !ServiceLocator.AuthService.IsAdmin)
             {
-                MessageBox.Show("Пароль администратора не подтвержден.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("РџР°СЂРѕР»СЊ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
 
@@ -1341,7 +1317,7 @@ namespace BIS.ERP.Views
 
             var okButton = new Button
             {
-                Content = "ОК",
+                Content = "РћРљ",
                 Width = 100,
                 Height = 32,
                 Margin = new Thickness(0, 16, 8, 0),
@@ -1349,7 +1325,7 @@ namespace BIS.ERP.Views
             };
             var cancelButton = new Button
             {
-                Content = "Отмена",
+                Content = "РћС‚РјРµРЅР°",
                 Width = 100,
                 Height = 32,
                 Margin = new Thickness(0, 16, 0, 0),
@@ -1399,7 +1375,7 @@ namespace BIS.ERP.Views
 
         private async void OnCloseCashDayClick(object sender, RoutedEventArgs e)
         {
-            const string caption = "Закрытие кассового дня";
+            const string caption = "Р—Р°РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ";
             if (!TryGetSelectedConcreteCashDesk(caption, out var cashDesk))
                 return;
 
@@ -1411,7 +1387,7 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var confirm = MessageBox.Show($"Закрыть кассовый день {cashDate:dd.MM.yyyy} по кассе \"{cashDesk.DisplayNameWithAccount}\"?",
+            var confirm = MessageBox.Show($"Р—Р°РєСЂС‹С‚СЊ РєР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {cashDate:dd.MM.yyyy} РїРѕ РєР°СЃСЃРµ \"{cashDesk.DisplayNameWithAccount}\"?",
                 caption,
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
@@ -1424,13 +1400,13 @@ namespace BIS.ERP.Views
                 var cashDayService = new CashDayClosureService(context);
                 if (await cashDayService.IsDayClosedAsync(cashDesk.Id, cashDate))
                 {
-                    MessageBox.Show("Этот кассовый день уже закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Р­С‚РѕС‚ РєР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ СѓР¶Рµ Р·Р°РєСЂС‹С‚.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
                 if (!await cashDayService.IsDayOpenAsync(cashDesk.Id, cashDate))
                 {
-                    MessageBox.Show("Кассовый день не открыт. Перед закрытием сначала откройте день.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show("РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ РЅРµ РѕС‚РєСЂС‹С‚. РџРµСЂРµРґ Р·Р°РєСЂС‹С‚РёРµРј СЃРЅР°С‡Р°Р»Р° РѕС‚РєСЂРѕР№С‚Рµ РґРµРЅСЊ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
@@ -1448,18 +1424,18 @@ namespace BIS.ERP.Views
                     turnoverSummary.ClosingCredit);
 
                 await LoadData();
-                StatusText.Text = $"Кассовый день {cashDate:dd.MM.yyyy} закрыт";
-                MessageBox.Show("Кассовый день закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = $"РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {cashDate:dd.MM.yyyy} Р·Р°РєСЂС‹С‚";
+                MessageBox.Show("РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ Р·Р°РєСЂС‹С‚.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка закрытия кассового дня: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"РћС€РёР±РєР° Р·Р°РєСЂС‹С‚РёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
         private async void OnOpenCashDayClick(object sender, RoutedEventArgs e)
         {
-            const string caption = "Открытие кассового дня";
+            const string caption = "РћС‚РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ";
             if (!TryGetSelectedConcreteCashDesk(caption, out var cashDesk))
                 return;
 
@@ -1475,23 +1451,23 @@ namespace BIS.ERP.Views
 
                 if (affected == 0)
                 {
-                    MessageBox.Show("Закрытый день для выбранной кассы и даты не найден.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Р—Р°РєСЂС‹С‚С‹Р№ РґРµРЅСЊ РґР»СЏ РІС‹Р±СЂР°РЅРЅРѕР№ РєР°СЃСЃС‹ Рё РґР°С‚С‹ РЅРµ РЅР°Р№РґРµРЅ.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
                 await LoadData();
-                StatusText.Text = $"Кассовый день {cashDate:dd.MM.yyyy} открыт";
-                MessageBox.Show("Кассовый день открыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = $"РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {cashDate:dd.MM.yyyy} РѕС‚РєСЂС‹С‚";
+                MessageBox.Show("РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ РѕС‚РєСЂС‹С‚.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка открытия кассового дня: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"РћС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
         private async void OnClosedDaysTurnoversClick(object sender, RoutedEventArgs e)
         {
-            const string caption = "Обороты по закрытым дням";
+            const string caption = "РћР±РѕСЂРѕС‚С‹ РїРѕ Р·Р°РєСЂС‹С‚С‹Рј РґРЅСЏРј";
             if (!TryGetSelectedConcreteCashDesk(caption, out var cashDesk) || !TryGetCurrentPeriod(caption, out var startDate, out var endDate))
                 return;
 
@@ -1503,7 +1479,7 @@ namespace BIS.ERP.Views
 
                 if (closedDates.Count == 0)
                 {
-                    MessageBox.Show("За выбранный период закрытые кассовые дни не найдены.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Р—Р° РІС‹Р±СЂР°РЅРЅС‹Р№ РїРµСЂРёРѕРґ Р·Р°РєСЂС‹С‚С‹Рµ РєР°СЃСЃРѕРІС‹Рµ РґРЅРё РЅРµ РЅР°Р№РґРµРЅС‹.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -1514,17 +1490,17 @@ namespace BIS.ERP.Views
 
                 var dialog = new CashClosedDaysTurnoversDialog(
                     caption,
-                    $"{cashDeskName} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
+                    $"{cashDeskName} Р·Р° {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
                     rows)
                 {
                     Owner = Window.GetWindow(this)
                 };
                 dialog.ShowDialog();
-                StatusText.Text = $"Закрытых дней: {rows.Count}";
+                StatusText.Text = $"Р—Р°РєСЂС‹С‚С‹С… РґРЅРµР№: {rows.Count}";
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка расчета оборотов по закрытым дням: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"РћС€РёР±РєР° СЂР°СЃС‡РµС‚Р° РѕР±РѕСЂРѕС‚РѕРІ РїРѕ Р·Р°РєСЂС‹С‚С‹Рј РґРЅСЏРј: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1559,7 +1535,7 @@ namespace BIS.ERP.Views
 
         private async void OnDayTurnoversClick(object sender, RoutedEventArgs e)
         {
-            const string caption = "Обороты за день";
+            const string caption = "РћР±РѕСЂРѕС‚С‹ Р·Р° РґРµРЅСЊ";
             if (!TryGetSelectedConcreteCashDesk(caption, out var cashDesk))
                 return;
 
@@ -1568,16 +1544,16 @@ namespace BIS.ERP.Views
             {
                 var postings = await LoadCashPostingsAsync(cashDesk, cashDate, cashDate);
                 var turnoverSummary = await CalculateCashTurnoverSummaryAsync(cashDesk, cashDate, cashDate);
-                var dialog = new DocumentPostingsDialog("Обороты за день", $"{cashDesk.DisplayNameWithAccount} за {cashDate:dd.MM.yyyy}", postings, BuildCashTurnoverSummaryFields(turnoverSummary))
+                var dialog = new DocumentPostingsDialog("РћР±РѕСЂРѕС‚С‹ Р·Р° РґРµРЅСЊ", $"{cashDesk.DisplayNameWithAccount} Р·Р° {cashDate:dd.MM.yyyy}", postings, BuildCashTurnoverSummaryFields(turnoverSummary))
                 {
                     Owner = Window.GetWindow(this)
                 };
                 dialog.ShowDialog();
-                StatusText.Text = $"Обороты за день: {postings.Count} проводок";
+                StatusText.Text = $"РћР±РѕСЂРѕС‚С‹ Р·Р° РґРµРЅСЊ: {postings.Count} РїСЂРѕРІРѕРґРѕРє";
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка расчета оборотов за день: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"РћС€РёР±РєР° СЂР°СЃС‡РµС‚Р° РѕР±РѕСЂРѕС‚РѕРІ Р·Р° РґРµРЅСЊ: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1593,7 +1569,7 @@ namespace BIS.ERP.Views
 
         private async Task OpenCashBookExcelAsync()
         {
-            const string caption = "Кассовая книга";
+            const string caption = "РљР°СЃСЃРѕРІР°СЏ РєРЅРёРіР°";
             try
             {
                 var rows = GetCurrentFilteredRows()
@@ -1603,7 +1579,7 @@ namespace BIS.ERP.Views
                     .ToList();
                 if (rows.Count == 0)
                 {
-                    MessageBox.Show("Нет строк для формирования кассовой книги.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("РќРµС‚ СЃС‚СЂРѕРє РґР»СЏ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -1611,15 +1587,15 @@ namespace BIS.ERP.Views
                 var endDate = PeriodEndDatePicker.SelectedDate ?? rows.Max(row => row.DocDate).Date;
                 var cashDeskName = CashDeskFilterCombo.SelectedItem is CashDeskItem cashDesk
                     ? cashDesk.DisplayNameWithAccount
-                    : "Все кассы";
+                    : "Р’СЃРµ РєР°СЃСЃС‹";
 
                 var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
 
                 CashBookButton.IsEnabled = false;
                 Cursor = Cursors.Wait;
-                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы кассовой книги..." : "Формирование Excel кассовой книги по макету конфигуратора...";
+                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Р’С‹Р±РѕСЂ С„РѕСЂРјС‹ РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё..." : "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ Excel РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё РїРѕ РјР°РєРµС‚Сѓ РєРѕРЅС„РёРіСѓСЂР°С‚РѕСЂР°...";
                 SystemLogService.Info(
-                    $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
+                    $"РЎС‚Р°СЂС‚ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё. РЎС‚СЂРѕРє: {rows.Count}, РєР°СЃСЃР°: {cashDeskName}, РїРµСЂРёРѕРґ: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
                     "CashOrderWorkView.CashBook");
 
                 await OpenConfiguredCashReportAsync(
@@ -1634,9 +1610,9 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка кассовой книги";
-                SystemLogService.Error("Ошибка формирования кассовой книги.", "CashOrderWorkView.CashBook", ex);
-                MessageBox.Show($"Ошибка формирования кассовой книги: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusText.Text = "РћС€РёР±РєР° РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё";
+                SystemLogService.Error("РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё.", "CashOrderWorkView.CashBook", ex);
+                MessageBox.Show($"РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РєР°СЃСЃРѕРІРѕР№ РєРЅРёРіРё: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -1658,7 +1634,7 @@ namespace BIS.ERP.Views
 
         private async Task OpenReceiptExpenseRegisterExcelAsync()
         {
-            const string caption = "Реестр приходов/расходов";
+            const string caption = "Р РµРµСЃС‚СЂ РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ";
             try
             {
                 var rows = GetCurrentFilteredRows()
@@ -1668,7 +1644,7 @@ namespace BIS.ERP.Views
                     .ToList();
                 if (rows.Count == 0)
                 {
-                    MessageBox.Show("Нет строк для формирования реестра.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("РќРµС‚ СЃС‚СЂРѕРє РґР»СЏ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ СЂРµРµСЃС‚СЂР°.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -1676,15 +1652,15 @@ namespace BIS.ERP.Views
                 var endDate = PeriodEndDatePicker.SelectedDate ?? rows.Max(row => row.DocDate).Date;
                 var cashDeskName = CashDeskFilterCombo.SelectedItem is CashDeskItem cashDesk
                     ? cashDesk.DisplayNameWithAccount
-                    : "Все кассы";
+                    : "Р’СЃРµ РєР°СЃСЃС‹";
 
                 var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
 
                 ReceiptExpenseRegisterButton.IsEnabled = false;
                 Cursor = Cursors.Wait;
-                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы реестра приходов/расходов..." : "Формирование Excel-реестра приходов/расходов по макету конфигуратора...";
+                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Р’С‹Р±РѕСЂ С„РѕСЂРјС‹ СЂРµРµСЃС‚СЂР° РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ..." : "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ Excel-СЂРµРµСЃС‚СЂР° РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ РїРѕ РјР°РєРµС‚Сѓ РєРѕРЅС„РёРіСѓСЂР°С‚РѕСЂР°...";
                 SystemLogService.Info(
-                    $"Старт формирования реестра приходов/расходов. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
+                    $"РЎС‚Р°СЂС‚ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ СЂРµРµСЃС‚СЂР° РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ. РЎС‚СЂРѕРє: {rows.Count}, РєР°СЃСЃР°: {cashDeskName}, РїРµСЂРёРѕРґ: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
                     "CashOrderWorkView.ReceiptExpenseRegister");
 
                 await OpenConfiguredCashReportAsync(
@@ -1699,9 +1675,9 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка реестра приходов/расходов";
-                SystemLogService.Error("Ошибка формирования реестра приходов/расходов.", "CashOrderWorkView.ReceiptExpenseRegister", ex);
-                MessageBox.Show($"Ошибка формирования реестра приходов/расходов: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusText.Text = "РћС€РёР±РєР° СЂРµРµСЃС‚СЂР° РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ";
+                SystemLogService.Error("РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ СЂРµРµСЃС‚СЂР° РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ.", "CashOrderWorkView.ReceiptExpenseRegister", ex);
+                MessageBox.Show($"РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ СЂРµРµСЃС‚СЂР° РїСЂРёС…РѕРґРѕРІ/СЂР°СЃС…РѕРґРѕРІ: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -1747,9 +1723,9 @@ namespace BIS.ERP.Views
                 .FirstOrDefaultAsync(item => item.Code == reportCode);
 
             if (report == null)
-                throw new InvalidOperationException($"Отчет \"{caption}\" не загружен в конфигурацию.");
+                throw new InvalidOperationException($"РћС‚С‡РµС‚ \"{caption}\" РЅРµ Р·Р°РіСЂСѓР¶РµРЅ РІ РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ.");
             if (!report.IsActive)
-                throw new InvalidOperationException($"Отчет \"{caption}\" отключен в конфигураторе.");
+                throw new InvalidOperationException($"РћС‚С‡РµС‚ \"{caption}\" РѕС‚РєР»СЋС‡РµРЅ РІ РєРѕРЅС„РёРіСѓСЂР°С‚РѕСЂРµ.");
 
             var selectedReport = report;
             var selectedFormat = PrintFormOutputFormat.Excel;
@@ -1762,7 +1738,7 @@ namespace BIS.ERP.Views
 
                 if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
                 {
-                    StatusText.Text = "Формирование отчета отменено";
+                    StatusText.Text = "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ РѕС‚С‡РµС‚Р° РѕС‚РјРµРЅРµРЅРѕ";
                     return;
                 }
 
@@ -1770,7 +1746,7 @@ namespace BIS.ERP.Views
                 selectedFormat = selectionDialog.SelectedFormat;
             }
 
-            selectedReport.SubtitleText = $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            selectedReport.SubtitleText = $"{cashDeskName}; РїРµСЂРёРѕРґ {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
             var ruleService = new FoxProReportFieldRuleService(context);
             await ruleService.SeedDefaultRulesAsync();
             var rules = await ruleService.GetRulesAsync(includeInactive: false);
@@ -1783,8 +1759,8 @@ namespace BIS.ERP.Views
             var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
             var formatName = PrintFormOutputFileService.GetDisplayName(selectedFormat);
 
-            StatusText.Text = $"{caption} открыт в {formatName}: {dataTable.Rows.Count} строк";
-            SystemLogService.Info($"{caption} открыт по настраиваемому макету ({formatName}): {outputPath}", logSource);
+            StatusText.Text = $"{caption} РѕС‚РєСЂС‹С‚ РІ {formatName}: {dataTable.Rows.Count} СЃС‚СЂРѕРє";
+            SystemLogService.Info($"{caption} РѕС‚РєСЂС‹С‚ РїРѕ РЅР°СЃС‚СЂР°РёРІР°РµРјРѕРјСѓ РјР°РєРµС‚Сѓ ({formatName}): {outputPath}", logSource);
         }
 
         private DataTable BuildCashBookReportDataTable(
@@ -1911,16 +1887,16 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "period_start", typeof(DateTime));
             AddCashOrderColumn(table, "period_end", typeof(DateTime));
             AddCashOrderColumn(table, "cash_desk", typeof(string));
-            AddCashOrderColumn(table, "Дата", typeof(DateTime));
+            AddCashOrderColumn(table, "Р”Р°С‚Р°", typeof(DateTime));
             AddCashOrderColumn(table, "date", typeof(DateTime));
             AddCashOrderColumn(table, "doc_date", typeof(DateTime));
             AddCashOrderColumn(table, "document_date", typeof(DateTime));
-            AddCashOrderColumn(table, "Документ", typeof(string));
+            AddCashOrderColumn(table, "Р”РѕРєСѓРјРµРЅС‚", typeof(string));
             AddCashOrderColumn(table, "document_number", typeof(string));
             AddCashOrderColumn(table, "dok", typeof(string));
             AddCashOrderColumn(table, "nuch", typeof(string));
             AddCashOrderColumn(table, "d_nuch", typeof(string));
-            AddCashOrderColumn(table, "Тип", typeof(string));
+            AddCashOrderColumn(table, "РўРёРї", typeof(string));
             AddCashOrderColumn(table, "order_type", typeof(string));
             AddCashOrderColumn(table, "debit", typeof(string));
             AddCashOrderColumn(table, "credit", typeof(string));
@@ -1936,8 +1912,8 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "sum_credit", typeof(decimal));
             AddCashOrderColumn(table, "opening_balance", typeof(decimal));
             AddCashOrderColumn(table, "closing_balance", typeof(decimal));
-            AddCashOrderColumn(table, "Остаток на начало", typeof(decimal));
-            AddCashOrderColumn(table, "Остаток на конец", typeof(decimal));
+            AddCashOrderColumn(table, "РћСЃС‚Р°С‚РѕРє РЅР° РЅР°С‡Р°Р»Рѕ", typeof(decimal));
+            AddCashOrderColumn(table, "РћСЃС‚Р°С‚РѕРє РЅР° РєРѕРЅРµС†", typeof(decimal));
             AddCashOrderColumn(table, "amount", typeof(decimal));
             AddCashOrderColumn(table, "amount_currency", typeof(decimal));
             AddCashOrderColumn(table, "currency", typeof(string));
@@ -1948,10 +1924,10 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "cash_account", typeof(string));
             AddCashOrderColumn(table, "correspondent_account", typeof(string));
             AddCashOrderColumn(table, "module", typeof(string));
-            AddCashOrderColumn(table, "ДН", typeof(decimal));
-            AddCashOrderColumn(table, "КН", typeof(decimal));
-            AddCashOrderColumn(table, "ДК", typeof(decimal));
-            AddCashOrderColumn(table, "КК", typeof(decimal));
+            AddCashOrderColumn(table, "Р”Рќ", typeof(decimal));
+            AddCashOrderColumn(table, "РљРќ", typeof(decimal));
+            AddCashOrderColumn(table, "Р”Рљ", typeof(decimal));
+            AddCashOrderColumn(table, "РљРљ", typeof(decimal));
             AddCashOrderColumn(table, "deb_beg", typeof(decimal));
             AddCashOrderColumn(table, "cred_beg", typeof(decimal));
             AddCashOrderColumn(table, "debsum", typeof(decimal));
@@ -1988,22 +1964,22 @@ namespace BIS.ERP.Views
             var closingBalance = turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit;
 
             SetCashOrderValue(dataRow, "Id", row.Id);
-            SetCashOrderValue(dataRow, "report_name", "Расходный/Приходный КО");
-            SetCashOrderValue(dataRow, "title", "Расходный/Приходный КО");
-            SetCashOrderValue(dataRow, "subtitle", $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}");
+            SetCashOrderValue(dataRow, "report_name", "Р Р°СЃС…РѕРґРЅС‹Р№/РџСЂРёС…РѕРґРЅС‹Р№ РљРћ");
+            SetCashOrderValue(dataRow, "title", "Р Р°СЃС…РѕРґРЅС‹Р№/РџСЂРёС…РѕРґРЅС‹Р№ РљРћ");
+            SetCashOrderValue(dataRow, "subtitle", $"{cashDeskName}; РїРµСЂРёРѕРґ {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}");
             SetCashOrderValue(dataRow, "period_start", startDate);
             SetCashOrderValue(dataRow, "period_end", endDate);
             SetCashOrderValue(dataRow, "cash_desk", cashDeskName);
-            SetCashOrderValue(dataRow, "Дата", row.DocDate);
+            SetCashOrderValue(dataRow, "Р”Р°С‚Р°", row.DocDate);
             SetCashOrderValue(dataRow, "date", row.DocDate);
             SetCashOrderValue(dataRow, "doc_date", row.DocDate);
             SetCashOrderValue(dataRow, "document_date", row.DocDate);
-            SetCashOrderValue(dataRow, "Документ", row.DocNumber);
+            SetCashOrderValue(dataRow, "Р”РѕРєСѓРјРµРЅС‚", row.DocNumber);
             SetCashOrderValue(dataRow, "document_number", row.DocNumber);
             SetCashOrderValue(dataRow, "dok", row.DocNumber);
             SetCashOrderValue(dataRow, "nuch", row.DocNumber);
             SetCashOrderValue(dataRow, "d_nuch", row.DocNumber);
-            SetCashOrderValue(dataRow, "Тип", row.OrderTypeDisplay);
+            SetCashOrderValue(dataRow, "РўРёРї", row.OrderTypeDisplay);
             SetCashOrderValue(dataRow, "order_type", row.OrderTypeDisplay);
             SetCashOrderValue(dataRow, "debit", debitAccount);
             SetCashOrderValue(dataRow, "credit", creditAccount);
@@ -2019,8 +1995,8 @@ namespace BIS.ERP.Views
             SetCashOrderValue(dataRow, "sum_credit", paymentAmount);
             SetCashOrderValue(dataRow, "opening_balance", openingBalance);
             SetCashOrderValue(dataRow, "closing_balance", closingBalance);
-            SetCashOrderValue(dataRow, "Остаток на начало", openingBalance);
-            SetCashOrderValue(dataRow, "Остаток на конец", closingBalance);
+            SetCashOrderValue(dataRow, "РћСЃС‚Р°С‚РѕРє РЅР° РЅР°С‡Р°Р»Рѕ", openingBalance);
+            SetCashOrderValue(dataRow, "РћСЃС‚Р°С‚РѕРє РЅР° РєРѕРЅРµС†", closingBalance);
             SetCashOrderValue(dataRow, "amount", row.Amount);
             SetCashOrderValue(dataRow, "amount_currency", row.AmountInCurrency == 0 ? row.Amount : row.AmountInCurrency);
             SetCashOrderValue(dataRow, "currency", row.CurrencyName);
@@ -2031,10 +2007,10 @@ namespace BIS.ERP.Views
             SetCashOrderValue(dataRow, "cash_account", row.IsReceipt ? debitAccount : creditAccount);
             SetCashOrderValue(dataRow, "correspondent_account", correspondentAccount);
             SetCashOrderValue(dataRow, "module", _moduleName);
-            SetCashOrderValue(dataRow, "ДН", turnoverSummary.OpeningDebit);
-            SetCashOrderValue(dataRow, "КН", turnoverSummary.OpeningCredit);
-            SetCashOrderValue(dataRow, "ДК", turnoverSummary.ClosingDebit);
-            SetCashOrderValue(dataRow, "КК", turnoverSummary.ClosingCredit);
+            SetCashOrderValue(dataRow, "Р”Рќ", turnoverSummary.OpeningDebit);
+            SetCashOrderValue(dataRow, "РљРќ", turnoverSummary.OpeningCredit);
+            SetCashOrderValue(dataRow, "Р”Рљ", turnoverSummary.ClosingDebit);
+            SetCashOrderValue(dataRow, "РљРљ", turnoverSummary.ClosingCredit);
             SetCashOrderValue(dataRow, "deb_beg", turnoverSummary.OpeningDebit);
             SetCashOrderValue(dataRow, "cred_beg", turnoverSummary.OpeningCredit);
             SetCashOrderValue(dataRow, "debsum", turnoverSummary.DebitTurnover);
@@ -2075,11 +2051,11 @@ namespace BIS.ERP.Views
                 var rows = GetCurrentFilteredRows();
                 if (rows.Count == 0)
                 {
-                    MessageBox.Show("Нет строк для формирования отчета.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("РќРµС‚ СЃС‚СЂРѕРє РґР»СЏ С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РѕС‚С‡РµС‚Р°.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
-                StatusText.Text = $"Формирование отчета: {caption}...";
+                StatusText.Text = $"Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ РѕС‚С‡РµС‚Р°: {caption}...";
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 await new MetadataService(context).EnsureStandardReportsAsync();
 
@@ -2090,15 +2066,15 @@ namespace BIS.ERP.Views
 
                 if (report == null)
                 {
-                    MessageBox.Show($"FRX-отчет \"{caption}\" не загружен в конфигурацию.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
-                    StatusText.Text = "FRX-отчет не найден";
+                    MessageBox.Show($"FRX-РѕС‚С‡РµС‚ \"{caption}\" РЅРµ Р·Р°РіСЂСѓР¶РµРЅ РІ РєРѕРЅС„РёРіСѓСЂР°С†РёСЋ.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    StatusText.Text = "FRX-РѕС‚С‡РµС‚ РЅРµ РЅР°Р№РґРµРЅ";
                     return;
                 }
 
                 if (!report.IsActive)
                 {
-                    MessageBox.Show($"FRX-отчет \"{caption}\" отключен в конфигураторе.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
-                    StatusText.Text = "FRX-отчет отключен";
+                    MessageBox.Show($"FRX-РѕС‚С‡РµС‚ \"{caption}\" РѕС‚РєР»СЋС‡РµРЅ РІ РєРѕРЅС„РёРіСѓСЂР°С‚РѕСЂРµ.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                    StatusText.Text = "FRX-РѕС‚С‡РµС‚ РѕС‚РєР»СЋС‡РµРЅ";
                     return;
                 }
 
@@ -2109,12 +2085,12 @@ namespace BIS.ERP.Views
                     Owner = Window.GetWindow(this)
                 };
                 previewWindow.ShowDialog();
-                StatusText.Text = "Готово";
+                StatusText.Text = "Р“РѕС‚РѕРІРѕ";
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка отчета";
-                MessageBox.Show($"Ошибка формирования отчета \"{caption}\": {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusText.Text = "РћС€РёР±РєР° РѕС‚С‡РµС‚Р°";
+                MessageBox.Show($"РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РѕС‚С‡РµС‚Р° \"{caption}\": {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -2130,41 +2106,41 @@ namespace BIS.ERP.Views
         {
             var table = new DataTable("cash_orders");
             AddCashOrderColumn(table, "Id", typeof(Guid));
-            AddCashOrderColumn(table, "Дата", typeof(DateTime));
+            AddCashOrderColumn(table, "Р”Р°С‚Р°", typeof(DateTime));
             AddCashOrderColumn(table, "date", typeof(DateTime));
             AddCashOrderColumn(table, "doc_date", typeof(DateTime));
-            AddCashOrderColumn(table, "Документ", typeof(string));
+            AddCashOrderColumn(table, "Р”РѕРєСѓРјРµРЅС‚", typeof(string));
             AddCashOrderColumn(table, "document_number", typeof(string));
             AddCashOrderColumn(table, "dok", typeof(string));
             AddCashOrderColumn(table, "nuch", typeof(string));
             AddCashOrderColumn(table, "d_nuch", typeof(string));
-            AddCashOrderColumn(table, "Тип", typeof(string));
+            AddCashOrderColumn(table, "РўРёРї", typeof(string));
             AddCashOrderColumn(table, "order_type", typeof(string));
-            AddCashOrderColumn(table, "Дебет", typeof(string));
+            AddCashOrderColumn(table, "Р”РµР±РµС‚", typeof(string));
             AddCashOrderColumn(table, "debit", typeof(string));
-            AddCashOrderColumn(table, "Кредит", typeof(string));
+            AddCashOrderColumn(table, "РљСЂРµРґРёС‚", typeof(string));
             AddCashOrderColumn(table, "credit", typeof(string));
-            AddCashOrderColumn(table, "Сумма", typeof(decimal));
+            AddCashOrderColumn(table, "РЎСѓРјРјР°", typeof(decimal));
             AddCashOrderColumn(table, "amount", typeof(decimal));
             AddCashOrderColumn(table, "sum", typeof(decimal));
-            AddCashOrderColumn(table, "Сумма в валюте", typeof(decimal));
+            AddCashOrderColumn(table, "РЎСѓРјРјР° РІ РІР°Р»СЋС‚Рµ", typeof(decimal));
             AddCashOrderColumn(table, "amount_currency", typeof(decimal));
             AddCashOrderColumn(table, "sum_v", typeof(decimal));
-            AddCashOrderColumn(table, "Валюта", typeof(string));
+            AddCashOrderColumn(table, "Р’Р°Р»СЋС‚Р°", typeof(string));
             AddCashOrderColumn(table, "currency", typeof(string));
             AddCashOrderColumn(table, "nval1", typeof(string));
-            AddCashOrderColumn(table, "Касса", typeof(string));
+            AddCashOrderColumn(table, "РљР°СЃСЃР°", typeof(string));
             AddCashOrderColumn(table, "cash_desk", typeof(string));
-            AddCashOrderColumn(table, "Основание", typeof(string));
+            AddCashOrderColumn(table, "РћСЃРЅРѕРІР°РЅРёРµ", typeof(string));
             AddCashOrderColumn(table, "basis", typeof(string));
-            AddCashOrderColumn(table, "Примечание", typeof(string));
+            AddCashOrderColumn(table, "РџСЂРёРјРµС‡Р°РЅРёРµ", typeof(string));
             AddCashOrderColumn(table, "description", typeof(string));
-            AddCashOrderColumn(table, "Модуль", typeof(string));
+            AddCashOrderColumn(table, "РњРѕРґСѓР»СЊ", typeof(string));
             AddCashOrderColumn(table, "module", typeof(string));
-            AddCashOrderColumn(table, "ДН", typeof(decimal));
-            AddCashOrderColumn(table, "КН", typeof(decimal));
-            AddCashOrderColumn(table, "ДК", typeof(decimal));
-            AddCashOrderColumn(table, "КК", typeof(decimal));
+            AddCashOrderColumn(table, "Р”Рќ", typeof(decimal));
+            AddCashOrderColumn(table, "РљРќ", typeof(decimal));
+            AddCashOrderColumn(table, "Р”Рљ", typeof(decimal));
+            AddCashOrderColumn(table, "РљРљ", typeof(decimal));
             AddCashOrderColumn(table, "deb_beg", typeof(decimal));
             AddCashOrderColumn(table, "cred_beg", typeof(decimal));
             AddCashOrderColumn(table, "debsum", typeof(decimal));
@@ -2186,36 +2162,36 @@ namespace BIS.ERP.Views
             {
                 var dataRow = table.NewRow();
                 SetCashOrderValue(dataRow, "Id", row.Id);
-                SetCashOrderValue(dataRow, "Дата", row.DocDate);
+                SetCashOrderValue(dataRow, "Р”Р°С‚Р°", row.DocDate);
                 SetCashOrderValue(dataRow, "date", row.DocDate);
                 SetCashOrderValue(dataRow, "doc_date", row.DocDate);
-                SetCashOrderValue(dataRow, "Документ", row.DocNumber);
+                SetCashOrderValue(dataRow, "Р”РѕРєСѓРјРµРЅС‚", row.DocNumber);
                 SetCashOrderValue(dataRow, "document_number", row.DocNumber);
                 SetCashOrderValue(dataRow, "dok", row.DocNumber);
                 SetCashOrderValue(dataRow, "nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "d_nuch", row.DocNumber);
-                SetCashOrderValue(dataRow, "Тип", row.OrderTypeDisplay);
+                SetCashOrderValue(dataRow, "РўРёРї", row.OrderTypeDisplay);
                 SetCashOrderValue(dataRow, "order_type", row.OrderTypeDisplay);
-                SetCashOrderValue(dataRow, "Дебет", ExtractAccountCode(row.DebitAccount));
+                SetCashOrderValue(dataRow, "Р”РµР±РµС‚", ExtractAccountCode(row.DebitAccount));
                 SetCashOrderValue(dataRow, "debit", ExtractAccountCode(row.DebitAccount));
-                SetCashOrderValue(dataRow, "Кредит", ExtractAccountCode(row.CreditAccount));
+                SetCashOrderValue(dataRow, "РљСЂРµРґРёС‚", ExtractAccountCode(row.CreditAccount));
                 SetCashOrderValue(dataRow, "credit", ExtractAccountCode(row.CreditAccount));
-                SetCashOrderValue(dataRow, "Сумма", row.Amount);
+                SetCashOrderValue(dataRow, "РЎСѓРјРјР°", row.Amount);
                 SetCashOrderValue(dataRow, "amount", row.Amount);
                 SetCashOrderValue(dataRow, "sum", row.Amount);
-                SetCashOrderValue(dataRow, "Сумма в валюте", row.AmountInCurrency);
+                SetCashOrderValue(dataRow, "РЎСѓРјРјР° РІ РІР°Р»СЋС‚Рµ", row.AmountInCurrency);
                 SetCashOrderValue(dataRow, "amount_currency", row.AmountInCurrency);
                 SetCashOrderValue(dataRow, "sum_v", row.AmountInCurrency == 0 ? row.Amount : row.AmountInCurrency);
-                SetCashOrderValue(dataRow, "Валюта", row.CurrencyName);
+                SetCashOrderValue(dataRow, "Р’Р°Р»СЋС‚Р°", row.CurrencyName);
                 SetCashOrderValue(dataRow, "currency", row.CurrencyName);
                 SetCashOrderValue(dataRow, "nval1", string.IsNullOrWhiteSpace(row.CurrencyName) ? "KGS" : row.CurrencyName);
-                SetCashOrderValue(dataRow, "Касса", row.CashDeskName);
+                SetCashOrderValue(dataRow, "РљР°СЃСЃР°", row.CashDeskName);
                 SetCashOrderValue(dataRow, "cash_desk", row.CashDeskName);
-                SetCashOrderValue(dataRow, "Основание", row.Basis);
+                SetCashOrderValue(dataRow, "РћСЃРЅРѕРІР°РЅРёРµ", row.Basis);
                 SetCashOrderValue(dataRow, "basis", row.Basis);
-                SetCashOrderValue(dataRow, "Примечание", row.Description);
+                SetCashOrderValue(dataRow, "РџСЂРёРјРµС‡Р°РЅРёРµ", row.Description);
                 SetCashOrderValue(dataRow, "description", row.Description);
-                SetCashOrderValue(dataRow, "Модуль", _moduleName);
+                SetCashOrderValue(dataRow, "РњРѕРґСѓР»СЊ", _moduleName);
                 SetCashOrderValue(dataRow, "module", _moduleName);
                 table.Rows.Add(dataRow);
             }
@@ -2239,7 +2215,7 @@ namespace BIS.ERP.Views
         {
             if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
-                MessageBox.Show("Выберите документ для печати.", "Печать", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show("Р’С‹Р±РµСЂРёС‚Рµ РґРѕРєСѓРјРµРЅС‚ РґР»СЏ РїРµС‡Р°С‚Рё.", "РџРµС‡Р°С‚СЊ", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -2255,7 +2231,7 @@ namespace BIS.ERP.Views
 
                 if (forms.Count == 0)
                 {
-                    MessageBox.Show("Для выбранного документа не настроены активные печатные формы.", "Печать", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Р”Р»СЏ РІС‹Р±СЂР°РЅРЅРѕРіРѕ РґРѕРєСѓРјРµРЅС‚Р° РЅРµ РЅР°СЃС‚СЂРѕРµРЅС‹ Р°РєС‚РёРІРЅС‹Рµ РїРµС‡Р°С‚РЅС‹Рµ С„РѕСЂРјС‹.", "РџРµС‡Р°С‚СЊ", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -2276,18 +2252,18 @@ namespace BIS.ERP.Views
                 }
 
                 StatusText.Text = selectedFormat == PrintFormOutputFormat.Excel
-                    ? "Формирование Excel..."
-                    : "Формирование PDF...";
+                    ? "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ Excel..."
+                    : "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ PDF...";
                 var output = selectedFormat == PrintFormOutputFormat.Excel
                     ? await printFormService.ExportDocumentExcelAsync(selectedReport, selectedRow.Id)
                     : await printFormService.ExportDocumentAsync(selectedReport, selectedRow.Id);
                 var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
-                StatusText.Text = $"Открыт файл печатной формы: {outputPath}";
+                StatusText.Text = $"РћС‚РєСЂС‹С‚ С„Р°Р№Р» РїРµС‡Р°С‚РЅРѕР№ С„РѕСЂРјС‹: {outputPath}";
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка печати";
-                MessageBox.Show($"Ошибка печати: {ex.Message}", "Печать", MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusText.Text = "РћС€РёР±РєР° РїРµС‡Р°С‚Рё";
+                MessageBox.Show($"РћС€РёР±РєР° РїРµС‡Р°С‚Рё: {ex.Message}", "РџРµС‡Р°С‚СЊ", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         private void DataGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -2340,7 +2316,7 @@ namespace BIS.ERP.Views
                 DebitAccount = selected.DebitAccount,
                 CreditAccount = selected.CreditAccount,
                 CorrespondentAccount = ResolveCorrespondentAccount(selected),
-                Direction = selected.IsPosted ? "Проводка документа" : "Документ еще не проведен",
+                Direction = selected.IsPosted ? "РџСЂРѕРІРѕРґРєР° РґРѕРєСѓРјРµРЅС‚Р°" : "Р”РѕРєСѓРјРµРЅС‚ РµС‰Рµ РЅРµ РїСЂРѕРІРµРґРµРЅ",
                 Amount = selected.Amount,
                 AmountCurrency = selected.AmountInCurrency,
                 Currency = selected.CurrencyName,
@@ -2367,8 +2343,8 @@ namespace BIS.ERP.Views
 
         private static string ResolveOrderKind(Dictionary<string, object> row, string documentName)
         {
-            var rawKind = GetRowString(row, "Тип КО", "order_kind", "cash_order_kind", "Тип", "document_type");
-            if (rawKind.Contains("приход", StringComparison.OrdinalIgnoreCase) ||
+            var rawKind = GetRowString(row, "РўРёРї РљРћ", "order_kind", "cash_order_kind", "РўРёРї", "document_type");
+            if (rawKind.Contains("РїСЂРёС…РѕРґ", StringComparison.OrdinalIgnoreCase) ||
                 rawKind.Equals(CashOrderReceiptKind, StringComparison.OrdinalIgnoreCase) ||
                 documentName.Equals(CashOrderReceiptDocumentType, StringComparison.OrdinalIgnoreCase))
             {
@@ -2393,15 +2369,15 @@ namespace BIS.ERP.Views
         public string DocumentType { get; set; } = string.Empty;
         public string OrderKind { get; set; } = "Payment";
         public bool IsReceipt => OrderKind.Equals("Receipt", StringComparison.OrdinalIgnoreCase);
-        public string OrderTypeDisplay => IsReceipt ? "Приходный" : "Расходный";
-        public string PostingDocumentType => IsReceipt ? "Приходный кассовый ордер" : "Расходный кассовый ордер";
+        public string OrderTypeDisplay => IsReceipt ? "РџСЂРёС…РѕРґРЅС‹Р№" : "Р Р°СЃС…РѕРґРЅС‹Р№";
+        public string PostingDocumentType => IsReceipt ? "РџСЂРёС…РѕРґРЅС‹Р№ РєР°СЃСЃРѕРІС‹Р№ РѕСЂРґРµСЂ" : "Р Р°СЃС…РѕРґРЅС‹Р№ РєР°СЃСЃРѕРІС‹Р№ РѕСЂРґРµСЂ";
         public string PostingTypeDisplay => IsReceipt
-            ? "Приход: Дт касса / Кт корр. счет"
-            : "Расход: Дт корр. счет / Кт касса";
+            ? "РџСЂРёС…РѕРґ: Р”С‚ РєР°СЃСЃР° / РљС‚ РєРѕСЂСЂ. СЃС‡РµС‚"
+            : "Р Р°СЃС…РѕРґ: Р”С‚ РєРѕСЂСЂ. СЃС‡РµС‚ / РљС‚ РєР°СЃСЃР°";
         public string DocNumber { get; set; } = string.Empty;
         public DateTime DocDate { get; set; }
         public bool IsCashDayClosed { get; set; }
-        public string CashDayStatusDisplay { get; set; } = "Не открыт";
+        public string CashDayStatusDisplay { get; set; } = "РќРµ РѕС‚РєСЂС‹С‚";
         public string CashDeskName { get; set; } = string.Empty;
         public string OrganizationName { get; set; } = string.Empty;
         public string CurrencyName { get; set; } = string.Empty;

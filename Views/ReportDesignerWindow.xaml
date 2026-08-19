@@ -74,17 +74,37 @@
 
                             <!-- Row 2: Источник + Тип отчета -->
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Источник:" VerticalAlignment="Center" FontWeight="Bold"/>
-                            <ComboBox x:Name="DataSourceCombo" Grid.Row="2" Grid.Column="1" Height="35" Margin="5"/>
+                            <Grid Grid.Row="2" Grid.Column="1" Margin="5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="36"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="DataSourceCombo" Grid.Column="0" Height="35"/>
+                                <Button x:Name="CreateReportDataSetButton" Grid.Column="1" Content="+"
+                                        Height="35" Margin="5,0,0,0" FontWeight="Bold"
+                                        ToolTip="Открыть наборы данных отчетов и создать новый источник"
+                                        Click="OnCreateReportDataSetClick"/>
+                            </Grid>
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="Тип отчета:" VerticalAlignment="Center" FontWeight="Bold"/>
-                            <ComboBox x:Name="ReportTypeCombo" Grid.Row="2" Grid.Column="3" Height="35" Margin="5" SelectedIndex="0"
-                                      SelectionChanged="OnReportTypeChanged">
-                                <ComboBoxItem Content="Таблица" Tag="Table"/>
-                                <ComboBoxItem Content="Список" Tag="List"/>
-                                <ComboBoxItem Content="Карточка" Tag="Card"/>
-                                <ComboBoxItem Content="Счет-фактура на материалы (КР)" Tag="InvoiceMaterialsKg"/>
-                                <ComboBoxItem Content="Расходный/Приходный КО" Tag="CashOrder"/>
-                                <ComboBoxItem Content="Макет Visual FoxPro FRX" Tag="FoxProLayout"/>
-                            </ComboBox>
+                            <Grid Grid.Row="2" Grid.Column="3" Margin="5">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="36"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="ReportTypeCombo" Grid.Column="0" Height="35" SelectedIndex="0"
+                                          SelectionChanged="OnReportTypeChanged">
+                                    <ComboBoxItem Content="Таблица" Tag="Table"/>
+                                    <ComboBoxItem Content="Список" Tag="List"/>
+                                    <ComboBoxItem Content="Карточка" Tag="Card"/>
+                                    <ComboBoxItem Content="Счет-фактура на материалы (КР)" Tag="InvoiceMaterialsKg"/>
+                                    <ComboBoxItem Content="Расходный/Приходный КО" Tag="CashOrder"/>
+                                    <ComboBoxItem Content="Макет Visual FoxPro FRX" Tag="FoxProLayout"/>
+                                </ComboBox>
+                                <Button x:Name="ReportTypeHelpButton" Grid.Column="1" Content="?"
+                                        Height="35" Margin="5,0,0,0" FontWeight="Bold"
+                                        ToolTip="Что делает тип отчета"
+                                        Click="OnReportTypeHelpClick"/>
+                            </Grid>
 
                             <!-- Row 3: Заголовок -->
                             <TextBlock Grid.Row="3" Grid.Column="0" Text="Заголовок:" VerticalAlignment="Center" FontWeight="Bold"/>

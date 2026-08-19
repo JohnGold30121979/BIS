@@ -141,9 +141,14 @@
             <TabControl x:Name="DocumentsTabControl"
                         Background="Transparent"
                         BorderThickness="0"
+                        AllowDrop="True"
                         ItemsSource="{Binding Documents, RelativeSource={RelativeSource AncestorType={x:Type controls:MdiWorkspaceControl}}}"
                         SelectedItem="{Binding SelectedDocument, RelativeSource={RelativeSource AncestorType={x:Type controls:MdiWorkspaceControl}}, Mode=TwoWay}"
-                        Visibility="Collapsed">
+                        Visibility="Collapsed"
+                        PreviewMouseLeftButtonDown="DocumentsTabControl_PreviewMouseLeftButtonDown"
+                        PreviewMouseMove="DocumentsTabControl_PreviewMouseMove"
+                        DragOver="DocumentsTabControl_DragOver"
+                        Drop="DocumentsTabControl_Drop">
                 <TabControl.ItemTemplate>
                     <DataTemplate>
                         <DockPanel LastChildFill="True" MinWidth="128">

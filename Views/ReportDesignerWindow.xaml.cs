@@ -123,6 +123,7 @@ namespace BIS.ERP.Views
             if (selected?.Tag is MetadataObject catalog)
             {
                 await LoadAvailableFields(catalog);
+                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
             else
             {
@@ -131,7 +132,64 @@ namespace BIS.ERP.Views
                 AvailableFilterFields.Clear();
                 AvailableLayoutFields.Clear();
                 AddComputedDataFields();
+                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
+        }
+
+        private async void OnCreateReportDataSetClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selectedSourceId = (DataSourceCombo.SelectedItem as ComboBoxItem)?.Tag is MetadataObject selectedSource
+                    ? selectedSource.Id
+                    : (Guid?)null;
+
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var window = new Window
+                {
+                    Title = "Наборы данных отчетов",
+                    Owner = this,
+                    Width = 1100,
+                    Height = 720,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Content = new ReportDataSetManagementView(context)
+                };
+
+                window.ShowDialog();
+
+                await LoadDataSources();
+                RestoreSelectedDataSource(selectedSourceId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка открытия наборов данных отчетов: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void OnReportTypeHelpClick(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show(
+                "Тип отчета определяет способ построения печатной формы.\n\n" +
+                "Для FRX выберите «Макет Visual FoxPro FRX» и укажите источник данных в поле «Источник».\n" +
+                "Поля во вкладках «Поля» и «FRX» берутся из одного выбранного источника.\n\n" +
+                "Чтобы добавить SQL-набор данных, нажмите «+» рядом с источником.",
+                "Тип отчета",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        private void RestoreSelectedDataSource(Guid? selectedSourceId)
+        {
+            if (!selectedSourceId.HasValue)
+                return;
+
+            var item = DataSourceCombo.Items
+                .Cast<ComboBoxItem>()
+                .FirstOrDefault(comboItem => (comboItem.Tag as MetadataObject)?.Id == selectedSourceId.Value);
+
+            if (item != null)
+                DataSourceCombo.SelectedItem = item;
         }
 
         private async Task LoadAvailableFields(MetadataObject catalog)
@@ -914,6 +972,7 @@ namespace BIS.ERP.Views
                     if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                     {
                         await LoadAvailableFields(catalog);
+                        RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                     }
 
                     StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей: {_reportFields.Count}";
@@ -1210,6 +1269,32 @@ namespace BIS.ERP.Views
         private string ResolveFieldDisplayName(string fieldName)
         {
             return FindAvailableDataField(fieldName)?.Name ?? string.Empty;
+        }
+
+        private void RefreshFrxMappingsForCurrentSource(bool clearMissingFields)
+        {
+            if (_frxElementMappings.Count == 0)
+                return;
+
+            var availableFieldNames = AvailableDataFields
+                .Select(field => field.DbColumnName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var mapping in _frxElementMappings)
+            {
+                if (clearMissingFields &&
+                    !string.IsNullOrWhiteSpace(mapping.MappedFieldName) &&
+                    !availableFieldNames.Contains(mapping.MappedFieldName))
+                {
+                    mapping.MappedFieldName = string.Empty;
+                }
+
+                mapping.MappedDisplayName = ResolveFieldDisplayName(mapping.MappedFieldName);
+            }
+
+            ApplyFoxProRulesToEmptyMappings();
+            UpdateMappingPreview();
         }
 
         private string GetCurrentRecognitionProfileCode()

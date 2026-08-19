@@ -5,12 +5,17 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 
 namespace BIS.ERP.Views.Controls;
 
 public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
 {
+    private const string MdiTabDragFormat = "BIS.ERP.MdiDocumentItem";
     private MdiDocumentItem? _selectedDocument;
+    private MdiDocumentItem? _draggedDocument;
+    private Point _dragStartPoint;
 
     public MdiWorkspaceControl()
     {
@@ -94,6 +99,75 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
     {
         if ((sender as FrameworkElement)?.Tag is MdiDocumentItem document)
             CloseDocument(document);
+    }
+
+    private void DocumentsTabControl_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStartPoint = e.GetPosition(DocumentsTabControl);
+        _draggedDocument = null;
+
+        if (FindAncestor<Button>(e.OriginalSource as DependencyObject) != null)
+            return;
+
+        var tabItem = FindAncestor<TabItem>(e.OriginalSource as DependencyObject);
+        _draggedDocument = tabItem?.DataContext as MdiDocumentItem;
+    }
+
+    private void DocumentsTabControl_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _draggedDocument == null)
+            return;
+
+        var currentPoint = e.GetPosition(DocumentsTabControl);
+        if (Math.Abs(currentPoint.X - _dragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(currentPoint.Y - _dragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        DragDrop.DoDragDrop(DocumentsTabControl, new DataObject(MdiTabDragFormat, _draggedDocument), DragDropEffects.Move);
+        _draggedDocument = null;
+    }
+
+    private void DocumentsTabControl_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(MdiTabDragFormat)
+            ? DragDropEffects.Move
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void DocumentsTabControl_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(MdiTabDragFormat))
+            return;
+
+        var draggedDocument = e.Data.GetData(MdiTabDragFormat) as MdiDocumentItem;
+        var targetDocument = FindAncestor<TabItem>(e.OriginalSource as DependencyObject)?.DataContext as MdiDocumentItem;
+        if (draggedDocument == null || targetDocument == null || ReferenceEquals(draggedDocument, targetDocument))
+            return;
+
+        var oldIndex = Documents.IndexOf(draggedDocument);
+        var newIndex = Documents.IndexOf(targetDocument);
+        if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex)
+            return;
+
+        Documents.Move(oldIndex, newIndex);
+        SelectedDocument = draggedDocument;
+        e.Handled = true;
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current != null)
+        {
+            if (current is T match)
+                return match;
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
     }
 
     private void UpdateEmptyState()

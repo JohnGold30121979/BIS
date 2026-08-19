@@ -140,10 +140,15 @@ namespace BIS.ERP.Views
             };
         }
 
-        private void OnReportTypeChanged(object sender, SelectionChangedEventArgs e)
+        private async void OnReportTypeChanged(object sender, SelectionChangedEventArgs e)
         {
             // Тип отчета не должен менять визуальный макет автоматически:
             // дизайнер является универсальным движком компоновки.
+            if (DataSourceCombo?.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
+            {
+                await LoadAvailableFields(catalog);
+                RefreshFrxMappingsForCurrentSource(clearMissingFields: GetSelectedReportType() == "FoxProLayout");
+            }
         }
 
         private void LoadNativeTemplateFromReport(Report report)
