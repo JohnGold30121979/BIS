@@ -111,6 +111,6 @@ internal sealed record ReportVariant(
     int Order,
     bool IsDefault,
     string SourceName = "Проводки",
-    bool IsPrintForm = false,
+    bool IsPrintForm = true,
     string PageOrientation = "Landscape",
     string Icon = "🤝");

@@ -236,7 +236,7 @@ namespace BIS.ERP.Services
                 {
                     Id = Guid.NewGuid(),
                     Name = "План счетов",
-                    TableName = $"catalog_plan_schetov_{DateTime.Now:yyyyMMddHHmmss}",
+                    TableName = $"catalog_plan_schetov",
                     ObjectType = "Catalog",
                     Description = "План счетов бухгалтерского учета Кыргызской Республики",
                     Icon = "📊",

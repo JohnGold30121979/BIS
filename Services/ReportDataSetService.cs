@@ -221,73 +221,98 @@ public sealed class ReportDataSetService
             })
             .ToList();
 
-        var existing = await _context.ReportDataSets
-            .Include(item => item.Fields)
-            .FirstAsync(item => item.Id == dataSet.Id);
+        var dataSetId = dataSet.Id;
+        var existingFields = await _context.ReportDataSetFields
+            .Where(f => f.ReportDataSetId == dataSetId)
+            .ToListAsync();
+        _context.ReportDataSetFields.RemoveRange(existingFields);
+        await _context.SaveChangesAsync();
 
-        _context.ReportDataSetFields.RemoveRange(existing.Fields);
         foreach (var field in desiredFields)
-            existing.Fields.Add(field);
-
+            _context.ReportDataSetFields.Add(field);
         await _context.SaveChangesAsync();
     }
 
     public async Task SyncMetadataSourceAsync(ReportDataSet dataSet)
     {
+        // Detach the dataSet entity so EF Core doesn't try to update it during SaveChangesAsync,
+        // which would cause a DbUpdateConcurrencyException.
+        _context.Entry(dataSet).State = EntityState.Detached;
+
         var configId = await _context.MetadataConfigurations
             .Select(item => (Guid?)item.Id)
             .FirstOrDefaultAsync();
 
-        var metadata = dataSet.MetadataObjectId.HasValue
-            ? await _context.MetadataObjects
-                .Include(item => item.Fields)
-                .FirstOrDefaultAsync(item => item.Id == dataSet.MetadataObjectId.Value)
-            : null;
-
-        metadata ??= await _context.MetadataObjects
-            .Include(item => item.Fields)
-            .FirstOrDefaultAsync(item =>
-                item.ObjectType == "ReportSource" &&
-                item.ReferenceFields != null &&
-                item.ReferenceFields.Contains(dataSet.Code));
-        metadata ??= await _context.MetadataObjects
-            .Include(item => item.Fields)
-            .FirstOrDefaultAsync(item =>
-                item.ObjectType == "ReportSource" &&
-                (item.Name == dataSet.Name ||
-                 item.TableName == $"dataset_{SanitizeIdentifier(dataSet.Code)}" ||
-                 (dataSet.Code == CashOrderTurnoverDataSetCode &&
-                  item.TableName == MetadataService.CashOrderTurnoverReportSourceTableName)));
-
-        if (metadata == null)
+        var metadataId = dataSet.MetadataObjectId;
+        if (!metadataId.HasValue)
         {
-            metadata = new MetadataObject
+            // Try to find existing metadata by code reference
+            var referenceJson = JsonSerializer.Serialize(new Dictionary<string, string>
             {
-                Id = Guid.NewGuid(),
-                ObjectType = "ReportSource",
-                Icon = "🧩",
-                IsSystem = dataSet.IsSystem,
-                MetadataConfigId = configId,
-                Fields = new List<MetadataField>()
-            };
-            await _context.MetadataObjects.AddAsync(metadata);
+                [DataSetReferenceKey] = dataSet.Code
+            });
+            var foundId = await _context.MetadataObjects
+                .Where(item => item.ObjectType == "ReportSource" &&
+                               item.ReferenceFields != null &&
+                               item.ReferenceFields.Contains(dataSet.Code))
+                .Select(item => (Guid?)item.Id)
+                .FirstOrDefaultAsync();
+            if (foundId.HasValue)
+                metadataId = foundId;
         }
 
-        metadata.Name = dataSet.Name;
-        metadata.Description = dataSet.Description;
-        metadata.TableName = $"dataset_{SanitizeIdentifier(dataSet.Code)}";
-        metadata.ReferenceFields = JsonSerializer.Serialize(new Dictionary<string, string>
+        if (!metadataId.HasValue)
         {
-            [DataSetReferenceKey] = dataSet.Code
-        });
-        metadata.IsSystem = dataSet.IsSystem;
-        metadata.Icon = string.IsNullOrWhiteSpace(metadata.Icon) ? "🧩" : metadata.Icon;
+            // Create new metadata object via raw SQL
+            metadataId = Guid.NewGuid();
+            await _context.Database.ExecuteSqlRawAsync(
+                @"INSERT INTO ""MetadataObjects"" (""Id"", ""Name"", ""TableName"", ""ObjectType"", ""Description"", ""Icon"", ""Order"", ""IsSystem"", ""ParentId"", ""MetadataConfigId"", ""UsePostings"", ""UseBalances"", ""UseMovements"", ""BalanceTable"", ""MovementTable"", ""ReferenceFields"")
+                  VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, NULL, @p8, false, false, false, NULL, NULL, @p9)",
+                metadataId.Value,
+                dataSet.Name,
+                $"dataset_{SanitizeIdentifier(dataSet.Code)}",
+                "ReportSource",
+                dataSet.Description,
+                "🧩",
+                0,
+                dataSet.IsSystem,
+                configId,
+                JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    [DataSetReferenceKey] = dataSet.Code
+                }));
+        }
+        else
+        {
+            // Update existing metadata via raw SQL
+            await _context.Database.ExecuteSqlRawAsync(
+                @"UPDATE ""MetadataObjects""
+                  SET ""Name"" = @p0, ""Description"" = @p1, ""TableName"" = @p2, ""IsSystem"" = @p3, ""Icon"" = @p4,
+                      ""ReferenceFields"" = @p5
+                  WHERE ""Id"" = @p6",
+                dataSet.Name,
+                dataSet.Description,
+                $"dataset_{SanitizeIdentifier(dataSet.Code)}",
+                dataSet.IsSystem,
+                "🧩",
+                JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    [DataSetReferenceKey] = dataSet.Code
+                }),
+                metadataId.Value);
+        }
 
-        dataSet.MetadataObjectId = metadata.Id;
+        // Update MetadataObjectId via raw SQL
+        await _context.Database.ExecuteSqlRawAsync(
+            "UPDATE \"ReportDataSets\" SET \"MetadataObjectId\" = @p0 WHERE \"Id\" = @p1",
+            metadataId.Value, dataSet.Id);
 
-        var currentFields = metadata.Fields.ToList();
-        _context.MetadataFields.RemoveRange(currentFields);
+        // Delete existing metadata fields via raw SQL
+        await _context.Database.ExecuteSqlRawAsync(
+            "DELETE FROM \"MetadataFields\" WHERE \"MetadataObjectId\" = @p0",
+            metadataId.Value);
 
+        // Insert new metadata fields via raw SQL
         var fields = await _context.ReportDataSetFields
             .Where(field => field.ReportDataSetId == dataSet.Id)
             .OrderBy(field => field.Order)
@@ -295,21 +320,19 @@ public sealed class ReportDataSetService
 
         foreach (var field in fields)
         {
-            metadata.Fields.Add(new MetadataField
-            {
-                Id = Guid.NewGuid(),
-                MetadataObjectId = metadata.Id,
-                Name = field.Name,
-                DbColumnName = field.DbColumnName,
-                FieldType = field.FieldType,
-                Length = field.FieldType == "String" ? 500 : 0,
-                Precision = 18,
-                Scale = 2,
-                Order = field.Order
-            });
+            await _context.Database.ExecuteSqlRawAsync(
+                @"INSERT INTO ""MetadataFields"" (""Id"", ""MetadataObjectId"", ""Name"", ""DbColumnName"", ""FieldType"", ""Length"", ""Precision"", ""Scale"", ""IsRequired"", ""IsUnique"", ""Order"", ""ReferenceCatalog"", ""Formula"", ""DisplayPattern"", ""DisplayFields"")
+                  VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, false, false, @p8, NULL, NULL, NULL, NULL)",
+                Guid.NewGuid(),
+                metadataId.Value,
+                field.Name,
+                field.DbColumnName,
+                field.FieldType,
+                field.FieldType == "String" ? 500 : 0,
+                18,
+                2,
+                field.Order);
         }
-
-        await _context.SaveChangesAsync();
     }
 
     private async Task EnsureCashOrderTurnoverDataSetAsync()
@@ -351,7 +374,12 @@ public sealed class ReportDataSetService
         try
         {
             if (!dataSet.Fields.Any())
+            {
                 await RefreshFieldsFromSqlAsync(dataSet);
+                dataSet = await _context.ReportDataSets
+                    .Include(item => item.Fields)
+                    .FirstAsync(item => item.Id == dataSet.Id);
+            }
 
             await SyncMetadataSourceAsync(dataSet);
         }
