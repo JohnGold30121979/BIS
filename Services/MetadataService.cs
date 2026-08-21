@@ -1056,12 +1056,13 @@ namespace BIS.ERP.Services
 
             foreach (var field in SelectFieldsForWrite(metadata, data))
             {
-                if (data.ContainsKey(field.Name) && data[field.Name] != null)
+                var hasFieldValue = TryGetFieldValue(data, field, out var fieldValue);
+                if (hasFieldValue && fieldValue != null && fieldValue != DBNull.Value)
                 {
                     columns.Add($"\"{field.DbColumnName}\"");
-                    values.Add(FormatSqlValue(data[field.Name], field.FieldType));
+                    values.Add(FormatSqlValue(fieldValue, field.FieldType));
                 }
-                else if (field.IsRequired && (!data.ContainsKey(field.Name) || data[field.Name] == null))
+                else if (field.IsRequired)
                 {
                     throw new Exception($"Поле '{field.Name}' обязательно для заполнения");
                 }
@@ -1125,9 +1126,9 @@ namespace BIS.ERP.Services
 
             foreach (var field in SelectFieldsForWrite(metadata, data))
             {
-                if (data.ContainsKey(field.Name))
+                if (TryGetFieldValue(data, field, out var fieldValue))
                 {
-                    setClauses.Add($"\"{field.DbColumnName}\" = {FormatSqlValue(data[field.Name], field.FieldType)}");
+                    setClauses.Add($"\"{field.DbColumnName}\" = {FormatSqlValue(fieldValue, field.FieldType)}");
                 }
             }
 
@@ -1191,7 +1192,7 @@ namespace BIS.ERP.Services
                 .OrderBy(item => item.Order)
                 .FirstOrDefault(item => string.Equals(item.DbColumnName, dbColumnName, StringComparison.OrdinalIgnoreCase));
 
-            if (field == null || data.ContainsKey(field.Name))
+            if (field == null || HasFieldValue(data, field))
                 return;
 
             data[field.Name] = value;
@@ -1221,7 +1222,7 @@ namespace BIS.ERP.Services
 
                 var fieldWithData = group
                     .OrderBy(field => field.Order)
-                    .FirstOrDefault(field => data.ContainsKey(field.Name));
+                    .FirstOrDefault(field => HasFieldValue(data, field));
                 var requiredField = group
                     .OrderBy(field => field.Order)
                     .FirstOrDefault(field => field.IsRequired);
@@ -1335,13 +1336,24 @@ namespace BIS.ERP.Services
 
         private static object? GetFieldValue(IReadOnlyDictionary<string, object> data, MetadataField field)
         {
-            if (data.TryGetValue(field.Name, out var byName))
-                return byName;
+            return TryGetFieldValue(data, field, out var value) ? value : null;
+        }
 
-            return !string.IsNullOrWhiteSpace(field.DbColumnName) &&
-                   data.TryGetValue(field.DbColumnName, out var byColumn)
-                ? byColumn
-                : null;
+        private static bool HasFieldValue(IReadOnlyDictionary<string, object> data, MetadataField field)
+        {
+            return TryGetFieldValue(data, field, out _);
+        }
+
+        private static bool TryGetFieldValue(IReadOnlyDictionary<string, object> data, MetadataField field, out object? value)
+        {
+            if (!string.IsNullOrWhiteSpace(field.Name) && data.TryGetValue(field.Name, out value))
+                return true;
+
+            if (!string.IsNullOrWhiteSpace(field.DbColumnName) && data.TryGetValue(field.DbColumnName, out value))
+                return true;
+
+            value = null;
+            return false;
         }
 
         private static bool IsTrueValue(object? value)

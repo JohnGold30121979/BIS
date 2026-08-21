@@ -52,7 +52,7 @@
 
                     <Border Grid.Column="0" Padding="8,6" BorderBrush="#CFEBD8" BorderThickness="1" Background="#F7FFF9" CornerRadius="4">
                         <StackPanel>
-                            <TextBlock x:Name="OpenCashDayHintText" Text="Текущий открытый день: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#1D6F42" TextTrimming="CharacterEllipsis" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="OpenCashDayHintText" Text="Текущий открытый период: выберите конкретную кассу" FontWeight="SemiBold" Foreground="#1D6F42" TextTrimming="CharacterEllipsis" Margin="0,0,0,4"/>
                             <WrapPanel Margin="0,0,0,5">
                                 <TextBlock Text="Дата:" FontWeight="Bold" Margin="0,0,4,0"/>
                                 <TextBlock x:Name="OpenCashDayDateText" Text="-" Foreground="#2C3E50"/>
@@ -160,6 +160,9 @@
                             Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
                     <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
                             Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
+                    <CheckBox x:Name="SelectAllBatchPostCheckBox" Content="Выбрать все" VerticalAlignment="Center" Margin="0,0,10,0"
+                              Click="OnSelectAllBatchPostClick"
+                              ToolTip="Отметить все непроведенные документы, доступные для проведения"/>
                     <Button x:Name="BatchPostButton" Content="✅ Провести выбранные" Width="165" Height="35" Margin="0,0,10,0"
                             Background="#8E44AD" Foreground="White" Click="OnBatchPostClick"
                             ToolTip="Провести все отмеченные непроведенные документы"/>
@@ -191,7 +194,7 @@
 
         <!-- Таблица -->
         <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 
-          IsReadOnly="True" SelectionChanged="OnSelectionChanged"
+          IsReadOnly="False" SelectionChanged="OnSelectionChanged"
           AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1"
           PreviewMouseRightButtonDown="DataGrid_PreviewMouseRightButtonDown"
           MouseDoubleClick="DataGrid_MouseDoubleClick"
@@ -217,13 +220,14 @@
                         <DataTemplate>
                             <CheckBox IsChecked="{Binding IsSelectedForBatchPost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                       IsEnabled="{Binding CanBatchPost}"
+                                      Click="OnBatchPostRowCheckBoxClick"
                                       HorizontalAlignment="Center"
                                       VerticalAlignment="Center"
-                                      ToolTip="Отметить непроведенный документ для массового проведения"/>
+                                      ToolTip="{Binding BatchPostAvailabilityHint}"/>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="День" Binding="{Binding CashDayStatusDisplay}" Width="85">
+                <DataGridTextColumn Header="День" Binding="{Binding CashDayStatusDisplay}" Width="85" IsReadOnly="True">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -239,19 +243,19 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100"/>
-                <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120"/>
-                <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120"/>
-                <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="180"/>
-                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="120"/>
-                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="120"/>
-                <DataGridTextColumn Header="Тип проводки" Binding="{Binding PostingTypeDisplay}" Width="250" Visibility="Collapsed"/>
-                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding Amount, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="В валюте" Binding="{Binding AmountInCurrency, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="180"/>
-                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80"/>
-                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150"/>
-                <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="180" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Тип проводки" Binding="{Binding PostingTypeDisplay}" Width="250" Visibility="Collapsed" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding Amount, StringFormat=N2}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="В валюте" Binding="{Binding AmountInCurrency, StringFormat=N2}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="180" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150" IsReadOnly="True"/>
             </DataGrid.Columns>
             
         </DataGrid>
@@ -300,5 +304,7 @@
         </StatusBar>
     </Grid>
 </UserControl>
+
+
 
 

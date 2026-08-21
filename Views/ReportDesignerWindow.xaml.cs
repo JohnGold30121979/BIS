@@ -29,6 +29,7 @@ namespace BIS.ERP.Views
         public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
+        public ObservableCollection<FieldDef> AvailableComputedFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableLayoutFields { get; } = new();
         public ObservableCollection<FoxProReportFieldRule> FoxProRules { get; } = new();
         private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
@@ -122,16 +123,20 @@ namespace BIS.ERP.Views
             var selected = DataSourceCombo.SelectedItem as ComboBoxItem;
             if (selected?.Tag is MetadataObject catalog)
             {
+                SyncReportFieldsWithSourceIfStale(
+                    _currentReport ?? new Report { ReportType = GetSelectedReportType() },
+                    catalog);
                 await LoadAvailableFields(catalog);
                 RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
             else
             {
+                _reportFields.Clear();
                 AvailableSourceFields.Clear();
+                AvailableComputedFields.Clear();
                 AvailableDataFields.Clear();
                 AvailableFilterFields.Clear();
                 AvailableLayoutFields.Clear();
-                AddComputedDataFields();
                 RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
         }
@@ -184,67 +189,149 @@ namespace BIS.ERP.Views
             if (!selectedSourceId.HasValue)
                 return;
 
+            SelectDataSourceById(selectedSourceId.Value);
+        }
+
+        private void SelectDataSourceById(Guid sourceId)
+        {
             var item = DataSourceCombo.Items
                 .Cast<ComboBoxItem>()
-                .FirstOrDefault(comboItem => (comboItem.Tag as MetadataObject)?.Id == selectedSourceId.Value);
+                .FirstOrDefault(comboItem => (comboItem.Tag as MetadataObject)?.Id == sourceId);
 
             if (item != null)
                 DataSourceCombo.SelectedItem = item;
         }
 
+        private async void OnSelectDataSourceClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_availableCatalogs == null || _availableCatalogs.Count == 0)
+                    await LoadDataSources();
+
+                var rows = _availableCatalogs
+                    .OrderBy(item => item.ObjectType == "ReportSource" ? 0 : item.ObjectType == "Document" ? 1 : 2)
+                    .ThenBy(item => item.Name)
+                    .Select(item => new Dictionary<string, object>
+                    {
+                        ["Id"] = item.Id,
+                        ["Наименование"] = item.Name,
+                        ["Тип"] = GetDataSourceTypeDisplay(item),
+                        ["Таблица"] = item.TableName,
+                        ["Описание"] = item.Description ?? string.Empty
+                    })
+                    .ToList();
+
+                var dialog = new ReferenceSelectionDialog(rows, "Наименование", "Тип")
+                {
+                    Owner = this,
+                    Title = "Выбор источника данных отчета"
+                };
+
+                if (dialog.ShowDialog() == true &&
+                    dialog.SelectedItem != null &&
+                    dialog.SelectedItem.TryGetValue("Id", out var idValue) &&
+                    Guid.TryParse(idValue?.ToString(), out var sourceId))
+                {
+                    SelectDataSourceById(sourceId);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка выбора источника данных: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static string GetDataSourceTypeDisplay(MetadataObject source) => source.ObjectType switch
+        {
+            "ReportSource" => "Набор данных отчета",
+            "Document" => "Документ",
+            "Catalog" => "Справочник",
+            _ => source.ObjectType
+        };
+
         private async Task LoadAvailableFields(MetadataObject catalog)
         {
-            var addedFieldNames = _reportFields.Select(f => f.DisplayName).ToHashSet();
+            CommitDesignerGridEdits();
+
+            var addedFieldNames = _reportFields
+                .SelectMany(field => new[] { field.FieldName, field.DisplayName })
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var allFields = catalog.Fields
                 .OrderBy(f => f.Order)
-                .Select(field => new FieldDef { Name = field.Name, DbColumnName = field.DbColumnName, Type = field.FieldType })
+                .Select(field => new FieldDef
+                {
+                    Name = field.Name,
+                    DbColumnName = string.IsNullOrWhiteSpace(field.DbColumnName) ? field.Name : field.DbColumnName,
+                    Type = field.FieldType
+                })
+                .Where(field => !string.IsNullOrWhiteSpace(field.Name) || !string.IsNullOrWhiteSpace(field.DbColumnName))
                 .ToList();
-
-            var fields = allFields
-                .Where(field => !addedFieldNames.Contains(field.Name))
-                .ToList();
-
-            CommitDesignerGridEdits();
 
             AvailableSourceFields.Clear();
+            AvailableComputedFields.Clear();
             AvailableDataFields.Clear();
             AvailableFilterFields.Clear();
             AvailableLayoutFields.Clear();
 
-            foreach (var field in fields)
-            {
-                AvailableSourceFields.Add(field);
-                AvailableDataFields.Add(field);
-            }
-
-            AddComputedDataFields();
-
             foreach (var field in allFields)
             {
+                if (!IsReportFieldAlreadyAdded(field, addedFieldNames))
+                    AvailableSourceFields.Add(field);
+
+                AvailableDataFields.Add(field);
                 AvailableFilterFields.Add(field);
                 AvailableLayoutFields.Add(field);
+            }
+
+            foreach (var field in GetComputedFieldDefinitions())
+            {
+                if (IsReportFieldAlreadyAdded(field, addedFieldNames))
+                {
+                    AddUniqueField(AvailableDataFields, field);
+                    AddUniqueField(AvailableLayoutFields, field);
+                }
+                else
+                {
+                    AvailableComputedFields.Add(field);
+                }
             }
 
             await Task.CompletedTask;
         }
 
-        private void AddComputedDataFields()
+        private static bool IsReportFieldAlreadyAdded(FieldDef field, HashSet<string> addedFieldNames)
         {
-            var existing = AvailableDataFields
-                .Select(field => field.DbColumnName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var field in GetPrintFormComputedFields())
-            {
-                if (string.IsNullOrWhiteSpace(field.DbColumnName) || existing.Contains(field.DbColumnName))
-                    continue;
-
-                AvailableDataFields.Add(field);
-                existing.Add(field.DbColumnName);
-            }
+            return addedFieldNames.Contains(field.Name) ||
+                   addedFieldNames.Contains(field.DbColumnName);
         }
+
+        private static void AddUniqueField(ObservableCollection<FieldDef> fields, FieldDef field)
+        {
+            if (fields.Any(item =>
+                    string.Equals(item.DbColumnName, field.DbColumnName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Name, field.Name, StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            fields.Add(field);
+        }
+
+        private static IEnumerable<FieldDef> GetComputedFieldDefinitions()
+        {
+            return ReportComputedFieldCatalog.GetFields()
+                .Select(field => new FieldDef
+                {
+                    Name = field.Name,
+                    DbColumnName = field.FieldName,
+                    Type = $"Вычисляемое {field.Type}"
+                });
+        }
+
+
+
         private void CommitDesignerGridEdits()
         {
             TryCommitGrid(ReportFieldsGrid);
@@ -289,10 +376,19 @@ namespace BIS.ERP.Views
             await AddSelectedFieldAsync();
         }
 
+        private async void OnComputedFieldDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            await AddReportFieldAsync(ComputedFieldsList.SelectedItem as FieldDef);
+        }
+
         private async Task AddSelectedFieldAsync()
         {
-            var field = AvailableFields.SelectedItem as FieldDef;
-            if (field != null && !_reportFields.Any(f => f.FieldName == field.DbColumnName))
+            await AddReportFieldAsync(AvailableFields.SelectedItem as FieldDef);
+        }
+
+        private async Task AddReportFieldAsync(FieldDef? field)
+        {
+            if (field != null && !_reportFields.Any(f => string.Equals(f.FieldName, field.DbColumnName, StringComparison.OrdinalIgnoreCase)))
             {
                 _reportFields.Add(new ReportField
                 {
@@ -301,13 +397,14 @@ namespace BIS.ERP.Views
                     DisplayName = field.Name,
                     Order = _reportFields.Count + 1,
                     IsVisible = true,
-                    Width = 120,
-                    Alignment = "Left"
+                    Width = GetDefaultReportFieldWidth(field.Type),
+                    Alignment = GetDefaultReportFieldAlignment(field.Type)
                 });
 
                 if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                 {
                     await LoadAvailableFields(catalog);
+                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 }
             }
         }
@@ -323,6 +420,7 @@ namespace BIS.ERP.Views
                 if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                 {
                     await LoadAvailableFields(catalog);
+                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 }
             }
         }
@@ -364,23 +462,51 @@ namespace BIS.ERP.Views
 
         private void SyncReportFieldsWithSourceIfStale(Report report, MetadataObject catalog)
         {
-            if (catalog.ObjectType != "ReportSource" || catalog.Fields.Count == 0)
+            if (catalog.Fields.Count == 0)
+            {
+                _reportFields.Clear();
                 return;
+            }
 
             var sourceFieldNames = catalog.Fields
                 .SelectMany(field => new[] { field.Name, field.DbColumnName })
                 .Where(value => !string.IsNullOrWhiteSpace(value))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var computedFieldNames = GetComputedFieldDefinitions()
+                .SelectMany(field => new[] { field.Name, field.DbColumnName })
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var mirrorSourceSchema = string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase);
-            var hasStaleFields = _reportFields.Any(field =>
-                !sourceFieldNames.Contains(field.FieldName) &&
-                !sourceFieldNames.Contains(field.DisplayName));
+            var computedFields = _reportFields
+                .Where(field => computedFieldNames.Contains(field.FieldName) || computedFieldNames.Contains(field.DisplayName))
+                .OrderBy(field => field.Order)
+                .ToList();
+            var hasStaleFields = false;
+            for (var i = _reportFields.Count - 1; i >= 0; i--)
+            {
+                var field = _reportFields[i];
+                if (sourceFieldNames.Contains(field.FieldName) ||
+                    sourceFieldNames.Contains(field.DisplayName) ||
+                    computedFieldNames.Contains(field.FieldName) ||
+                    computedFieldNames.Contains(field.DisplayName))
+                    continue;
 
-            if (_reportFields.Count > 0 && !mirrorSourceSchema && !hasStaleFields)
+                _reportFields.RemoveAt(i);
+                hasStaleFields = true;
+            }
+
+            if (_reportFields.Count > 0 && !mirrorSourceSchema)
+            {
+                if (hasStaleFields)
+                    ReorderFields();
                 return;
+            }
 
-            if (mirrorSourceSchema && _reportFields.Count == catalog.Fields.Count && !hasStaleFields)
+            var sourceReportFieldCount = _reportFields.Count(field =>
+                !computedFieldNames.Contains(field.FieldName) &&
+                !computedFieldNames.Contains(field.DisplayName));
+            if (mirrorSourceSchema && sourceReportFieldCount == catalog.Fields.Count && !hasStaleFields)
                 return;
 
             _reportFields.Clear();
@@ -402,6 +528,15 @@ namespace BIS.ERP.Views
                     IsVisible = true,
                     Alignment = GetDefaultReportFieldAlignment(field.FieldType)
                 });
+            }
+
+            foreach (var field in computedFields)
+            {
+                if (_reportFields.Any(existing => string.Equals(existing.FieldName, field.FieldName, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                field.Order = order++;
+                _reportFields.Add(field);
             }
         }
 
@@ -430,6 +565,7 @@ namespace BIS.ERP.Views
                 _ => "Left"
             };
         }
+
         private async Task LoadReportAsync(Report report)
         {
             _currentReport = report;
@@ -483,19 +619,7 @@ namespace BIS.ERP.Views
                     _reportFields.Add(field);
                 }
             }
-            else if (report.ReportType == "FoxProLayout" && !string.IsNullOrWhiteSpace(report.Template))
-            {
-                // Если поля не сохранились, но есть FRX-шаблон — извлекаем поля из него
-                var extractedFields = PrintFormService.ExtractReportFieldsFromTemplate(report.Template);
-                int fieldOrder = 1;
-                foreach (var field in extractedFields)
-                {
-                    field.Order = fieldOrder++;
-                    _reportFields.Add(field);
-                }
-            }
 
-            // Обновляем доступные поля для источника данных
             if (report.DataSourceId.HasValue)
             {
                 var catalog = _availableCatalogs.FirstOrDefault(c => c.Id == report.DataSourceId);
@@ -503,9 +627,19 @@ namespace BIS.ERP.Views
                 {
                     SyncReportFieldsWithSourceIfStale(report, catalog);
                     await LoadAvailableFields(catalog);
+                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 }
             }
-
+            else
+            {
+                _reportFields.Clear();
+                AvailableSourceFields.Clear();
+                AvailableComputedFields.Clear();
+                AvailableDataFields.Clear();
+                AvailableFilterFields.Clear();
+                AvailableLayoutFields.Clear();
+                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
+            }
             // Загрузка фильтров
             _reportFilters.Clear();
             foreach (var filter in report.Filters.OrderBy(f => f.Order))
@@ -516,6 +650,7 @@ namespace BIS.ERP.Views
             if (!string.IsNullOrWhiteSpace(report.Template))
             {
                 await LoadFrxElementMappings(report.Template, report.ElementMappings);
+                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 LoadNativeTemplateFromReport(report);
             }
             else
@@ -946,41 +1081,26 @@ namespace BIS.ERP.Views
                     // Устанавливаем флаг печатной формы
                     IsPrintFormCheck.IsChecked = true;
 
-                    // ИЗВЛЕКАЕМ ПОЛЯ ИЗ ШАБЛОНА И ЗАПОЛНЯЕМ ИМИ ТАБЛИЦУ ПОЛЕЙ
-                    var extractedFields = PrintFormService.ExtractReportFieldsFromTemplate(templateJson);
-                    ReportFieldsGrid.ItemsSource = null;
-                    try
-                    {
-                        _reportFields.Clear();
-                        int fieldOrder = 1;
-                        foreach (var field in extractedFields)
-                        {
-                            field.Order = fieldOrder++;
-                            _reportFields.Add(field);
-                        }
-                    }
-                    finally
-                    {
-                        ReportFieldsGrid.ItemsSource = _reportFields;
-                    }
-
                     // ЗАПОЛНЯЕМ ТАБЛИЦУ СООТВЕТСТВИЙ ЭЛЕМЕНТОВ МАКЕТА
                     await LoadFrxElementMappings(templateJson);
                     DeferNativeTemplate(templateJson, showWarning: true);
 
-                    // Также обновляем список доступных полей, убирая уже добавленные
                     if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                     {
                         await LoadAvailableFields(catalog);
                         RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                     }
+                    else
+                    {
+                        RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
+                    }
 
-                    StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей: {_reportFields.Count}";
+                    StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей источника: {AvailableDataFields.Count}";
 
                     MessageBox.Show($"FRX-макет успешно загружен!\n\n" +
                                    $"Файл: {Path.GetFileName(openDialog.FileName)}\n" +
                                    $"Размер: {templateJson.Length} символов\n" +
-                                   $"Извлечено полей: {_reportFields.Count}",
+                                   $"Доступно полей выбранного источника: {AvailableDataFields.Count}",
                                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 else
@@ -1240,7 +1360,11 @@ namespace BIS.ERP.Views
                 .OrderBy(rule => rule.Priority)
                 .FirstOrDefault(rule => FoxProReportKnowledgeBase.RuleMatches(rule, source));
             if (!string.IsNullOrWhiteSpace(savedRule?.TargetFieldName))
-                return savedRule.TargetFieldName;
+            {
+                var savedField = FindAvailableDataField(savedRule.TargetFieldName);
+                if (savedField != null)
+                    return savedField.DbColumnName;
+            }
 
             var canonical = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
             foreach (var candidate in FoxProReportKnowledgeBase.GetTargetFieldCandidates(canonical))
@@ -1277,7 +1401,7 @@ namespace BIS.ERP.Views
                 return;
 
             var availableFieldNames = AvailableDataFields
-                .Select(field => field.DbColumnName)
+                .SelectMany(field => new[] { field.Name, field.DbColumnName })
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -1420,5 +1544,10 @@ namespace BIS.ERP.Views
             PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
     }
 }
+
+
+
+
+
 
 

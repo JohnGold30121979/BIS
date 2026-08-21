@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -6,6 +6,15 @@ using NpgsqlTypes;
 
 namespace BIS.ERP.Services
 {
+    public sealed class CashDayInfo
+    {
+        public Guid Id { get; init; }
+        public Guid CashDeskId { get; init; }
+        public string CashDeskName { get; init; } = string.Empty;
+        public DateTime CloseDate { get; init; }
+        public bool IsClosed { get; init; }
+    }
+
     public sealed class CashDayClosureService
     {
         private readonly AppDbContext _context;
@@ -43,7 +52,7 @@ namespace BIS.ERP.Services
                         "CreditTurnover" numeric(18,2) NOT NULL DEFAULT 0,
                         "ClosingDebit" numeric(18,2) NOT NULL DEFAULT 0,
                         "ClosingCredit" numeric(18,2) NOT NULL DEFAULT 0,
-                        "Description" text NOT NULL DEFAULT 'Р—Р°РєСЂС‹С‚РёРµ/РѕС‚РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІС‹С… РґРЅРµР№ РїРѕ РєР°СЃСЃР°Рј',
+                        "Description" text NOT NULL DEFAULT 'Закрытие/открытие кассовых дней по кассам',
                         CONSTRAINT "PK_CashDayClosures" PRIMARY KEY ("Id")
                     )
                     """);
@@ -51,7 +60,7 @@ namespace BIS.ERP.Services
                 await RenameLegacyColumnsAsync();
                 await RenameLegacyIndexAsync();
 
-                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "Description" text NOT NULL DEFAULT 'Р—Р°РєСЂС‹С‚РёРµ/РѕС‚РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІС‹С… РґРЅРµР№ РїРѕ РєР°СЃСЃР°Рј'""");
+                await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "Description" text NOT NULL DEFAULT 'Закрытие/открытие кассовых дней по кассам'""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "UpdatedAt" timestamp with time zone NOT NULL DEFAULT NOW()""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "OpeningDebit" numeric(18,2) NOT NULL DEFAULT 0""");
                 await _context.Database.ExecuteSqlRawAsync("""ALTER TABLE "CashDayClosures" ADD COLUMN IF NOT EXISTS "OpeningCredit" numeric(18,2) NOT NULL DEFAULT 0""");
@@ -68,18 +77,18 @@ namespace BIS.ERP.Services
                         ON "CashDayClosures" ("CashDeskId", "CloseDate")
                     """);
 
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON TABLE "CashDayClosures" IS 'РЎР»СѓР¶РµР±РЅР°СЏ С‚Р°Р±Р»РёС†Р°: Р·Р°РєСЂС‹С‚РёРµ Рё РѕС‚РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІС‹С… РґРЅРµР№ РїРѕ РєР°СЃСЃР°Рј, РІРєР»СЋС‡Р°СЏ РЅР°С‡Р°Р»СЊРЅС‹Рµ Рё РєРѕРЅРµС‡РЅС‹Рµ РѕСЃС‚Р°С‚РєРё'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."OpeningDebit" IS 'Р”РµР±РµС‚РѕРІС‹Р№ РѕСЃС‚Р°С‚РѕРє РЅР° РЅР°С‡Р°Р»Рѕ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ (Р”Рќ)'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."OpeningCredit" IS 'РљСЂРµРґРёС‚РѕРІС‹Р№ РѕСЃС‚Р°С‚РѕРє РЅР° РЅР°С‡Р°Р»Рѕ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ (РљРќ)'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."DebitTurnover" IS 'Р”РµР±РµС‚РѕРІС‹Р№ РѕР±РѕСЂРѕС‚ Р·Р° РєР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."CreditTurnover" IS 'РљСЂРµРґРёС‚РѕРІС‹Р№ РѕР±РѕСЂРѕС‚ Р·Р° РєР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."ClosingDebit" IS 'Р”РµР±РµС‚РѕРІС‹Р№ РѕСЃС‚Р°С‚РѕРє РЅР° РєРѕРЅРµС† РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ (Р”Рљ)'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."ClosingCredit" IS 'РљСЂРµРґРёС‚РѕРІС‹Р№ РѕСЃС‚Р°С‚РѕРє РЅР° РєРѕРЅРµС† РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ (РљРљ)'""");
-                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."Description" IS 'РћРїРёСЃР°РЅРёРµ РѕРїРµСЂР°С†РёРё Р·Р°РєСЂС‹С‚РёСЏ/РѕС‚РєСЂС‹С‚РёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON TABLE "CashDayClosures" IS 'Служебная таблица: закрытие и открытие кассовых дней по кассам, включая начальные и конечные остатки'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."OpeningDebit" IS 'Дебетовый остаток на начало кассового дня (ДН)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."OpeningCredit" IS 'Кредитовый остаток на начало кассового дня (КН)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."DebitTurnover" IS 'Дебетовый оборот за кассовый день'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."CreditTurnover" IS 'Кредитовый оборот за кассовый день'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."ClosingDebit" IS 'Дебетовый остаток на конце кассового дня (ДК)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."ClosingCredit" IS 'Кредитовый остаток на конце кассового дня (КК)'""");
+                await _context.Database.ExecuteSqlRawAsync("""COMMENT ON COLUMN "CashDayClosures"."Description" IS 'Описание операции закрытия/открытия кассового дня'""");
             }
             catch (Exception ex)
             {
-                SystemLogService.Error("РћС€РёР±РєР° РїРѕРґРіРѕС‚РѕРІРєРё СЃР»СѓР¶РµР±РЅРѕР№ С‚Р°Р±Р»РёС†С‹ CashDayClosures.", "CashDayClosureService.EnsureSchemaAsync", ex);
+                SystemLogService.Error("Ошибка подключения к служебной таблице CashDayClosures.", "CashDayClosureService.EnsureSchemaAsync", ex);
                 throw;
             }
         }
@@ -203,11 +212,72 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task<DateTime?> ExecuteNullableDateAsync(string sql, params NpgsqlParameter[] parameters)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                foreach (var parameter in parameters)
+                    command.Parameters.Add(parameter);
+
+                var result = await command.ExecuteScalarAsync();
+                return result == null || result == DBNull.Value
+                    ? null
+                    : ((DateTime)result).Date;
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
+        }
+
+        private async Task<CashDayInfo?> ExecuteCashDayInfoAsync(string sql, params NpgsqlParameter[] parameters)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var shouldClose = connection.State != ConnectionState.Open;
+
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                foreach (var parameter in parameters)
+                    command.Parameters.Add(parameter);
+
+                await using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return null;
+
+                return new CashDayInfo
+                {
+                    Id = reader.GetGuid(0),
+                    CashDeskId = reader.GetGuid(1),
+                    CashDeskName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    CloseDate = reader.GetDateTime(3).Date,
+                    IsClosed = reader.GetBoolean(4)
+                };
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
+            }
+        }
         public async Task EnsureExistsAsync()
         {
             await EnsureSchemaAsync();
             if (!await TableExistsAsync())
-                throw new InvalidOperationException("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕР·РґР°С‚СЊ СЃР»СѓР¶РµР±РЅСѓСЋ С‚Р°Р±Р»РёС†Сѓ CashDayClosures.");
+                throw new InvalidOperationException("Не удалось создать служебную таблицу CashDayClosures.");
         }
 
         public async Task<bool> TableExistsAsync()
@@ -228,7 +298,7 @@ namespace BIS.ERP.Services
             decimal closingCredit = 0m)
         {
             await EnsureExistsAsync();
-            var description = $"Р—Р°РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ {closeDate:dd.MM.yyyy}";
+            var description = $"Закрытие кассового дня {closeDate:dd.MM.yyyy}";
 
             try
             {
@@ -272,22 +342,83 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 SystemLogService.Error(
-                    $"РћС€РёР±РєР° Р·Р°РєСЂС‹С‚РёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ. CashDeskId={cashDeskId}; Date={closeDate:yyyy-MM-dd}",
+                    $"Ошибка закрытия кассового дня. CashDeskId={cashDeskId}; Date={closeDate:yyyy-MM-dd}",
                     "CashDayClosureService.CloseDayAsync",
                     ex);
                 throw;
             }
         }
 
+        public async Task CloseOpenDayAsync(
+            CashDayInfo openDay,
+            string cashDeskName,
+            DateTime closeDate,
+            string closedBy,
+            decimal openingDebit = 0m,
+            decimal openingCredit = 0m,
+            decimal debitTurnover = 0m,
+            decimal creditTurnover = 0m,
+            decimal closingDebit = 0m,
+            decimal closingCredit = 0m)
+        {
+            await EnsureExistsAsync();
+            var description = $"Закрытие кассового периода {closeDate:dd.MM.yyyy}";
+
+            if (await IsDayClosedAsync(openDay.CashDeskId, closeDate))
+                throw new InvalidOperationException($"Кассовый день {closeDate:dd.MM.yyyy} уже закрыт.");
+
+            try
+            {
+                var affected = await _context.Database.ExecuteSqlRawAsync("""
+                    UPDATE "CashDayClosures"
+                    SET "CashDeskName" = @cashDeskName,
+                        "CloseDate" = @closeDate,
+                        "IsClosed" = true,
+                        "ClosedBy" = @closedBy,
+                        "ClosedAt" = NOW(),
+                        "UpdatedAt" = NOW(),
+                        "OpeningDebit" = @openingDebit,
+                        "OpeningCredit" = @openingCredit,
+                        "DebitTurnover" = @debitTurnover,
+                        "CreditTurnover" = @creditTurnover,
+                        "ClosingDebit" = @closingDebit,
+                        "ClosingCredit" = @closingCredit,
+                        "Description" = @description
+                    WHERE "Id" = @id
+                      AND "IsClosed" = false
+                    """,
+                    new NpgsqlParameter("@id", openDay.Id),
+                    new NpgsqlParameter("@cashDeskName", cashDeskName ?? string.Empty),
+                    DateParameter("@closeDate", closeDate),
+                    new NpgsqlParameter("@closedBy", closedBy ?? string.Empty),
+                    new NpgsqlParameter("@openingDebit", openingDebit),
+                    new NpgsqlParameter("@openingCredit", openingCredit),
+                    new NpgsqlParameter("@debitTurnover", debitTurnover),
+                    new NpgsqlParameter("@creditTurnover", creditTurnover),
+                    new NpgsqlParameter("@closingDebit", closingDebit),
+                    new NpgsqlParameter("@closingCredit", closingCredit),
+                    new NpgsqlParameter("@description", description));
+
+                if (affected == 0)
+                    throw new InvalidOperationException("Текущий открытый кассовый период не найден или уже закрыт.");
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error(
+                    $"Ошибка закрытия текущего открытого кассового периода. CashDeskId={openDay.CashDeskId}; Date={closeDate:yyyy-MM-dd}",
+                    "CashDayClosureService.CloseOpenDayAsync",
+                    ex);
+                throw;
+            }
+        }
         public async Task<int> OpenDayAsync(Guid cashDeskId, DateTime closeDate, string openedBy)
         {
             await EnsureExistsAsync();
-            var description = $"РћС‚РєСЂС‹С‚РёРµ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ {closeDate:dd.MM.yyyy}";
-            var openDates = await GetOpenDayDatesAsync(cashDeskId);
-            var anotherOpenDate = openDates.FirstOrDefault(date => date.Date != closeDate.Date);
+            var description = $"Открытие кассового дня {closeDate:dd.MM.yyyy}";
+            var currentOpenDay = await GetCurrentOpenDayAsync(cashDeskId);
 
-            if (anotherOpenDate != default)
-                throw new InvalidOperationException($"РџРѕ РІС‹Р±СЂР°РЅРЅРѕР№ РєР°СЃСЃРµ СѓР¶Рµ РѕС‚РєСЂС‹С‚ РєР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {anotherOpenDate:dd.MM.yyyy}. РЎРЅР°С‡Р°Р»Р° Р·Р°РєСЂРѕР№С‚Рµ РµРіРѕ.");
+            if (currentOpenDay != null)
+                throw new InvalidOperationException($"По выбранной кассе уже открыт текущий кассовый день {currentOpenDay.CloseDate:dd.MM.yyyy}. Сначала закройте его.");
 
             try
             {
@@ -313,7 +444,7 @@ namespace BIS.ERP.Services
             catch (Exception ex)
             {
                 SystemLogService.Error(
-                    $"РћС€РёР±РєР° РѕС‚РєСЂС‹С‚РёСЏ РєР°СЃСЃРѕРІРѕРіРѕ РґРЅСЏ. CashDeskId={cashDeskId}; Date={closeDate:yyyy-MM-dd}",
+                    $"Ошибка открытия кассового дня. CashDeskId={cashDeskId}; Date={closeDate:yyyy-MM-dd}",
                     "CashDayClosureService.OpenDayAsync",
                     ex);
                 throw;
@@ -324,11 +455,38 @@ namespace BIS.ERP.Services
         {
             await EnsureExistsAsync();
 
-            if (await IsDayClosedAsync(cashDeskId, cashDate))
-                throw new InvalidOperationException($"РљР°СЃСЃРѕРІС‹Р№ РґРµРЅСЊ {cashDate:dd.MM.yyyy} РїРѕ РєР°СЃСЃРµ \"{cashDeskName}\" Р·Р°РєСЂС‹С‚. РЎРѕР·РґР°РЅРёРµ, РёР·РјРµРЅРµРЅРёРµ Рё РїСЂРѕРІРµРґРµРЅРёРµ РїСЂРѕРІРѕРґРѕРє РІ Р·Р°РєСЂС‹С‚РѕРј РґРЅРµ Р·Р°РїСЂРµС‰РµРЅС‹.");
-
+            var currentOpenDay = await GetCurrentOpenDayAsync(cashDeskId);
+            if (currentOpenDay == null)
+                throw new InvalidOperationException($"По кассе \"{cashDeskName}\" не открыт текущий кассовый день. Перед созданием, изменением или проведением документов откройте день.");
         }
 
+        public async Task<CashDayInfo?> GetCurrentOpenDayAsync(Guid cashDeskId)
+        {
+            await EnsureExistsAsync();
+
+            return await ExecuteCashDayInfoAsync("""
+                SELECT "Id", "CashDeskId", "CashDeskName", "CloseDate", "IsClosed"
+                FROM "CashDayClosures"
+                WHERE "CashDeskId" = @cashDeskId
+                  AND "IsClosed" = false
+                ORDER BY "OpenedAt" DESC NULLS LAST, "CloseDate" DESC
+                LIMIT 1
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId));
+        }
+
+        public async Task<DateTime?> GetLastClosedDayDateAsync(Guid cashDeskId)
+        {
+            await EnsureExistsAsync();
+
+            return await ExecuteNullableDateAsync("""
+                SELECT MAX("CloseDate")
+                FROM "CashDayClosures"
+                WHERE "CashDeskId" = @cashDeskId
+                  AND "IsClosed" = true
+                """,
+                new NpgsqlParameter("@cashDeskId", cashDeskId));
+        }
         public async Task<bool> IsDayClosedAsync(Guid cashDeskId, DateTime cashDate)
         {
             await EnsureExistsAsync();
@@ -414,4 +572,3 @@ namespace BIS.ERP.Services
         }
     }
 }
-

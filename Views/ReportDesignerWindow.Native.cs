@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -79,66 +79,6 @@ namespace BIS.ERP.Views
             NativeZoomSlider.Value = newValue;
         }
 
-        private IEnumerable<FieldDef> GetPrintFormComputedFields()
-        {
-            return new[]
-            {
-                new FieldDef { Name = "Номер документа", DbColumnName = "number", Type = "Computed" },
-                new FieldDef { Name = "Дата", DbColumnName = "date", Type = "Computed" },
-                new FieldDef { Name = "Организация", DbColumnName = "organization", Type = "Computed" },
-                new FieldDef { Name = "ИНН организации", DbColumnName = "inn", Type = "Computed" },
-                new FieldDef { Name = "ОКПО организации", DbColumnName = "okpo", Type = "Computed" },
-                new FieldDef { Name = "Сотрудник / получатель", DbColumnName = "person", Type = "Computed" },
-                new FieldDef { Name = "Касса", DbColumnName = "cash_desk", Type = "Computed" },
-                new FieldDef { Name = "Корр. счет", DbColumnName = "correspondent_account", Type = "Computed" },
-                new FieldDef { Name = "Дебет", DbColumnName = "debit_account", Type = "Computed" },
-                new FieldDef { Name = "Кредит", DbColumnName = "credit_account", Type = "Computed" },
-                new FieldDef { Name = "Код дебета", DbColumnName = "debit_code", Type = "Computed" },
-                new FieldDef { Name = "Код кредита", DbColumnName = "credit_code", Type = "Computed" },
-                new FieldDef { Name = "Сумма", DbColumnName = "amount", Type = "Computed" },
-                new FieldDef { Name = "Сумма в валюте", DbColumnName = "amount_in_currency", Type = "Computed" },
-                new FieldDef { Name = "Сумма прописью", DbColumnName = "amount_in_words", Type = "Computed" },
-                new FieldDef { Name = "Основание", DbColumnName = "basis", Type = "Computed" },
-                new FieldDef { Name = "Примечание", DbColumnName = "note", Type = "Computed" },
-                new FieldDef { Name = "Валюта", DbColumnName = "currency", Type = "Computed" },
-                new FieldDef { Name = "Счет-фактура - номер", DbColumnName = "fact.NOM_BL", Type = "Computed" },
-                new FieldDef { Name = "Счет-фактура - серия/ЭСФ", DbColumnName = "fact.SER_BL", Type = "Computed" },
-                new FieldDef { Name = "Счет-фактура - дата", DbColumnName = "fact.D_SALE", Type = "Computed" },
-                new FieldDef { Name = "Счет-фактура - основание", DbColumnName = "fact.TXT_KOR", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - наименование операции", DbColumnName = "operation_name", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - дебет", DbColumnName = "debit_account", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - кредит", DbColumnName = "credit_account", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - сумма Дт", DbColumnName = "debit_amount", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - сумма Кт", DbColumnName = "credit_amount", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - номер документа", DbColumnName = "document_number", Type = "Computed" },
-                new FieldDef { Name = "Акт сверки - дата операции", DbColumnName = "document_date", Type = "Computed" },
-                new FieldDef { Name = "Модуль", DbColumnName = "module", Type = "Computed" },
-                new FieldDef { Name = "Период с", DbColumnName = "period_start", Type = "Computed" },
-                new FieldDef { Name = "Период по", DbColumnName = "period_end", Type = "Computed" },
-                new FieldDef { Name = "Заголовок отчета", DbColumnName = "report_title", Type = "Computed" },
-                new FieldDef { Name = "Итоговое описание", DbColumnName = "report_summary", Type = "Computed" },
-                new FieldDef { Name = "Организация А - наименование", DbColumnName = "fact.C_NAME_ORG", Type = "Computed" },
-                new FieldDef { Name = "Организация А - ИНН", DbColumnName = "fact.C_INN", Type = "Computed" },
-                new FieldDef { Name = "Организация А - ОКПО", DbColumnName = "fact.C_OKPO", Type = "Computed" },
-                new FieldDef { Name = "Организация А - адрес", DbColumnName = "fact.C_ADR", Type = "Computed" },
-                new FieldDef { Name = "Организация А - телефон", DbColumnName = "fact.C_PHONE", Type = "Computed" },
-                new FieldDef { Name = "Организация А - банк", DbColumnName = "fact.C_BANK", Type = "Computed" },
-                new FieldDef { Name = "Организация А - расчетный счет", DbColumnName = "fact.C_RS", Type = "Computed" },
-                new FieldDef { Name = "Организация А - БИК", DbColumnName = "fact.C_BIK", Type = "Computed" },
-                new FieldDef { Name = "Организация А - руководитель", DbColumnName = "fact.C_DIR", Type = "Computed" },
-                new FieldDef { Name = "Организация А - главный бухгалтер", DbColumnName = "fact.C_BUH", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - наименование", DbColumnName = "fact.D_NAME_ORG", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - ИНН", DbColumnName = "fact.D_INN", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - ОКПО", DbColumnName = "fact.D_OKPO", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - адрес", DbColumnName = "fact.D_ADR", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - телефон", DbColumnName = "fact.D_PHONE", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - банк", DbColumnName = "fact.D_BANK", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - расчетный счет", DbColumnName = "fact.D_RS", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - БИК", DbColumnName = "fact.D_BIK", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - руководитель", DbColumnName = "fact.D_DIR", Type = "Computed" },
-                new FieldDef { Name = "Организация Б - главный бухгалтер", DbColumnName = "fact.D_BUH", Type = "Computed" }
-            };
-        }
 
         private async void OnReportTypeChanged(object sender, SelectionChangedEventArgs e)
         {

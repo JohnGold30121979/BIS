@@ -75,6 +75,7 @@ namespace BIS.ERP.Services
                     if (customDataSet != null)
                     {
                         dataTable = await new ReportDataSetService(_context).ExecuteAsync(customDataSet, parameters);
+                        ReportComputedFieldCatalog.AddComputedColumns(dataTable, catalog, selectedFields);
                         await ResolveReportReferencesAsync(dataTable, catalog, selectedFields);
                         return dataTable;
                     }
@@ -82,6 +83,7 @@ namespace BIS.ERP.Services
                     if (IsCashOrderTurnoverReportSource(catalog))
                     {
                         dataTable = await GetCashOrderTurnoverReportDataAsync(catalog, selectedFields, parameters);
+                        ReportComputedFieldCatalog.AddComputedColumns(dataTable, catalog, selectedFields);
                         await ResolveReportReferencesAsync(dataTable, catalog, selectedFields);
                         return dataTable;
                     }
@@ -93,7 +95,8 @@ namespace BIS.ERP.Services
                         var metadataField = FindMetadataField(catalog, field.FieldName);
                         if (metadataField == null)
                         {
-                            if (TryBuildCompatibleReportFieldSelect(report, catalog, field, out var compatibleSelect))
+                            if (TryBuildComputedReportFieldSelect(catalog, field, out var compatibleSelect) ||
+                                TryBuildCompatibleReportFieldSelect(report, catalog, field, out compatibleSelect))
                             {
                                 selectColumns.Add(compatibleSelect);
                                 continue;
@@ -469,6 +472,60 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 field.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase));
         }
 
+        private static bool TryBuildComputedReportFieldSelect(
+            MetadataObject source,
+            ReportField field,
+            out string selectExpression)
+        {
+            selectExpression = string.Empty;
+            if (!ReportComputedFieldCatalog.TryGetDefinition(field.FieldName, out var definition))
+                return false;
+
+            var expression = BuildComputedFieldExpression(source, definition);
+            var displayName = string.IsNullOrWhiteSpace(field.DisplayName)
+                ? definition.Name
+                : field.DisplayName;
+            selectExpression = $"{expression} AS {QuoteIdentifier(displayName)}";
+            return true;
+        }
+
+        private static string BuildComputedFieldExpression(
+            MetadataObject source,
+            ReportComputedFieldDefinition definition)
+        {
+            var sourceColumns = definition.SourceAliases
+                .Select(alias => FindMetadataField(source, alias))
+                .Where(field => field != null && !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .Select(field => field!.DbColumnName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (sourceColumns.Count == 0)
+                return BuildComputedFieldDefaultExpression(definition.Type);
+
+            var nullableValues = sourceColumns
+                .Select(column => $"NULLIF(CAST({QuoteIdentifier(column)} AS text), '')")
+                .ToList();
+            var coalesce = nullableValues.Count == 1
+                ? nullableValues[0]
+                : $"COALESCE({string.Join(", ", nullableValues)})";
+
+            return definition.Type switch
+            {
+                "Decimal" => $"COALESCE(({coalesce})::numeric, 0)",
+                "Int" or "Integer" => $"COALESCE(({coalesce})::integer, 0)",
+                "DateTime" => $"({coalesce})::timestamp",
+                _ => $"COALESCE(({coalesce})::text, '')"
+            };
+        }
+
+        private static string BuildComputedFieldDefaultExpression(string type) => type switch
+        {
+            "Decimal" => "0::numeric",
+            "Int" or "Integer" => "0::integer",
+            "DateTime" => "NULL::timestamp",
+            _ => "''::text"
+        };
         private static bool TryBuildCompatibleReportFieldSelect(
             Report report,
             MetadataObject source,
@@ -1634,6 +1691,11 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
         }
     }
 }
+
+
+
+
+
 
 
 
