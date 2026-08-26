@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using BIS.ERP.Views.Dialogs;
@@ -73,52 +73,16 @@ namespace BIS.ERP
             "Платежная ведомость"
         };
 
-
-        /// <summary>
-        /// Множество названий навигационных объектов, относящихся к модулю основных средств (ОС).
-        /// Применяется для выявления объектов, которые следует скрывать из навигации,
-        /// если модуль основных средств не включён в систему.
-        /// </summary>
-        private static readonly HashSet<string> FixedAssetsNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
+        // Скрывает временные объекты разработки из навигации независимо от модуля.
+        private static readonly HashSet<string> DevelopmentHiddenNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Соответствия счетов ОС",
-            "Подгруппы ОС",
-            "Виды ОС",
-            "Методы амортизации ОС",
-            "Статусы ОС",
-            "Налоговые группы ОС",
-            "Параметры контура ОС",
             "Покупка ОС",
             "Ввод ОС в эксплуатацию",
             "Приход из производства ОС",
             "Переоценка ОС",
-            "Реализация ОС",
-            "Частичная реализация ОС",
-            "Ликвидация ОС",
-            "Укомплектация ОС",
-            "Разукомплектация ОС",
-            "Начисление амортизации",
-            "Списание амортизации",
-            "Консервация ОС",
-            "Расконсервация ОС",
             "Передача ОС в подотчет",
-            "Смена затратного счета"
-        };
-
-        private static readonly HashSet<string> InventoryNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Виды материалов",
-            "Приход товаров",
-            "Расход товаров",
-            "Внутреннее перемещение ТМЦ",
-            "Приход из производства ТМЦ",
-            "Расход в производство",
-            "Передача ТМЦ в подотчет",
-            "Инвентаризация ТМЦ",
-            "Ведомость наличия материалов",
-            "Перечень материалов",
-            "Журнал прихода товаров",
-            "Журнал расхода товаров"
+            "Реализация ОС",
+            "Частичная реализация ОС"
         };
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
@@ -209,8 +173,10 @@ namespace BIS.ERP
                 .ThenBy(module => module.Name)
                 .ToList();
             var activeModuleCodes = modules.Select(module => module.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var moduleItems = await _moduleMetadataService.GetItemsAsync();
+            var assignedModuleCodesByObject = BuildAssignedModuleCodesByObject(moduleItems, allModules);
             var hiddenMetadataIds = allMetadata
-                .Where(item => IsHiddenByUnavailableModule(item, activeModuleCodes))
+                .Where(item => IsHiddenByUnavailableModule(item, assignedModuleCodesByObject, activeModuleCodes))
                 .Select(item => item.Id)
                 .ToHashSet();
             var catalogs = MetadataService.CollapseDuplicateCatalogsForNavigation(
@@ -224,9 +190,8 @@ namespace BIS.ERP
                                !hiddenMetadataIds.Contains(item.Id))
                 .ToList();
             var reports = (await _reportService.GetNavigationReportsAsync())
-                .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, activeModuleCodes))
+                .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, assignedModuleCodesByObject, activeModuleCodes))
                 .ToList();
-            var moduleItems = await _moduleMetadataService.GetItemsAsync();
             if (modules.Count == 0 && allModules.Count == 0)
             {
                 await BuildLegacyNavigationTree();
@@ -353,45 +318,118 @@ namespace BIS.ERP
                 ShowNavigationOverview(NavigationItems[0]);
         }
 
+        private static Dictionary<Guid, HashSet<string>> BuildAssignedModuleCodesByObject(
+            IEnumerable<MetadataModuleItem> moduleItems,
+            IEnumerable<MetadataModule> modules)
+        {
+            var moduleCodeById = modules
+                .Where(module => !string.IsNullOrWhiteSpace(module.Code))
+                .ToDictionary(module => module.Id, module => module.Code);
+
+            var result = new Dictionary<Guid, HashSet<string>>();
+            foreach (var item in moduleItems)
+            {
+                if (!moduleCodeById.TryGetValue(item.ModuleId, out var moduleCode))
+                    continue;
+
+                if (!result.TryGetValue(item.ObjectId, out var moduleCodes))
+                {
+                    moduleCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    result[item.ObjectId] = moduleCodes;
+                }
+
+                moduleCodes.Add(moduleCode);
+            }
+
+            return result;
+        }
+
+        private static bool IsHiddenByUnavailableModule(
+            MetadataObject metadata,
+            IReadOnlyDictionary<Guid, HashSet<string>> assignedModuleCodesByObject,
+            IReadOnlySet<string> activeModuleCodes)
+        {
+            if (DevelopmentHiddenNavigationObjectNames.Contains(metadata.Name))
+                return true;
+
+            if (IsAssignedOnlyToInactiveModules(metadata.Id, assignedModuleCodesByObject, activeModuleCodes))
+                return true;
+
+            if (!assignedModuleCodesByObject.ContainsKey(metadata.Id) && IsHiddenLegacyNavigationTable(metadata.TableName, activeModuleCodes))
+                return true;
+
+            return false;
+        }
+
         private static bool IsHiddenByUnavailableModule(MetadataObject metadata, IReadOnlySet<string> activeModuleCodes)
         {
-            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationObject(metadata.Name, metadata.TableName))
+            if (DevelopmentHiddenNavigationObjectNames.Contains(metadata.Name))
                 return true;
-            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationObject(metadata.Name, metadata.TableName))
+
+            return IsHiddenLegacyNavigationTable(metadata.TableName, activeModuleCodes);
+        }
+
+        private static bool IsHiddenByUnavailableModule(
+            Report report,
+            IReadOnlySet<Guid> hiddenMetadataIds,
+            IReadOnlyDictionary<Guid, HashSet<string>> assignedModuleCodesByObject,
+            IReadOnlySet<string> activeModuleCodes)
+        {
+            if (DevelopmentHiddenNavigationObjectNames.Contains(report.Name))
                 return true;
-            return false;
+
+            if (report.DataSourceId.HasValue && hiddenMetadataIds.Contains(report.DataSourceId.Value))
+                return true;
+
+            return IsAssignedOnlyToInactiveModules(report.Id, assignedModuleCodesByObject, activeModuleCodes);
         }
 
         private static bool IsHiddenByUnavailableModule(Report report, IReadOnlySet<Guid> hiddenMetadataIds, IReadOnlySet<string> activeModuleCodes)
         {
+            if (DevelopmentHiddenNavigationObjectNames.Contains(report.Name))
+                return true;
+
             if (report.DataSourceId.HasValue && hiddenMetadataIds.Contains(report.DataSourceId.Value))
                 return true;
-            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationObject(report.Name, string.Empty))
-                return true;
-            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationObject(report.Name, string.Empty))
-                return true;
+
             return false;
         }
 
-        private static bool IsFixedAssetsNavigationObject(string name, string? tableName)
+        private static bool IsAssignedOnlyToInactiveModules(
+            Guid objectId,
+            IReadOnlyDictionary<Guid, HashSet<string>> assignedModuleCodesByObject,
+            IReadOnlySet<string> activeModuleCodes)
         {
-            if (FixedAssetsNavigationObjectNames.Contains(name))
+            return assignedModuleCodesByObject.TryGetValue(objectId, out var moduleCodes) &&
+                   moduleCodes.Count > 0 &&
+                   !moduleCodes.Any(activeModuleCodes.Contains);
+        }
+
+        private static bool IsHiddenLegacyNavigationTable(string? tableName, IReadOnlySet<string> activeModuleCodes)
+        {
+            if (!activeModuleCodes.Contains(ModuleMetadataService.FixedAssetsCode) && IsFixedAssetsNavigationTable(tableName))
                 return true;
 
+            if (!activeModuleCodes.Contains(ModuleMetadataService.InventoryCode) && IsInventoryNavigationTable(tableName))
+                return true;
+
+            return false;
+        }
+
+        private static bool IsFixedAssetsNavigationTable(string? tableName)
+        {
             var normalizedTable = tableName ?? string.Empty;
             return normalizedTable.StartsWith("catalog_asset_", StringComparison.OrdinalIgnoreCase) ||
                    normalizedTable.StartsWith("doc_asset_", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static bool IsInventoryNavigationObject(string name, string? tableName)
+        private static bool IsInventoryNavigationTable(string? tableName)
         {
-            if (InventoryNavigationObjectNames.Contains(name))
-                return true;
-
             var normalizedTable = tableName ?? string.Empty;
             return normalizedTable.Contains("material", StringComparison.OrdinalIgnoreCase) ||
                    normalizedTable.Contains("inventory", StringComparison.OrdinalIgnoreCase);
         }
+
         private static bool IsCashOrderDocument(MetadataObject document)
             => document.Name == "Расходный/Приходный КО" || document.TableName == "doc_cash_orders";
 
@@ -1849,3 +1887,5 @@ namespace BIS.ERP
         }
     }
 }
+
+

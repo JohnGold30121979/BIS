@@ -176,7 +176,10 @@ namespace BIS.ERP.Services
             var selectedReports = reportIds.Distinct().ToHashSet();
             var selectedObjects = selectedDocuments.Concat(selectedReports).ToHashSet();
 
-            var oldItems = await _context.MetadataModuleItems.Where(item => item.ModuleId == moduleId).ToListAsync();
+            var oldItems = await _context.MetadataModuleItems
+                .Where(item => item.ModuleId == moduleId &&
+                               (item.ObjectType == "Document" || item.ObjectType == "Report"))
+                .ToListAsync();
             _context.MetadataModuleItems.RemoveRange(oldItems);
 
             var conflicting = await _context.MetadataModuleItems
@@ -269,6 +272,8 @@ namespace BIS.ERP.Services
         private async Task SynchronizeDefaultAssignmentsAsync()
         {
             var modules = await _context.MetadataModules.ToDictionaryAsync(module => module.Code);
+            var catalogs = await _context.MetadataObjects.AsNoTracking()
+                .Where(item => item.ObjectType == "Catalog").ToListAsync();
             var documents = await _context.MetadataObjects.AsNoTracking()
                 .Where(item => item.ObjectType == "Document").ToListAsync();
             var reports = await _context.Reports.AsNoTracking().ToListAsync();
@@ -277,6 +282,10 @@ namespace BIS.ERP.Services
                 "Проводки", "Расходный/Приходный КО", "Платежное поручение",
                 "Авансовые платежи", "Расчет курсовой разницы",
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
+            await AssignMissingByNameAsync(modules[FixedAssetsCode].Id, "Catalog", catalogs.Select(item => (item.Id, item.Name)),
+                FixedAssetCatalogNames);
+            await AssignMissingByNameAsync(modules[InventoryCode].Id, "Catalog", catalogs.Select(item => (item.Id, item.Name)),
+                InventoryCatalogNames);
             await MoveByNameToModuleAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
@@ -302,7 +311,10 @@ namespace BIS.ERP.Services
         {
             var namesSet = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var candidates = objects.Where(item => namesSet.Contains(item.Name)).ToList();
-            var assignedIds = await _context.MetadataModuleItems.Select(item => item.ObjectId).ToListAsync();
+            var assignedIds = await _context.MetadataModuleItems
+                .Where(item => item.ObjectType == objectType)
+                .Select(item => item.ObjectId)
+                .ToListAsync();
             var assigned = assignedIds.ToHashSet();
             var order = await _context.MetadataModuleItems.Where(item => item.ModuleId == moduleId)
                 .Select(item => (int?)item.Order).MaxAsync() ?? 0;
@@ -367,6 +379,18 @@ namespace BIS.ERP.Services
             return string.IsNullOrWhiteSpace(normalized) ? $"Module{Guid.NewGuid():N}" : normalized;
         }
 
+        public static readonly string[] FixedAssetCatalogNames =
+        {
+            "Основные средства", "Соответствия счетов ОС", "Группы ОС", "Подгруппы ОС",
+            "Виды ОС", "Методы амортизации ОС", "Статусы ОС", "Налоговые группы ОС",
+            "Параметры контура ОС", "Ввод нового документа ОС"
+        };
+
+        public static readonly string[] InventoryCatalogNames =
+        {
+            "Виды материалов", "Справочник материалов", "Наименования категорий"
+        };
+
         public static readonly string[] FixedAssetDocumentNames =
         {
             "Учет движения ОС",
@@ -378,6 +402,7 @@ namespace BIS.ERP.Services
         };
     }
 }
+
 
 
 
