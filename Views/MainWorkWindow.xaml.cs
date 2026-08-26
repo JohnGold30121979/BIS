@@ -74,11 +74,14 @@ namespace BIS.ERP
         };
 
 
+        /// <summary>
+        /// Множество названий навигационных объектов, относящихся к модулю основных средств (ОС).
+        /// Применяется для выявления объектов, которые следует скрывать из навигации,
+        /// если модуль основных средств не включён в систему.
+        /// </summary>
         private static readonly HashSet<string> FixedAssetsNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Основные средства",
             "Соответствия счетов ОС",
-            "Группы ОС",
             "Подгруппы ОС",
             "Виды ОС",
             "Методы амортизации ОС",
@@ -105,8 +108,6 @@ namespace BIS.ERP
         private static readonly HashSet<string> InventoryNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "Виды материалов",
-            "Справочник материалов",
-            "Наименования категорий",
             "Приход товаров",
             "Расход товаров",
             "Внутреннее перемещение ТМЦ",
@@ -1848,8 +1849,3 @@ namespace BIS.ERP
         }
     }
 }
-
-
-
-
-

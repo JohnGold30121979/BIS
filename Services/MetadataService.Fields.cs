@@ -493,46 +493,51 @@ public partial class MetadataService
         Add("Код", "code", "String", 1, true, length: 50, unique: true);
         Add("Инвентарный номер", "inventory_number", "String", 2, true, length: 50, unique: true);
         Add("Наименование", "name", "String", 3, true, length: 300);
-        Add("Группа ОС", "asset_group", "Reference", 4, referenceCatalog: "Группы ОС",
+        Add("Год выпуска оборудования", "manufacture_year", "Int", 4);
+        Add("Основной код для инв. №", "use_code_as_inventory_number", "Bool", 5);
+        Add("Группа ОС", "asset_group", "Reference", 6, referenceCatalog: "Группы ОС",
             displayPattern: catalogPattern, displayFields: catalogFields);
-        Add("Подгруппа ОС", "asset_subgroup_id", "Reference", 5, referenceCatalog: "Подгруппы ОС",
+        Add("Подгруппа ОС", "asset_subgroup_id", "Reference", 7, referenceCatalog: "Подгруппы ОС",
             displayPattern: catalogPattern, displayFields: catalogFields);
-        Add("Вид ОС", "asset_type_id", "Reference", 6, referenceCatalog: "Виды ОС",
+        Add("Вид ОС", "asset_type_id", "Reference", 8, referenceCatalog: "Виды ОС",
             displayPattern: catalogPattern, displayFields: catalogFields);
-        Add("Дата приобретения", "acquisition_date", "DateTime", 7);
-        Add("Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 8);
-        Add("Дата начала амортизации", "depreciation_start_date", "DateTime", 9);
-        Add("Первоначальная стоимость", "initial_cost", "Decimal", 10);
-        Add("Ликвидационная стоимость", "salvage_value", "Decimal", 11);
-        Add("Накопленная амортизация", "accumulated_depreciation", "Decimal", 12);
-        Add("Остаточная стоимость", "carrying_amount", "Decimal", 13);
-        Add("Срок полезного использования, мес.", "useful_life_months", "Int", 14);
-        Add("Метод амортизации", "depreciation_method", "Reference", 15, referenceCatalog: "Методы амортизации ОС",
+        Add("Дата приобретения", "acquisition_date", "DateTime", 9);
+        Add("Документ поступления ОС", "acquisition_document_number", "String", 10, length: 100);
+        Add("Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 11);
+        Add("Документ ввода в эксплуатацию", "commissioning_document_number", "String", 12, length: 100);
+        Add("Дата начала амортизации", "depreciation_start_date", "DateTime", 13);
+        Add("Первоначальная стоимость", "initial_cost", "Decimal", 14);
+        Add("Ликвидационная стоимость", "salvage_value", "Decimal", 15);
+        Add("Накопленная амортизация", "accumulated_depreciation", "Decimal", 16);
+        Add("Остаточная стоимость", "carrying_amount", "Decimal", 17);
+        Add("Срок полезного использования", "useful_life_months", "Int", 18);
+        Add("Метод амортизации", "depreciation_method", "Reference", 19, referenceCatalog: "Методы амортизации ОС",
             displayPattern: catalogPattern, displayFields: catalogFields);
-        Add("Норма амортизации, %", "depreciation_rate", "Decimal", 16);
-        Add("Месячная амортизация", "monthly_depreciation", "Decimal", 17);
-        Add("Амортизация по пробегу", "use_mileage_depreciation", "Bool", 18);
-        Add("Месячный пробег", "monthly_mileage", "Decimal", 19);
-        Add("Ресурс пробега", "mileage_resource", "Decimal", 20);
-        Add("Счет учета", "asset_account", "Reference", 21, referenceCatalog: "План счетов",
+        Add("Шифр", "depreciation_code", "String", 20, length: 100);
+        Add("Норма амортизации, %", "depreciation_rate", "Decimal", 21);
+        Add("Месячная амортизация", "monthly_depreciation", "Decimal", 22);
+        Add("Амортизация по пробегу", "use_mileage_depreciation", "Bool", 23);
+        Add("Месячный пробег", "monthly_mileage", "Decimal", 24);
+        Add("Ресурс пробега", "mileage_resource", "Decimal", 25);
+        Add("Счет учета", "asset_account", "Reference", 26, referenceCatalog: "План счетов",
             displayPattern: accountPattern, displayFields: accountFields);
-        Add("Счет амортизации", "depreciation_account", "Reference", 22, referenceCatalog: "План счетов",
+        Add("Счет амортизации", "depreciation_account", "Reference", 27, referenceCatalog: "План счетов",
             displayPattern: accountPattern, displayFields: accountFields);
-        Add("Затратный счет", "expense_account", "Reference", 23, referenceCatalog: "План счетов",
+        Add("Затратный счет", "expense_account", "Reference", 28, referenceCatalog: "План счетов",
             displayPattern: accountPattern, displayFields: accountFields);
-        Add("Налоговая группа", "tax_group", "Reference", 24, referenceCatalog: "Налоговые группы ОС",
+        Add("Налоговая группа", "tax_group", "Reference", 29, referenceCatalog: "Налоговые группы ОС",
             displayPattern: catalogPattern, displayFields: catalogFields);
-        Add("Организация", "organization_id", "Reference", 25, referenceCatalog: "Организации");
-        Add("МОЛ", "responsible_person_id", "Reference", 26, referenceCatalog: "МОЛ");
-        Add("Участок", "site_id", "Reference", 27, referenceCatalog: "Участки");
-        Add("Класс ОС", "asset_class", "Int", 28);
-        Add("Статус", "status", "Reference", 29, referenceCatalog: "Статусы ОС",
+        Add("Организация", "organization_id", "Reference", 30, referenceCatalog: "Организации");
+        Add("МОЛ", "responsible_person_id", "Reference", 31, referenceCatalog: "МОЛ");
+        Add("Участок", "site_id", "Reference", 32, referenceCatalog: "Участки");
+        Add("Класс ОС", "asset_class", "Int", 33);
+        Add("Статус", "status", "Reference", 34, referenceCatalog: "Статусы ОС",
             displayPattern: catalogPattern, displayFields: catalogFields);
-        Add("Активен", "is_active", "Bool", 30, true);
-        Add("Дата консервации", "conservation_date", "DateTime", 31);
-        Add("Дата расконсервации", "reopening_date", "DateTime", 32);
-        Add("Дата выбытия", "disposal_date", "DateTime", 33);
-        Add("Описание", "description", "String", 34, length: 500);
+        Add("Активен", "is_active", "Bool", 35, true);
+        Add("Дата консервации", "conservation_date", "DateTime", 36);
+        Add("Дата расконсервации", "reopening_date", "DateTime", 37);
+        Add("Дата выбытия", "disposal_date", "DateTime", 38);
+        Add("Описание", "description", "String", 39, length: 500);
         return fields;
     }
 

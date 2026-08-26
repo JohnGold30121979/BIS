@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -231,6 +231,93 @@ namespace BIS.ERP.Views
                 : normalized;
         }
 
+        private async Task<Dictionary<string, object>?> SelectFixedAssetMovementTypeAsync()
+        {
+            var metadataItems = await _metadataService.GetCatalogsAsync();
+            var entryCatalog = metadataItems.FirstOrDefault(item =>
+                item.ObjectType == "Catalog" &&
+                string.Equals(item.Name, "Ввод нового документа ОС", StringComparison.OrdinalIgnoreCase));
+
+            if (entryCatalog == null)
+            {
+                MessageBox.Show("Справочник 'Ввод нового документа ОС' не найден. Обновите метаданные конфигурации.",
+                    "Ввод документа ОС", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+
+            var entries = await _metadataService.GetCatalogDataAsync(entryCatalog.Id);
+            var activeEntries = entries
+                .Where(IsActiveCatalogRow)
+                .OrderBy(ReadSortOrder)
+                .ThenBy(row => ReadString(row, "Код", "code"))
+                .ToList();
+
+            if (activeEntries.Count == 0)
+            {
+                MessageBox.Show("В справочнике 'Ввод нового документа ОС' нет активных записей.",
+                    "Ввод документа ОС", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+
+            var dialog = new ReferenceSelectionDialog(activeEntries, "Код", "Наименование")
+            {
+                Owner = Window.GetWindow(this),
+                Title = "Ввод нового документа ОС"
+            };
+
+            if (dialog.ShowDialog() != true || dialog.SelectedItem == null)
+                return null;
+
+            if (!dialog.SelectedItem.TryGetValue("Id", out var id) ||
+                !Guid.TryParse(id?.ToString(), out var entryId))
+            {
+                MessageBox.Show("Не удалось определить выбранный вид документа ОС.",
+                    "Ввод документа ОС", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Вид документа ОС"] = entryId.ToString()
+            };
+        }
+
+        private static bool IsActiveCatalogRow(Dictionary<string, object> row)
+        {
+            var value = row.GetValueOrDefault("Активен") ?? row.GetValueOrDefault("is_active");
+            if (value == null || value == DBNull.Value)
+                return true;
+            if (value is bool boolValue)
+                return boolValue;
+
+            var text = value.ToString()?.Trim();
+            return string.IsNullOrEmpty(text) ||
+                   text.Equals("Да", StringComparison.OrdinalIgnoreCase) ||
+                   text.Equals("Активен", StringComparison.OrdinalIgnoreCase) ||
+                   text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   text == "1";
+        }
+
+        private static int ReadSortOrder(Dictionary<string, object> row)
+        {
+            var text = ReadString(row, "Порядок", "sort_order", "Order");
+            return int.TryParse(text, out var order) ? order : int.MaxValue;
+        }
+
+        private static string ReadString(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                var text = value.ToString();
+                if (!string.IsNullOrWhiteSpace(text))
+                    return text.Trim();
+            }
+
+            return string.Empty;
+        }
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
             // Для документа "Проводки" используем кастомный диалог
@@ -242,6 +329,24 @@ namespace BIS.ERP.Views
                 {
                     await LoadData();
                     MessageBox.Show("Проводка добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            else if (_documentMetadata.Name == "Учет движения ОС")
+            {
+                var initialData = await SelectFixedAssetMovementTypeAsync();
+                if (initialData == null)
+                {
+                    UpdateButtonsState();
+                    return;
+                }
+
+                var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService, initialData: initialData);
+                dialog.Owner = Window.GetWindow(this);
+                if (dialog.ShowDialog() == true)
+                {
+                    await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
+                    await LoadData();
+                    MessageBox.Show("Запись добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
             else
@@ -257,8 +362,6 @@ namespace BIS.ERP.Views
             }
             UpdateButtonsState();
         }
-
-
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
             var selectedRow = DataGrid.SelectedItem as DataRowView;

@@ -68,11 +68,17 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnDisableDevelopmentModulesClick(object sender, RoutedEventArgs e)
         {
+            var disabledCount = 0;
             foreach (var module in _modules.Where(module => ModuleMetadataService.IsDevelopmentDisabledModuleCode(module.Code)))
+            {
                 module.IsActive = false;
+                disabledCount++;
+            }
 
             ModulesGrid.Items.Refresh();
-            StatusText.Text = "Отключены модули этапа разработки: Основные средства и Материалы.";
+            StatusText.Text = disabledCount > 0
+                ? $"Отключены модули этапа разработки: {disabledCount}."
+                : "Нет жестко отключаемых модулей этапа разработки.";
         }
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
@@ -104,3 +110,4 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+

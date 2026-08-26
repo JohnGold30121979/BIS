@@ -1682,7 +1682,7 @@ namespace BIS.ERP.Services
         {
             var initialCost = GetDecimalValue(data, "initial_cost", "InitialCost", "Первоначальная стоимость");
             var salvageValue = GetDecimalValue(data, "salvage_value", "SalvageValue", "Ликвидационная стоимость");
-            var usefulLife = GetIntValue(data, "useful_life_months", "UsefulLife", "useful_life", "Срок полезного использования, мес.");
+            var usefulLifeYears = GetIntValue(data, "useful_life_months", "UsefulLife", "useful_life", "Срок полезного использования", "Срок полезного использования, мес.");
             var depreciationRate = GetDecimalValue(data, "depreciation_rate", "DepreciationRate", "Норма амортизации, %");
             var useMileageDepreciation = GetBoolValue(data, "use_mileage_depreciation", "Амортизация по пробегу");
             var monthlyMileage = GetDecimalValue(data, "monthly_mileage", "Месячный пробег");
@@ -1697,8 +1697,8 @@ namespace BIS.ERP.Services
 
             if (useMileageDepreciation && monthlyMileage > 0 && mileageResource > 0)
                 return Math.Round(depreciableAmount * monthlyMileage / mileageResource, 2);
-            if (usefulLife > 0)
-                return Math.Round(depreciableAmount / usefulLife, 2);
+            if (usefulLifeYears > 0)
+                return Math.Round(depreciableAmount / (usefulLifeYears * 12m), 2);
             if (depreciationRate > 0)
                 return Math.Round(depreciableAmount * depreciationRate / 100 / 12, 2);
 

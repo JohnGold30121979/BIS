@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using System;
@@ -20,19 +20,26 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<string, FrameworkElement> _fieldPanels = new();
         private readonly Dictionary<string, MetadataField> _fieldsByName = new();
         private readonly MetadataService _metadataService;
+        private readonly Dictionary<string, object>? _initialData;
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private Dictionary<string, object>? _existingData;
         private string? _assignedModuleName;
 
         public Dictionary<string, object> ItemData { get; private set; } = new();
 
-        public DynamicDocumentItemDialog(MetadataObject metadata, MetadataService metadataService, Guid? editId = null, bool isReadOnly = false)
+        public DynamicDocumentItemDialog(
+            MetadataObject metadata,
+            MetadataService metadataService,
+            Guid? editId = null,
+            bool isReadOnly = false,
+            Dictionary<string, object>? initialData = null)
         {
             InitializeComponent();
             _metadata = metadata;
             _metadataService = metadataService;
             _editId = editId;
             _isReadOnly = isReadOnly;
+            _initialData = initialData;
             Title = $"{(isReadOnly ? "Просмотр" : editId.HasValue ? "Редактирование" : "Добавление")}: {metadata.Name}";
 
             if (_isReadOnly)
@@ -56,6 +63,13 @@ namespace BIS.ERP.Views.Dialogs
             _fieldControls.Clear();
             _fieldPanels.Clear();
             _fieldsByName.Clear();
+
+            if (IsFixedAssetMovementDocument())
+            {
+                await BuildFixedAssetMovementFormAsync(catalogsDict);
+                UpdateAccountControlledFieldsVisibility();
+                return;
+            }
 
             foreach (var field in _metadata.Fields.OrderBy(f => f.Order))
             {
@@ -100,10 +114,309 @@ namespace BIS.ERP.Views.Dialogs
             UpdateAccountControlledFieldsVisibility();
         }
 
+        private bool IsFixedAssetMovementDocument()
+        {
+            return _metadata.ObjectType == "Document" &&
+                   string.Equals(_metadata.Name, "Учет движения ОС", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task BuildFixedAssetMovementFormAsync(Dictionary<string, MetadataObject> catalogsDict)
+        {
+            Width = Math.Max(Width, 1040);
+            Height = Math.Max(Height, 720);
+            MinWidth = Math.Max(MinWidth, 860);
+            MinHeight = Math.Max(MinHeight, 620);
+
+            FieldsPanel.Children.Add(CreateFixedAssetMovementHeader());
+
+            var usedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var documentGrid = CreateTwoColumnGrid(3);
+            await AddFieldToGridAsync(documentGrid, 0, 0, catalogsDict, usedFields, "Вид документа ОС");
+            await AddFieldToGridAsync(documentGrid, 0, 1, catalogsDict, usedFields, "Номер");
+            await AddFieldToGridAsync(documentGrid, 1, 0, catalogsDict, usedFields, "Дата");
+            await AddFieldToGridAsync(documentGrid, 1, 1, catalogsDict, usedFields, "Серия/№ бланка");
+            await AddFieldToGridAsync(documentGrid, 2, 0, catalogsDict, usedFields, "№ счет-фактуры", "invoice_number");
+            FieldsPanel.Children.Add(CreateSection("Документ", documentGrid));
+
+            var settlementGrid = CreateTwoColumnGrid(2);
+            await AddFieldToGridAsync(settlementGrid, 0, 0, catalogsDict, usedFields, "Счет расчетов");
+            await AddFieldToGridAsync(settlementGrid, 0, 1, catalogsDict, usedFields, "Организация");
+            await AddFieldToGridAsync(settlementGrid, 1, 0, catalogsDict, usedFields, "Вид покупки");
+            FieldsPanel.Children.Add(CreateSection("Поставщик и расчеты", settlementGrid));
+
+            var taxGrid = CreateTwoColumnGrid(3);
+            await AddFieldToGridAsync(taxGrid, 0, 0, catalogsDict, usedFields, "Вид НДС");
+            await AddFieldToGridAsync(taxGrid, 0, 1, catalogsDict, usedFields, "Вид оплаты");
+            await AddFieldToGridAsync(taxGrid, 1, 0, catalogsDict, usedFields, "Вид налога с продаж");
+            await AddFieldToGridAsync(taxGrid, 1, 1, catalogsDict, usedFields, "Валюта");
+            await AddFieldToGridAsync(taxGrid, 2, 0, catalogsDict, usedFields, "Курс валюты");
+            FieldsPanel.Children.Add(CreateSection("Налоги и валюта", taxGrid));
+
+            var lineGrid = CreateFixedAssetLineGrid();
+            await AddFieldToGridAsync(lineGrid, 1, 0, catalogsDict, usedFields, "Основное средство");
+            await AddFieldToGridAsync(lineGrid, 1, 1, catalogsDict, usedFields, "Счет операции");
+            await AddFieldToGridAsync(lineGrid, 1, 2, catalogsDict, usedFields, "Без НДС");
+            await AddFieldToGridAsync(lineGrid, 1, 3, catalogsDict, usedFields, "НДС");
+            await AddFieldToGridAsync(lineGrid, 1, 4, catalogsDict, usedFields, "% НДС");
+            await AddFieldToGridAsync(lineGrid, 1, 5, catalogsDict, usedFields, "Налог с продаж");
+            await AddFieldToGridAsync(lineGrid, 1, 6, catalogsDict, usedFields, "Сумма", "amount");
+            await AddFieldToGridAsync(lineGrid, 1, 7, catalogsDict, usedFields, "Сумма в валюте");
+            FieldsPanel.Children.Add(CreateSection("Строка основного средства", new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = lineGrid
+            }));
+
+            var postingGrid = CreateTwoColumnGrid(3);
+            await AddFieldToGridAsync(postingGrid, 0, 0, catalogsDict, usedFields, "Счет дебета");
+            await AddFieldToGridAsync(postingGrid, 0, 1, catalogsDict, usedFields, "Счет кредита");
+            await AddFieldToGridAsync(postingGrid, 1, 0, catalogsDict, usedFields, "Основание");
+            await AddFieldToGridAsync(postingGrid, 1, 1, catalogsDict, usedFields, "Примечание");
+            await AddFieldToGridAsync(postingGrid, 2, 0, catalogsDict, usedFields, "Проведен");
+            FieldsPanel.Children.Add(CreateSection("Проводка и примечание", postingGrid));
+
+            var remainingFields = _metadata.Fields
+                .OrderBy(field => field.Order)
+                .Where(field => !usedFields.Contains(field.Name))
+                .ToList();
+
+            if (remainingFields.Count == 0)
+                return;
+
+            var additionalGrid = CreateTwoColumnGrid((remainingFields.Count + 1) / 2);
+            for (var index = 0; index < remainingFields.Count; index++)
+            {
+                await AddFieldByMetadataToGridAsync(
+                    additionalGrid,
+                    index / 2,
+                    index % 2,
+                    remainingFields[index],
+                    catalogsDict,
+                    usedFields);
+            }
+
+            FieldsPanel.Children.Add(CreateSection("Дополнительно", additionalGrid));
+        }
+
+        private Border CreateFixedAssetMovementHeader()
+        {
+            var title = _editId.HasValue
+                ? "Редактирование документа движения ОС"
+                : "Новый документ движения ОС";
+
+            var subtitle = _existingData?.GetValueOrDefault("Вид документа ОС")?.ToString();
+            if (string.IsNullOrWhiteSpace(subtitle))
+                subtitle = "Сначала выбран вид ввода, далее заполняются реквизиты документа.";
+
+            return new Border
+            {
+                Background = new LinearGradientBrush(
+                    Color.FromRgb(238, 247, 255),
+                    Color.FromRgb(249, 252, 255),
+                    0),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(205, 225, 242)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(16, 14, 16, 14),
+                Margin = new Thickness(0, 0, 0, 12),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = title,
+                            FontSize = 20,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = new SolidColorBrush(Color.FromRgb(14, 45, 77))
+                        },
+                        new TextBlock
+                        {
+                            Text = subtitle,
+                            Margin = new Thickness(0, 4, 0, 0),
+                            Foreground = new SolidColorBrush(Color.FromRgb(72, 99, 124))
+                        }
+                    }
+                }
+            };
+        }
+
+        private static Border CreateSection(string title, UIElement content)
+        {
+            return new Border
+            {
+                BorderBrush = new SolidColorBrush(Color.FromRgb(214, 225, 235)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, 0, 12),
+                Background = Brushes.White,
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = title,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = new SolidColorBrush(Color.FromRgb(26, 58, 88)),
+                            Margin = new Thickness(0, 0, 0, 10)
+                        },
+                        content
+                    }
+                }
+            };
+        }
+
+        private static Grid CreateTwoColumnGrid(int rows)
+        {
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            for (var row = 0; row < rows; row++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            return grid;
+        }
+
+        private static Grid CreateFixedAssetLineGrid()
+        {
+            var grid = new Grid { MinWidth = 960 };
+            foreach (var width in new[] { 230d, 170d, 110d, 100d, 70d, 130d, 110d, 120d })
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
+
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var headers = new[]
+            {
+                "Наименование ОС", "Счет операции", "Без НДС", "НДС", "%", "Налог с продаж", "Итого", "В валюте"
+            };
+
+            for (var index = 0; index < headers.Length; index++)
+            {
+                var header = new Border
+                {
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(213, 225, 236)),
+                    BorderThickness = new Thickness(0, 0, 1, 1),
+                    Background = new SolidColorBrush(Color.FromRgb(231, 240, 248)),
+                    Padding = new Thickness(6, 5, 6, 5),
+                    Child = new TextBlock
+                    {
+                        Text = headers[index],
+                        FontWeight = FontWeights.Bold,
+                        FontSize = 12,
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                };
+                Grid.SetRow(header, 0);
+                Grid.SetColumn(header, index);
+                grid.Children.Add(header);
+            }
+
+            return grid;
+        }
+
+        private async Task<bool> AddFieldToGridAsync(
+            Grid grid,
+            int row,
+            int column,
+            Dictionary<string, MetadataObject> catalogsDict,
+            ISet<string> usedFields,
+            params string[] aliases)
+        {
+            var field = FindDialogField(aliases);
+            if (field == null)
+                return false;
+
+            return await AddFieldByMetadataToGridAsync(grid, row, column, field, catalogsDict, usedFields);
+        }
+
+        private async Task<bool> AddFieldByMetadataToGridAsync(
+            Grid grid,
+            int row,
+            int column,
+            MetadataField field,
+            Dictionary<string, MetadataObject> catalogsDict,
+            ISet<string> usedFields)
+        {
+            if (_fieldControls.ContainsKey(field.Name))
+                return false;
+
+            var panel = await CreateFieldPanelAsync(field, catalogsDict);
+            Grid.SetRow(panel, row);
+            Grid.SetColumn(panel, column);
+            grid.Children.Add(panel);
+            usedFields.Add(field.Name);
+            return true;
+        }
+
+        private async Task<StackPanel> CreateFieldPanelAsync(
+            MetadataField field,
+            Dictionary<string, MetadataObject> catalogsDict)
+        {
+            var panel = new StackPanel { Margin = new Thickness(0, 0, 10, 10) };
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = field.Name,
+                FontWeight = FontWeights.Bold,
+                FontSize = 12,
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+
+            var inputControl = await CreateControlAsync(field, catalogsDict);
+            if (_isReadOnly)
+                ApplyReadOnly(inputControl);
+
+            if (_metadata.ObjectType == "Document" &&
+                MetadataService.IsDocumentNumberFieldName(field.Name) &&
+                inputControl is TextBox numberTextBox &&
+                !_editId.HasValue)
+            {
+                numberTextBox.IsReadOnly = true;
+                numberTextBox.Background = Brushes.LightGray;
+
+                try
+                {
+                    numberTextBox.Text = await _metadataService.GetNextDocumentNumberAsync(_metadata);
+                }
+                catch
+                {
+                    numberTextBox.Text = MetadataService.GenerateFallbackDocumentNumber();
+                }
+            }
+
+            panel.Children.Add(inputControl);
+            _fieldControls[field.Name] = inputControl;
+            _fieldPanels[field.Name] = panel;
+            _fieldsByName[field.Name] = field;
+            return panel;
+        }
+
+        private MetadataField? FindDialogField(params string[] aliases)
+        {
+            foreach (var alias in aliases.Where(alias => !string.IsNullOrWhiteSpace(alias)))
+            {
+                var field = _metadata.Fields.FirstOrDefault(item =>
+                    string.Equals(item.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.DbColumnName, alias, StringComparison.OrdinalIgnoreCase));
+
+                if (field != null)
+                    return field;
+            }
+
+            return null;
+        }
         private async Task<Dictionary<string, object>?> LoadExistingDataAsync()
         {
             if (!_editId.HasValue)
-                return null;
+                return _initialData == null
+                    ? null
+                    : new Dictionary<string, object>(_initialData, StringComparer.OrdinalIgnoreCase);
 
             var data = await _metadataService.GetCatalogDataAsync(_metadata.Id);
             return data.FirstOrDefault(row =>
@@ -503,3 +816,5 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
+

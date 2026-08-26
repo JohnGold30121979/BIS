@@ -584,17 +584,11 @@ namespace BIS.ERP.Services
                     DO $$
 
                     BEGIN
-
                         IF EXISTS (
-
                             SELECT 1
-
                             FROM information_schema.columns
-
                             WHERE table_name = '{catalog.TableName}'
-
                               AND column_name = 'country_id'
-
                         ) THEN
 
                             UPDATE ""{catalog.TableName}""

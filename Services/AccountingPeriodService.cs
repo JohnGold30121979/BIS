@@ -1084,13 +1084,13 @@ namespace BIS.ERP.Services
             if (useMileageDepreciation && monthlyMileage > 0 && mileageResource > 0)
                 return Math.Round(depreciableAmount * monthlyMileage / mileageResource, 2);
 
+            var usefulLifeYears = GetInt(asset, "Срок полезного использования", "Срок полезного использования, мес.", "useful_life_months");
+            if (usefulLifeYears > 0)
+                return Math.Round(depreciableAmount / (usefulLifeYears * 12m), 2);
+
             var depreciationRate = GetDecimal(asset, "Норма амортизации, %", "depreciation_rate");
             if (depreciationRate > 0)
                 return Math.Round(depreciableAmount * depreciationRate / 100m / 12m, 2);
-
-            var usefulLife = GetInt(asset, "Срок полезного использования, мес.", "useful_life_months");
-            if (usefulLife > 0)
-                return Math.Round(depreciableAmount / usefulLife, 2);
 
             return 0m;
         }

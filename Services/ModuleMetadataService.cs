@@ -17,11 +17,8 @@ namespace BIS.ERP.Services
         public const int FinalBalanceCloseOrder = 10000;
         public const bool HideUnassignedObjectsInNavigationDuringDevelopment = true;
 
-        private static readonly HashSet<string> DevelopmentDisabledModuleCodes = new(StringComparer.OrdinalIgnoreCase)
-        {
-            FixedAssetsCode,
-            InventoryCode
-        };
+        // Module visibility must be controlled by administrator settings, not by a hardcoded development lock.
+        private static readonly HashSet<string> DevelopmentDisabledModuleCodes = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly AppDbContext _context;
 
@@ -372,12 +369,15 @@ namespace BIS.ERP.Services
 
         public static readonly string[] FixedAssetDocumentNames =
         {
+            "Учет движения ОС",
             "Покупка ОС", "Ввод ОС в эксплуатацию", "Приход из производства ОС", "Переоценка ОС",
             "Реализация ОС", "Частичная реализация ОС", "Ликвидация ОС", "Укомплектация ОС",
             "Разукомплектация ОС", "Начисление амортизации", "Списание амортизации",
-            "Консервация ОС", "Расконсервация ОС", "Передача ОС в подотчет", "Смена затратного счета"
+            "Консервация ОС", "Расконсервация ОС", "Передача ОС в подотчет", "Смена затратного счета",
+            "Смена группы ОС"
         };
     }
 }
+
 
 

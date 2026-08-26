@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 using ClosedXML.Excel;
 using Microsoft.Win32;
 using BIS.ERP.Models;
@@ -21,6 +22,7 @@ namespace BIS.ERP.Views
         private DataTable _dataTable;
         private Dictionary<string, Dictionary<string, string>> _referenceCache;
         private Dictionary<string, MetadataObject> _catalogsDict;
+        private readonly Dictionary<Guid, Dictionary<string, object>> _rawRowsById = new();
         private static readonly IValueConverter AccountTypeConverter = new AccountTypeDisplayConverter();
         private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
         private static readonly IValueConverter LinkFlagConverter = new BooleanPlusDisplayConverter();
@@ -45,6 +47,13 @@ namespace BIS.ERP.Views
             ImportDbfButton.Content = IsPaymentClassificationCatalog
                 ? "📥 Загрузить классификацию"
                 : "📥 Загрузить DBF";
+
+            if (IsFixedAssetsCatalog)
+            {
+                FixedAssetDatePanel.Visibility = Visibility.Visible;
+                FixedAssetAsOfDatePicker.SelectedDate = DateTime.Today;
+                SearchBox.ToolTip = "Поиск по карточкам основных средств на выбранную дату";
+            }
         }
 
         private bool IsChartOfAccountsCatalog =>
@@ -58,6 +67,10 @@ namespace BIS.ERP.Views
         private bool IsAdvancePaymentsCatalog =>
             string.Equals(_catalog.Name, "Пары счетов", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
+
+        private bool IsFixedAssetsCatalog =>
+            string.Equals(_catalog.Name, "Основные средства", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_assets", StringComparison.OrdinalIgnoreCase);
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
@@ -81,6 +94,8 @@ namespace BIS.ERP.Views
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
                 if (IsAdvancePaymentsCatalog)
                     data = SortRowsByNumericCode(data).ToList();
+
+                _rawRowsById.Clear();
 
                 // Загружаем все справочники один раз
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
@@ -107,7 +122,13 @@ namespace BIS.ERP.Views
                 foreach (var row in data)
                 {
                     var dataRow = _dataTable.NewRow();
-                    dataRow["Id"] = row.ContainsKey("Id") ? row["Id"] : Guid.NewGuid();
+                    var rowId = GetRowId(row);
+                    dataRow["Id"] = rowId;
+
+                    var rawCopy = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var pair in row)
+                        rawCopy[pair.Key] = pair.Value;
+                    _rawRowsById[rowId] = rawCopy;
 
                     foreach (var field in visibleFields)
                     {
@@ -146,6 +167,7 @@ namespace BIS.ERP.Views
                     Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
                     Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
+                    Visibility = IsFixedAssetsCatalog ? Visibility.Collapsed : Visibility.Visible,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -154,6 +176,7 @@ namespace BIS.ERP.Views
                     Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
                     Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
+                    Visibility = IsFixedAssetsCatalog ? Visibility.Collapsed : Visibility.Visible,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -206,7 +229,7 @@ namespace BIS.ERP.Views
         {
             _referenceCache.Clear();
 
-            foreach (var field in GetUniqueCatalogFields().Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
+            foreach (var field in GetReferenceFieldsForDisplay())
             {
                 if (!_catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
                     continue;
@@ -229,6 +252,13 @@ namespace BIS.ERP.Views
             }
         }
 
+        private IEnumerable<MetadataField> GetReferenceFieldsForDisplay()
+        {
+            return _catalog.Fields
+                .Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog))
+                .GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderBy(f => f.Order).First());
+        }
         private List<MetadataField> GetUniqueCatalogFields()
         {
             var allowedColumns = GetAllowedCatalogColumns();
@@ -255,7 +285,36 @@ namespace BIS.ERP.Views
                 result.Add(field);
             }
 
+            if (IsFixedAssetsCatalog)
+            {
+                result = result
+                    .OrderBy(GetFixedAssetListOrder)
+                    .ThenBy(field => field.Order <= 0 ? int.MaxValue : field.Order)
+                    .ThenBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
             return result;
+        }
+
+        private static int GetFixedAssetListOrder(MetadataField field)
+        {
+            var key = field.DbColumnName?.Trim();
+            return key switch
+            {
+                "code" => 1,
+                "name" => 2,
+                "inventory_number" => 3,
+                "manufacture_year" => 4,
+                "asset_group" => 5,
+                "acquisition_date" => 6,
+                "depreciation_start_date" => 7,
+                "disposal_date" => 8,
+                "carrying_amount" => 9,
+                "initial_cost" => 10,
+                "site_id" => 11,
+                _ => 1000
+            };
         }
 
         private HashSet<string>? GetAllowedCatalogColumns()
@@ -306,9 +365,26 @@ namespace BIS.ERP.Views
                 };
             }
 
+            if (IsFixedAssetsCatalog)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "code",
+                    "name",
+                    "inventory_number",
+                    "manufacture_year",
+                    "asset_group",
+                    "acquisition_date",
+                    "depreciation_start_date",
+                    "disposal_date",
+                    "carrying_amount",
+                    "initial_cost",
+                    "site_id"
+                };
+            }
+
             return null;
         }
-
         private static IEnumerable<string> GetReferenceLookupKeys(Dictionary<string, object> row)
         {
             foreach (var keyName in new[] { "Id", "Код", "code", "Code", "Счет", "account_code" })
@@ -426,14 +502,16 @@ namespace BIS.ERP.Views
 
         private object CreateColumnHeader(string fieldName)
         {
-            if (!IsChartOfAccountsCatalog && !IsAdvancePaymentsCatalog)
+            if (!IsChartOfAccountsCatalog && !IsAdvancePaymentsCatalog && !IsFixedAssetsCatalog)
                 return fieldName;
 
             return new TextBlock
             {
-                Text = IsAdvancePaymentsCatalog
-                    ? GetAdvancePaymentsColumnHeader(fieldName)
-                    : GetChartOfAccountsColumnHeader(fieldName),
+                Text = IsFixedAssetsCatalog
+                    ? GetFixedAssetColumnHeader(fieldName)
+                    : IsAdvancePaymentsCatalog
+                        ? GetAdvancePaymentsColumnHeader(fieldName)
+                        : GetChartOfAccountsColumnHeader(fieldName),
                 ToolTip = fieldName,
                 TextAlignment = TextAlignment.Center,
                 TextWrapping = TextWrapping.Wrap,
@@ -442,7 +520,6 @@ namespace BIS.ERP.Views
                 Margin = new Thickness(2, 2, 2, 2)
             };
         }
-
         private DataGridLength GetColumnWidth(MetadataField field)
         {
             if (IsAdvancePaymentsCatalog)
@@ -465,6 +542,27 @@ namespace BIS.ERP.Views
                 };
 
                 return new DataGridLength(advanceWidth, DataGridLengthUnitType.Pixel);
+            }
+
+            if (IsFixedAssetsCatalog)
+            {
+                var assetWidth = field.DbColumnName switch
+                {
+                    "code" => 64,
+                    "name" => 210,
+                    "inventory_number" => 92,
+                    "manufacture_year" => 92,
+                    "asset_group" => 150,
+                    "acquisition_date" => 106,
+                    "depreciation_start_date" => 116,
+                    "disposal_date" => 106,
+                    "carrying_amount" => 128,
+                    "initial_cost" => 124,
+                    "site_id" => 150,
+                    _ => field.FieldType == "Decimal" ? 112 : 120
+                };
+
+                return new DataGridLength(assetWidth, DataGridLengthUnitType.Pixel);
             }
 
             if (!IsChartOfAccountsCatalog)
@@ -496,11 +594,13 @@ namespace BIS.ERP.Views
 
             return new DataGridLength(width, DataGridLengthUnitType.Pixel);
         }
-
         private double GetColumnMinWidth(MetadataField field)
         {
             if (IsAdvancePaymentsCatalog)
                 return field.FieldType == "Bool" ? 40 : 62;
+
+            if (IsFixedAssetsCatalog)
+                return field.FieldType == "Bool" ? 40 : 70;
 
             if (!IsChartOfAccountsCatalog)
                 return 88;
@@ -522,13 +622,23 @@ namespace BIS.ERP.Views
                 _ => field.FieldType == "Bool" ? 36 : 50
             };
         }
-
         private TextAlignment GetColumnTextAlignment(MetadataField field)
         {
             if (IsAdvancePaymentsCatalog)
                 return field.FieldType == "Bool" || field.Name == "Код"
                     ? TextAlignment.Center
                     : TextAlignment.Left;
+
+            if (IsFixedAssetsCatalog)
+            {
+                if (field.FieldType == "Decimal")
+                    return TextAlignment.Right;
+
+                return field.FieldType == "DateTime" ||
+                       field.DbColumnName is "code" or "inventory_number" or "manufacture_year"
+                    ? TextAlignment.Center
+                    : TextAlignment.Left;
+            }
 
             if (!IsChartOfAccountsCatalog)
                 return TextAlignment.Left;
@@ -537,7 +647,6 @@ namespace BIS.ERP.Views
                 ? TextAlignment.Center
                 : TextAlignment.Left;
         }
-
         private Style CreateCellTextStyle(TextAlignment textAlignment = TextAlignment.Left)
         {
             var style = new Style(typeof(TextBlock));
@@ -548,6 +657,21 @@ namespace BIS.ERP.Views
             return style;
         }
 
+        private string GetFixedAssetColumnHeader(string fieldName)
+        {
+            return fieldName switch
+            {
+                "Инвентарный номер" => "Инв. номер",
+                "Год выпуска оборудования" => "Год\nвыпуска",
+                "Группа ОС" => "Группа",
+                "Дата начала амортизации" => "Дата нач. износа",
+                "Остаточная стоимость" => "Перерасчетная стоимость",
+                "Первоначальная стоимость" => "Начальная стоимость",
+                "Дата создания" => "Дата\nсоздания",
+                "Дата изменения" => "Дата\nизменения",
+                _ => fieldName
+            };
+        }
         private string GetChartOfAccountsColumnHeader(string fieldName)
         {
             return fieldName switch
@@ -619,9 +743,11 @@ namespace BIS.ERP.Views
                 binding.Converter = LinkFlagConverter;
             }
 
+            if (field.FieldType == "DateTime")
+                binding.StringFormat = "dd.MM.yyyy";
+
             return binding;
         }
-
         private void SearchButton_Click(object sender, RoutedEventArgs e)
         {
             ApplySearchFilter();
@@ -638,34 +764,65 @@ namespace BIS.ERP.Views
                 return;
 
             var searchText = SearchBox.Text?.Trim();
-            if (string.IsNullOrWhiteSpace(searchText))
+            if (IsChartOfAccountsCatalog && !string.IsNullOrWhiteSpace(searchText))
             {
-                _dataTable.DefaultView.RowFilter = string.Empty;
-                StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
+                ApplyChartOfAccountsSearchFilter(searchText);
+                StatusText.Text = $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}";
                 return;
             }
 
-            if (IsChartOfAccountsCatalog)
+            var filterParts = new List<string>();
+            if (IsFixedAssetsCatalog)
             {
-                ApplyChartOfAccountsSearchFilter(searchText);
-            }
-            else
-            {
-                var escapedValue = EscapeRowFilterValue(searchText);
-                var filterParts = _dataTable.Columns
-                    .Cast<DataColumn>()
-                    .Where(column => !column.ColumnName.Equals("Id", StringComparison.OrdinalIgnoreCase))
-                    .Select(column => $"CONVERT([{EscapeColumnName(column.ColumnName)}], 'System.String') LIKE '%{escapedValue}%'")
-                    .ToList();
-
-                _dataTable.DefaultView.RowFilter = string.Join(" OR ", filterParts);
+                var dateFilter = BuildFixedAssetAsOfFilter();
+                if (!string.IsNullOrWhiteSpace(dateFilter))
+                    filterParts.Add(dateFilter);
             }
 
-            StatusText.Text = IsChartOfAccountsCatalog
-                ? $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}"
-                : $"🔍 Найдено записей: {_dataTable.DefaultView.Count}";
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                if (IsChartOfAccountsCatalog)
+                {
+                    ApplyChartOfAccountsSearchFilter(searchText);
+                    StatusText.Text = $"🔍 Найдено счетов: {_dataTable.DefaultView.Count}";
+                    return;
+                }
+
+                var genericFilter = BuildGenericSearchFilter(searchText);
+                if (!string.IsNullOrWhiteSpace(genericFilter))
+                    filterParts.Add($"({genericFilter})");
+            }
+
+            _dataTable.DefaultView.RowFilter = string.Join(" AND ", filterParts);
+
+            StatusText.Text = IsFixedAssetsCatalog
+                ? $"📊 Карточек ОС на {GetFixedAssetAsOfDate():dd.MM.yyyy}: {_dataTable.DefaultView.Count}"
+                : string.IsNullOrWhiteSpace(searchText)
+                    ? $"📊 Загружено записей: {_dataTable.Rows.Count}"
+                    : $"🔍 Найдено записей: {_dataTable.DefaultView.Count}";
         }
 
+        private string BuildGenericSearchFilter(string searchText)
+        {
+            var escapedValue = EscapeRowFilterValue(searchText);
+            var filterParts = _dataTable.Columns
+                .Cast<DataColumn>()
+                .Where(column => !column.ColumnName.Equals("Id", StringComparison.OrdinalIgnoreCase))
+                .Where(column => !column.ColumnName.StartsWith("__", StringComparison.OrdinalIgnoreCase))
+                .Select(column => $"CONVERT([{EscapeColumnName(column.ColumnName)}], 'System.String') LIKE '%{escapedValue}%'")
+                .ToList();
+
+            return string.Join(" OR ", filterParts);
+        }
+
+        private string? BuildFixedAssetAsOfFilter()
+        {
+            if (_dataTable == null || !_dataTable.Columns.Contains("Дата приобретения"))
+                return null;
+
+            var cutoff = GetFixedAssetAsOfDate().ToString("MM/dd/yyyy", CultureInfo.InvariantCulture);
+            return $"([{EscapeColumnName("Дата приобретения")}] IS NULL OR [{EscapeColumnName("Дата приобретения")}] <= #{cutoff}#)";
+        }
         private void ApplyChartOfAccountsSearchFilter(string searchText)
         {
             const string markerColumn = "__search_match";
@@ -740,8 +897,291 @@ namespace BIS.ERP.Views
                 .Replace("*", "[*]");
         }
 
+        private DateTime GetFixedAssetAsOfDate()
+        {
+            return FixedAssetAsOfDatePicker?.SelectedDate?.Date ?? DateTime.Today;
+        }
+
+        private static Guid GetRowId(Dictionary<string, object> row)
+        {
+            foreach (var key in new[] { "Id", "id" })
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is Guid guid)
+                    return guid;
+
+                if (Guid.TryParse(value.ToString(), out guid))
+                    return guid;
+            }
+
+            return Guid.NewGuid();
+        }
+
+        private void FixedAssetAsOfDatePicker_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!IsFixedAssetsCatalog || _dataTable?.DefaultView == null)
+                return;
+
+            ApplySearchFilter();
+            DataGrid.Items.Refresh();
+        }
+
+        private void DataGrid_LoadingRow(object sender, DataGridRowEventArgs e)
+        {
+            if (!IsFixedAssetsCatalog)
+                return;
+
+            if (e.Row.Item is not DataRowView view)
+                return;
+
+            e.Row.ClearValue(Control.ForegroundProperty);
+            e.Row.ClearValue(Control.BackgroundProperty);
+
+            if (!IsFixedAssetDisposedAsOf(view))
+                return;
+
+            e.Row.Foreground = Brushes.Gray;
+            e.Row.Background = new SolidColorBrush(Color.FromRgb(242, 244, 246));
+        }
+
+        private void DataGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (DataGrid.SelectedItem is not DataRowView)
+                return;
+
+            if (IsFixedAssetsCatalog)
+            {
+                OpenFixedAssetDetailsDialog();
+                e.Handled = true;
+                return;
+            }
+
+            OnEditClick(sender, e);
+        }
+
+        private void OpenFixedAssetDetailsDialog()
+        {
+            if (DataGrid.SelectedItem is not DataRowView selectedRow)
+                return;
+
+            var id = (Guid)selectedRow["Id"];
+            var existingData = GetExistingDataForEdit(id, selectedRow);
+
+            var dialog = new FixedAssetDetailsDialog(
+                _catalog,
+                _metadataService,
+                FixedAssetCardMode.Details,
+                existingData,
+                id,
+                GetFixedAssetAsOfDate())
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            dialog.ShowDialog();
+        }
+
+        private Dictionary<string, string> BuildFixedAssetDisplayValues(
+            IReadOnlyDictionary<string, object> record,
+            DataRowView selectedRow)
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in _catalog.Fields.OrderBy(f => f.Order).ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(field.Name))
+                    continue;
+
+                var rawValue = GetRawFixedAssetValue(record, selectedRow, field);
+                values[field.Name] = FormatFixedAssetDetailValue(rawValue, field);
+            }
+
+            return values;
+        }
+
+        private static object? GetRawFixedAssetValue(
+            IReadOnlyDictionary<string, object> record,
+            DataRowView selectedRow,
+            MetadataField field)
+        {
+            if (record.TryGetValue(field.Name, out var byName))
+                return byName;
+
+            if (!string.IsNullOrWhiteSpace(field.DbColumnName) && record.TryGetValue(field.DbColumnName, out var byColumn))
+                return byColumn;
+
+            if (selectedRow.Row.Table.Columns.Contains(field.Name))
+                return selectedRow[field.Name];
+
+            return null;
+        }
+
+        private string FormatFixedAssetDetailValue(object? value, MetadataField field)
+        {
+            if (value == null || value == DBNull.Value)
+                return string.Empty;
+
+            if (field.FieldType == "Reference" && _referenceCache.TryGetValue(field.Name, out var lookup))
+            {
+                var key = NormalizeReferenceKey(value);
+                if (!string.IsNullOrWhiteSpace(key) && lookup.TryGetValue(key, out var displayValue))
+                    return displayValue;
+            }
+
+            if (field.Name == "Класс ОС")
+                return FormatFixedAssetClass(value);
+
+            if (value is DateTime dateTime)
+                return dateTime.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture);
+
+            if (value is DateTimeOffset dateTimeOffset)
+                return dateTimeOffset.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture);
+
+            if (field.FieldType == "Decimal")
+                return FormatFixedAssetNumber(value);
+
+            if (value is bool boolValue)
+                return boolValue ? "Да" : "Нет";
+
+            return Convert.ToString(value, CultureInfo.CurrentCulture)?.Trim() ?? string.Empty;
+        }
+
+        private static string FormatFixedAssetNumber(object value)
+        {
+            if (value is decimal decimalValue)
+                return decimalValue.ToString("N2", CultureInfo.CurrentCulture);
+
+            if (value is double doubleValue)
+                return doubleValue.ToString("N2", CultureInfo.CurrentCulture);
+
+            if (value is float floatValue)
+                return floatValue.ToString("N2", CultureInfo.CurrentCulture);
+
+            var text = Convert.ToString(value, CultureInfo.CurrentCulture)?.Trim();
+            if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out var parsed) ||
+                decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed))
+            {
+                return parsed.ToString("N2", CultureInfo.CurrentCulture);
+            }
+
+            return text ?? string.Empty;
+        }
+
+        private static string FormatFixedAssetClass(object value)
+        {
+            var text = Convert.ToString(value, CultureInfo.CurrentCulture)?.Trim();
+            return text switch
+            {
+                "1" => "Стационарный",
+                "2" => "Подвижной",
+                _ => text ?? string.Empty
+            };
+        }
+        private bool IsFixedAssetDisposedAsOf(DataRowView view)
+        {
+            if (!TryGetDate(view, "Дата выбытия", out var disposalDate))
+                return false;
+
+            return disposalDate.Date <= GetFixedAssetAsOfDate();
+        }
+
+        private static bool TryGetDate(DataRowView view, string columnName, out DateTime date)
+        {
+            date = default;
+            if (!view.Row.Table.Columns.Contains(columnName))
+                return false;
+
+            var value = view[columnName];
+            if (value == null || value == DBNull.Value)
+                return false;
+
+            if (value is DateTime dateTime)
+            {
+                date = dateTime;
+                return true;
+            }
+
+            return DateTime.TryParse(value.ToString(), CultureInfo.CurrentCulture, DateTimeStyles.None, out date) ||
+                   DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+        }
+
+        private Dictionary<string, object> GetExistingDataForEdit(Guid id, DataRowView selectedRow)
+        {
+            var existingData = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+            if (_rawRowsById.TryGetValue(id, out var rawRow))
+            {
+                foreach (var pair in rawRow)
+                {
+                    if (pair.Key.Equals("Id", StringComparison.OrdinalIgnoreCase) ||
+                        pair.Key.Equals("CreatedAt", StringComparison.OrdinalIgnoreCase) ||
+                        pair.Key.Equals("UpdatedAt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    existingData[pair.Key] = pair.Value;
+                }
+            }
+
+            foreach (DataColumn column in _dataTable.Columns)
+            {
+                if (column.ColumnName == "Id" ||
+                    column.ColumnName == "Дата создания" ||
+                    column.ColumnName == "Дата изменения" ||
+                    existingData.ContainsKey(column.ColumnName))
+                {
+                    continue;
+                }
+
+                var value = selectedRow[column.ColumnName];
+                if (value != DBNull.Value)
+                    existingData[column.ColumnName] = value;
+            }
+
+            return existingData;
+        }
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
+            if (IsFixedAssetsCatalog)
+            {
+                var fixedAssetDialog = new FixedAssetDetailsDialog(
+                    _catalog,
+                    _metadataService,
+                    FixedAssetCardMode.Create,
+                    asOfDate: GetFixedAssetAsOfDate())
+                {
+                    Owner = Window.GetWindow(this)
+                };
+
+                if (fixedAssetDialog.ShowDialog() == true)
+                {
+                    try
+                    {
+                        StatusText.Text = "💾 Сохранение...";
+                        ProgressText.Text = "⏳ Сохранение...";
+                        await _metadataService.CreateDynamicRecordAsync(_catalog.Id, fixedAssetDialog.ItemData);
+                        await LoadData();
+                        MessageBox.Show("Запись успешно добавлена!", "Успех",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    finally
+                    {
+                        ProgressText.Text = "";
+                        StatusText.Text = "✅ Готово";
+                    }
+                }
+
+                return;
+            }
+
             var dialog = new CatalogItemDialog(_catalog, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
@@ -775,16 +1215,45 @@ namespace BIS.ERP.Views
             if (selectedRow == null) return;
 
             var id = (Guid)selectedRow["Id"];
-            var existingData = new Dictionary<string, object>();
+            var existingData = GetExistingDataForEdit(id, selectedRow);
 
-            foreach (DataColumn column in _dataTable.Columns)
+            if (IsFixedAssetsCatalog)
             {
-                var value = selectedRow[column.ColumnName];
-                if (value != DBNull.Value && column.ColumnName != "Id" &&
-                    column.ColumnName != "Дата создания" && column.ColumnName != "Дата изменения")
+                var fixedAssetDialog = new FixedAssetDetailsDialog(
+                    _catalog,
+                    _metadataService,
+                    FixedAssetCardMode.Edit,
+                    existingData,
+                    id,
+                    GetFixedAssetAsOfDate())
                 {
-                    existingData[column.ColumnName] = value;
+                    Owner = Window.GetWindow(this)
+                };
+
+                if (fixedAssetDialog.ShowDialog() == true)
+                {
+                    try
+                    {
+                        StatusText.Text = "💾 Обновление...";
+                        ProgressText.Text = "⏳ Обновление...";
+                        await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, fixedAssetDialog.ItemData);
+                        await LoadData();
+                        MessageBox.Show("Запись успешно обновлена!", "Успех",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Ошибка обновления: {ex.Message}", "Ошибка",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    finally
+                    {
+                        ProgressText.Text = "";
+                        StatusText.Text = "✅ Готово";
+                    }
                 }
+
+                return;
             }
 
             var dialog = new CatalogItemDialog(_catalog, _metadataService, existingData);
@@ -813,7 +1282,6 @@ namespace BIS.ERP.Views
                 }
             }
         }
-
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
             var selectedRow = DataGrid.SelectedItem as DataRowView;

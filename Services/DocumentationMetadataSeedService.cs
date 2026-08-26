@@ -20,6 +20,7 @@ namespace BIS.ERP.Services
             await EnsureFixedAssetCatalogsAsync();
             await EnsureFixedAssetSupportCatalogsAsync();
             await SeedFixedAssetSupportCatalogDataAsync();
+            await SeedFixedAssetDocumentEntryDataAsync();
             await ExtendFixedAssetCardAsync();
             await EnsureFixedAssetCanonicalModelAsync();
             await EnsureDocumentsAsync();
@@ -48,7 +49,7 @@ namespace BIS.ERP.Services
                     ("Наименование", "name", "String", true, null),
                     ("Материальный счет", "asset_account", "String", false, null),
                     ("Счет амортизации", "depreciation_account", "String", false, null),
-                    ("Срок использования, мес.", "useful_life_months", "Int", false, null),
+                    ("Срок использования, лет", "useful_life_months", "Int", false, null),
                     ("Активен", "is_active", "Bool", true, null)));
 
             await EnsureObjectAsync("Подгруппы ОС", "catalog_asset_subgroups", "Catalog",
@@ -56,7 +57,7 @@ namespace BIS.ERP.Services
                     ("Код", "code", "String", true, null),
                     ("Наименование", "name", "String", true, null),
                     ("Группа ОС", "asset_group_id", "Reference", true, "Группы ОС"),
-                    ("Срок использования, мес.", "useful_life_months", "Int", false, null),
+                    ("Срок использования, лет", "useful_life_months", "Int", false, null),
                     ("Активен", "is_active", "Bool", true, null)));
 
             await EnsureObjectAsync("Виды ОС", "catalog_asset_types", "Catalog",
@@ -105,7 +106,16 @@ namespace BIS.ERP.Services
                     ("Источник Fox", "fox_source", "String", false, null),
                     ("Описание", "description", "String", false, null),
                     ("Активен", "is_active", "Bool", true, null)));
-        }
+            await EnsureObjectAsync("Ввод нового документа ОС", "catalog_asset_document_entries", "Catalog",
+                "Типы ввода документов движения основных средств", "📝", CatalogFields(
+                    ("Код", "code", "String", true, null),
+                    ("Наименование", "name", "String", true, null),
+                    ("Вид движения", "movement_kind", "String", true, null),
+                    ("Документ ОС", "target_document_name", "String", true, null),
+                    ("Порядок", "sort_order", "Int", false, null),
+                    ("Описание", "description", "String", false, null),
+                    ("Активен", "is_active", "Bool", true, null)));
+}
 
         private async Task SeedFixedAssetSupportCatalogDataAsync()
         {
@@ -199,6 +209,27 @@ namespace BIS.ERP.Services
             });
         }
 
+        private async Task SeedFixedAssetDocumentEntryDataAsync()
+        {
+            await EnsureCatalogRowsAsync("Ввод нового документа ОС", new[]
+            {
+                FixedAssetDocumentEntry(1, "Покупка ОС", "Приобретение ОС", "Покупка ОС"),
+                FixedAssetDocumentEntry(2, "Корректировка стоимости/срока ОС", "Корректировка стоимости/срока ОС", "Переоценка ОС"),
+                FixedAssetDocumentEntry(3, "Реализация ОС", "Выбытие ОС", "Реализация ОС"),
+                FixedAssetDocumentEntry(4, "Ликвидация ОС", "Выбытие ОС", "Ликвидация ОС"),
+                FixedAssetDocumentEntry(5, "Частичная реализация ОС", "Выбытие ОС", "Частичная реализация ОС"),
+                FixedAssetDocumentEntry(6, "Укомплектация", "Приход/расход ОС", "Укомплектация ОС"),
+                FixedAssetDocumentEntry(7, "Разукомплектация", "Приход/расход ОС", "Разукомплектация ОС"),
+                FixedAssetDocumentEntry(8, "Автоматическое начисление износа", "Начисление износа", "Начисление амортизации"),
+                FixedAssetDocumentEntry(9, "Начисление износа", "Доначисление износа", "Начисление амортизации"),
+                FixedAssetDocumentEntry(10, "Списание износа", "Списание износа", "Списание амортизации"),
+                FixedAssetDocumentEntry(11, "Ввод в эксплуатацию", "Изменение состояния ОС", "Ввод ОС в эксплуатацию"),
+                FixedAssetDocumentEntry(12, "Консервация", "Изменение состояния ОС", "Консервация ОС"),
+                FixedAssetDocumentEntry(13, "Передача под отчет", "Изменение состояния ОС", "Передача ОС в подотчет"),
+                FixedAssetDocumentEntry(14, "Смена затратного счета", "Смена затратного счета", "Смена затратного счета"),
+                FixedAssetDocumentEntry(15, "Смена группы", "Смена группы ОС", "Смена группы ОС")
+            });
+        }
         private async Task ExtendFixedAssetCardAsync()
         {
             var asset = await _context.MetadataObjects.Include(item => item.Fields)
@@ -244,51 +275,67 @@ namespace BIS.ERP.Services
             const string chartFields = "Код,Наименование";
 
             await EnsureMetadataFieldAsync(asset,
-                Field(asset.Id, "Норма амортизации, %", "depreciation_rate", "Decimal", 12));
+                Field(asset.Id, "Год выпуска оборудования", "manufacture_year", "Int", 4));
+            await EnsureMetadataFieldAsync(asset,
+                Field(asset.Id, "Основной код для инв. №", "use_code_as_inventory_number", "Bool", 5));
+            await EnsureMetadataFieldAsync(asset,
+                Field(asset.Id, "Документ поступления ОС", "acquisition_document_number", "String", 10));
+            await EnsureMetadataFieldAsync(asset,
+                Field(asset.Id, "Документ ввода в эксплуатацию", "commissioning_document_number", "String", 12));
+            await EnsureMetadataFieldAsync(asset,
+                Field(asset.Id, "Шифр", "depreciation_code", "String", 20));
+
+            await EnsureMetadataFieldAsync(asset,
+                Field(asset.Id, "Норма амортизации, %", "depreciation_rate", "Decimal", 21));
 
             ConfigureField(asset, "code", type: "String", order: 1, required: true, unique: true, length: 50);
             ConfigureField(asset, "inventory_number", type: "String", order: 2, required: true, unique: true, length: 50);
             ConfigureField(asset, "name", type: "String", order: 3, required: true, length: 300);
-            ConfigureField(asset, "asset_group", type: "Reference", order: 4, reference: "Группы ОС",
+            ConfigureField(asset, "manufacture_year", type: "Int", order: 4);
+            ConfigureField(asset, "use_code_as_inventory_number", type: "Bool", order: 5);
+            ConfigureField(asset, "asset_group", type: "Reference", order: 6, reference: "Группы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "asset_subgroup_id", type: "Reference", order: 5, reference: "Подгруппы ОС",
+            ConfigureField(asset, "asset_subgroup_id", type: "Reference", order: 7, reference: "Подгруппы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "asset_type_id", type: "Reference", order: 6, reference: "Виды ОС",
+            ConfigureField(asset, "asset_type_id", type: "Reference", order: 8, reference: "Виды ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "acquisition_date", type: "DateTime", order: 7);
-            ConfigureField(asset, "commissioning_date", type: "DateTime", order: 8);
-            ConfigureField(asset, "depreciation_start_date", type: "DateTime", order: 9);
-            ConfigureField(asset, "initial_cost", type: "Decimal", order: 10);
-            ConfigureField(asset, "salvage_value", type: "Decimal", order: 11);
-            ConfigureField(asset, "accumulated_depreciation", type: "Decimal", order: 12);
-            ConfigureField(asset, "carrying_amount", type: "Decimal", order: 13);
-            ConfigureField(asset, "useful_life_months", type: "Int", order: 14);
-            ConfigureField(asset, "depreciation_method", type: "Reference", order: 15, reference: "Методы амортизации ОС",
+            ConfigureField(asset, "acquisition_date", type: "DateTime", order: 9);
+            ConfigureField(asset, "acquisition_document_number", type: "String", order: 10, length: 100);
+            ConfigureField(asset, "commissioning_date", type: "DateTime", order: 11);
+            ConfigureField(asset, "commissioning_document_number", type: "String", order: 12, length: 100);
+            ConfigureField(asset, "depreciation_start_date", type: "DateTime", order: 13);
+            ConfigureField(asset, "initial_cost", type: "Decimal", order: 14);
+            ConfigureField(asset, "salvage_value", type: "Decimal", order: 15);
+            ConfigureField(asset, "accumulated_depreciation", type: "Decimal", order: 16);
+            ConfigureField(asset, "carrying_amount", type: "Decimal", order: 17);
+            ConfigureField(asset, "useful_life_months", type: "Int", order: 18);
+            ConfigureField(asset, "depreciation_method", type: "Reference", order: 19, reference: "Методы амортизации ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "depreciation_rate", type: "Decimal", order: 16);
-            ConfigureField(asset, "monthly_depreciation", type: "Decimal", order: 17);
-            ConfigureField(asset, "use_mileage_depreciation", type: "Bool", order: 18);
-            ConfigureField(asset, "monthly_mileage", type: "Decimal", order: 19);
-            ConfigureField(asset, "mileage_resource", type: "Decimal", order: 20);
-            ConfigureField(asset, "asset_account", type: "Reference", order: 21, reference: "План счетов",
+            ConfigureField(asset, "depreciation_code", type: "String", order: 20, length: 100);
+            ConfigureField(asset, "depreciation_rate", type: "Decimal", order: 21);
+            ConfigureField(asset, "monthly_depreciation", type: "Decimal", order: 22);
+            ConfigureField(asset, "use_mileage_depreciation", type: "Bool", order: 23);
+            ConfigureField(asset, "monthly_mileage", type: "Decimal", order: 24);
+            ConfigureField(asset, "mileage_resource", type: "Decimal", order: 25);
+            ConfigureField(asset, "asset_account", type: "Reference", order: 26, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "depreciation_account", type: "Reference", order: 22, reference: "План счетов",
+            ConfigureField(asset, "depreciation_account", type: "Reference", order: 27, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "expense_account", type: "Reference", order: 23, reference: "План счетов",
+            ConfigureField(asset, "expense_account", type: "Reference", order: 28, reference: "План счетов",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "tax_group", type: "Reference", order: 24, reference: "Налоговые группы ОС",
+            ConfigureField(asset, "tax_group", type: "Reference", order: 29, reference: "Налоговые группы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "organization_id", type: "Reference", order: 25, reference: "Организации");
-            ConfigureField(asset, "responsible_person_id", type: "Reference", order: 26, reference: "МОЛ");
-            ConfigureField(asset, "site_id", type: "Reference", order: 27, reference: "Участки");
-            ConfigureField(asset, "asset_class", type: "Int", order: 28);
-            ConfigureField(asset, "status", type: "Reference", order: 29, reference: "Статусы ОС",
+            ConfigureField(asset, "organization_id", type: "Reference", order: 30, reference: "Организации");
+            ConfigureField(asset, "responsible_person_id", type: "Reference", order: 31, reference: "МОЛ");
+            ConfigureField(asset, "site_id", type: "Reference", order: 32, reference: "Участки");
+            ConfigureField(asset, "asset_class", type: "Int", order: 33);
+            ConfigureField(asset, "status", type: "Reference", order: 34, reference: "Статусы ОС",
                 displayPattern: chartPattern, displayFields: chartFields);
-            ConfigureField(asset, "is_active", type: "Bool", order: 30, required: true);
-            ConfigureField(asset, "conservation_date", type: "DateTime", order: 31);
-            ConfigureField(asset, "reopening_date", type: "DateTime", order: 32);
-            ConfigureField(asset, "disposal_date", type: "DateTime", order: 33);
-            ConfigureField(asset, "description", type: "String", order: 34, length: 500);
+            ConfigureField(asset, "is_active", type: "Bool", order: 35, required: true);
+            ConfigureField(asset, "conservation_date", type: "DateTime", order: 36);
+            ConfigureField(asset, "reopening_date", type: "DateTime", order: 37);
+            ConfigureField(asset, "disposal_date", type: "DateTime", order: 38);
+            ConfigureField(asset, "description", type: "String", order: 39, length: 500);
 
             await EnsureFixedAssetAutoCalculationsAsync(asset);
             await _context.SaveChangesAsync();
@@ -667,6 +714,8 @@ namespace BIS.ERP.Services
 
         private static List<MetadataField> FixedAssetDocumentFields(string documentName)
         {
+            if (documentName == "Учет движения ОС")
+                return FixedAssetMovementDocumentFields();
             var fields = StandardDocumentFields();
             fields.Insert(2, Field(Guid.Empty, "Основное средство", "asset_id", "Reference", 3, true, "Основные средства"));
 
@@ -692,7 +741,7 @@ namespace BIS.ERP.Services
                     fields.Add(Field(Guid.Empty, "Подгруппа ОС", "asset_subgroup_id", "Reference", 23, false, "Подгруппы ОС"));
                     fields.Add(Field(Guid.Empty, "Вид ОС", "asset_type_id", "Reference", 24, false, "Виды ОС"));
                     fields.Add(Field(Guid.Empty, "Метод амортизации", "depreciation_method", "Reference", 25, false, "Методы амортизации ОС"));
-                    fields.Add(Field(Guid.Empty, "Срок полезного использования, мес.", "useful_life_months", "Int", 26));
+                    fields.Add(Field(Guid.Empty, "Срок полезного использования", "useful_life_months", "Int", 26));
                     fields.Add(Field(Guid.Empty, "Норма амортизации, %", "depreciation_rate", "Decimal", 27));
                     fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 28, false, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 29, false, "План счетов"));
@@ -703,7 +752,7 @@ namespace BIS.ERP.Services
                     RequireDocumentPostingFields(fields);
                     fields.Add(Field(Guid.Empty, "Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 20));
                     fields.Add(Field(Guid.Empty, "Метод амортизации", "depreciation_method", "Reference", 21, false, "Методы амортизации ОС"));
-                    fields.Add(Field(Guid.Empty, "Срок полезного использования, мес.", "useful_life_months", "Int", 22));
+                    fields.Add(Field(Guid.Empty, "Срок полезного использования", "useful_life_months", "Int", 22));
                     fields.Add(Field(Guid.Empty, "Норма амортизации, %", "depreciation_rate", "Decimal", 23));
                     fields.Add(Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 24, true, "План счетов"));
                     fields.Add(Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 25, true, "План счетов"));
@@ -755,6 +804,41 @@ namespace BIS.ERP.Services
             return fields;
         }
 
+        private static List<MetadataField> FixedAssetMovementDocumentFields()
+        {
+            var fields = new List<MetadataField>
+            {
+                Field(Guid.Empty, "Номер", "doc_number", "String", 1, true),
+                Field(Guid.Empty, "Дата", "doc_date", "DateTime", 2, true),
+                Field(Guid.Empty, "Вид документа ОС", "asset_document_entry_id", "Reference", 3, true, "Ввод нового документа ОС"),
+                Field(Guid.Empty, "№ счет-фактуры", "invoice_number", "String", 4),
+                Field(Guid.Empty, "Серия/№ бланка", "tax_blank_number", "String", 5),
+                Field(Guid.Empty, "Счет расчетов", "settlement_account", "Reference", 6, false, "План счетов"),
+                Field(Guid.Empty, "Организация", "organization_id", "Reference", 7, false, "Организации"),
+                Field(Guid.Empty, "Вид покупки", "purchase_kind_id", "Reference", 8, false, "Типы поставки"),
+                Field(Guid.Empty, "Вид НДС", "vat_type_id", "Reference", 9, false, "Налоги"),
+                Field(Guid.Empty, "Вид оплаты", "payment_type_id", "Reference", 10, false, "Виды оплаты"),
+                Field(Guid.Empty, "Вид налога с продаж", "sales_tax_type_id", "Reference", 11, false, "Налоги"),
+                Field(Guid.Empty, "Валюта", "currency_id", "Reference", 12, false, "Справочник валют"),
+                Field(Guid.Empty, "Курс валюты", "exchange_rate", "Decimal", 13),
+                Field(Guid.Empty, "Основное средство", "asset_id", "Reference", 14, false, "Основные средства"),
+                Field(Guid.Empty, "Счет операции", "operation_account", "Reference", 15, false, "План счетов"),
+                Field(Guid.Empty, "Без НДС", "amount_without_vat", "Decimal", 16),
+                Field(Guid.Empty, "НДС", "vat_amount", "Decimal", 17),
+                Field(Guid.Empty, "% НДС", "vat_rate", "Decimal", 18),
+                Field(Guid.Empty, "Налог с продаж", "sales_tax_amount", "Decimal", 19),
+                Field(Guid.Empty, "Итого", "total_amount", "Decimal", 20),
+                Field(Guid.Empty, "Сумма", "amount", "Decimal", 21, true),
+                Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 22),
+                Field(Guid.Empty, "Счет дебета", "debit_account", "Reference", 23, false, "План счетов"),
+                Field(Guid.Empty, "Счет кредита", "credit_account", "Reference", 24, false, "План счетов"),
+                Field(Guid.Empty, "Основание", "basis", "String", 25),
+                Field(Guid.Empty, "Примечание", "description", "String", 26),
+                Field(Guid.Empty, "Проведен", "is_posted", "Bool", 27)
+            };
+            Reorder(fields);
+            return fields;
+        }
         private static void RequireDocumentPostingFields(List<MetadataField> fields)
         {
             foreach (var field in fields.Where(field =>
@@ -990,6 +1074,18 @@ namespace BIS.ERP.Services
             }
         }
 
+        private static Dictionary<string, object> FixedAssetDocumentEntry(
+            int order,
+            string name,
+            string movementKind,
+            string targetDocumentName) => Row(
+            ("Код", order.ToString()),
+            ("Наименование", name),
+            ("Вид движения", movementKind),
+            ("Документ ОС", targetDocumentName),
+            ("Порядок", order),
+            ("Описание", $"FoxPro: {name} / {movementKind}"),
+            ("Активен", true));
         private static Dictionary<string, object> Row(params (string Key, object Value)[] values)
         {
             var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
