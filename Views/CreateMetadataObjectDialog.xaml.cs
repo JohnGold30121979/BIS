@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -61,3 +61,4 @@ namespace BIS.ERP.Views
         public string Name { get; set; } = string.Empty;
     }
 }
+

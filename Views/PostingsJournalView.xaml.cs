@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -175,7 +175,7 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            dialog.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Обороты по счету");
         }
 
         private async void OnOpenJournalReportClick(object sender, RoutedEventArgs e)
@@ -574,7 +574,7 @@ namespace BIS.ERP.Views
 
             var dialog = new PostingDetailsDialog(selected);
             dialog.Owner = Window.GetWindow(this);
-            dialog.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {selected.DocumentNumber}");
         }
 
         private async Task<bool> TryOpenInvoiceFromPostingAsync(PostingViewModel posting)
@@ -640,3 +640,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+

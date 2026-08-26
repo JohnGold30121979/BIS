@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -73,7 +73,10 @@ namespace BIS.ERP.Views
             var dialog = new EmployeeDialog(null, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Добавление сотрудника") == true)
             {
                 await _employeeService.AddEmployeeAsync(dialog.Employee);
                 await LoadEmployees();
@@ -90,7 +93,10 @@ namespace BIS.ERP.Views
             var dialog = new EmployeeDialog(selected, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Редактирование сотрудника") == true)
             {
                 await _employeeService.UpdateEmployeeAsync(dialog.Employee);
                 await LoadEmployees();

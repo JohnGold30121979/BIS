@@ -118,3 +118,5 @@ namespace BIS.ERP.Views.Dialogs
         private void OnCancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
     }
 }
+
+

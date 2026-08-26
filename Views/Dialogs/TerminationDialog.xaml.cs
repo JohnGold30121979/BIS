@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using System;
 using System.Windows;
 using System.Windows.Controls;
@@ -33,3 +33,4 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
@@ -88,7 +88,7 @@ namespace BIS.ERP.Views
                 {
                     Owner = Window.GetWindow(this)
                 };
-                allPostingsDialog.ShowDialog();
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), allPostingsDialog, $"Все проводки: {row.DocNumber}");
                 return;
             }
 
@@ -96,7 +96,7 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            details.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), details, $"Детали проводки: {row.DocNumber}");
         }
 
         private void UpdateSelectedPostingDetails()
@@ -501,7 +501,10 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Платежное поручение") == true)
                 await LoadData();
         }
 
@@ -514,7 +517,10 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Редактирование платежного поручения") == true)
                 await LoadData();
         }
 
@@ -938,3 +944,5 @@ namespace BIS.ERP.Views
         public DateTime UpdatedAt { get; set; }
     }
 }
+
+

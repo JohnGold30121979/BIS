@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using BIS.ERP.Models;
@@ -55,3 +55,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -686,7 +686,7 @@ namespace BIS.ERP.Views
                 {
                     Owner = Window.GetWindow(this)
                 };
-                dialog.ShowDialog();
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Проводки по кассе: {selectedCashDesk.DisplayName}");
                 StatusText.Text = $"Продажи по кассе: {cashPostings.Count}";
             }
             catch (Exception ex)
@@ -986,7 +986,10 @@ namespace BIS.ERP.Views
                     Title = title
                 };
 
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        title) == true)
                 {
                     await LoadData();
                     MessageBox.Show("Документ успешно добавлен!", "Успех",
@@ -1020,7 +1023,10 @@ namespace BIS.ERP.Views
                     WindowStartupLocation = WindowStartupLocation.CenterOwner
                 };
 
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        "Редактирование кассового ордера") == true)
                 {
                     await LoadData();
                     MessageBox.Show("Документ успешно обновлен!", "Успех",
@@ -1629,7 +1635,7 @@ namespace BIS.ERP.Views
                 {
                     Owner = Window.GetWindow(this)
                 };
-                dialog.ShowDialog();
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, caption);
                 StatusText.Text = $"Закрытых дней: {rows.Count}";
             }
             catch (Exception ex)
@@ -1715,7 +1721,7 @@ namespace BIS.ERP.Views
                 {
                     Owner = Window.GetWindow(this)
                 };
-                dialog.ShowDialog();
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, caption);
                 StatusText.Text = $"Обороты открытого периода {periodText}";
             }
             catch (Exception ex)
@@ -2250,7 +2256,7 @@ namespace BIS.ERP.Views
                 {
                     Owner = Window.GetWindow(this)
                 };
-                previewWindow.ShowDialog();
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), previewWindow, caption);
                 StatusText.Text = "Формирование отчета завершено";
             }
             catch (Exception ex)
@@ -2492,7 +2498,7 @@ namespace BIS.ERP.Views
             };
 
             var dialog = new PostingDetailsDialog(posting) { Owner = Window.GetWindow(this) };
-            dialog.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}");
         }
 
         private static string ResolveCorrespondentAccount(CashOrderRow selected)
@@ -2609,6 +2615,11 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+
+
+
+
 
 
 

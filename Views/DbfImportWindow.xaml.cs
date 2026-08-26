@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
@@ -218,3 +218,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

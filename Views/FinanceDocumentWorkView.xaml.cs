@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -158,7 +158,10 @@ namespace BIS.ERP.Views
                 Owner = Window.GetWindow(this)
             };
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    _documentMetadata.Name) == true)
                 await LoadDataAsync();
         }
 
@@ -176,7 +179,10 @@ namespace BIS.ERP.Views
                 Owner = Window.GetWindow(this)
             };
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    $"Редактирование: {_documentMetadata.Name}") == true)
                 await LoadDataAsync();
         }
 
@@ -347,7 +353,7 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            dialog.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}");
         }
 
         private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) =>
@@ -611,4 +617,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 

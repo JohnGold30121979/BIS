@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -227,7 +227,10 @@ namespace BIS.ERP.Views
             var dialog = new PostingEditDialog(_document, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Добавление проводки") == true)
             {
                 await LoadData();
             }
@@ -253,7 +256,10 @@ namespace BIS.ERP.Views
                 var dialog = new PostingEditDialog(_document, _metadataService, id);
                 dialog.Owner = Window.GetWindow(this);
 
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        "Редактирование проводки") == true)
                 {
                     await LoadData();
                 }
@@ -311,9 +317,10 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var dialog = new PostingDetailsDialog(BuildPostingViewModel(selected));
+            var posting = BuildPostingViewModel(selected);
+            var dialog = new PostingDetailsDialog(posting);
             dialog.Owner = Window.GetWindow(this);
-            dialog.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}");
         }
 
         private async Task<bool> TryOpenInvoiceFromPostingAsync(
@@ -367,7 +374,14 @@ namespace BIS.ERP.Views
                 isReadOnly);
             dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true && !isReadOnly)
+            var result = isReadOnly
+                ? dialog.ShowDialog()
+                : await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Редактирование счет-фактуры");
+
+            if (result == true && !isReadOnly)
                 await LoadData();
 
             return true;
@@ -443,3 +457,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Windows;
 using BIS.ERP.Models.Configurator;
 
@@ -38,3 +38,5 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
+

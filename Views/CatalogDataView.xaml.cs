@@ -1156,7 +1156,10 @@ namespace BIS.ERP.Views
                     Owner = Window.GetWindow(this)
                 };
 
-                if (fixedAssetDialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        fixedAssetDialog,
+                        "Добавление: Основное средство") == true)
                 {
                     try
                     {
@@ -1185,7 +1188,10 @@ namespace BIS.ERP.Views
             var dialog = new CatalogItemDialog(_catalog, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    $"Добавление: {_catalog.Name}") == true)
             {
                 try
                 {
@@ -1230,7 +1236,10 @@ namespace BIS.ERP.Views
                     Owner = Window.GetWindow(this)
                 };
 
-                if (fixedAssetDialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        fixedAssetDialog,
+                        "Редактирование: Основное средство") == true)
                 {
                     try
                     {
@@ -1259,7 +1268,10 @@ namespace BIS.ERP.Views
             var dialog = new CatalogItemDialog(_catalog, _metadataService, existingData);
             dialog.Owner = Window.GetWindow(this);
 
-            if (dialog.ShowDialog() == true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    $"Редактирование: {_catalog.Name}") == true)
             {
                 try
                 {
@@ -1591,3 +1603,6 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+
+

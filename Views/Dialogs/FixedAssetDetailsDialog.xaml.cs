@@ -743,7 +743,7 @@ namespace BIS.ERP.Views
             try
             {
                 BuildItemData();
-                DialogResult = true;
+                BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
             }
             catch (Exception ex)
             {
@@ -899,7 +899,7 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            DialogResult = false;
+            BIS.ERP.Services.MdiDialogService.CloseWithResult(this, false);
         }
 
         private void DevelopmentButton_Click(object sender, RoutedEventArgs e)

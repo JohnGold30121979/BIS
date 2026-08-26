@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.ObjectModel;
@@ -742,7 +742,7 @@ namespace BIS.ERP.Views
                 else
                     await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
 
-                DialogResult = true;
+                BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
             }
             catch (Exception ex)
@@ -867,7 +867,7 @@ namespace BIS.ERP.Views
 
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            BIS.ERP.Services.MdiDialogService.CloseWithResult(this, false);
             Close();
         }
 
@@ -1437,5 +1437,6 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
+
 
 

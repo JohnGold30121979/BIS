@@ -276,9 +276,18 @@ namespace BIS.ERP.Views
                 return null;
             }
 
+            var entryCode = ReadString(dialog.SelectedItem, "Код", "code");
+            var entryName = ReadString(dialog.SelectedItem, "Наименование", "name");
+            var entryCaption = string.IsNullOrWhiteSpace(entryCode)
+                ? entryName
+                : string.IsNullOrWhiteSpace(entryName)
+                    ? entryCode
+                    : $"{entryCode} - {entryName}";
+
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Вид документа ОС"] = entryId.ToString()
+                ["Вид документа ОС"] = entryId.ToString(),
+                ["_FixedAssetMovementTypeTitle"] = entryCaption
             };
         }
 
@@ -325,7 +334,10 @@ namespace BIS.ERP.Views
             {
                 var dialog = new PostingEditDialog(_documentMetadata, _metadataService);
                 dialog.Owner = Window.GetWindow(this);
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        "Добавление проводки") == true)
                 {
                     await LoadData();
                     MessageBox.Show("Проводка добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -342,7 +354,10 @@ namespace BIS.ERP.Views
 
                 var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService, initialData: initialData);
                 dialog.Owner = Window.GetWindow(this);
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        $"Добавление: {_documentMetadata.Name}") == true)
                 {
                     await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
@@ -353,7 +368,10 @@ namespace BIS.ERP.Views
             {
                 var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService);
                 dialog.Owner = Window.GetWindow(this);
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        $"Добавление: {_documentMetadata.Name}") == true)
                 {
                     await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
@@ -379,7 +397,10 @@ namespace BIS.ERP.Views
             {
                 var dialog = new PostingEditDialog(_documentMetadata, _metadataService, id);
                 dialog.Owner = Window.GetWindow(this);
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        "Редактирование проводки") == true)
                 {
                     await LoadData();
                     MessageBox.Show("Проводка обновлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -389,7 +410,10 @@ namespace BIS.ERP.Views
             {
                 var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService, id);
                 dialog.Owner = Window.GetWindow(this);
-                if (dialog.ShowDialog() == true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        $"Редактирование: {_documentMetadata.Name}") == true)
                 {
                     await _metadataService.UpdateDynamicRecordAsync(_documentMetadata.Id, id, dialog.ItemData);
                     await LoadData();
@@ -478,3 +502,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+

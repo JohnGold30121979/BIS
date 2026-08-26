@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using System;
@@ -233,7 +233,7 @@ namespace BIS.ERP.Views.Dialogs
                 Employee.PassportIssueDate = ReadDateText(txtPassportIssueDate, "Дата выдачи");
                 Employee.IsActive = Employee.Status == "Активен";             
 
-                DialogResult = true;
+                BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
             }
             catch (Exception ex)
@@ -244,7 +244,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            BIS.ERP.Services.MdiDialogService.CloseWithResult(this, false);
             Close();
         }
 
@@ -500,3 +500,4 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+

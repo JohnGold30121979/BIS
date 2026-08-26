@@ -41,7 +41,7 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
 
     public UserControl? CurrentContent => SelectedDocument?.Content;
 
-    public void OpenDocument(string key, string title, UserControl content, bool activate = true)
+    public MdiDocumentItem OpenDocument(string key, string title, UserControl content, bool activate = true)
     {
         if (string.IsNullOrWhiteSpace(key))
             key = content.GetType().FullName ?? Guid.NewGuid().ToString("N");
@@ -55,13 +55,53 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
         {
             if (activate)
                 SelectedDocument = existing;
-            return;
+            return existing;
         }
 
         var item = new MdiDocumentItem(key, title, content);
         Documents.Add(item);
         if (activate)
             SelectedDocument = item;
+
+        return item;
+    }
+
+    public MdiDocumentItem OpenWindow(
+        string key,
+        string title,
+        Window window,
+        bool activate = true,
+        Action? documentClosed = null,
+        bool fillWorkspace = false)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            key = $"{window.GetType().FullName}:{Guid.NewGuid():N}";
+        if (string.IsNullOrWhiteSpace(title))
+            title = string.IsNullOrWhiteSpace(window.Title) ? window.GetType().Name : window.Title;
+
+        var existing = Documents.FirstOrDefault(document =>
+            string.Equals(document.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            if (activate)
+                SelectedDocument = existing;
+            return existing;
+        }
+
+        var actualKey = key;
+        var host = new MdiDialogHostControl(window, () => CloseDocumentByKey(actualKey), documentClosed, fillWorkspace);
+        return OpenDocument(actualKey, title, host, activate);
+    }
+
+    public void CloseDocumentByKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return;
+
+        var document = Documents.FirstOrDefault(item =>
+            string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (document != null)
+            CloseDocument(document);
     }
 
     public void CloseCurrentDocument()
@@ -74,6 +114,9 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
 
     public void CloseDocument(MdiDocumentItem document)
     {
+        if (document.Content is MdiDialogHostControl hostedDialog)
+            hostedDialog.NotifyDocumentClosed();
+
         var index = Documents.IndexOf(document);
         if (index < 0)
             return;
@@ -87,6 +130,12 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
 
     public void CloseAllDocuments()
     {
+        foreach (var document in Documents.ToList())
+        {
+            if (document.Content is MdiDialogHostControl hostedDialog)
+                hostedDialog.NotifyDocumentClosed();
+        }
+
         Documents.Clear();
         SelectedDocument = null;
     }

@@ -968,7 +968,7 @@ namespace BIS.ERP.Views
                 if (!ValidateChartOfAccountsCatalogLinks())
                     return;
 
-                DialogResult = true;
+                BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
             }
             catch (Exception ex)
@@ -1186,7 +1186,7 @@ namespace BIS.ERP.Views
         }
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            BIS.ERP.Services.MdiDialogService.CloseWithResult(this, false);
             Close();
         }
 
@@ -1366,3 +1366,4 @@ namespace BIS.ERP.Views
     }
 
 }
+

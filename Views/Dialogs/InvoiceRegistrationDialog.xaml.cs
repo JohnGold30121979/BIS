@@ -90,7 +90,7 @@ namespace BIS.ERP.Views.Dialogs
                     _invoiceId,
                     TaxBlankNumberBox.Text,
                     ModuleCodeBox.Text);
-                DialogResult = true;
+                BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
             }
             catch (Exception ex)
@@ -101,8 +101,9 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
+            BIS.ERP.Services.MdiDialogService.CloseWithResult(this, false);
             Close();
         }
     }
 }
+
