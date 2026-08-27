@@ -259,13 +259,13 @@ namespace BIS.ERP.Views
                 return null;
             }
 
+            var owner = Window.GetWindow(this);
             var dialog = new ReferenceSelectionDialog(activeEntries, "Код", "Наименование")
             {
-                Owner = Window.GetWindow(this),
                 Title = "Ввод нового документа ОС"
             };
 
-            if (dialog.ShowDialog() != true || dialog.SelectedItem == null)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true || dialog.SelectedItem == null)
                 return null;
 
             if (!dialog.SelectedItem.TryGetValue("Id", out var id) ||

@@ -61,8 +61,9 @@ namespace BIS.ERP.Views
         private async void OnAddOpeningClick(object sender, RoutedEventArgs e)
         {
             var accounts = await LoadAccountsAsync();
-            var dialog = new AccountSelectionDialog(accounts) { Owner = Window.GetWindow(this) };
-            if (dialog.ShowDialog() != true)
+            var owner = Window.GetWindow(this);
+            var dialog = new AccountSelectionDialog(accounts);
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true)
                 return;
             _openings.Add(new OpeningBalanceEditorRow
             {

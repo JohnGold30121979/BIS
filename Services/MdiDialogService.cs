@@ -39,7 +39,21 @@ public static class MdiDialogService
         if (TryShowInWorkspace(owner, dialog, title, key))
             return;
 
-        dialog.Owner = owner;
+        SetSafeOwner(dialog, owner);
+        dialog.ShowDialog();
+    }
+
+    public static void ShowInWorkspaceOrDialog(
+        Window? owner,
+        Window dialog,
+        string? title,
+        string? key,
+        bool fillWorkspace)
+    {
+        if (TryShowInWorkspace(owner, dialog, title, key, activate: true, fillWorkspace: fillWorkspace))
+            return;
+
+        SetSafeOwner(dialog, owner);
         dialog.ShowDialog();
     }
 
@@ -53,7 +67,7 @@ public static class MdiDialogService
         var workspace = FindWorkspace(owner) ?? FindWorkspace(Application.Current?.MainWindow);
         if (workspace == null)
         {
-            dialog.Owner = owner;
+            SetSafeOwner(dialog, owner);
             return Task.FromResult(dialog.ShowDialog());
         }
 
@@ -87,7 +101,14 @@ public static class MdiDialogService
         if (CompleteHostedDialog(dialog, result))
             return;
 
-        dialog.DialogResult = result;
+        try
+        {
+            dialog.DialogResult = result;
+        }
+        catch (InvalidOperationException)
+        {
+            dialog.Close();
+        }
     }
 
     private static bool CompleteHostedDialog(Window dialog, bool? result, bool closeDocument = true)
@@ -108,6 +129,13 @@ public static class MdiDialogService
         return true;
     }
 
+    private static void SetSafeOwner(Window dialog, Window? owner)
+    {
+        if (owner == null || !owner.IsVisible)
+            return;
+
+        dialog.Owner = owner;
+    }
     private static MdiWorkspaceControl? FindWorkspace(DependencyObject? root)
     {
         if (root == null)

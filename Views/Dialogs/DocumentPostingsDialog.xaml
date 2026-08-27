@@ -1,8 +1,8 @@
 <Window x:Class="BIS.ERP.Views.Dialogs.DocumentPostingsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Проводки документа" Height="520" Width="980" MinHeight="420" MinWidth="760"
-        WindowStartupLocation="CenterOwner" ResizeMode="CanResize" UseLayoutRounding="True" SnapsToDevicePixels="True">
+        Title="Проводки документа" Height="Auto" Width="Auto"
+        ResizeMode="CanResize" UseLayoutRounding="True" SnapsToDevicePixels="True">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>

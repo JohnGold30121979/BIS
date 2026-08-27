@@ -7,6 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>BIS.ERP.Updater</AssemblyName>
     <RootNamespace>BIS.ERP.Updater</RootNamespace>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
-
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true' Or '$(SelfContained)' == 'true'">
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
 </Project>

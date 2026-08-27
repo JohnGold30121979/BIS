@@ -21,7 +21,7 @@ namespace BIS.ERP.Views.Dialogs
             InitializeComponent();
             UpdatesGrid.ItemsSource = _updates;
             DescriptionText.Text =
-                $"Сборка и установка зашифрованных пакетов .bisapp для файлов приложения. Текущая версия: {_updateService.CurrentAppVersion}.";
+                $"Сборка self-contained single-file публикации и установка зашифрованных пакетов .bisapp. Текущая версия: {_updateService.CurrentAppVersion}.";
             Loaded += async (_, _) => await RefreshAsync();
         }
 
@@ -54,8 +54,8 @@ namespace BIS.ERP.Views.Dialogs
         {
             var folderDialog = new OpenFolderDialog
             {
-                Title = "Выберите папку публикации программы",
-                InitialDirectory = AppContext.BaseDirectory
+                Title = "Выберите папку проекта BIS.ERP или готовую self-contained публикацию",
+                InitialDirectory = _updateService.SuggestedUpdateSourceFolder
             };
 
             if (folderDialog.ShowDialog(this) != true)
@@ -107,7 +107,7 @@ namespace BIS.ERP.Views.Dialogs
             try
             {
                 Mouse.OverrideCursor = Cursors.Wait;
-                StatusText.Text = "Сборка .bisapp...";
+                StatusText.Text = "Сборка self-contained публикации и .bisapp...";
                 await _updateService.CreateUpdateFromFolderAsync(folderDialog.FolderName, saveDialog.FileName, manifest);
                 var info = await _updateService.InspectUpdateAsync(saveDialog.FileName);
 

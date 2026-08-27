@@ -374,12 +374,10 @@ namespace BIS.ERP.Views
                 isReadOnly);
             dialog.Owner = Window.GetWindow(this);
 
-            var result = isReadOnly
-                ? dialog.ShowDialog()
-                : await MdiDialogService.ShowInWorkspaceForResultAsync(
-                    Window.GetWindow(this),
-                    dialog,
-                    "Редактирование счет-фактуры");
+            var result = await MdiDialogService.ShowInWorkspaceForResultAsync(
+                Window.GetWindow(this),
+                dialog,
+                isReadOnly ? "Просмотр счет-фактуры" : "Редактирование счет-фактуры");
 
             if (result == true && !isReadOnly)
                 await LoadData();

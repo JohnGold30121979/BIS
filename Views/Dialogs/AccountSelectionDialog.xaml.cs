@@ -74,8 +74,7 @@ namespace BIS.ERP.Views
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
-            Close();
+            MdiDialogService.CloseWithResult(this, false);
         }
 
         private void AccountsGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -167,8 +166,7 @@ namespace BIS.ERP.Views
                 }
 
                 SelectedAccount = new Dictionary<string, object>(originalAccount);
-                DialogResult = true;
-                Close();
+                MdiDialogService.CloseWithResult(this, true);
             }
             else
             {

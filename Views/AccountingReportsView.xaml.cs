@@ -94,12 +94,10 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new AccountSelectionDialog(accounts)
-                {
-                    Owner = Window.GetWindow(this)
-                };
+                var owner = Window.GetWindow(this);
+                var dialog = new AccountSelectionDialog(accounts);
 
-                if (dialog.ShowDialog() != true || dialog.SelectedAccount == null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true || dialog.SelectedAccount == null)
                     return;
 
                 _trialBalanceAccountCode = ReadReportString(dialog.SelectedAccount, "Код", "code", "Code", "Счет", "account_code");
@@ -163,12 +161,12 @@ namespace BIS.ERP.Views
                     ["Первичная"] = LocalizationService.DisplayValue(org.IsPrimary)
                 }).ToList();
 
+                var owner = Window.GetWindow(this);
                 var dialog = new ReferenceSelectionDialog(rows, "Код", "Наименование")
                 {
-                    Owner = Window.GetWindow(this),
                     Title = $"Выбор: Организации ({organizations.Count})"
                 };
-                if (dialog.ShowDialog() != true || dialog.SelectedItem == null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true || dialog.SelectedItem == null)
                     return;
 
                 var selectedOrg = TryReadGuid(dialog.SelectedItem, out var selectedId, "Id")

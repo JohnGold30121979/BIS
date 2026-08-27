@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -50,15 +50,15 @@ namespace BIS.ERP.Views
                 MinWidth = 200
             };
 
-            button.Click += (_, _) =>
+            button.Click += async (_, _) =>
             {
                 var dialog = new AccountSelectionDialog(
                     BuildAccountRows(accountAnalytics.GetAccountsForModule(moduleCodeOrName)))
                 {
-                    Owner = owner
+                    Title = "Выбор счета"
                 };
 
-                if (dialog.ShowDialog() != true || dialog.SelectedAccount == null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true || dialog.SelectedAccount == null)
                     return;
 
                 var selected = accountAnalytics.FindAccount(dialog.SelectedAccount.GetValueOrDefault("Id"));

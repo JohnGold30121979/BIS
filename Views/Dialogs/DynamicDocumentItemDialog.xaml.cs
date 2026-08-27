@@ -165,14 +165,14 @@ namespace BIS.ERP.Views.Dialogs
             FieldsPanel.Children.Add(detailsGrid);
 
             var lineGrid = CreateFixedAssetLineGrid();
-            await AddFieldToGridAsync(lineGrid, 1, 0, catalogsDict, usedFields, "Основное средство");
-            await AddFieldToGridAsync(lineGrid, 1, 1, catalogsDict, usedFields, "Счет операции");
-            await AddFieldToGridAsync(lineGrid, 1, 2, catalogsDict, usedFields, "Без НДС");
-            await AddFieldToGridAsync(lineGrid, 1, 3, catalogsDict, usedFields, "НДС");
-            await AddFieldToGridAsync(lineGrid, 1, 4, catalogsDict, usedFields, "% НДС");
-            await AddFieldToGridAsync(lineGrid, 1, 5, catalogsDict, usedFields, "Налог с продаж");
-            await AddFieldToGridAsync(lineGrid, 1, 6, catalogsDict, usedFields, "Сумма", "amount");
-            await AddFieldToGridAsync(lineGrid, 1, 7, catalogsDict, usedFields, "Сумма в валюте");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 0, catalogsDict, usedFields, "Основное средство");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 1, catalogsDict, usedFields, "Счет операции");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 2, catalogsDict, usedFields, "Без НДС");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 3, catalogsDict, usedFields, "НДС");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 4, catalogsDict, usedFields, "% НДС");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 5, catalogsDict, usedFields, "Налог с продаж");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 6, catalogsDict, usedFields, "Сумма", "amount");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 7, catalogsDict, usedFields, "Сумма в валюте");
             FieldsPanel.Children.Add(CreateSection("Строка основного средства", new ScrollViewer
             {
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -426,18 +426,33 @@ namespace BIS.ERP.Views.Dialogs
             return await AddFieldByMetadataToGridAsync(grid, row, column, field, catalogsDict, usedFields);
         }
 
+        private async Task<bool> AddCompactFieldToGridAsync(
+            Grid grid,
+            int row,
+            int column,
+            Dictionary<string, MetadataObject> catalogsDict,
+            ISet<string> usedFields,
+            params string[] aliases)
+        {
+            var field = FindDialogField(aliases);
+            if (field == null)
+                return false;
+
+            return await AddFieldByMetadataToGridAsync(grid, row, column, field, catalogsDict, usedFields, showLabel: false);
+        }
         private async Task<bool> AddFieldByMetadataToGridAsync(
             Grid grid,
             int row,
             int column,
             MetadataField field,
             Dictionary<string, MetadataObject> catalogsDict,
-            ISet<string> usedFields)
+            ISet<string> usedFields,
+            bool showLabel = true)
         {
             if (_fieldControls.ContainsKey(field.Name))
                 return false;
 
-            var panel = await CreateFieldPanelAsync(field, catalogsDict);
+            var panel = await CreateFieldPanelAsync(field, catalogsDict, showLabel);
             Grid.SetRow(panel, row);
             Grid.SetColumn(panel, column);
             grid.Children.Add(panel);
@@ -463,21 +478,36 @@ namespace BIS.ERP.Views.Dialogs
 
         private async Task<StackPanel> CreateFieldPanelAsync(
             MetadataField field,
-            Dictionary<string, MetadataObject> catalogsDict)
+            Dictionary<string, MetadataObject> catalogsDict,
+            bool showLabel = true)
         {
-            var panel = new StackPanel { Margin = new Thickness(0, 0, 10, 10) };
-
-            panel.Children.Add(new TextBlock
+            var panel = new StackPanel
             {
-                Text = field.Name,
-                FontWeight = FontWeights.Bold,
-                FontSize = 12,
-                Margin = new Thickness(0, 0, 0, 4)
-            });
+                Margin = showLabel
+                    ? new Thickness(0, 0, 10, 10)
+                    : new Thickness(3, 2, 3, 4)
+            };
+
+            if (showLabel)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = field.Name,
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 12,
+                    Margin = new Thickness(0, 0, 0, 4)
+                });
+            }
 
             var inputControl = await CreateControlAsync(field, catalogsDict);
             if (_isReadOnly)
                 ApplyReadOnly(inputControl);
+
+            if (!showLabel && inputControl is FrameworkElement inputElement)
+            {
+                inputElement.MinHeight = 30;
+                inputElement.Margin = new Thickness(0);
+            }
 
             if (_metadata.ObjectType == "Document" &&
                 MetadataService.IsDocumentNumberFieldName(field.Name) &&

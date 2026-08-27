@@ -446,12 +446,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new AccountSelectionDialog(accountsData)
-                {
-                    Owner = this
-                };
+                var dialog = new AccountSelectionDialog(accountsData) { Title = "Выбор счета" };
 
-                if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
                 {
                     var accountCode = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
                     var accountName = dialog.SelectedAccount.GetValueOrDefault("Наименование")?.ToString() ?? string.Empty;

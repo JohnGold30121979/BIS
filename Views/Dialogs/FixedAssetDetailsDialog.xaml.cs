@@ -535,11 +535,10 @@ namespace BIS.ERP.Views
 
             var dialog = new ReferenceSelectionDialog(rows, firstField, secondField, maps)
             {
-                Owner = this,
                 Title = $"Выбор: {referenceCatalog.Name}"
             };
 
-            if (dialog.ShowDialog() != true || dialog.SelectedItem == null)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true || dialog.SelectedItem == null)
                 return;
 
             var selected = dialog.SelectedItem;
@@ -560,12 +559,9 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var dialog = new CatalogItemDialog(referenceCatalog, _metadataService)
-            {
-                Owner = this
-            };
+            var dialog = new CatalogItemDialog(referenceCatalog, _metadataService);
 
-            if (dialog.ShowDialog() != true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
                 return;
 
             var createdId = await _metadataService.CreateDynamicRecordAsync(referenceCatalog.Id, dialog.ItemData);
@@ -599,12 +595,9 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var dialog = new CatalogItemDialog(referenceCatalog, _metadataService, selected)
-            {
-                Owner = this
-            };
+            var dialog = new CatalogItemDialog(referenceCatalog, _metadataService, selected);
 
-            if (dialog.ShowDialog() != true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
                 return;
 
             await _metadataService.UpdateDynamicRecordAsync(referenceCatalog.Id, selectedId.Value, dialog.ItemData);

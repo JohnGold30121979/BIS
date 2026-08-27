@@ -686,7 +686,7 @@ namespace BIS.ERP.Views
                 {
                     Owner = Window.GetWindow(this)
                 };
-                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Проводки по кассе: {selectedCashDesk.DisplayName}");
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Проводки по кассе: {selectedCashDesk.DisplayName}", null, fillWorkspace: true);
                 StatusText.Text = $"Продажи по кассе: {cashPostings.Count}";
             }
             catch (Exception ex)

@@ -682,7 +682,7 @@ namespace BIS.ERP.Views.Dialogs
             };
         }
 
-        private void OnSelectAccountClick(object sender, RoutedEventArgs e)
+        private async void OnSelectAccountClick(object sender, RoutedEventArgs e)
         {
             if (_isReadOnlyMode)
                 return;
@@ -690,25 +690,21 @@ namespace BIS.ERP.Views.Dialogs
             if (_accounts.Count == 0)
                 return;
 
-            var dialog = new AccountSelectionDialog(_accounts);
-            dialog.Owner = this;
-            if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
+            var dialog = new AccountSelectionDialog(_accounts) { Title = "Выбор счета" };
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
             {
                 SetHeaderAccount(dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty);
             }
         }
 
-        private void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
+        private async void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
         {
             if (_isReadOnlyMode || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
                 return;
 
-            var dialog = new AccountSelectionDialog(_accounts)
-            {
-                Owner = this
-            };
+            var dialog = new AccountSelectionDialog(_accounts) { Title = "Выбор счета" };
 
-            if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
             {
                 var accountCode = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
                 if (IsSameAccount(accountCode, _selectedHeaderAccountCode))
@@ -848,8 +844,7 @@ namespace BIS.ERP.Views.Dialogs
                 noteContains == null ? _document.Name : $"{_document.Name} (строка)",
                 invoice.DocNumber,
                 postings);
-            dialog.Owner = this;
-            dialog.ShowDialog();
+            MdiDialogService.ShowInWorkspaceOrDialog(this, dialog, dialog.Title, null, fillWorkspace: true);
         }
 
         private void OnRecalculateClick(object sender, RoutedEventArgs e)

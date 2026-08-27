@@ -275,12 +275,10 @@ namespace BIS.ERP.Views
 
             var dialog = new InvoiceEditDialog(_documentMetadata, _metadataService, _invoiceService, invoiceId, isReadOnly);
             dialog.Owner = Window.GetWindow(this);
-            var result = isReadOnly
-                ? dialog.ShowDialog()
-                : await MdiDialogService.ShowInWorkspaceForResultAsync(
-                    Window.GetWindow(this),
-                    dialog,
-                    $"Редактирование: {_documentMetadata.Name}");
+            var result = await MdiDialogService.ShowInWorkspaceForResultAsync(
+                Window.GetWindow(this),
+                dialog,
+                isReadOnly ? $"Просмотр: {_documentMetadata.Name}" : $"Редактирование: {_documentMetadata.Name}");
 
             if (result == true && !isReadOnly)
                 await LoadDataAsync();
@@ -325,7 +323,7 @@ namespace BIS.ERP.Views
 
                 var dialog = new DocumentPostingsDialog(_documentMetadata.Name, selected.DocNumber, postings);
                 dialog.Owner = Window.GetWindow(this);
-                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Все проводки: {selected.DocNumber}");
+                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Все проводки: {selected.DocNumber}", null, fillWorkspace: true);
             }
             catch (Exception ex)
             {

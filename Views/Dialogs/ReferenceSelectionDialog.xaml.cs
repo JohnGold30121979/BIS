@@ -155,15 +155,13 @@ namespace BIS.ERP.Views
             SelectedItem = ItemsGrid.SelectedItem as Dictionary<string, object>;
             if (SelectedItem != null)
             {
-                DialogResult = true;
-                Close();
+                MdiDialogService.CloseWithResult(this, true);
             }
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
-            DialogResult = false;
-            Close();
+            MdiDialogService.CloseWithResult(this, false);
         }
         private static Binding CreateValueBinding(string key)
         {

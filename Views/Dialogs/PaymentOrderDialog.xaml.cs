@@ -329,7 +329,7 @@ namespace BIS.ERP.Views
             });
         }
 
-        private void SelectPaymentClassification_Click(object sender, RoutedEventArgs e)
+        private async void SelectPaymentClassification_Click(object sender, RoutedEventArgs e)
         {
             if (_paymentClassificationRows.Count == 0)
             {
@@ -343,11 +343,10 @@ namespace BIS.ERP.Views
 
             var dialog = new ReferenceSelectionDialog(_paymentClassificationRows, "Код", "Наименование")
             {
-                Owner = this,
                 Title = "Выбор классификации платежа"
             };
 
-            if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedItem != null)
                 ApplySelectedPaymentClassification(dialog.SelectedItem.GetValueOrDefault("Id"));
         }
 
@@ -366,10 +365,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new AccountSelectionDialog(accountsData);
-                dialog.Owner = this;
+                var dialog = new AccountSelectionDialog(accountsData) { Title = "Выбор счета" };
 
-                if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
                 {
                     var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
                     var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";

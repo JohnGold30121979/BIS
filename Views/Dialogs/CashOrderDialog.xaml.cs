@@ -176,6 +176,7 @@ namespace BIS.ERP.Views
                         // Загружаем корреспондирующий счет. В старых записях поле могло быть пустым,
                         // хотя Дт/Кт уже сохранены, поэтому восстанавливаем значение из проводки.
                         ApplyExistingCorrespondentAccount(data.Record);
+                        RefreshPostingPreview();
 
                         // Загружаем организацию
                         SelectComboByRecordValue(OrganizationCombo, data.Record, "Организация");
@@ -413,11 +414,10 @@ namespace BIS.ERP.Views
 
                 var dialog = new ReferenceSelectionDialog(rows, "Наименование кассы", "Счет", referenceMaps)
                 {
-                    Owner = this,
                     Title = "Выбор: Кассы"
                 };
 
-                if (dialog.ShowDialog() == true &&
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true &&
                     dialog.SelectedItem != null &&
                     dialog.SelectedItem.TryGetValue("Id", out var idValue) &&
                     Guid.TryParse(idValue?.ToString(), out var selectedId))
@@ -445,12 +445,9 @@ namespace BIS.ERP.Views
                 if (cashDeskCatalog == null)
                     return;
 
-                var dialog = new CatalogItemDialog(cashDeskCatalog, _metadataService)
-                {
-                    Owner = this
-                };
+                var dialog = new CatalogItemDialog(cashDeskCatalog, _metadataService);
 
-                if (dialog.ShowDialog() != true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
                     return;
 
                 var createdId = await _metadataService.CreateDynamicRecordAsync(cashDeskCatalog.Id, dialog.ItemData);
@@ -496,12 +493,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new CatalogItemDialog(cashDeskCatalog, _metadataService, cashDesk)
-                {
-                    Owner = this
-                };
+                var dialog = new CatalogItemDialog(cashDeskCatalog, _metadataService, cashDesk);
 
-                if (dialog.ShowDialog() != true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
                     return;
 
                 await _metadataService.UpdateDynamicRecordAsync(cashDeskCatalog.Id, selected.Id, dialog.ItemData);
@@ -533,10 +527,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new AccountSelectionDialog(accountsData);
-                dialog.Owner = this;
+                var dialog = new AccountSelectionDialog(accountsData) { Title = "Выбор счета" };
 
-                if (dialog.ShowDialog() == true && dialog.SelectedAccount != null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
                 {
                     var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
                     var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
@@ -1091,6 +1084,18 @@ namespace BIS.ERP.Views
                 }
             }
 
+            foreach (var key in keys)
+            {
+                var match = row.FirstOrDefault(pair =>
+                    string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(match.Key) && match.Value != null && match.Value != DBNull.Value)
+                {
+                    var text = match.Value.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                        return text;
+                }
+            }
+
             return null;
         }
 
@@ -1169,10 +1174,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new ReferenceSelectionDialog(employeesData, "Табельный номер", "ФИО");
-                dialog.Owner = this;
+                var dialog = new ReferenceSelectionDialog(employeesData, "Табельный номер", "ФИО") { Title = "Выбор: Сотрудники" };
 
-                if (dialog.ShowDialog() == true && dialog.SelectedItem != null)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedItem != null)
                 {
                     var employee = dialog.SelectedItem;
                     var displayName = $"{employee.GetValueOrDefault("Табельный номер")} - {employee.GetValueOrDefault("ФИО")}";
@@ -1203,12 +1207,9 @@ namespace BIS.ERP.Views
                 if (employeeCatalog == null)
                     return;
 
-                var dialog = new CatalogItemDialog(employeeCatalog, _metadataService)
-                {
-                    Owner = this
-                };
+                var dialog = new CatalogItemDialog(employeeCatalog, _metadataService);
 
-                if (dialog.ShowDialog() != true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
                     return;
 
                 var createdId = await _metadataService.CreateDynamicRecordAsync(employeeCatalog.Id, dialog.ItemData);
@@ -1255,12 +1256,9 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new CatalogItemDialog(employeeCatalog, _metadataService, employee)
-                {
-                    Owner = this
-                };
+                var dialog = new CatalogItemDialog(employeeCatalog, _metadataService, employee);
 
-                if (dialog.ShowDialog() != true)
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
                     return;
 
                 await _metadataService.UpdateDynamicRecordAsync(employeeCatalog.Id, _selectedEmployeeId, dialog.ItemData);

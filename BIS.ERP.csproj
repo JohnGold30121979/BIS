@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -13,7 +13,13 @@
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <DefaultItemExcludes>$(DefaultItemExcludes);BIS.ERP.TESTS\**;BIS.ERP.Updater\**;Tests\**;BIS.ERP.FrxMetadataGenerator\**</DefaultItemExcludes>
   </PropertyGroup>
-
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true' Or '$(SelfContained)' == 'true'">
+    <PublishTrimmed>false</PublishTrimmed>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
   <ItemGroup>
     <None Remove="Assets\AppIcon.ico" />
     <Compile Remove="Tests\**\*.cs" />
@@ -75,8 +81,8 @@
   <Target Name="PublishUpdater" AfterTargets="Publish"
           Condition="'$(PublishDir)' != '' And Exists('BIS.ERP.Updater\BIS.ERP.Updater.csproj')">
     <MSBuild Projects="BIS.ERP.Updater\BIS.ERP.Updater.csproj"
-             Targets="Publish"
-             Properties="Configuration=$(Configuration);PublishDir=$(PublishDir)" />
+             Targets="Restore;Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishSingleFile=$(PublishSingleFile);PublishTrimmed=false;IncludeNativeLibrariesForSelfExtract=$(IncludeNativeLibrariesForSelfExtract);EnableCompressionInSingleFile=$(EnableCompressionInSingleFile);DebugType=$(DebugType);DebugSymbols=$(DebugSymbols);PublishDir=$(PublishDir)" />
   </Target>
 
 </Project>

@@ -391,11 +391,10 @@ namespace BIS.ERP.Views
                 secondDisplayField ?? FindSecondDisplayField(referenceCatalog),
                 referenceMaps)
             {
-                Owner = owner,
                 Title = $"Выбор: {referenceCatalog.Name}"
             };
 
-            if (dialog.ShowDialog() == true &&
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) == true &&
                 dialog.SelectedItem != null &&
                 dialog.SelectedItem.TryGetValue("Id", out var idValue) &&
                 Guid.TryParse(idValue?.ToString(), out var id))
@@ -411,12 +410,9 @@ namespace BIS.ERP.Views
             MetadataObject referenceCatalog,
             Window owner)
         {
-            var dialog = new CatalogItemDialog(referenceCatalog, metadataService)
-            {
-                Owner = owner
-            };
+            var dialog = new CatalogItemDialog(referenceCatalog, metadataService);
 
-            if (dialog.ShowDialog() != true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true)
                 return null;
 
             return await metadataService.CreateDynamicRecordAsync(referenceCatalog.Id, dialog.ItemData);
@@ -440,12 +436,9 @@ namespace BIS.ERP.Views
                 return false;
             }
 
-            var dialog = new CatalogItemDialog(referenceCatalog, metadataService, row)
-            {
-                Owner = owner
-            };
+            var dialog = new CatalogItemDialog(referenceCatalog, metadataService, row);
 
-            if (dialog.ShowDialog() != true)
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true)
                 return false;
 
             await metadataService.UpdateDynamicRecordAsync(referenceCatalog.Id, recordId, dialog.ItemData);

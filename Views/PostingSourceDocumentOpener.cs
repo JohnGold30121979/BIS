@@ -51,8 +51,10 @@ namespace BIS.ERP.Views
                 metadataService,
                 recordId.Value,
                 isReadOnly);
-            dialog.Owner = owner;
-            dialog.ShowDialog();
+            await MdiDialogService.ShowInWorkspaceForResultAsync(
+                owner,
+                dialog,
+                $"{(isReadOnly ? "Просмотр" : "Редактирование")}: {documentMetadata.Name}");
             return true;
         }
 
@@ -114,8 +116,10 @@ namespace BIS.ERP.Views
                 invoiceService,
                 invoiceId.Value,
                 isReadOnly);
-            dialog.Owner = owner;
-            dialog.ShowDialog();
+            await MdiDialogService.ShowInWorkspaceForResultAsync(
+                owner,
+                dialog,
+                $"{(isReadOnly ? "Просмотр" : "Редактирование")}: {invoiceMetadata.Name}");
             return true;
         }
 

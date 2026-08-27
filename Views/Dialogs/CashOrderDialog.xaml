@@ -5,22 +5,27 @@
         MinHeight="600" MinWidth="620" ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="12">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="130"/>
                 <ColumnDefinition Width="*"/>
@@ -133,33 +138,36 @@
             <TextBox x:Name="DescriptionBox" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Height="56" Margin="0,0,0,10"
                      TextWrapping="Wrap" TextChanged="OnPostingPreviewChanged"/>
 
-            <GroupBox Grid.Row="10" Grid.ColumnSpan="3" Header="Проводка документа" Margin="0,0,0,12">
-                <Grid Margin="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    <TextBlock x:Name="PostingPreviewHint" Grid.Row="0" Margin="0,0,0,6"
-                               Text="Проводка формируется при проведении документа."/>
-                    <DataGrid x:Name="PostingsPreviewGrid" Grid.Row="1" Height="105"
-                              AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Тип" Binding="{Binding Mark}" Width="120"/>
-                            <DataGridTextColumn Header="Дебет" Binding="{Binding Debit}" Width="120"/>
-                            <DataGridTextColumn Header="Кредит" Binding="{Binding Credit}" Width="120"/>
-                            <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="120"/>
-                            <DataGridTextColumn Header="Основание" Binding="{Binding Note}" Width="*"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-            </GroupBox>
+            </Grid>
+        </ScrollViewer>
 
-            <StackPanel Grid.Row="11" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="Сохранить" Width="110" Height="36" Margin="0,0,10,0" Click="OnSaveClick"
-                        Background="#27AE60" Foreground="White"/>
-                <Button Content="Отмена" Width="110" Height="36" Click="OnCancelClick"
-                        Background="#95A5A6" Foreground="White"/>
-            </StackPanel>
-        </Grid>
-    </ScrollViewer>
+        <GroupBox Grid.Row="1" Header="Проводка документа" Margin="12,0,12,12">
+            <Grid Margin="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="PostingPreviewHint" Grid.Row="0" Margin="0,0,0,6"
+                           Text="Проводка формируется при проведении документа."/>
+                <DataGrid x:Name="PostingsPreviewGrid" Grid.Row="1" Height="105"
+                          AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
+                          HorizontalAlignment="Stretch">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Тип" Binding="{Binding Mark}" Width="1.2*" MinWidth="80"/>
+                        <DataGridTextColumn Header="Дебет" Binding="{Binding Debit}" Width="1.8*" MinWidth="110"/>
+                        <DataGridTextColumn Header="Кредит" Binding="{Binding Credit}" Width="1.8*" MinWidth="110"/>
+                        <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="1.2*" MinWidth="80"/>
+                        <DataGridTextColumn Header="Основание" Binding="{Binding Note}" Width="4.0*" MinWidth="180"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </GroupBox>
+
+        <StackPanel Grid.Row="2" Margin="12,0,12,12" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Сохранить" Width="110" Height="36" Margin="0,0,10,0" Click="OnSaveClick"
+                    Background="#27AE60" Foreground="White"/>
+            <Button Content="Отмена" Width="110" Height="36" Click="OnCancelClick"
+                    Background="#95A5A6" Foreground="White"/>
+        </StackPanel>
+    </Grid>
 </Window>

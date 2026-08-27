@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace BIS.ERP.Services
@@ -17,6 +18,14 @@ namespace BIS.ERP.Services
     public sealed class AppUpdatePackageService
     {
         public const string UpdateKind = "BIS.AppUpdate";
+
+        private const string MainExecutableName = "BIS.ERP.exe";
+        private const string MainAssemblyName = "BIS.ERP.dll";
+        private const string MainRuntimeConfigName = "BIS.ERP.runtimeconfig.json";
+        private const string UpdaterExecutableName = "BIS.ERP.Updater.exe";
+        private const string UpdateRuntimeIdentifier = "win-x64";
+        private const string UpdatePublishFolderName = "appupdate";
+        private static readonly TimeSpan PublishTimeout = TimeSpan.FromMinutes(10);
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -30,9 +39,11 @@ namespace BIS.ERP.Services
         private static string UpdatesDirectory => Path.Combine(LocalStateDirectory, "Updates");
         private static string BackupsDirectory => Path.Combine(LocalStateDirectory, "UpdateBackups");
         private static string DownloadsDirectory => Path.Combine(UpdatesDirectory, "Downloads");
+        private static string UpdateBuildsDirectory => Path.Combine(UpdatesDirectory, "Builds");
         private static string HistoryFilePath => Path.Combine(LocalStateDirectory, "app-updates.json");
 
         public string CurrentAppVersion => GetCurrentAppVersion();
+        public string SuggestedUpdateSourceFolder => GetSuggestedUpdateSourceFolder();
 
         public async Task<List<AppUpdateRecord>> GetHistoryAsync()
         {
@@ -51,11 +62,12 @@ namespace BIS.ERP.Services
 
         public async Task<AppUpdateManifest> CreateManifestForFolderAsync(string sourceFolder)
         {
-            sourceFolder = ResolveApplicationPayloadFolder(sourceFolder);
-            if (!Directory.Exists(sourceFolder))
-                throw new DirectoryNotFoundException(sourceFolder);
+            var requestedFolder = Path.GetFullPath(sourceFolder);
+            if (!Directory.Exists(requestedFolder))
+                throw new DirectoryNotFoundException(requestedFolder);
 
-            var manifestPath = Path.Combine(sourceFolder, "manifest.json");
+            var payloadFolder = ResolveApplicationPayloadFolder(requestedFolder);
+            var manifestPath = Path.Combine(payloadFolder, "manifest.json");
             if (File.Exists(manifestPath))
             {
                 var manifest = JsonSerializer.Deserialize<AppUpdateManifest>(
@@ -65,7 +77,7 @@ namespace BIS.ERP.Services
                 return manifest;
             }
 
-            return CreateDefaultManifest(sourceFolder, CurrentAppVersion);
+            return CreateDefaultManifest(requestedFolder, CurrentAppVersion);
         }
 
         public async Task CreateUpdateFromFolderAsync(
@@ -73,7 +85,7 @@ namespace BIS.ERP.Services
             string destinationFile,
             AppUpdateManifest? defaultManifest = null)
         {
-            sourceFolder = ResolveApplicationPayloadFolder(sourceFolder);
+            sourceFolder = await PrepareApplicationPayloadFolderAsync(sourceFolder);
             if (!Directory.Exists(sourceFolder))
                 throw new DirectoryNotFoundException(sourceFolder);
 
@@ -208,7 +220,9 @@ namespace BIS.ERP.Services
 
             await ExtractPayloadAsync(package.PackageBytes, payloadDirectory, package.Manifest.Files);
 
-            var updaterSource = Path.Combine(AppContext.BaseDirectory, "BIS.ERP.Updater.exe");
+            var updaterSource = Path.Combine(payloadDirectory, UpdaterExecutableName);
+            if (!File.Exists(updaterSource))
+                updaterSource = Path.Combine(AppContext.BaseDirectory, UpdaterExecutableName);
             if (!File.Exists(updaterSource))
             {
                 throw new FileNotFoundException(
@@ -457,6 +471,102 @@ namespace BIS.ERP.Services
                 .ToList();
         }
 
+        private async Task<string> PrepareApplicationPayloadFolderAsync(string sourceFolder)
+        {
+            var requestedFolder = Path.GetFullPath(sourceFolder);
+
+            if (LooksLikeSelfContainedApplicationPayload(requestedFolder))
+                return requestedFolder;
+
+            var projectPath = FindMainProjectFile(requestedFolder);
+            if (!string.IsNullOrWhiteSpace(projectPath))
+            {
+                var publishFolder = GetUpdatePublishFolder(projectPath);
+                await PublishSelfContainedAsync(projectPath, publishFolder);
+                if (LooksLikeSelfContainedApplicationPayload(publishFolder))
+                    return publishFolder;
+
+                throw new InvalidOperationException(
+                    $"Self-contained публикация не содержит ожидаемый автономный набор файлов: {publishFolder}");
+            }
+
+            var resolvedFolder = ResolveApplicationPayloadFolder(requestedFolder);
+            if (LooksLikeSelfContainedApplicationPayload(resolvedFolder))
+                return resolvedFolder;
+
+            if (LooksLikeFrameworkDependentApplicationPayload(resolvedFolder))
+            {
+                throw new InvalidOperationException(
+                    "Выбрана обычная папка сборки .NET, а не автономная публикация. Выберите папку проекта BIS.ERP или готовую self-contained single-file публикацию.");
+            }
+
+            throw new InvalidOperationException(
+                $"В выбранной папке не найден автономный {MainExecutableName} для обновления: {requestedFolder}");
+        }
+
+        private static async Task PublishSelfContainedAsync(string projectPath, string publishFolder)
+        {
+            Directory.CreateDirectory(publishFolder);
+
+            var startInfo = new ProcessStartInfo("dotnet")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(projectPath)!
+            };
+
+            startInfo.ArgumentList.Add("publish");
+            startInfo.ArgumentList.Add(projectPath);
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("Release");
+            startInfo.ArgumentList.Add("-r");
+            startInfo.ArgumentList.Add(UpdateRuntimeIdentifier);
+            startInfo.ArgumentList.Add("--self-contained");
+            startInfo.ArgumentList.Add("true");
+            startInfo.ArgumentList.Add("/p:PublishSingleFile=true");
+            startInfo.ArgumentList.Add("/p:PublishTrimmed=false");
+            startInfo.ArgumentList.Add("/p:IncludeNativeLibrariesForSelfExtract=true");
+            startInfo.ArgumentList.Add("/p:EnableCompressionInSingleFile=true");
+            startInfo.ArgumentList.Add("/p:DebugType=embedded");
+            startInfo.ArgumentList.Add("/p:DebugSymbols=false");
+            startInfo.ArgumentList.Add($"/p:PublishDir={EnsureTrailingDirectorySeparator(publishFolder)}");
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Не удалось запустить dotnet publish для сборки обновления.");
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
+            using var timeout = new CancellationTokenSource(PublishTimeout);
+
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Процесс уже мог завершиться между таймаутом и Kill.
+                }
+
+                throw new TimeoutException("Сборка self-contained обновления заняла слишком много времени и была остановлена.");
+            }
+
+            var output = await outputTask;
+            var error = await errorTask;
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Не удалось собрать self-contained обновление. dotnet publish вернул код {process.ExitCode}.\n{TrimProcessLog(output, error)}");
+            }
+        }
+
         private static string ResolveApplicationPayloadFolder(string sourceFolder)
         {
             var requestedFolder = Path.GetFullPath(sourceFolder);
@@ -469,27 +579,101 @@ namespace BIS.ERP.Services
                     return candidate;
             }
 
-            var currentAppFolder = AppContext.BaseDirectory;
-            if (!HasPackageFiles(requestedFolder) && LooksLikeApplicationPayload(currentAppFolder))
-                return Path.GetFullPath(currentAppFolder);
-
             return requestedFolder;
         }
 
         private static IEnumerable<string> GetApplicationPayloadCandidates(string sourceFolder)
         {
+            yield return Path.Combine(sourceFolder, UpdatePublishFolderName);
             yield return Path.Combine(sourceFolder, "publish");
+            yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows", UpdateRuntimeIdentifier, UpdatePublishFolderName);
+            yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows", UpdateRuntimeIdentifier, "publish");
+            yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows", UpdateRuntimeIdentifier);
             yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows", "publish");
             yield return Path.Combine(sourceFolder, "bin", "Release", "net8.0-windows");
-            yield return Path.Combine(sourceFolder, "bin", "Debug", "net8.0-windows", "publish");
-            yield return Path.Combine(sourceFolder, "bin", "Debug", "net8.0-windows");
         }
 
         private static bool LooksLikeApplicationPayload(string folder)
         {
             return Directory.Exists(folder) &&
-                (File.Exists(Path.Combine(folder, "BIS.ERP.exe")) ||
-                 File.Exists(Path.Combine(folder, "BIS.ERP.dll")));
+                (File.Exists(Path.Combine(folder, MainExecutableName)) ||
+                 File.Exists(Path.Combine(folder, MainAssemblyName)));
+        }
+
+        private static bool LooksLikeSelfContainedApplicationPayload(string folder)
+        {
+            return Directory.Exists(folder) &&
+                File.Exists(Path.Combine(folder, MainExecutableName)) &&
+                File.Exists(Path.Combine(folder, UpdaterExecutableName)) &&
+                !File.Exists(Path.Combine(folder, MainAssemblyName)) &&
+                !File.Exists(Path.Combine(folder, MainRuntimeConfigName));
+        }
+
+        private static bool LooksLikeFrameworkDependentApplicationPayload(string folder)
+        {
+            return Directory.Exists(folder) &&
+                File.Exists(Path.Combine(folder, MainExecutableName)) &&
+                (File.Exists(Path.Combine(folder, MainAssemblyName)) ||
+                 File.Exists(Path.Combine(folder, MainRuntimeConfigName)));
+        }
+
+        private static string GetSuggestedUpdateSourceFolder()
+        {
+            var projectPath = FindMainProjectFile(AppContext.BaseDirectory);
+            return string.IsNullOrWhiteSpace(projectPath)
+                ? AppContext.BaseDirectory
+                : Path.GetDirectoryName(projectPath)!;
+        }
+
+        private static string? FindMainProjectFile(string startPath)
+        {
+            var folder = Directory.Exists(startPath)
+                ? Path.GetFullPath(startPath)
+                : Path.GetDirectoryName(Path.GetFullPath(startPath));
+
+            while (!string.IsNullOrWhiteSpace(folder))
+            {
+                var directProject = Path.Combine(folder, "BIS.ERP.csproj");
+                if (File.Exists(directProject))
+                    return directProject;
+
+                var nestedProject = Path.Combine(folder, "BIS.ERP", "BIS.ERP.csproj");
+                if (File.Exists(nestedProject))
+                    return nestedProject;
+
+                folder = Directory.GetParent(folder)?.FullName;
+            }
+
+            return null;
+        }
+
+        private static string GetUpdatePublishFolder(string projectPath)
+        {
+            var safeProjectName = NormalizeIdPart(Path.GetFileNameWithoutExtension(projectPath));
+            return Path.Combine(
+                UpdateBuildsDirectory,
+                $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{safeProjectName}-{UpdateRuntimeIdentifier}");
+        }
+
+        private static string EnsureTrailingDirectorySeparator(string folder)
+        {
+            var fullPath = Path.GetFullPath(folder);
+            return fullPath.EndsWith(Path.DirectorySeparatorChar)
+                ? fullPath
+                : fullPath + Path.DirectorySeparatorChar;
+        }
+
+        private static string TrimProcessLog(string output, string error)
+        {
+            var log = string.Join(Environment.NewLine, new[] { output, error }
+                .Where(value => !string.IsNullOrWhiteSpace(value)))
+                .Trim();
+
+            const int maxLength = 4000;
+            if (log.Length <= maxLength)
+                return log;
+
+            return log[^maxLength..];
         }
 
         private static bool HasPackageFiles(string folder)
@@ -512,7 +696,6 @@ namespace BIS.ERP.Services
                         !relativePath.Contains("/.vs/", StringComparison.OrdinalIgnoreCase);
                 });
         }
-
         private static async Task<List<AppUpdateFile>> BuildFileManifestAsync(
             string sourceFolder,
             string destinationFullPath,

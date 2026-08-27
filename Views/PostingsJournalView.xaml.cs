@@ -627,8 +627,10 @@ namespace BIS.ERP.Views
                     invoiceService,
                     invoiceId.Value,
                     isReadOnly: true);
-                dialog.Owner = Window.GetWindow(this);
-                dialog.ShowDialog();
+                await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this),
+                    dialog,
+                    "Просмотр счет-фактуры");
                 return true;
             }
             catch (Exception ex)

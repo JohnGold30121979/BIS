@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -49,6 +49,8 @@ public sealed class MdiDialogHostControl : UserControl
             TextWrapping = TextWrapping.Wrap
         };
 
+        PreserveWindowDataContext(sourceWindow, body);
+
         HookCloseButtons(body);
         sourceWindow.Closed += (_, _) => RequestClose();
 
@@ -91,6 +93,16 @@ public sealed class MdiDialogHostControl : UserControl
         };
         root.Children.Add(card);
         return root;
+    }
+
+    private static void PreserveWindowDataContext(Window sourceWindow, UIElement body)
+    {
+        if (sourceWindow.DataContext == null || body is not FrameworkElement element)
+            return;
+
+        var localDataContext = element.ReadLocalValue(FrameworkElement.DataContextProperty);
+        if (localDataContext == DependencyProperty.UnsetValue || element.DataContext == null)
+            element.DataContext = sourceWindow.DataContext;
     }
 
     private static UIElement BuildFullWorkspaceContent(UIElement body)
