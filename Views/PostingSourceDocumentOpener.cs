@@ -11,7 +11,12 @@ namespace BIS.ERP.Views
 {
     internal static class PostingSourceDocumentOpener
     {
-        public static async Task<bool> TryOpenAsync(
+        /// <returns>
+        /// <c>null</c> — исходный документ не найден/не удалось определить (вызывающий код
+        /// открывает детали самой проводки); иначе — результат закрытия диалога исходного
+        /// документа (<c>true</c> — документ был изменен и сохранен).
+        /// </returns>
+        public static async Task<bool?> TryOpenAsync(
             PostingViewModel posting,
             MetadataService? metadataService,
             Window? owner,
@@ -20,21 +25,33 @@ namespace BIS.ERP.Views
             if (string.IsNullOrWhiteSpace(posting.DocumentType) ||
                 string.IsNullOrWhiteSpace(posting.DocumentNumber))
             {
-                return false;
+                return null;
             }
 
             var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             metadataService ??= new MetadataService(context);
 
+            // Документы закрытого учетного периода всегда открываются только для просмотра.
+            var effectiveReadOnly = isReadOnly;
+            if (!effectiveReadOnly && !await CanModifyDocumentDateAsync(context, posting.Date))
+            {
+                effectiveReadOnly = true;
+                MessageBox.Show(
+                    $"Период, содержащий дату {posting.Date:dd.MM.yyyy}, закрыт. Документ открывается в режиме просмотра.",
+                    "Закрытый период",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+
             var documents = await metadataService.GetDocumentsAsync();
             var documentMetadata = ResolveSourceDocumentMetadata(documents, posting.DocumentType);
             if (documentMetadata == null)
-                return false;
+                return null;
 
             if (InvoiceDocumentTypes.IsSales(posting.DocumentType) ||
                 InvoiceDocumentTypes.IsPurchase(posting.DocumentType))
             {
-                return await TryOpenInvoiceAsync(posting, documentMetadata, metadataService, owner, isReadOnly);
+                return await TryOpenInvoiceAsync(posting, documentMetadata, metadataService, owner, effectiveReadOnly);
             }
 
             var recordId = await FindDynamicDocumentRecordIdAsync(
@@ -44,18 +61,55 @@ namespace BIS.ERP.Views
                 posting.Date,
                 posting.DocumentType);
             if (!recordId.HasValue)
-                return false;
+                return null;
+
+            // Кассовые ордера (ПКО/РКО) открываются специализированным диалогом
+            // CashOrderDialog: из проводки — просмотр, по «Корректировке» — редактирование.
+            if (documentMetadata.Name.Equals("Расходный/Приходный КО", StringComparison.OrdinalIgnoreCase) ||
+                posting.DocumentType.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase) ||
+                posting.DocumentType.Equals("Расходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
+            {
+                var cashDialog = new CashOrderDialog(
+                    documentMetadata,
+                    metadataService,
+                    recordId.Value,
+                    isReadOnly: effectiveReadOnly);
+
+                return await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    owner,
+                    cashDialog,
+                    $"{(effectiveReadOnly ? "Просмотр" : "Редактирование")}: {posting.DocumentType} №{posting.DocumentNumber}");
+            }
 
             var dialog = new DynamicDocumentItemDialog(
                 documentMetadata,
                 metadataService,
                 recordId.Value,
-                isReadOnly);
-            await MdiDialogService.ShowInWorkspaceForResultAsync(
+                effectiveReadOnly);
+            return await MdiDialogService.ShowInWorkspaceForResultAsync(
                 owner,
                 dialog,
-                $"{(isReadOnly ? "Просмотр" : "Редактирование")}: {documentMetadata.Name}");
-            return true;
+                $"{(effectiveReadOnly ? "Просмотр" : "Редактирование")}: {documentMetadata.Name}");
+        }
+
+        /// <summary>
+        /// Проверяет, можно ли изменять документ с указанной датой:
+        /// даты, попадающие в итогово закрытый учетный период, блокируются.
+        /// </summary>
+        private static async Task<bool> CanModifyDocumentDateAsync(
+            BIS.ERP.Data.AppDbContext context,
+            DateTime date)
+        {
+            try
+            {
+                var periodService = new AccountingPeriodService(context);
+                await periodService.EnsureDateCanBeModifiedAsync(date);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
         }
 
         private static MetadataObject? ResolveSourceDocumentMetadata(
@@ -84,7 +138,7 @@ namespace BIS.ERP.Views
             return documentType;
         }
 
-        private static async Task<bool> TryOpenInvoiceAsync(
+        private static async Task<bool?> TryOpenInvoiceAsync(
             PostingViewModel posting,
             MetadataObject invoiceMetadata,
             MetadataService metadataService,
@@ -107,7 +161,7 @@ namespace BIS.ERP.Views
                     "Счет-фактура",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
-                return false;
+                return null;
             }
 
             var dialog = new InvoiceEditDialog(
@@ -116,11 +170,10 @@ namespace BIS.ERP.Views
                 invoiceService,
                 invoiceId.Value,
                 isReadOnly);
-            await MdiDialogService.ShowInWorkspaceForResultAsync(
+            return await MdiDialogService.ShowInWorkspaceForResultAsync(
                 owner,
                 dialog,
                 $"{(isReadOnly ? "Просмотр" : "Редактирование")}: {invoiceMetadata.Name}");
-            return true;
         }
 
         private static async Task<Guid?> FindDynamicDocumentRecordIdAsync(

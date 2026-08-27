@@ -500,9 +500,15 @@ namespace BIS.ERP.Views
             try
             {
                 var owner = Window.GetWindow(this);
-                if (await PostingSourceDocumentOpener.TryOpenAsync(selected, null, owner, isReadOnly: false))
+                var sourceResult = await PostingSourceDocumentOpener.TryOpenAsync(selected, null, owner, isReadOnly: false);
+                if (sourceResult != null)
                 {
-                    await LoadPostingsAsync();
+                    // Исходный документ был открыт: обновляем журнал, если он изменен и сохранен.
+                    if (sourceResult.Value)
+                    {
+                        await LoadPostingsAsync();
+                    }
+
                     return;
                 }
 
@@ -562,11 +568,12 @@ namespace BIS.ERP.Views
             if (InvoiceDocumentTypes.IsSales(selected.DocumentType) ||
                 InvoiceDocumentTypes.IsPurchase(selected.DocumentType))
             {
-                if (await PostingSourceDocumentOpener.TryOpenAsync(
+                var sourceResult = await PostingSourceDocumentOpener.TryOpenAsync(
                         selected,
                         null,
                         Window.GetWindow(this),
-                        isReadOnly: true))
+                        isReadOnly: true);
+                if (sourceResult != null)
                 {
                     return;
                 }

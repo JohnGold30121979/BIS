@@ -21,6 +21,7 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
+        private readonly bool _isReadOnly;
         private Guid _selectedCorrAccountId;
         private string _selectedCorrAccountCode = string.Empty;
         private Guid _selectedCashDeskId;
@@ -32,6 +33,21 @@ namespace BIS.ERP.Views
         private MetadataObject? _cashDeskCatalog;
         private readonly ObservableCollection<CashPostingPreviewRow> _postingPreviewRows = new();
         private string _orderKind = CashOrderPaymentKind;
+        // Флаг проведения исходной записи: если документ был проведен, после
+        // редактирования проводки нужно пересформировать (перепровести).
+        private bool _wasPosted;
+
+        public static bool ResolveRecordPostedFlag(IReadOnlyDictionary<string, object> record)
+        {
+            foreach (var key in new[] { "is_posted", "Проведён", "Проведен", "posted" })
+            {
+                var pair = record.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (pair.Value is bool flag) return flag;
+                if (bool.TryParse(pair.Value?.ToString(), out var parsed)) return parsed;
+            }
+
+            return false;
+        }
 
         // Для сотрудника
         private Guid _selectedEmployeeId = Guid.Empty;
@@ -64,6 +80,19 @@ namespace BIS.ERP.Views
             _metadataService = metadataService;
             _editId = editId;
             DialogTitle.Text = "Редактирование: кассовый ордер";
+
+            ContentRendered += async (s, e) => await InitializeAsync(editId);
+        }
+
+        public CashOrderDialog(MetadataObject document, MetadataService metadataService, Guid editId, bool isReadOnly)
+        {
+            InitializeComponent();
+            PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
+            _document = document;
+            _metadataService = metadataService;
+            _editId = editId;
+            _isReadOnly = isReadOnly;
+            DialogTitle.Text = isReadOnly ? "Просмотр: кассовый ордер" : "Редактирование: кассовый ордер";
 
             ContentRendered += async (s, e) => await InitializeAsync(editId);
         }
@@ -155,6 +184,7 @@ namespace BIS.ERP.Views
                     {
                         _orderKind = ResolveOrderKind(data.Record, _document.Name);
                         DialogTitle.Text = BuildDialogTitle();
+                        _wasPosted = ResolveRecordPostedFlag(data.Record);
                         // Заполняем данные для редактирования
                         var rawNumber = data.Record.ContainsKey("Номер") ? data.Record["Номер"]?.ToString() :
                                        (data.Record.ContainsKey("doc_number") ? data.Record["doc_number"]?.ToString() : "");
@@ -203,6 +233,7 @@ namespace BIS.ERP.Views
                 });
 
                 await UpdateDialogTitleWithOpenDayAsync();
+                ApplyReadOnlyState();
                 _isDataLoaded = true;
             }
             catch (Exception ex)
@@ -560,6 +591,13 @@ namespace BIS.ERP.Views
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            if (_isReadOnly)
+            {
+                MdiDialogService.CloseWithResult(this, false);
+                Close();
+                return;
+            }
+
             try
             {
                 this.Cursor = Cursors.Wait;
@@ -643,6 +681,24 @@ namespace BIS.ERP.Views
                 if (!await EnsureCashDayAllowsSaveAsync(_selectedCashDeskId, CashDeskCombo.Text, documentDate))
                     return;
 
+                // Если документ уже проведен, нельзя переносить его в закрытый период:
+                // проводки после перепроведения были бы потеряны.
+                if (_wasPosted && _editId.HasValue)
+                {
+                    try
+                    {
+                        var periodService = new BIS.ERP.Services.AccountingPeriodService(
+                            await BIS.ERP.ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync());
+                        await periodService.EnsureDateCanBeModifiedAsync(documentDate);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        MessageBox.Show(ex.Message, "Закрытый период",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+                }
+
                 // Получаем корреспондирующий счет
                 string corrAccountId = _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId.ToString() : string.Empty;
                 string corrAccountCode = _selectedCorrAccountCode;
@@ -685,9 +741,9 @@ namespace BIS.ERP.Views
                     ["Сумма"] = amount,
                     ["Основание"] = BasisBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
-                    ["Проведён"] = false,
-                    ["Проведен"] = false,
-                    ["is_posted"] = false,
+                    ["Проведён"] = _wasPosted,
+                    ["Проведен"] = _wasPosted,
+                    ["is_posted"] = _wasPosted,
                     ["Касса"] = cashDeskId,
                     ["cash_desk_id"] = cashDeskId,
                     ["Корр. счет"] = corrAccountValue,
@@ -734,6 +790,25 @@ namespace BIS.ERP.Views
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
                 else
                     await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
+
+                // Если документ был проведен — пересоздаем проводки с новыми данными:
+                // журналы и отчеты строятся по doc_postings и без этого остались бы старыми.
+                if (_editId.HasValue && _wasPosted)
+                {
+                    try
+                    {
+                        await _metadataService.UnpostDocumentAsync(_document.Id, _editId.Value);
+                        await _metadataService.PostDocumentAsync(_document.Id, _editId.Value);
+                    }
+                    catch (Exception repostEx)
+                    {
+                        MessageBox.Show(
+                            $"Документ сохранен, но при перепроведении возникла ошибка:\n{repostEx.Message}\n\n" +
+                            "Проверьте документ в журнале кассовых ордеров и проведите его повторно.",
+                            "Перепроведение",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }
 
                 BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
@@ -862,6 +937,41 @@ namespace BIS.ERP.Views
         {
             BIS.ERP.Services.MdiDialogService.CloseWithResult(this, false);
             Close();
+        }
+
+        /// <summary>
+        /// Применяет режим «только чтение»: блокирует все поля ввода (внутри InputScrollViewer)
+        /// и превращает кнопку «Сохранить» в «Закрыть». Просмотр проводок остаётся доступным.
+        /// </summary>
+        private void ApplyReadOnlyState()
+        {
+            if (!_isReadOnly || InputScrollViewer == null)
+                return;
+
+            SetInputControlsEnabled(InputScrollViewer, false);
+
+            if (SaveButton != null)
+            {
+                SaveButton.Content = "Закрыть";
+                SaveButton.Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(149, 165, 166));
+            }
+        }
+
+        private static void SetInputControlsEnabled(DependencyObject parent, bool enabled)
+        {
+            var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+            for (var index = 0; index < count; index++)
+            {
+                var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, index);
+
+                if (child is not ScrollViewer && child is System.Windows.Controls.Control control)
+                {
+                    control.IsEnabled = enabled;
+                }
+
+                SetInputControlsEnabled(child, enabled);
+            }
         }
 
         private void AllowNumberEditCheckBox_Changed(object sender, RoutedEventArgs e)

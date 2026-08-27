@@ -50,26 +50,35 @@ namespace BIS.ERP.Views
 
                 _postings.Clear();
 
-                // Для отладки - выводим ключи
-                if (displayData.Any())
-                {
-                    var firstRow = displayData.First();
-                    System.Diagnostics.Debug.WriteLine("=== Ключи в данных ===");
-                    foreach (var key in firstRow.Keys)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"  {key}");
-                    }
-                }
+                // Фильтр по периоду (если задан)
+                var periodFrom = PeriodFromPicker?.SelectedDate?.Date;
+                var periodTo = PeriodToPicker?.SelectedDate?.Date;
+                if (periodFrom.HasValue && periodTo.HasValue && periodFrom > periodTo)
+                    (periodFrom, periodTo) = (periodTo, periodFrom);
 
                 foreach (var row in displayData.OrderByDescending(r => r.GetValueOrDefault("Дата")))
                 {
+                    if (periodFrom.HasValue || periodTo.HasValue)
+                    {
+                        var rowDate = GetRowDate(row, "Дата", "posting_date");
+                        if (!rowDate.HasValue)
+                            continue;
+                        if (periodFrom.HasValue && rowDate.Value.Date < periodFrom.Value)
+                            continue;
+                        if (periodTo.HasValue && rowDate.Value.Date > periodTo.Value)
+                            continue;
+                    }
+
                     _postings.Add(row);
                 }
 
                 UpdateAnalyticColumns(data, _accountAnalytics);
                 UpdateSelectedPostingDetails();
 
-                StatusText.Text = $"📊 Загружено проводок: {_postings.Count}";
+                var periodText = periodFrom.HasValue || periodTo.HasValue
+                    ? $", период: {(periodFrom?.ToString("dd.MM.yyyy") ?? "…")}—{(periodTo?.ToString("dd.MM.yyyy") ?? "…")}"
+                    : ", весь период";
+                StatusText.Text = $"📊 Загружено проводок: {_postings.Count}{periodText}";
             }
             catch (Exception ex)
             {
@@ -241,12 +250,19 @@ namespace BIS.ERP.Views
             var selected = PostingsGrid.SelectedItem as Dictionary<string, object>;
             if (selected == null) return;
 
-            if (await PostingSourceDocumentOpener.TryOpenAsync(
+            var sourceResult = await PostingSourceDocumentOpener.TryOpenAsync(
                     BuildPostingViewModel(selected),
                     _metadataService,
                     Window.GetWindow(this),
-                    isReadOnly: false))
+                    isReadOnly: false);
+            if (sourceResult != null)
             {
+                // Исходный документ был открыт: обновляем список, если он изменился и сохранен.
+                if (sourceResult.Value)
+                {
+                    await LoadData();
+                }
+
                 return;
             }
 
@@ -290,6 +306,13 @@ namespace BIS.ERP.Views
             await LoadData();
         }
 
+        private async void OnResetPeriodClick(object sender, RoutedEventArgs e)
+        {
+            PeriodFromPicker.SelectedDate = null;
+            PeriodToPicker.SelectedDate = null;
+            await LoadData();
+        }
+
         private void OnSearchClick(object sender, RoutedEventArgs e)
         {
             // Открыть окно поиска
@@ -308,11 +331,12 @@ namespace BIS.ERP.Views
             if (selected == null)
                 return;
 
-            if (await PostingSourceDocumentOpener.TryOpenAsync(
+            var sourceResult = await PostingSourceDocumentOpener.TryOpenAsync(
                     BuildPostingViewModel(selected),
                     _metadataService,
                     Window.GetWindow(this),
-                    isReadOnly: true))
+                    isReadOnly: true);
+            if (sourceResult != null)
             {
                 return;
             }

@@ -29,10 +29,20 @@
                     Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
             <Button x:Name="DeleteButton" Content="🗑️ Удалить (Del)" Width="140" Height="35" Margin="0,0,10,0"
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
-            <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="100" Height="35" Margin="0,0,10,0"
-                    Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
+            <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="110" Height="35" Margin="0,0,10,0"
+                    Background="#16A085" Foreground="White" Click="OnRefreshClick"/>
             <Button x:Name="SearchButton" Content="🔍 Поиск" Width="100" Height="35"
                     Background="#F39C12" Foreground="White" Click="OnSearchClick"/>
+            <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
+            <TextBlock Text="Период:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
+            <DatePicker x:Name="PeriodFromPicker" Width="120" VerticalAlignment="Center" Margin="0,0,4,0"
+                        ToolTip="Начало периода"/>
+            <TextBlock Text="—" VerticalAlignment="Center" Margin="0,0,4,0"/>
+            <DatePicker x:Name="PeriodToPicker" Width="120" VerticalAlignment="Center" Margin="0,0,6,0"
+                        ToolTip="Конец периода"/>
+            <Button Content="Весь период" Width="110" Height="35"
+                    Background="#8E44AD" Foreground="White" Click="OnResetPeriodClick"
+                    ToolTip="Очистить фильтр периода и показать все проводки"/>
             <Separator Width="1" Height="26" Margin="10,0" Background="#D6DEE8"/>
             <TextBlock Text="Показать поля:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold"/>
             <CheckBox x:Name="ShowOrganizationColumnCheckBox" Content="Организация" IsChecked="False"
