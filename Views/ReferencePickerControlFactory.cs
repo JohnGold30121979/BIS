@@ -394,6 +394,13 @@ namespace BIS.ERP.Views
                 Title = $"Выбор: {referenceCatalog.Name}"
             };
 
+            if (IsCurrencyCatalog(referenceCatalog))
+            {
+                dialog.ConfigureExtraAction(
+                    "Обновить курс",
+                    selectedItem => UpdateRatesAndOpenCurrencyRatesCatalogAsync(metadataService, owner, selectedItem),
+                    "Обновить курсы НБКР и открыть справочник курсов валют");
+            }
             if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) == true &&
                 dialog.SelectedItem != null &&
                 dialog.SelectedItem.TryGetValue("Id", out var idValue) &&
@@ -403,6 +410,84 @@ namespace BIS.ERP.Views
             }
 
             return null;
+        }
+
+        private static async Task UpdateRatesAndOpenCurrencyRatesCatalogAsync(
+            MetadataService metadataService,
+            Window owner,
+            Dictionary<string, object>? selectedCurrency)
+        {
+            var selectedCurrencyText = BuildSelectedCurrencyText(selectedCurrency);
+            try
+            {
+                var results = await metadataService.ImportLatestOfficialCurrencyRatesAsync();
+                var imported = results.Sum(item => item.Imported);
+                var skipped = results.Sum(item => item.Skipped);
+                var dates = string.Join(", ", results.Select(item => item.RateDate.ToString("dd.MM.yyyy")).Distinct());
+                MessageBox.Show(
+                    $"Курсы НБКР обновлены. Загружено: {imported}; пропущено: {skipped}." +
+                    (string.IsNullOrWhiteSpace(dates) ? string.Empty : $"\nДаты курсов: {dates}.") +
+                    (string.IsNullOrWhiteSpace(selectedCurrencyText) ? string.Empty : $"\nВыбранная валюта: {selectedCurrencyText}."),
+                    "Курсы валют",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Автоматически обновить курсы не удалось: {ex.Message}\nОткрою справочник курсов валют для ручного ввода.",
+                    "Курсы валют",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+
+            var ratesCatalog = await metadataService.GetCatalogByNameAsync("Справочник курсов валют");
+            if (ratesCatalog == null)
+            {
+                MessageBox.Show("Справочник курсов валют не найден.", "Курсы валют",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            OpenCatalogView(owner, ratesCatalog, metadataService);
+        }
+
+        private static void OpenCatalogView(Window owner, MetadataObject catalog, MetadataService metadataService)
+        {
+            var view = new CatalogDataView(catalog, metadataService);
+            if (MdiDialogService.TryOpenDocumentInWorkspace(owner, $"catalog:{catalog.Id}", catalog.Name, view))
+                return;
+
+            MessageBox.Show(
+                $"Не удалось открыть справочник '{catalog.Name}' во вкладке MDI.",
+                catalog.Name,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        private static bool IsCurrencyCatalog(MetadataObject catalog)
+        {
+            return catalog.Name.Equals("Справочник валют", StringComparison.OrdinalIgnoreCase) ||
+                   catalog.TableName.Equals("catalog_currencies", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildSelectedCurrencyText(Dictionary<string, object>? selectedCurrency)
+        {
+            if (selectedCurrency == null)
+                return string.Empty;
+
+            var code = GetValue(selectedCurrency, "Код");
+            if (string.IsNullOrWhiteSpace(code))
+                code = GetValue(selectedCurrency, "code");
+
+            var name = GetValue(selectedCurrency, "Наименование");
+            if (string.IsNullOrWhiteSpace(name))
+                name = GetValue(selectedCurrency, "name");
+
+            if (!string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(name))
+                return $"{code} - {name}";
+
+            return !string.IsNullOrWhiteSpace(code) ? code : name;
         }
 
         private static async Task<Guid?> AddReferenceAsync(

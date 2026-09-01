@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -16,6 +17,7 @@ namespace BIS.ERP.Views
         private readonly string _firstField;
         private readonly string _secondField;
         private List<Dictionary<string, object>> _filteredItems;
+        private Func<Dictionary<string, object>?, Task>? _extraAction;
 
         public Dictionary<string, object> SelectedItem { get; private set; }
 
@@ -117,6 +119,15 @@ namespace BIS.ERP.Views
             ItemsGrid.ItemsSource = _filteredItems;
         }
 
+        public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>?, Task> action, string tooltip = null)
+        {
+            _extraAction = action ?? throw new ArgumentNullException(nameof(action));
+            ExtraActionButton.Content = caption;
+            ExtraActionButton.ToolTip = tooltip;
+            ExtraActionButton.Visibility = Visibility.Visible;
+            ExtraActionButton.IsEnabled = ItemsGrid.SelectedItem != null;
+        }
+
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             var search = SearchBox.Text?.Trim() ?? string.Empty;
@@ -135,14 +146,41 @@ namespace BIS.ERP.Views
 
         private void ItemsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            var button = FindName("SelectButton") as Button;
-            if (button != null)
-                button.IsEnabled = ItemsGrid.SelectedItem != null;
+            SelectButton.IsEnabled = ItemsGrid.SelectedItem != null;
+            ExtraActionButton.IsEnabled = ExtraActionButton.Visibility == Visibility.Visible && ItemsGrid.SelectedItem != null;
         }
 
         private void ItemsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             SelectItem();
+        }
+
+        private async void OnExtraActionClick(object sender, RoutedEventArgs e)
+        {
+            if (_extraAction == null)
+                return;
+
+            if (ItemsGrid.SelectedItem is not Dictionary<string, object> selectedItem)
+            {
+                MessageBox.Show("Сначала выберите запись справочника.", Title,
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                ExtraActionButton.IsEnabled = false;
+                await _extraAction(selectedItem);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка выполнения действия: {ex.Message}", Title,
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ExtraActionButton.IsEnabled = ExtraActionButton.Visibility == Visibility.Visible && ItemsGrid.SelectedItem != null;
+            }
         }
 
         private void OnSelectClick(object sender, RoutedEventArgs e)
@@ -176,8 +214,13 @@ namespace BIS.ERP.Views
         {
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
-                if (IsActiveField(parameter?.ToString()) && TryGetBool(value, out var isActive))
-                    return isActive ? "Активен" : "Неактивен";
+                if (TryGetBool(value, out var boolValue))
+                {
+                    if (IsActiveField(parameter?.ToString()))
+                        return boolValue ? "Активен" : "Неактивен";
+
+                    return boolValue ? "Да" : "Нет";
+                }
 
                 return value ?? string.Empty;
             }

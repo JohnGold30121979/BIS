@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using ClosedXML.Excel;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
@@ -54,6 +55,15 @@ namespace BIS.ERP.Views
                 FixedAssetAsOfDatePicker.SelectedDate = DateTime.Today;
                 SearchBox.ToolTip = "Поиск по карточкам основных средств на выбранную дату";
             }
+
+            if (IsCurrencyRatesCatalog)
+            {
+                CurrencyRateFilterPanel.Visibility = Visibility.Visible;
+                var today = DateTime.Today;
+                CurrencyRatePeriodStartPicker.SelectedDate = new DateTime(today.Year, today.Month, 1);
+                CurrencyRatePeriodEndPicker.SelectedDate = today;
+                SearchBox.ToolTip = "Поиск по истории курсов валют";
+            }
         }
 
         private bool IsChartOfAccountsCatalog =>
@@ -72,6 +82,9 @@ namespace BIS.ERP.Views
             string.Equals(_catalog.Name, "Основные средства", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, "catalog_assets", StringComparison.OrdinalIgnoreCase);
 
+        private bool IsCurrencyRatesCatalog =>
+            string.Equals(_catalog.TableName, "catalog_currency_rates", StringComparison.OrdinalIgnoreCase);
+
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
             await LoadData();
@@ -82,8 +95,356 @@ namespace BIS.ERP.Views
             bool hasSelection = DataGrid.SelectedItem != null;
             EditButton.IsEnabled = hasSelection;
             DeleteButton.IsEnabled = hasSelection;
+            if (IsCurrencyRatesCatalog && ActivateRateButton != null)
+                ActivateRateButton.IsEnabled = hasSelection;
         }
 
+        private async Task LoadCurrencyRateFilterAsync()
+        {
+            var items = new List<BIS.ERP.Models.ReferenceItem>
+            {
+                new() { Id = Guid.Empty, DisplayName = "Все валюты" }
+            };
+
+            if (_catalogsDict != null &&
+                _catalogsDict.TryGetValue("Справочник валют", out var currencyCatalog))
+            {
+                var rows = await _metadataService.GetCatalogDataAsync(currencyCatalog.Id);
+                foreach (var row in rows)
+                {
+                    if (!Guid.TryParse(GetRowId(row).ToString(), out var id))
+                        continue;
+
+                    var code = Convert.ToString(row.GetValueOrDefault("Код") ?? row.GetValueOrDefault("code")) ?? string.Empty;
+                    var name = Convert.ToString(row.GetValueOrDefault("Наименование") ?? row.GetValueOrDefault("name")) ?? string.Empty;
+                    var displayName = string.IsNullOrWhiteSpace(code) ? name : $"{code} - {name}";
+                    if (string.IsNullOrWhiteSpace(displayName))
+                        displayName = id.ToString();
+                    items.Add(new BIS.ERP.Models.ReferenceItem { Id = id, DisplayName = displayName });
+                }
+            }
+
+            var previousSelection = TryReadGuid(CurrencyRateFilterCombo.SelectedValue, out var selectedCurrencyId)
+                ? selectedCurrencyId
+                : Guid.Empty;
+            CurrencyRateFilterCombo.ItemsSource = items;
+            CurrencyRateFilterCombo.SelectedValue = items.Any(item => item.Id == previousSelection)
+                ? previousSelection
+                : Guid.Empty;
+        }
+
+        private void CurrencyRateFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ApplyCurrencyRateFilter();
+        }
+
+        private void CurrencyRatePeriod_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ApplyCurrencyRateFilter();
+        }
+
+        private void CurrencyRateFindButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!ValidateCurrencyRatePeriod())
+                return;
+
+            ApplyCurrencyRateFilter();
+        }
+
+        private async void OnUpdateNbkrRatesClick(object sender, RoutedEventArgs e)
+        {
+            if (!IsCurrencyRatesCatalog || !ValidateCurrencyRatePeriod())
+                return;
+
+            var startDate = CurrencyRatePeriodStartPicker.SelectedDate!.Value.Date;
+            var endDate = CurrencyRatePeriodEndPicker.SelectedDate!.Value.Date;
+
+            try
+            {
+                UpdateNbkrRatesButton.IsEnabled = false;
+                StatusText.Text = $"Загрузка курсов НБКР за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}...";
+
+                var results = await _metadataService.ImportOfficialCurrencyRatesAsync(startDate, endDate);
+                var imported = results.Sum(item => item.Imported);
+                var skipped = results.Sum(item => item.Skipped);
+
+                await LoadData();
+                StatusText.Text = $"Загружено курсов НБКР: {imported}; пропущено валют: {skipped}";
+                MessageBox.Show(
+                    $"Загрузка курсов НБКР завершена.\nЗагружено строк: {imported}\nПропущено валют: {skipped}",
+                    "Курсы валют",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка обновления курсов НБКР";
+                MessageBox.Show($"Не удалось обновить курсы НБКР: {ex.Message}", "Курсы валют",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                UpdateNbkrRatesButton.IsEnabled = true;
+            }
+        }
+
+        private bool ValidateCurrencyRatePeriod()
+        {
+            var startDate = CurrencyRatePeriodStartPicker.SelectedDate?.Date;
+            var endDate = CurrencyRatePeriodEndPicker.SelectedDate?.Date;
+            if (!startDate.HasValue || !endDate.HasValue)
+            {
+                MessageBox.Show("Укажите период загрузки курсов валют.", "Курсы валют",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            if (startDate.Value > endDate.Value)
+            {
+                MessageBox.Show("Дата начала периода больше даты окончания.", "Курсы валют",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
+            }
+
+            return true;
+        }
+
+        private void ApplyCurrencyRateFilter()
+        {
+            if (!IsCurrencyRatesCatalog || _dataTable == null || !_dataTable.Columns.Contains("CurrencyFilterFlag"))
+                return;
+
+            var selectedId = TryReadGuid(CurrencyRateFilterCombo.SelectedValue, out var selectedCurrencyId)
+                ? selectedCurrencyId
+                : Guid.Empty;
+            var selectedDisplayName = (CurrencyRateFilterCombo.SelectedItem as BIS.ERP.Models.ReferenceItem)?.DisplayName ?? string.Empty;
+            var selectedCode = NormalizeReferenceKey(selectedDisplayName);
+            var startDate = CurrencyRatePeriodStartPicker?.SelectedDate?.Date;
+            var endDate = CurrencyRatePeriodEndPicker?.SelectedDate?.Date;
+
+            foreach (DataRow row in _dataTable.Rows)
+            {
+                var rowId = TryReadGuid(row["Id"], out var parsedId) ? parsedId : Guid.Empty;
+                var matchesCurrency = selectedId == Guid.Empty;
+                var matchesDate = !startDate.HasValue && !endDate.HasValue;
+
+                if (_rawRowsById.TryGetValue(rowId, out var raw))
+                {
+                    if (!matchesCurrency)
+                        matchesCurrency = MatchesCurrencyRateCurrency(raw, row, selectedId, selectedDisplayName, selectedCode);
+
+                    if (TryGetCurrencyRateDate(raw, row, out var rateDate))
+                    {
+                        matchesDate = (!startDate.HasValue || rateDate.Date >= startDate.Value) &&
+                                      (!endDate.HasValue || rateDate.Date <= endDate.Value);
+                    }
+                }
+                else
+                {
+                    if (!matchesCurrency)
+                        matchesCurrency = MatchesCurrencyRateCurrency(null, row, selectedId, selectedDisplayName, selectedCode);
+
+                    if (TryGetCurrencyRateDate(null, row, out var rateDate))
+                    {
+                        matchesDate = (!startDate.HasValue || rateDate.Date >= startDate.Value) &&
+                                      (!endDate.HasValue || rateDate.Date <= endDate.Value);
+                    }
+                }
+
+                row["CurrencyFilterFlag"] = matchesCurrency && matchesDate;
+            }
+
+            ApplySearchFilter();
+        }
+        private static bool TryReadGuid(object value, out Guid guid)
+        {
+            if (value is Guid typedGuid)
+            {
+                guid = typedGuid;
+                return true;
+            }
+
+            return Guid.TryParse(Convert.ToString(value), out guid);
+        }
+
+        private static bool TryGetDate(IReadOnlyDictionary<string, object> row, string key, out DateTime date)
+        {
+            date = default;
+            if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                return false;
+
+            if (value is DateTime dateTime)
+            {
+                date = dateTime;
+                return true;
+            }
+
+            return DateTime.TryParse(value.ToString(), CultureInfo.CurrentCulture, DateTimeStyles.None, out date) ||
+                   DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+        }
+        private static bool TryGetCurrencyRateDate(
+            IReadOnlyDictionary<string, object>? raw,
+            DataRow row,
+            out DateTime date)
+        {
+            date = default;
+
+            foreach (var key in new[] { "rate_date", "Дата", "date" })
+            {
+                if (raw != null && TryGetDate(raw, key, out date))
+                    return true;
+
+                if (row.Table.Columns.Contains(key) && TryParseDateValue(row[key], out date))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool MatchesCurrencyRateCurrency(
+            IReadOnlyDictionary<string, object>? raw,
+            DataRow row,
+            Guid selectedId,
+            string selectedDisplayName,
+            string selectedCode)
+        {
+            foreach (var key in new[] { "currency_id", "Валюта", "currency" })
+            {
+                if (raw != null &&
+                    raw.TryGetValue(key, out var rawValue) &&
+                    IsCurrencyValueMatch(rawValue, selectedId, selectedDisplayName, selectedCode))
+                {
+                    return true;
+                }
+
+                if (row.Table.Columns.Contains(key) &&
+                    IsCurrencyValueMatch(row[key], selectedId, selectedDisplayName, selectedCode))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsCurrencyValueMatch(
+            object value,
+            Guid selectedId,
+            string selectedDisplayName,
+            string selectedCode)
+        {
+            if (value == null || value == DBNull.Value)
+                return false;
+
+            if (TryReadGuid(value, out var currencyId) && currencyId == selectedId)
+                return true;
+
+            var text = value.ToString()?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            if (text.Equals(selectedId.ToString(), StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (!string.IsNullOrWhiteSpace(selectedDisplayName) &&
+                text.Equals(selectedDisplayName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var normalizedText = NormalizeReferenceKey(text);
+            return !string.IsNullOrWhiteSpace(selectedCode) &&
+                   (normalizedText.Equals(selectedCode, StringComparison.OrdinalIgnoreCase) ||
+                    text.StartsWith($"{selectedCode} - ", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool TryParseDateValue(object value, out DateTime date)
+        {
+            date = default;
+            if (value == null || value == DBNull.Value)
+                return false;
+
+            if (value is DateTime dateTime)
+            {
+                date = dateTime;
+                return true;
+            }
+
+            return DateTime.TryParse(value.ToString(), CultureInfo.CurrentCulture, DateTimeStyles.None, out date) ||
+                   DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+        }
+
+        private async void OnActivateRateClick(object sender, RoutedEventArgs e)
+        {
+            if (DataGrid.SelectedItem is not DataRowView rowView || rowView.Row["Id"] is not Guid rowId)
+                return;
+            if (!_rawRowsById.TryGetValue(rowId, out var raw) ||
+                !TryGetCurrencyId(raw, out var currencyId))
+                return;
+
+            try
+            {
+                StatusText.Text = "Применение курса...";
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var connection = context.Database.GetDbConnection();
+                var shouldClose = connection.State != System.Data.ConnectionState.Open;
+                if (shouldClose)
+                    await connection.OpenAsync();
+
+                try
+                {
+                    var tableName = QuoteSqlIdentifier(_catalog.TableName);
+
+                    await using (var deactivate = connection.CreateCommand())
+                    {
+                        deactivate.CommandText = $@"UPDATE {tableName}
+                            SET ""is_active"" = false, ""UpdatedAt"" = NOW()
+                            WHERE currency_id::text = @currencyId AND ""Id"" <> @rowId;";
+                        deactivate.Parameters.Add(new Npgsql.NpgsqlParameter("currencyId", currencyId.ToString()));
+                        deactivate.Parameters.Add(new Npgsql.NpgsqlParameter("rowId", rowId));
+                        await deactivate.ExecuteNonQueryAsync();
+                    }
+
+                    await using (var activate = connection.CreateCommand())
+                    {
+                        activate.CommandText = $@"UPDATE {tableName}
+                            SET ""is_active"" = true, ""UpdatedAt"" = NOW()
+                            WHERE ""Id"" = @rowId;";
+                        activate.Parameters.Add(new Npgsql.NpgsqlParameter("rowId", rowId));
+                        await activate.ExecuteNonQueryAsync();
+                    }
+                }
+                finally
+                {
+                    if (shouldClose)
+                        await connection.CloseAsync();
+                }
+
+                StatusText.Text = "Курс сделан активным.";
+                await LoadData();
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка";
+                MessageBox.Show($"Не удалось сделать курс активным: {ex.Message}", "Курсы валют",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static string QuoteSqlIdentifier(string identifier) =>
+            "\"" + (identifier ?? string.Empty).Replace("\"", "\"\"") + "\"";
+
+        private static bool TryGetCurrencyId(IReadOnlyDictionary<string, object> raw, out Guid currencyId)
+        {
+            foreach (var key in new[] { "currency_id", "Валюта", "currency" })
+            {
+                if (raw.TryGetValue(key, out var value) && TryReadGuid(value, out currencyId))
+                    return true;
+            }
+
+            currencyId = Guid.Empty;
+            return false;
+        }
         private async Task LoadData()
         {
             try
@@ -94,6 +455,10 @@ namespace BIS.ERP.Views
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
                 if (IsAdvancePaymentsCatalog)
                     data = SortRowsByNumericCode(data).ToList();
+                if (IsCurrencyRatesCatalog)
+                    data = data
+                        .OrderByDescending(row => row.GetValueOrDefault("rate_date") as DateTime? ?? DateTime.MinValue)
+                        .ToList();
 
                 _rawRowsById.Clear();
 
@@ -114,9 +479,14 @@ namespace BIS.ERP.Views
                 }
                 _dataTable.Columns.Add("Дата создания", typeof(DateTime));
                 _dataTable.Columns.Add("Дата изменения", typeof(DateTime));
+                if (IsCurrencyRatesCatalog)
+                    _dataTable.Columns.Add("CurrencyFilterFlag", typeof(bool));
 
                 // Загружаем данные справочников для подстановки имен (универсально)
                 await LoadReferenceDataAsync();
+
+                if (IsCurrencyRatesCatalog)
+                    await LoadCurrencyRateFilterAsync();
 
                 // Добавляем строки
                 foreach (var row in data)
@@ -150,6 +520,8 @@ namespace BIS.ERP.Views
 
                     dataRow["Дата создания"] = row.ContainsKey("CreatedAt") ? row["CreatedAt"] : DateTime.Now;
                     dataRow["Дата изменения"] = row.ContainsKey("UpdatedAt") ? row["UpdatedAt"] : DateTime.Now;
+                    if (IsCurrencyRatesCatalog)
+                        dataRow["CurrencyFilterFlag"] = true;
 
                     _dataTable.Rows.Add(dataRow);
                 }
@@ -181,6 +553,8 @@ namespace BIS.ERP.Views
                 });
 
                 DataGrid.ItemsSource = _dataTable.DefaultView;
+
+                ApplyCurrencyRateFilter();
 
                 StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
                 ProgressText.Text = "";
@@ -772,6 +1146,8 @@ namespace BIS.ERP.Views
             }
 
             var filterParts = new List<string>();
+            if (IsCurrencyRatesCatalog)
+                filterParts.Add("CurrencyFilterFlag = true");
             if (IsFixedAssetsCatalog)
             {
                 var dateFilter = BuildFixedAssetAsOfFilter();
@@ -1603,6 +1979,11 @@ namespace BIS.ERP.Views
         }
     }
 }
+
+
+
+
+
 
 
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using BIS.ERP.Views.Controls;
 
@@ -19,7 +20,7 @@ public static class MdiDialogService
         bool activate = true,
         bool fillWorkspace = false)
     {
-        var workspace = FindWorkspace(owner) ?? FindWorkspace(Application.Current?.MainWindow);
+        var workspace = ResolveWorkspace(owner);
         if (workspace == null)
             return false;
 
@@ -64,7 +65,7 @@ public static class MdiDialogService
         string? key = null,
         bool activate = true)
     {
-        var workspace = FindWorkspace(owner) ?? FindWorkspace(Application.Current?.MainWindow);
+        var workspace = ResolveWorkspace(owner);
         if (workspace == null)
         {
             SetSafeOwner(dialog, owner);
@@ -94,6 +95,21 @@ public static class MdiDialogService
             fillWorkspace: true);
 
         return completionSource.Task;
+    }
+
+    public static bool TryOpenDocumentInWorkspace(
+        Window? owner,
+        string key,
+        string title,
+        UserControl content,
+        bool activate = true)
+    {
+        var workspace = ResolveWorkspace(owner);
+        if (workspace == null)
+            return false;
+
+        workspace.OpenDocument(key, title, content, activate);
+        return true;
     }
 
     public static void CloseWithResult(Window dialog, bool? result)
@@ -136,6 +152,49 @@ public static class MdiDialogService
 
         dialog.Owner = owner;
     }
+    private static MdiWorkspaceControl? ResolveWorkspace(Window? owner)
+    {
+        return FindWorkspace(owner)
+            ?? FindActiveWorkspace()
+            ?? FindWorkspace(Application.Current?.MainWindow)
+            ?? FindWorkspaceInOpenWindows();
+    }
+
+    private static MdiWorkspaceControl? FindActiveWorkspace()
+    {
+        var app = Application.Current;
+        if (app == null)
+            return null;
+
+        foreach (Window window in app.Windows)
+        {
+            if (!window.IsActive)
+                continue;
+
+            var workspace = FindWorkspace(window);
+            if (workspace != null)
+                return workspace;
+        }
+
+        return null;
+    }
+
+    private static MdiWorkspaceControl? FindWorkspaceInOpenWindows()
+    {
+        var app = Application.Current;
+        if (app == null)
+            return null;
+
+        foreach (Window window in app.Windows)
+        {
+            var workspace = FindWorkspace(window);
+            if (workspace != null)
+                return workspace;
+        }
+
+        return null;
+    }
+
     private static MdiWorkspaceControl? FindWorkspace(DependencyObject? root)
     {
         if (root == null)

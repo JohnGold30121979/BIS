@@ -70,6 +70,43 @@
                                 SelectedDateChanged="FixedAssetAsOfDatePicker_SelectedDateChanged"/>
                 </StackPanel>
 
+                <WrapPanel x:Name="CurrencyRateFilterPanel" Grid.Column="0"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0" Visibility="Collapsed">
+                    <TextBlock Text="Валюта:" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="CurrencyRateFilterCombo"
+                              Width="190" Height="32" MinWidth="170"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                              SelectionChanged="CurrencyRateFilterCombo_SelectionChanged"
+                              ToolTip="Показать историю курсов выбранной валюты"/>
+                    <TextBlock Text="с:" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="8,0,4,0"/>
+                    <DatePicker x:Name="CurrencyRatePeriodStartPicker"
+                                Width="120" Height="32"
+                                SelectedDateChanged="CurrencyRatePeriod_SelectedDateChanged"/>
+                    <TextBlock Text="по:" FontWeight="Bold"
+                               VerticalAlignment="Center" Margin="8,0,4,0"/>
+                    <DatePicker x:Name="CurrencyRatePeriodEndPicker"
+                                Width="120" Height="32"
+                                SelectedDateChanged="CurrencyRatePeriod_SelectedDateChanged"/>
+                    <Button x:Name="CurrencyRateFindButton" Content="Найти"
+                            MinWidth="72" Height="32" Margin="8,0,0,0"
+                            Background="#3498DB" Foreground="White"
+                            Click="CurrencyRateFindButton_Click"
+                            ToolTip="Показать курсы за выбранный период"/>
+                    <Button x:Name="UpdateNbkrRatesButton" Content="Обновить НБКР"
+                            MinWidth="120" Height="32" Margin="8,0,0,0"
+                            Background="#16A085" Foreground="White"
+                            Click="OnUpdateNbkrRatesClick"
+                            ToolTip="Загрузить историю курсов НБКР за выбранный период"/>
+                    <Button x:Name="ActivateRateButton" Content="✅ Сделать активным"
+                            MinWidth="150" Height="32" Margin="8,0,0,0"
+                            Background="#27AE60" Foreground="White"
+                            IsEnabled="False" Click="OnActivateRateClick"
+                            ToolTip="Сделать выбранный курс активным для его валюты (остальные курсы этой валюты станут неактивными)"/>
+                </WrapPanel>
+
                 <TextBox x:Name="SearchBox" Grid.Column="1"
                          Height="32" Padding="8,5"
                          VerticalContentAlignment="Center"
@@ -130,3 +167,4 @@
         </Border>
     </Grid>
 </UserControl>
+

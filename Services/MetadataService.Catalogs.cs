@@ -14,6 +14,28 @@ namespace BIS.ERP.Services
 
     public partial class MetadataService
     {
+        public async Task<MetadataObject?> GetCatalogByNameAsync(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return null;
+
+            return await _context.MetadataObjects.AsNoTracking()
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == name);
+        }
+
+        public async Task<IReadOnlyList<CurrencyRateImportResult>> ImportLatestOfficialCurrencyRatesAsync()
+        {
+            var importService = new NationalBankCurrencyRateImportService(_context);
+            return await importService.ImportLatestOfficialRatesAsync();
+        }
+
+        public async Task<IReadOnlyList<CurrencyRateImportResult>> ImportOfficialCurrencyRatesAsync(DateTime startDate, DateTime endDate)
+        {
+            var importService = new NationalBankCurrencyRateImportService(_context);
+            return await importService.ImportOfficialRatesForPeriodAsync(startDate, endDate);
+        }
+
         #region catalogs
         private async Task CreateCurrencyRatesCatalog(MetadataConfiguration config)
         {
@@ -2721,6 +2743,7 @@ namespace BIS.ERP.Services
 
     }
 }
+
 
 
 

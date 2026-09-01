@@ -114,6 +114,30 @@ namespace BIS.ERP.Views.Dialogs
             UpdateAccountControlledFieldsVisibility();
         }
 
+        private List<Dictionary<string, object>> _taxCatalogRows = new();
+        private bool _recalculatingMovementTotals;
+
+        /// <summary>
+        /// Загружает строки справочника «Налоги» для выпадающих списков налогов
+        /// документа движения ОС (как в счете-фактуре).
+        /// </summary>
+        private async Task LoadTaxCatalogRowsAsync(Dictionary<string, MetadataObject> catalogsDict)
+        {
+            _taxCatalogRows.Clear();
+            try
+            {
+                if (!catalogsDict.TryGetValue("Налоги", out var catalog))
+                    return;
+                var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                _taxCatalogRows = rows ?? new();
+            }
+            catch
+            {
+                // Справочник налогов недоступен — комбобоксы останутся пустыми.
+            }
+        }
+
+
         private bool IsFixedAssetMovementDocument()
         {
             return _metadata.ObjectType == "Document" &&
@@ -122,6 +146,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private async Task BuildFixedAssetMovementFormAsync(Dictionary<string, MetadataObject> catalogsDict)
         {
+            await LoadTaxCatalogRowsAsync(catalogsDict);
             Width = Math.Max(Width, 1040);
             Height = Math.Max(Height, 720);
             MinWidth = Math.Max(MinWidth, 860);
@@ -311,6 +336,172 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             return string.Empty;
+        }
+
+        private ComboBox CreateFixedAssetTaxComboBox(MetadataField field, object? currentValue)
+        {
+            var isVatCombo = string.Equals(field.DbColumnName, "vat_type_id", StringComparison.OrdinalIgnoreCase);
+            var items = new List<BIS.ERP.Models.ReferenceItem>();
+            foreach (var row in _taxCatalogRows)
+            {
+                var idText = ReadFixedAssetMovementText(row, "Id");
+                if (!Guid.TryParse(idText, out var id))
+                    continue;
+
+                var code = ReadFixedAssetMovementText(row, "Код", "code");
+                var name = ReadFixedAssetMovementText(row, "Наименование", "name");
+                var caption = string.IsNullOrWhiteSpace(name)
+                    ? code
+                    : string.IsNullOrWhiteSpace(code) || string.Equals(code, name, StringComparison.OrdinalIgnoreCase)
+                        ? name
+                        : $"{code} - {name}";
+
+                var rate = TryGetTaxRowDecimal(row, "Ставка", "rate");
+                if (rate > 0m)
+                    caption += $" ({rate:0.##}%)";
+
+                items.Add(new BIS.ERP.Models.ReferenceItem { Id = id, DisplayName = caption });
+            }
+
+            var comboBox = new ComboBox
+            {
+                Height = 30,
+                Name = GetSafeControlName(field.Name),
+                DisplayMemberPath = nameof(BIS.ERP.Models.ReferenceItem.DisplayName),
+                SelectedValuePath = nameof(BIS.ERP.Models.ReferenceItem.Id),
+                MinWidth = 200,
+                ItemsSource = items,
+                Tag = isVatCombo ? "vat" : "sales_tax"
+            };
+
+            // Восстанавливаем сохраненное значение либо выбираем налог по умолчанию,
+            // как в финансах («По умолчанию для НДС» / «По умолчанию для налога с продаж»).
+            Guid.TryParse(currentValue?.ToString(), out var selectedId);
+            var selected = selectedId != Guid.Empty
+                ? items.FirstOrDefault(item => item.Id == selectedId)
+                : null;
+
+            if (selected == null && !_isReadOnly && !_editId.HasValue)
+            {
+                var defaultRow = _taxCatalogRows.FirstOrDefault(row =>
+                    TryGetTaxRowBool(row, isVatCombo ? "is_default_vat" : "___none",
+                        isVatCombo ? "По умолчанию для НДС" : "По умолчанию для налога с продаж"));
+                if (defaultRow != null &&
+                    Guid.TryParse(ReadFixedAssetMovementText(defaultRow, "Id"), out var defaultId))
+                {
+                    selected = items.FirstOrDefault(item => item.Id == defaultId);
+                }
+            }
+
+            comboBox.SelectedItem = selected;
+
+            // Как в счете-фактуре: выбор налога автоматически проставляет ставку
+            // и пересчитывает суммы (НДС / налог с продаж / итог).
+            comboBox.SelectionChanged += (_, _) => RecalculateFixedAssetMovementTotals(comboBox);
+            return comboBox;
+        }
+
+        private void RecalculateFixedAssetMovementTotals(ComboBox changedCombo)
+        {
+            if (_recalculatingMovementTotals)
+                return;
+
+            _recalculatingMovementTotals = true;
+            try
+            {
+                var isVatCombo = ((string?)changedCombo.Tag) == "vat";
+                var rate = GetSelectedTaxRate(changedCombo);
+
+                if (isVatCombo)
+                    SetMovementDecimal("% НДС", "vat_rate", rate);
+                else
+                    SetMovementDecimal("Налог с продаж", "sales_tax_amount",
+                        decimal.Round(GetMovementDecimal("Без НДС", "amount_without_vat") * rate / 100m, 2,
+                            MidpointRounding.AwayFromZero));
+
+                var baseAmount = GetMovementDecimal("Без НДС", "amount_without_vat");
+                var vatRate = GetMovementDecimal("% НДС", "vat_rate");
+                var vatAmount = decimal.Round(baseAmount * vatRate / 100m, 2, MidpointRounding.AwayFromZero);
+                SetMovementDecimal("НДС", "vat_amount", vatAmount);
+                SetMovementDecimal("Итого", "total_amount",
+                    decimal.Round(baseAmount + vatAmount +
+                        GetMovementDecimal("Налог с продаж", "sales_tax_amount"), 2,
+                        MidpointRounding.AwayFromZero));
+            }
+            finally
+            {
+                _recalculatingMovementTotals = false;
+            }
+        }
+
+        private decimal GetSelectedTaxRate(ComboBox combo)
+        {
+            if (combo.SelectedItem is not BIS.ERP.Models.ReferenceItem item || item.Id == Guid.Empty)
+                return 0m;
+
+            var row = _taxCatalogRows.FirstOrDefault(candidate =>
+                ReadFixedAssetMovementText(candidate, "Id")
+                    .Equals(item.Id.ToString(), StringComparison.OrdinalIgnoreCase));
+            return row != null ? TryGetTaxRowDecimal(row, "Ставка", "rate") : 0m;
+        }
+
+        private decimal GetMovementDecimal(params string[] aliases)
+        {
+            foreach (var alias in aliases)
+            {
+                var match = _fieldsByName.FirstOrDefault(pair =>
+                    string.Equals(pair.Key, alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Value.DbColumnName, alias, StringComparison.OrdinalIgnoreCase));
+                if (match.Value != null &&
+                    _fieldControls.TryGetValue(match.Key, out var control) &&
+                    control is TextBox box &&
+                    decimal.TryParse(box.Text.Replace(',', '.'),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var value))
+                    return value;
+            }
+
+            return 0m;
+        }
+
+        private void SetMovementDecimal(string fieldName, string columnAlias, decimal value)
+        {
+            var match = _fieldsByName.FirstOrDefault(pair =>
+                string.Equals(pair.Key, fieldName, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pair.Value.DbColumnName, columnAlias, StringComparison.OrdinalIgnoreCase));
+            if (match.Value == null || !_fieldControls.TryGetValue(match.Key, out var control))
+                return;
+
+            if (control is TextBox box && !box.IsReadOnly)
+                box.Text = value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryGetTaxRowBool(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (key == "___none") continue;
+                var pair = row.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (pair.Value is bool flag) return flag;
+                if (bool.TryParse(pair.Value?.ToString(), out var parsed)) return parsed;
+            }
+
+            return false;
+        }
+
+        private static decimal TryGetTaxRowDecimal(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var pair = row.FirstOrDefault(item => item.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+                if (pair.Value is decimal dec) return dec;
+                if (decimal.TryParse(pair.Value?.ToString(),
+                        System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                    return parsed;
+            }
+
+            return 0m;
         }
 
         private static Border CreateSection(string title, UIElement content)
@@ -575,6 +766,15 @@ namespace BIS.ERP.Views.Dialogs
                     this,
                     UpdateAccountControlledFieldsVisibility,
                     _assignedModuleName);
+            }
+
+            // Для документа движения ОС налоговые поля «Вид НДС» и «Вид налога с продаж»
+            // отображаются как простые выпадающие списки из справочника «Налоги» (как в счете-фактуре).
+            if (IsFixedAssetMovementDocument() &&
+                (string.Equals(field.DbColumnName, "vat_type_id", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(field.DbColumnName, "sales_tax_type_id", StringComparison.OrdinalIgnoreCase)))
+            {
+                return CreateFixedAssetTaxComboBox(field, currentValue);
             }
 
             if (!string.IsNullOrEmpty(field.ReferenceCatalog))
