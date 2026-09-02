@@ -67,6 +67,7 @@ namespace BIS.ERP.Views.Dialogs
             if (IsFixedAssetMovementDocument())
             {
                 await BuildFixedAssetMovementFormAsync(catalogsDict);
+                await ApplyFixedAssetMovementDefaultsAsync(catalogsDict);
                 UpdateAccountControlledFieldsVisibility();
                 return;
             }
@@ -144,6 +145,100 @@ namespace BIS.ERP.Views.Dialogs
                    string.Equals(_metadata.Name, "Учет движения ОС", StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Для нового документа движения ОС подставляет активные элементы по умолчанию:
+        /// активный вид оплаты, активный налог для НДС и активный налог с продаж.
+        /// Для редактируемого документа значения восстанавливаются из сохраненной записи.
+        /// </summary>
+        private async Task ApplyFixedAssetMovementDefaultsAsync(Dictionary<string, MetadataObject> catalogsDict)
+        {
+            if (_editId.HasValue)
+                return;
+
+            // Вид оплаты: активный элемент справочника «Виды оплаты».
+            if (_fieldControls.TryGetValue("Вид оплаты", out var paymentControl))
+            {
+                if (paymentControl is ReferencePickerControl paymentPicker &&
+                    paymentPicker.ComboBox.SelectedItem == null)
+                {
+                    var defaultId = await GetDefaultCatalogRowIdAsync(catalogsDict, "Виды оплаты");
+                    if (defaultId.HasValue)
+                    {
+                        paymentPicker.SelectedReferenceItem = paymentPicker.ComboBox.Items
+                            .OfType<BIS.ERP.Models.ReferenceItem>()
+                            .FirstOrDefault(item => item.Id == defaultId.Value);
+                    }
+                }
+                else if (paymentControl is ComboBox paymentCombo && paymentCombo.SelectedItem == null)
+                {
+                    var defaultId = await GetDefaultCatalogRowIdAsync(catalogsDict, "Виды оплаты");
+                    if (defaultId.HasValue)
+                    {
+                        paymentCombo.SelectedItem = paymentCombo.Items
+                            .OfType<BIS.ERP.Models.ReferenceItem>()
+                            .FirstOrDefault(item => item.Id == defaultId.Value);
+                    }
+                }
+            }
+
+            // Налоги: активный по умолчанию для НДС / налога с продаж.
+            if (_fieldControls.TryGetValue("Вид НДС", out var vatControl) &&
+                vatControl is ComboBox vatCombo && vatCombo.SelectedItem == null)
+            {
+                var defaultVat = _taxCatalogRows.FirstOrDefault(row =>
+                    TryGetTaxRowBool(row, "is_default_vat", "По умолчанию для НДС"));
+                if (defaultVat != null &&
+                    Guid.TryParse(ReadFixedAssetMovementText(defaultVat, "Id"), out var vatId))
+                {
+                    vatCombo.SelectedItem = vatCombo.Items
+                        .OfType<BIS.ERP.Models.ReferenceItem>()
+                        .FirstOrDefault(item => item.Id == vatId);
+                }
+            }
+
+            if (_fieldControls.TryGetValue("Вид налога с продаж", out var salesControl) &&
+                salesControl is ComboBox salesCombo && salesCombo.SelectedItem == null)
+
+            {
+                var defaultSales = _taxCatalogRows.FirstOrDefault(row =>
+                    TryGetTaxRowBool(row, "is_default_sales_tax", "По умолчанию для налога с продаж"));
+                if (defaultSales != null &&
+                    Guid.TryParse(ReadFixedAssetMovementText(defaultSales, "Id"), out var salesId))
+                {
+                    salesCombo.SelectedItem = salesCombo.Items
+                        .OfType<BIS.ERP.Models.ReferenceItem>()
+                        .FirstOrDefault(item => item.Id == salesId);
+                }
+            }
+
+            RecalculateFixedAssetMovementTotals();
+        }
+
+        /// <summary>
+        /// Возвращает Id первой активной (is_default = true) строки справочника.
+        /// </summary>
+        private async Task<Guid?> GetDefaultCatalogRowIdAsync(
+            Dictionary<string, MetadataObject> catalogsDict,
+            string catalogName)
+        {
+            if (!catalogsDict.TryGetValue(catalogName, out var catalog))
+                return null;
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            var activeRow = rows
+                .FirstOrDefault(row =>
+                    TryGetTaxRowBool(row, "is_default", "По умолчанию") &&
+                    Guid.TryParse(ReadFixedAssetMovementText(row, "Id"), out _));
+            return activeRow != null
+                ? Guid.Parse(ReadFixedAssetMovementText(activeRow, "Id"))
+                : rows.FirstOrDefault(row =>
+                        Guid.TryParse(ReadFixedAssetMovementText(row, "Id"), out _))
+                    is { } fallback &&
+                  Guid.TryParse(ReadFixedAssetMovementText(fallback, "Id"), out var fallbackId)
+                    ? fallbackId
+                    : null;
+        }
+
         private async Task BuildFixedAssetMovementFormAsync(Dictionary<string, MetadataObject> catalogsDict)
         {
             await LoadTaxCatalogRowsAsync(catalogsDict);
@@ -152,8 +247,9 @@ namespace BIS.ERP.Views.Dialogs
             MinWidth = Math.Max(MinWidth, 860);
             MinHeight = Math.Max(MinHeight, 620);
 
-            FieldsPanel.MaxWidth = 1280;
-            FieldsPanel.HorizontalAlignment = HorizontalAlignment.Center;
+            FieldsPanel.MaxWidth = double.PositiveInfinity;
+            FieldsPanel.Width = double.NaN;
+            FieldsPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
             FieldsPanel.Children.Add(await CreateFixedAssetMovementHeaderAsync(catalogsDict));
 
             var usedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -170,7 +266,19 @@ namespace BIS.ERP.Views.Dialogs
 
             var settlementGrid = CreateTwoColumnGrid(2);
             await AddFieldToGridAsync(settlementGrid, 0, 0, catalogsDict, usedFields, "Счет расчетов");
-            await AddFieldToGridAsync(settlementGrid, 0, 1, catalogsDict, usedFields, "Организация");
+            await AddFieldToGridAsync(
+                settlementGrid,
+                0,
+                1,
+                catalogsDict,
+                usedFields,
+                "Организация",
+                "organization_id",
+                "primary_organization_id",
+                "Поставщик",
+                "supplier_id",
+                "Контрагент",
+                "contractor_id");
             await AddFieldToGridAsync(settlementGrid, 1, 0, catalogsDict, usedFields, "Вид покупки");
             var settlementSection = CreateSection("Поставщик и расчеты", settlementGrid);
             settlementSection.Margin = new Thickness(0, 0, 6, 12);
@@ -191,24 +299,25 @@ namespace BIS.ERP.Views.Dialogs
 
             var lineGrid = CreateFixedAssetLineGrid();
             await AddCompactFieldToGridAsync(lineGrid, 1, 0, catalogsDict, usedFields, "Основное средство");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 1, catalogsDict, usedFields, "Счет операции");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 2, catalogsDict, usedFields, "Без НДС");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 3, catalogsDict, usedFields, "НДС");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 4, catalogsDict, usedFields, "% НДС");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 5, catalogsDict, usedFields, "Налог с продаж");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 6, catalogsDict, usedFields, "Сумма", "amount");
-            await AddCompactFieldToGridAsync(lineGrid, 1, 7, catalogsDict, usedFields, "Сумма в валюте");
-            FieldsPanel.Children.Add(CreateSection("Строка основного средства", new ScrollViewer
-            {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Content = lineGrid
-            }));
+            MarkFieldAsUsed(usedFields, "Счет операции", "operation_account");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 1, catalogsDict, usedFields, "Без НДС");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 2, catalogsDict, usedFields, "НДС");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 3, catalogsDict, usedFields, "% НДС");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 4, catalogsDict, usedFields, "Налог с продаж");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 5, catalogsDict, usedFields, "Сумма", "amount");
+            await AddCompactFieldToGridAsync(lineGrid, 1, 6, catalogsDict, usedFields, "Сумма в валюте");
+            FieldsPanel.Children.Add(CreateSection("Строка основного средства", CreateFixedAssetLineArea(lineGrid)));
 
             var postingGrid = CreateTwoColumnGrid(3);
             await AddFieldToGridAsync(postingGrid, 0, 0, catalogsDict, usedFields, "Счет дебета");
             await AddFieldToGridAsync(postingGrid, 0, 1, catalogsDict, usedFields, "Счет кредита");
-            await AddFieldToGridAsync(postingGrid, 1, 0, catalogsDict, usedFields, "Основание");
+            var basisPanel = await CreateOptionalFixedAssetBasisPanelAsync(catalogsDict, usedFields);
+            if (basisPanel != null)
+            {
+                Grid.SetRow(basisPanel, 1);
+                Grid.SetColumn(basisPanel, 0);
+                postingGrid.Children.Add(basisPanel);
+            }
             await AddFieldToGridAsync(postingGrid, 1, 1, catalogsDict, usedFields, "Примечание");
             await AddFieldToGridAsync(postingGrid, 2, 0, catalogsDict, usedFields, "Проведен");
             FieldsPanel.Children.Add(CreateSection("Проводка и примечание", postingGrid));
@@ -348,13 +457,10 @@ namespace BIS.ERP.Views.Dialogs
                 if (!Guid.TryParse(idText, out var id))
                     continue;
 
-                var code = ReadFixedAssetMovementText(row, "Код", "code");
                 var name = ReadFixedAssetMovementText(row, "Наименование", "name");
                 var caption = string.IsNullOrWhiteSpace(name)
-                    ? code
-                    : string.IsNullOrWhiteSpace(code) || string.Equals(code, name, StringComparison.OrdinalIgnoreCase)
-                        ? name
-                        : $"{code} - {name}";
+                    ? ReadFixedAssetMovementText(row, "Код", "code")
+                    : name;
 
                 var rate = TryGetTaxRowDecimal(row, "Ставка", "rate");
                 if (rate > 0m)
@@ -397,11 +503,11 @@ namespace BIS.ERP.Views.Dialogs
 
             // Как в счете-фактуре: выбор налога автоматически проставляет ставку
             // и пересчитывает суммы (НДС / налог с продаж / итог).
-            comboBox.SelectionChanged += (_, _) => RecalculateFixedAssetMovementTotals(comboBox);
+            comboBox.SelectionChanged += (_, _) => RecalculateFixedAssetMovementTotals();
             return comboBox;
         }
 
-        private void RecalculateFixedAssetMovementTotals(ComboBox changedCombo)
+        private void RecalculateFixedAssetMovementTotals()
         {
             if (_recalculatingMovementTotals)
                 return;
@@ -409,29 +515,73 @@ namespace BIS.ERP.Views.Dialogs
             _recalculatingMovementTotals = true;
             try
             {
-                var isVatCombo = ((string?)changedCombo.Tag) == "vat";
-                var rate = GetSelectedTaxRate(changedCombo);
-
-                if (isVatCombo)
-                    SetMovementDecimal("% НДС", "vat_rate", rate);
-                else
-                    SetMovementDecimal("Налог с продаж", "sales_tax_amount",
-                        decimal.Round(GetMovementDecimal("Без НДС", "amount_without_vat") * rate / 100m, 2,
-                            MidpointRounding.AwayFromZero));
-
                 var baseAmount = GetMovementDecimal("Без НДС", "amount_without_vat");
-                var vatRate = GetMovementDecimal("% НДС", "vat_rate");
+                var vatRate = GetSelectedTaxRate("Вид НДС", "vat_type_id");
+                var salesTaxRate = GetSelectedTaxRate("Вид налога с продаж", "sales_tax_type_id");
                 var vatAmount = decimal.Round(baseAmount * vatRate / 100m, 2, MidpointRounding.AwayFromZero);
+                var salesTaxAmount = decimal.Round(baseAmount * salesTaxRate / 100m, 2, MidpointRounding.AwayFromZero);
+                var totalAmount = decimal.Round(baseAmount + vatAmount + salesTaxAmount, 2, MidpointRounding.AwayFromZero);
+
+                SetMovementDecimal("% НДС", "vat_rate", vatRate);
                 SetMovementDecimal("НДС", "vat_amount", vatAmount);
-                SetMovementDecimal("Итого", "total_amount",
-                    decimal.Round(baseAmount + vatAmount +
-                        GetMovementDecimal("Налог с продаж", "sales_tax_amount"), 2,
-                        MidpointRounding.AwayFromZero));
+                SetMovementDecimal("Налог с продаж", "sales_tax_amount", salesTaxAmount);
+                SetMovementDecimal("Итого", "total_amount", totalAmount);
+                SetMovementDecimal("Сумма", "amount", totalAmount);
+
+                var exchangeRate = GetMovementDecimal("Курс валюты", "exchange_rate");
+                if (exchangeRate > 0m)
+                {
+                    SetMovementDecimal("Сумма в валюте", "amount_currency",
+                        decimal.Round(totalAmount / exchangeRate, 2, MidpointRounding.AwayFromZero));
+                }
             }
             finally
             {
                 _recalculatingMovementTotals = false;
             }
+        }
+
+        private decimal GetSelectedTaxRate(params string[] aliases)
+        {
+            foreach (var alias in aliases)
+            {
+                var match = _fieldsByName.FirstOrDefault(pair =>
+                    string.Equals(pair.Key, alias, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Value.DbColumnName, alias, StringComparison.OrdinalIgnoreCase));
+                if (match.Value != null &&
+                    _fieldControls.TryGetValue(match.Key, out var control) &&
+                    control is ComboBox combo)
+                {
+                    return GetSelectedTaxRate(combo);
+                }
+            }
+
+            return 0m;
+        }
+
+        private void AttachFixedAssetMovementRecalculation(MetadataField field, Control inputControl)
+        {
+            if (!IsFixedAssetMovementDocument() || _isReadOnly || inputControl is not TextBox box)
+                return;
+
+            if (!IsFixedAssetMovementRecalculationSource(field))
+                return;
+
+            box.TextChanged += (_, _) => RecalculateFixedAssetMovementTotals();
+        }
+
+        private static bool IsFixedAssetMovementRecalculationSource(MetadataField field)
+        {
+            return MatchesFixedAssetMovementField(field,
+                "Без НДС", "amount_without_vat",
+                "Курс валюты", "exchange_rate");
+        }
+
+        private static bool MatchesFixedAssetMovementField(MetadataField field, params string[] aliases)
+        {
+            return aliases.Any(alias =>
+                string.Equals(field.Name, alias, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(field.DbColumnName, alias, StringComparison.OrdinalIgnoreCase));
         }
 
         private decimal GetSelectedTaxRate(ComboBox combo)
@@ -472,8 +622,12 @@ namespace BIS.ERP.Views.Dialogs
             if (match.Value == null || !_fieldControls.TryGetValue(match.Key, out var control))
                 return;
 
-            if (control is TextBox box && !box.IsReadOnly)
-                box.Text = value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            if (control is TextBox box)
+            {
+                var text = value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+                if (!string.Equals(box.Text, text, StringComparison.Ordinal))
+                    box.Text = text;
+            }
         }
 
         private static bool TryGetTaxRowBool(Dictionary<string, object> row, params string[] keys)
@@ -566,8 +720,8 @@ namespace BIS.ERP.Views.Dialogs
 
         private static Grid CreateFixedAssetLineGrid()
         {
-            var grid = new Grid { MinWidth = 960 };
-            foreach (var width in new[] { 230d, 170d, 110d, 100d, 70d, 130d, 110d, 120d })
+            var grid = new Grid { MinWidth = 930 };
+            foreach (var width in new[] { 260d, 115d, 105d, 70d, 140d, 115d, 125d })
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
 
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -575,7 +729,7 @@ namespace BIS.ERP.Views.Dialogs
 
             var headers = new[]
             {
-                "Наименование ОС", "Счет операции", "Без НДС", "НДС", "%", "Налог с продаж", "Итого", "В валюте"
+                "Наименование ОС", "Без НДС", "НДС", "%", "Налог с продаж", "Итого", "В валюте"
             };
 
             for (var index = 0; index < headers.Length; index++)
@@ -600,6 +754,110 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             return grid;
+        }
+
+        private Grid CreateFixedAssetLineArea(Grid lineGrid)
+        {
+            var container = new Grid { MinHeight = 165 };
+            container.RowDefinitions.Add(new RowDefinition { Height = new GridLength(135), MinHeight = 95 });
+            container.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            container.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var scrollViewer = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = lineGrid
+            };
+            Grid.SetRow(scrollViewer, 0);
+            container.Children.Add(scrollViewer);
+
+            var splitter = new GridSplitter
+            {
+                Height = 6,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = new SolidColorBrush(Color.FromRgb(226, 236, 245)),
+                ResizeDirection = GridResizeDirection.Rows
+            };
+            Grid.SetRow(splitter, 1);
+            container.Children.Add(splitter);
+
+            var buttonsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            buttonsPanel.Children.Add(CreateFixedAssetLineButton("+ Добавить запись", OnAddFixedAssetLineClick, "#2BAE66"));
+            buttonsPanel.Children.Add(CreateFixedAssetLineButton("- Удалить запись", OnDeleteFixedAssetLineClick, "#E74C3C"));
+
+            Grid.SetRow(buttonsPanel, 2);
+            container.Children.Add(buttonsPanel);
+            return container;
+        }
+
+        private Button CreateFixedAssetLineButton(string text, RoutedEventHandler clickHandler, string color)
+        {
+            var button = new Button
+            {
+                Content = text,
+                Width = 150,
+                Height = 32,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = (Brush)new BrushConverter().ConvertFromString(color)!,
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.SemiBold,
+                IsEnabled = !_isReadOnly
+            };
+
+            button.Click += clickHandler;
+            return button;
+        }
+
+        private void OnAddFixedAssetLineClick(object sender, RoutedEventArgs e)
+        {
+            if (_isReadOnly)
+                return;
+
+            FocusFixedAssetLineStart();
+            MessageBox.Show(
+                "Сейчас документ движения ОС хранит одну строку основного средства. Кнопку оставил на месте для будущей табличной части; текущую строку можно заполнить или очистить кнопкой 'Удалить запись'.",
+                "Строки основного средства",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        private void OnDeleteFixedAssetLineClick(object sender, RoutedEventArgs e)
+        {
+            if (_isReadOnly)
+                return;
+
+            foreach (var aliases in new[]
+                     {
+                         new[] { "Основное средство", "fixed_asset_id" },
+                         new[] { "Без НДС", "amount_without_vat" },
+                         new[] { "НДС", "vat_amount" },
+                         new[] { "% НДС", "vat_percent" },
+                         new[] { "Налог с продаж", "sales_tax_amount" },
+                         new[] { "Сумма", "amount" },
+                         new[] { "Сумма в валюте", "foreign_amount" }
+                     })
+            {
+                var field = FindDialogField(aliases);
+                if (field != null && _fieldControls.TryGetValue(field.Name, out var control))
+                    ClearControl(control);
+            }
+
+            RecalculateFixedAssetMovementTotals();
+            FocusFixedAssetLineStart();
+        }
+
+        private void FocusFixedAssetLineStart()
+        {
+            var field = FindDialogField("Основное средство", "fixed_asset_id");
+            if (field != null && _fieldControls.TryGetValue(field.Name, out var control))
+                control.Focus();
         }
 
         private async Task<bool> AddFieldToGridAsync(
@@ -630,6 +888,55 @@ namespace BIS.ERP.Views.Dialogs
                 return false;
 
             return await AddFieldByMetadataToGridAsync(grid, row, column, field, catalogsDict, usedFields, showLabel: false);
+        }
+
+        private bool MarkFieldAsUsed(ISet<string> usedFields, params string[] aliases)
+        {
+            var field = FindDialogField(aliases);
+            if (field == null)
+                return false;
+
+            usedFields.Add(field.Name);
+            return true;
+        }
+
+        private async Task<FrameworkElement?> CreateOptionalFixedAssetBasisPanelAsync(
+            Dictionary<string, MetadataObject> catalogsDict,
+            ISet<string> usedFields)
+        {
+            var field = FindDialogField("Основание", "basis");
+            if (field == null || _fieldControls.ContainsKey(field.Name))
+                return null;
+
+            var fieldPanel = await CreateFieldPanelAsync(field, catalogsDict);
+            fieldPanel.Margin = new Thickness(0, 6, 10, 0);
+            usedFields.Add(field.Name);
+
+            var hasBasisValue = !string.IsNullOrWhiteSpace(ReadFixedAssetMovementText(_existingData, field.Name, field.DbColumnName));
+            fieldPanel.Visibility = hasBasisValue ? Visibility.Visible : Visibility.Collapsed;
+
+            var checkBox = new CheckBox
+            {
+                Content = "Показать основание",
+                IsChecked = hasBasisValue,
+                IsEnabled = !_isReadOnly,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 10, 0)
+            };
+
+            checkBox.Checked += (_, _) => fieldPanel.Visibility = Visibility.Visible;
+            checkBox.Unchecked += (_, _) =>
+            {
+                fieldPanel.Visibility = Visibility.Collapsed;
+                if (_fieldControls.TryGetValue(field.Name, out var control))
+                    ClearControl(control);
+            };
+
+            return new StackPanel
+            {
+                Margin = new Thickness(0, 0, 10, 10),
+                Children = { checkBox, fieldPanel }
+            };
         }
         private async Task<bool> AddFieldByMetadataToGridAsync(
             Grid grid,
@@ -693,6 +1000,8 @@ namespace BIS.ERP.Views.Dialogs
             var inputControl = await CreateControlAsync(field, catalogsDict);
             if (_isReadOnly)
                 ApplyReadOnly(inputControl);
+
+            AttachFixedAssetMovementRecalculation(field, inputControl);
 
             if (!showLabel && inputControl is FrameworkElement inputElement)
             {
