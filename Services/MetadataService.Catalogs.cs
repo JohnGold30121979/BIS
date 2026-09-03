@@ -549,6 +549,75 @@ namespace BIS.ERP.Services
             }
         }
 
+        public async Task<CurrencyRateLookupResult?> GetLatestCurrencyRateAsync(Guid currencyId, DateTime? maxDate = null)
+        {
+            var catalog = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    item.Name == "Справочник курсов валют");
+            if (catalog == null)
+                return null;
+
+            var dateFilter = maxDate.HasValue
+                ? "AND rate_date::date <= @maxDate"
+                : string.Empty;
+            var sql = $@"
+                SELECT rate_date,
+                       COALESCE(NULLIF(rate_nb, 0), NULLIF(rate_commercial, 0), 0) AS rate,
+                       CASE
+                           WHEN COALESCE(rate_nb, 0) <> 0 THEN 'НБКР'
+                           WHEN COALESCE(rate_commercial, 0) <> 0 THEN 'Коммерческий'
+                           ELSE ''
+                       END AS source
+                FROM {QuoteIdentifier(catalog.TableName)}
+                WHERE currency_id::text = @currencyId
+                  {dateFilter}
+                ORDER BY rate_date DESC, COALESCE(is_active, false) DESC, ""UpdatedAt"" DESC
+                LIMIT 1;";
+
+            using var command = _context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            var currencyParameter = command.CreateParameter();
+            currencyParameter.ParameterName = "@currencyId";
+            currencyParameter.Value = currencyId.ToString();
+            command.Parameters.Add(currencyParameter);
+
+            if (maxDate.HasValue)
+            {
+                var dateParameter = command.CreateParameter();
+                dateParameter.ParameterName = "@maxDate";
+                dateParameter.Value = maxDate.Value.Date;
+                command.Parameters.Add(dateParameter);
+            }
+
+            var connectionOpened = false;
+            try
+            {
+                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await _context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return null;
+
+                var rate = reader["rate"] == DBNull.Value ? 0m : Convert.ToDecimal(reader["rate"], CultureInfo.InvariantCulture);
+                if (rate <= 0)
+                    return null;
+
+                var rateDate = reader["rate_date"] is DateTime date ? date : (maxDate ?? DateTime.Today).Date;
+                var source = reader["source"]?.ToString() ?? "Справочник курсов валют";
+                return new CurrencyRateLookupResult(rate, rateDate, source);
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
         // Сотрудники
         private async Task CreateEmployeesCatalog(MetadataConfiguration config)
         {

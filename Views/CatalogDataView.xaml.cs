@@ -85,6 +85,10 @@ namespace BIS.ERP.Views
         private bool IsCurrencyRatesCatalog =>
             string.Equals(_catalog.TableName, "catalog_currency_rates", StringComparison.OrdinalIgnoreCase);
 
+        private bool IsCurrenciesCatalog =>
+            string.Equals(_catalog.Name, "Справочник валют", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_currencies", StringComparison.OrdinalIgnoreCase);
+
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
             await LoadData();
@@ -434,6 +438,39 @@ namespace BIS.ERP.Views
         private static string QuoteSqlIdentifier(string identifier) =>
             "\"" + (identifier ?? string.Empty).Replace("\"", "\"\"") + "\"";
 
+        private async Task<Dictionary<Guid, decimal>> LoadLatestCurrencyRatesAsync(IEnumerable<Dictionary<string, object>> currencyRows)
+        {
+            var rates = new Dictionary<Guid, decimal>();
+            foreach (var row in currencyRows)
+            {
+                var rowId = GetRowId(row);
+                if (rowId == Guid.Empty)
+                    continue;
+
+                var latestRate = await _metadataService.GetLatestCurrencyRateAsync(rowId);
+                if (latestRate?.Rate > 0m)
+                    rates[rowId] = latestRate.Rate;
+            }
+
+            return rates;
+        }
+
+        private static object GetCatalogFieldValue(IReadOnlyDictionary<string, object> row, MetadataField field)
+        {
+            if (row.TryGetValue(field.Name, out var byName))
+                return byName ?? DBNull.Value;
+
+            if (!string.IsNullOrWhiteSpace(field.DbColumnName) && row.TryGetValue(field.DbColumnName, out var byColumn))
+                return byColumn ?? DBNull.Value;
+
+            return DBNull.Value;
+        }
+
+        private static bool IsCurrencyRateField(MetadataField field)
+        {
+            return string.Equals(field.Name, "Курс", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.DbColumnName, "rate", StringComparison.OrdinalIgnoreCase);
+        }
         private static bool TryGetCurrencyId(IReadOnlyDictionary<string, object> raw, out Guid currencyId)
         {
             foreach (var key in new[] { "currency_id", "Валюта", "currency" })
@@ -488,6 +525,10 @@ namespace BIS.ERP.Views
                 if (IsCurrencyRatesCatalog)
                     await LoadCurrencyRateFilterAsync();
 
+                var latestCurrencyRates = IsCurrenciesCatalog
+                    ? await LoadLatestCurrencyRatesAsync(data)
+                    : new Dictionary<Guid, decimal>();
+
                 // Добавляем строки
                 foreach (var row in data)
                 {
@@ -502,7 +543,14 @@ namespace BIS.ERP.Views
 
                     foreach (var field in visibleFields)
                     {
-                        var rawValue = row.ContainsKey(field.Name) ? row[field.Name] : DBNull.Value;
+                        var rawValue = GetCatalogFieldValue(row, field);
+                        if (IsCurrenciesCatalog &&
+                            IsCurrencyRateField(field) &&
+                            latestCurrencyRates.TryGetValue(rowId, out var latestRate))
+                        {
+                            rawValue = latestRate;
+                            rawCopy[field.Name] = latestRate;
+                        }
 
                         // Если поле ссылается на справочник - подставляем DisplayName
                         if (!string.IsNullOrEmpty(field.ReferenceCatalog) && _referenceCache.TryGetValue(field.Name, out var dict))
