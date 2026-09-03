@@ -47,6 +47,7 @@ namespace BIS.ERP.Services
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT true;
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsPrintForm"" boolean NOT NULL DEFAULT false;
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsDefault"" boolean NOT NULL DEFAULT false;
+                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsSystem"" boolean NOT NULL DEFAULT false;
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""SourceFormat"" varchar(80) NOT NULL DEFAULT 'Native';
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""TemplateVersion"" integer NOT NULL DEFAULT 1;
                         ALTER TABLE ""Reports"" ALTER COLUMN ""Name"" TYPE varchar(500);

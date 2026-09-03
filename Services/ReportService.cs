@@ -1547,6 +1547,7 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 IsActive = report.IsActive,
                 IsPrintForm = report.IsPrintForm,
                 IsDefault = report.IsDefault,
+                IsSystem = report.IsSystem,
                 SourceFormat = report.SourceFormat,
                 TemplateVersion = report.TemplateVersion,
                 Order = report.Order,

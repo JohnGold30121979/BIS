@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -36,6 +36,7 @@ namespace BIS.ERP.Models
         public bool IsActive { get; set; } = true;
         public bool IsPrintForm { get; set; }
         public bool IsDefault { get; set; }
+        public bool IsSystem { get; set; }
 
         [MaxLength(80)]
         public string SourceFormat { get; set; } = "Native";

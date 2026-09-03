@@ -565,6 +565,7 @@ namespace BIS.ERP.Services
                 existingReport.DataSourceType = source.ObjectType;
                 existingReport.DataSourceId = source.Id;
                 existingReport.SourceFormat = "Native";
+                existingReport.IsSystem = true;
                 existingReport.UpdatedAt = DateTime.UtcNow;
 
                 if (sourceChanged && existingReport.Fields.Count > 0)
@@ -586,7 +587,7 @@ namespace BIS.ERP.Services
             {
                 Name = name, Code = code, Description = $"Настраиваемый отчет: {name}",
                 DataSourceType = source.ObjectType, DataSourceId = source.Id, ReportType = "Table",
-                Icon = "📊", IsActive = true, SourceFormat = "Native", Order = 100,
+                Icon = "📊", IsActive = true, IsSystem = true, SourceFormat = "Native", Order = 100,
                 TitleText = name, PageOrientation = "Landscape"
             };
             var order = 1;

@@ -89,9 +89,12 @@ public sealed class StandardReportDeletionService
             return false;
 
         return code.StartsWith("standard.", StringComparison.OrdinalIgnoreCase) ||
+               code.StartsWith("assets.", StringComparison.OrdinalIgnoreCase) ||
+               code.StartsWith("inventory.", StringComparison.OrdinalIgnoreCase) ||
                code.StartsWith("cash.receipt.", StringComparison.OrdinalIgnoreCase) ||
                code.StartsWith("cash.payment.", StringComparison.OrdinalIgnoreCase) ||
                code.StartsWith("invoice.sales.", StringComparison.OrdinalIgnoreCase) ||
-               code.StartsWith("invoice.purchase.", StringComparison.OrdinalIgnoreCase);
+               code.StartsWith("invoice.purchase.", StringComparison.OrdinalIgnoreCase) ||
+               code.StartsWith("payment.order.", StringComparison.OrdinalIgnoreCase);
     }
 }

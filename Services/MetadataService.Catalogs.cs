@@ -2755,8 +2755,16 @@ namespace BIS.ERP.Services
             int order,
             IEnumerable<string> fieldNames)
         {
-            if (await _context.Reports.AnyAsync(report => report.Name == name))
+            var reportCode = GetStandardMetadataReportCode(name);
+            var existingReport = await _context.Reports
+                .FirstOrDefaultAsync(report => report.Code == reportCode || report.Name == name);
+            if (existingReport != null)
+            {
+                existingReport.Code = reportCode;
+                existingReport.IsSystem = true;
+                existingReport.UpdatedAt = DateTime.UtcNow;
                 return;
+            }
 
             var source = await _context.MetadataObjects
                 .Include(metadata => metadata.Fields)
@@ -2768,11 +2776,13 @@ namespace BIS.ERP.Services
             {
                 Id = Guid.NewGuid(),
                 Name = name,
+                Code = reportCode,
                 Description = description,
                 DataSourceType = source.ObjectType,
                 DataSourceId = source.Id,
                 ReportType = reportType,
                 Icon = "📄",
+                IsSystem = true,
                 Order = order,
                 TitleText = name,
                 PageOrientation = source.Name == "Проводки" ? "Landscape" : "Portrait",
@@ -2809,6 +2819,30 @@ namespace BIS.ERP.Services
                 await _context.Reports.AddAsync(report);
         }
 
+        private static string GetStandardMetadataReportCode(string name)
+        {
+            return name switch
+            {
+                "Счет-фактура на материалы (КР)" => "standard.metadata.invoice.materials.kg",
+                "Ведомость основных средств" => "standard.metadata.fixed.assets.statement",
+                "Перечень материалов" => "standard.metadata.materials.list",
+                "Журнал прихода товаров" => "standard.metadata.goods.receipt.journal",
+                "Журнал расхода товаров" => "standard.metadata.goods.issue.journal",
+                "Журнал бухгалтерских проводок" => "standard.metadata.postings.journal",
+                _ => $"standard.metadata.{GetStableReportNameHash(name):x8}"
+            };
+        }
+
+        private static int GetStableReportNameHash(string value)
+        {
+            unchecked
+            {
+                var hash = 17;
+                foreach (var ch in value ?? string.Empty)
+                    hash = hash * 31 + ch;
+                return hash;
+            }
+        }
 
     }
 }

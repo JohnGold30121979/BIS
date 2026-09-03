@@ -327,6 +327,7 @@ public partial class MetadataService
             StringComparison.OrdinalIgnoreCase);
 
         report.Code = definition.Code;
+        report.IsSystem = true;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
             report.Name = definition.Name;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
@@ -429,6 +430,7 @@ public partial class MetadataService
         }
 
         report.Code = definition.Code;
+        report.IsSystem = true;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
             report.Name = definition.Name;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Description))

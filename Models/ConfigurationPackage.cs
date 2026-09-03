@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace BIS.ERP.Models
@@ -11,6 +11,7 @@ namespace BIS.ERP.Models
         public string Application { get; set; } = "BIS ERP";
         public List<SystemConfiguration> SystemConfigurations { get; set; } = new();
         public List<MetadataObject> MetadataObjects { get; set; } = new();
+        public List<ReportDataSet> ReportDataSets { get; set; } = new();
         public List<Report> Reports { get; set; } = new();
         public List<RegulatedReportTemplate> RegulatedReportTemplates { get; set; } = new();
         public List<MetadataModule> Modules { get; set; } = new();

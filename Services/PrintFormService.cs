@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +53,7 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT true;
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsPrintForm"" boolean NOT NULL DEFAULT false;
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsDefault"" boolean NOT NULL DEFAULT false;
+                ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsSystem"" boolean NOT NULL DEFAULT false;
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""SourceFormat"" varchar(30) NOT NULL DEFAULT 'Native';
                 ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""TemplateVersion"" integer NOT NULL DEFAULT 1;
                 ALTER TABLE ""Reports"" ALTER COLUMN ""Name"" TYPE varchar(500);
@@ -175,6 +176,7 @@ namespace BIS.ERP.Services
                 report.DataSourceId = cashOrder.Id;
                 report.ReportType = reportType;
                 report.IsPrintForm = true;
+                report.IsSystem = true;
                 if (isNewReport)
                 {
                     report.IsActive = true;
@@ -288,6 +290,7 @@ namespace BIS.ERP.Services
             report.DataSourceId = paymentOrder.Id;
             report.ReportType = "PaymentOrder";
             report.IsPrintForm = true;
+            report.IsSystem = true;
             report.SourceFormat = "Native";
             report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
             if (isNewReport)
@@ -340,6 +343,7 @@ namespace BIS.ERP.Services
                     DataSourceId = document.Id,
                     ReportType = "FoxProLayout",
                     IsPrintForm = true,
+                    IsSystem = true,
                     IsActive = true,
                     IsDefault = true,
                     SourceFormat = "FoxProFRX",

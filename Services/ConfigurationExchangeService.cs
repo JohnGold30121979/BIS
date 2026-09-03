@@ -73,7 +73,8 @@ namespace BIS.ERP.Services
             try
             {
                 await ReplaceMetadataAsync(package.MetadataObjects);
-                await ReplaceReportsAsync(package.Reports);
+                await ReplaceSystemReportDataSetsAsync(package.ReportDataSets);
+                await ReplaceSystemReportsAsync(package.Reports);
                 await ReplaceRegulatedReportTemplatesAsync(package.RegulatedReportTemplates);
                 await ReplaceSystemConfigurationAsync(package.SystemConfigurations);
                 await ReplaceModulesAsync(package.Modules, package.ModuleItems);
@@ -118,6 +119,9 @@ namespace BIS.ERP.Services
             await new BisPatchService(_context).EnsureSchemaAsync();
             await new RegulatedReportTemplateService(_context).EnsureSchemaAsync();
             await new MetadataService(_context).EnsureStandardReportsAsync();
+            await new ReportDataSetService(_context).EnsureStandardDataSetsAsync();
+            await MarkKnownStandardReportDataSetsAsSystemAsync();
+            await MarkKnownStandardReportsAsSystemAsync();
 
             var metadata = await _context.MetadataObjects
                 .AsNoTracking()
@@ -127,16 +131,26 @@ namespace BIS.ERP.Services
                 .OrderBy(item => item.Order)
                 .ToListAsync();
 
+            var reportDataSets = await _context.ReportDataSets
+                .AsNoTracking()
+                .Include(item => item.Fields)
+                .Where(item => item.IsSystem)
+                .OrderBy(item => item.Code)
+                .ToListAsync();
+
             var reports = await _context.Reports
                 .AsNoTracking()
                 .Include(item => item.Fields)
                 .Include(item => item.Filters)
                 .Include(item => item.Groups)
                 .Include(item => item.ElementMappings)
+                .Include(item => item.HeadersFooters)
+                .Where(item => item.IsSystem)
                 .OrderBy(item => item.Order)
                 .ToListAsync();
 
             DetachMetadataNavigation(metadata);
+            DetachReportDataSetNavigation(reportDataSets);
             DetachReportNavigation(reports);
 
             var package = new ConfigurationPackage
@@ -144,6 +158,7 @@ namespace BIS.ERP.Services
                 ExportedAt = DateTime.UtcNow,
                 SystemConfigurations = await _context.SystemConfigurations.AsNoTracking().ToListAsync(),
                 MetadataObjects = metadata,
+                ReportDataSets = reportDataSets,
                 Reports = reports,
                 RegulatedReportTemplates = await _context.RegulatedReportTemplates.AsNoTracking()
                     .OrderBy(item => item.Code).ThenBy(item => item.Version).ToListAsync(),
@@ -164,6 +179,41 @@ namespace BIS.ERP.Services
 
             return package;
         }
+
+        private async Task MarkKnownStandardReportDataSetsAsSystemAsync()
+        {
+            var now = DateTime.UtcNow;
+            await _context.ReportDataSets
+                .Where(dataSet => !dataSet.IsSystem && dataSet.Code == ReportDataSetService.CashOrderTurnoverDataSetCode)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(dataSet => dataSet.IsSystem, true)
+                    .SetProperty(dataSet => dataSet.UpdatedAt, now));
+        }
+
+        private async Task MarkKnownStandardReportsAsSystemAsync()
+        {
+            var now = DateTime.UtcNow;
+            await _context.Reports
+                .Where(report => !report.IsSystem &&
+                    (EF.Functions.Like(report.Code, "standard.%") ||
+                     EF.Functions.Like(report.Code, "assets.%") ||
+                     EF.Functions.Like(report.Code, "inventory.%") ||
+                     EF.Functions.Like(report.Code, "cash.receipt.%") ||
+                     EF.Functions.Like(report.Code, "cash.payment.%") ||
+                     EF.Functions.Like(report.Code, "invoice.sales.%") ||
+                     EF.Functions.Like(report.Code, "invoice.purchase.%") ||
+                     EF.Functions.Like(report.Code, "payment.order.%")))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(report => report.IsSystem, true)
+                    .SetProperty(report => report.UpdatedAt, now));
+        }
+
+        private static bool IsConfigurationSystemReport(Report report) =>
+            report.IsSystem || StandardReportDeletionService.IsStandardReportCode(report.Code);
+
+        private static bool IsConfigurationSystemReportDataSet(ReportDataSet dataSet) =>
+            dataSet.IsSystem ||
+            string.Equals(dataSet.Code, ReportDataSetService.CashOrderTurnoverDataSetCode, StringComparison.OrdinalIgnoreCase);
 
         private async Task ReplaceMetadataAsync(List<MetadataObject> metadata)
         {
@@ -229,19 +279,73 @@ namespace BIS.ERP.Services
             config.UpdatedAt = DateTime.UtcNow;
             return config.Id;
         }
-        private async Task ReplaceReportsAsync(List<Report> reports)
+
+        private async Task ReplaceSystemReportDataSetsAsync(List<ReportDataSet>? dataSets)
         {
-            await new PrintFormService(_context).EnsureSchemaAsync();
-            _context.ReportGroups.RemoveRange(await _context.ReportGroups.ToListAsync());
-            _context.ReportFilters.RemoveRange(await _context.ReportFilters.ToListAsync());
-            _context.ReportFields.RemoveRange(await _context.ReportFields.ToListAsync());
-            _context.ReportElementMappings.RemoveRange(await _context.ReportElementMappings.ToListAsync());
-            _context.Reports.RemoveRange(await _context.Reports.ToListAsync());
+            await new ReportDataSetService(_context).EnsureSchemaAsync();
+            dataSets ??= new List<ReportDataSet>();
+
+            var systemDataSets = dataSets.Where(IsConfigurationSystemReportDataSet).ToList();
+            if (systemDataSets.Count == 0)
+                return;
+
+            await MarkCollidingReportDataSetsAsSystemAsync(systemDataSets);
+
+            var existingSystemDataSets = await _context.ReportDataSets
+                .Where(item => item.IsSystem)
+                .ToListAsync();
+            _context.ReportDataSets.RemoveRange(existingSystemDataSets);
             await _context.SaveChangesAsync();
 
-            DetachReportNavigation(reports);
-            foreach (var report in reports)
+            DetachReportDataSetNavigation(systemDataSets);
+            foreach (var dataSet in systemDataSets)
             {
+                dataSet.IsSystem = true;
+                foreach (var field in dataSet.Fields)
+                    field.ReportDataSetId = dataSet.Id;
+            }
+
+            await _context.ReportDataSets.AddRangeAsync(systemDataSets);
+        }
+
+        private async Task MarkCollidingReportDataSetsAsSystemAsync(List<ReportDataSet> systemDataSets)
+        {
+            var codes = systemDataSets
+                .Select(item => item.Code?.Trim())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (codes.Length == 0)
+                return;
+
+            await _context.Database.ExecuteSqlRawAsync(
+                @"UPDATE ""ReportDataSets""
+                  SET ""IsSystem"" = true
+                  WHERE COALESCE(""Code"", '') = ANY(@codes);",
+                new NpgsqlParameter("@codes", codes));
+        }
+        private async Task ReplaceSystemReportsAsync(List<Report>? reports)
+        {
+            await new PrintFormService(_context).EnsureSchemaAsync();
+            reports ??= new List<Report>();
+
+            var systemReports = reports.Where(IsConfigurationSystemReport).ToList();
+            if (systemReports.Count == 0)
+                return;
+
+            await MarkCollidingReportsAsSystemAsync(systemReports);
+
+            var existingSystemReports = await _context.Reports
+                .Where(item => item.IsSystem)
+                .ToListAsync();
+            _context.Reports.RemoveRange(existingSystemReports);
+            await _context.SaveChangesAsync();
+
+            DetachReportNavigation(systemReports);
+            foreach (var report in systemReports)
+            {
+                report.IsSystem = true;
                 foreach (var field in report.Fields)
                     field.ReportId = report.Id;
                 foreach (var filter in report.Filters)
@@ -250,9 +354,29 @@ namespace BIS.ERP.Services
                     group.ReportId = report.Id;
                 foreach (var mapping in report.ElementMappings)
                     mapping.ReportId = report.Id;
+                foreach (var headerFooter in report.HeadersFooters)
+                    headerFooter.ReportId = report.Id;
             }
 
-            await _context.Reports.AddRangeAsync(reports);
+            await _context.Reports.AddRangeAsync(systemReports);
+        }
+
+        private async Task MarkCollidingReportsAsSystemAsync(List<Report> systemReports)
+        {
+            var codes = systemReports
+                .Select(item => item.Code?.Trim())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (codes.Length == 0)
+                return;
+
+            await _context.Database.ExecuteSqlRawAsync(
+                @"UPDATE ""Reports""
+                  SET ""IsSystem"" = true
+                  WHERE COALESCE(""Code"", '') = ANY(@codes);",
+                new NpgsqlParameter("@codes", codes));
         }
 
         private async Task ReplaceRegulatedReportTemplatesAsync(List<RegulatedReportTemplate> templates)
@@ -440,6 +564,15 @@ namespace BIS.ERP.Services
             }
         }
 
+        private static void DetachReportDataSetNavigation(IEnumerable<ReportDataSet> dataSets)
+        {
+            foreach (var dataSet in dataSets)
+            {
+                foreach (var field in dataSet.Fields)
+                    field.ReportDataSet = null;
+            }
+        }
+
         private static void DetachReportNavigation(IEnumerable<Report> reports)
         {
             foreach (var report in reports)
@@ -452,7 +585,8 @@ namespace BIS.ERP.Services
                     group.Report = null!;
                 foreach (var mapping in report.ElementMappings)
                     mapping.Report = null!;
-                report.HeadersFooters.Clear();
+                foreach (var headerFooter in report.HeadersFooters)
+                    headerFooter.Report = null!;
             }
         }
 
