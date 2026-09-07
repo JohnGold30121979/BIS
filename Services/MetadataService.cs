@@ -1,30 +1,65 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
+using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Internal;
 using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
-using BIS.ERP.Services;
-using System.Linq.Expressions;
 
 namespace BIS.ERP.Services
 {
     public partial class MetadataService
     {
         private readonly AppDbContext _context;
+        private readonly IDbContextFactory<AppDbContext>? _contextFactory;
         private const string CashOrderDocumentName = "Расходный/Приходный КО";
         private const string CashOrderReceiptDocumentType = "Приходный кассовый ордер";
         private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
         private const string CashOrderReceiptKind = "Receipt";
         private const string CashOrderPaymentKind = "Payment";
         private const long MaxDocumentNumberUsedForCounter = 999_999_999;
+        private readonly string _connectionString;
+        private readonly System.Threading.SemaphoreSlim _contextAccess = new(1, 1);
 
         public MetadataService(AppDbContext context)
         {
-            _context = context;
+            _context = context ?? throw new ArgumentNullException(nameof(context));
+            _connectionString = _context.Database.GetConnectionString()
+                ?? AppSettings.Instance.GetMasterConnectionString();
+        }
+
+        // Дополнительный конструктор: принимает фабрику контекстов для создания независимых экземпляров.
+        public MetadataService(AppDbContext context, IDbContextFactory<AppDbContext> contextFactory)
+            : this(context)
+        {
+            _contextFactory = contextFactory ?? throw new ArgumentNullException(nameof(contextFactory));
+        }
+
+        /// <summary>
+        /// Безопасное создание независимого контекста для изоляции параллельных запросов.
+        /// Каждый вызов возвращает НОВОЕ короткоживущее соединение, чтобы исключить
+        /// ошибку "A command is already in progress" при одновременном чтении/записи.
+        /// </summary>
+        private AppDbContext CreateIndependentContext()
+        {
+            // Если есть фабрика — используем её (безопасно и контролируемо через DI).
+            if (_contextFactory != null)
+                return _contextFactory.CreateDbContext();
+
+            if (!string.IsNullOrEmpty(_connectionString))
+            {
+                return new AppDbContext(_connectionString);
+            }
+
+            // Фолбэк: собственное соединение на основе строки подключения текущего контекста.
+            var connString = _context?.Database.GetConnectionString()
+                ?? AppSettings.Instance.GetMasterConnectionString();
+            return new AppDbContext(connString);
         }
 
         // Инициализация базовых метаданных (как в 1С)
@@ -163,37 +198,54 @@ namespace BIS.ERP.Services
         // Получение данных справочника
         public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
         {
-            var catalog = await _context.MetadataObjects
-                .Include(c => c.Fields)
-                .FirstOrDefaultAsync(m => m.Id == catalogId);
+            await using var context = CreateIndependentContext();
+            MetadataObject? catalog;
+            string sql;
 
-            if (catalog == null) return new List<Dictionary<string, object>>();
-            await RemoveDuplicateMetadataFieldsAsync(catalog);
-
-            if (catalog.ObjectType == "Document")
-            {
-                try
-                {
-                    await EnsureGlobalDocumentNumberConfigurationAsync();
-                    await NormalizeDocumentTableNumbersAsync(catalog);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"Ошибка синхронизации нумерации для {catalog.Name}: {ex.Message}");
-                }
-            }
-
-            var result = new List<Dictionary<string, object>>();
-            var sql = await BuildCatalogDataSelectSqlAsync(catalog);
-
-            using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-
+            await _contextAccess.WaitAsync();
             try
             {
-                await _context.Database.OpenConnectionAsync();
-                using var reader = await command.ExecuteReaderAsync();
+                catalog = await _context.MetadataObjects
+                    .Include(c => c.Fields)
+                    .FirstOrDefaultAsync(m => m.Id == catalogId);
+
+                if (catalog == null) return new List<Dictionary<string, object>>();
+
+                await RemoveDuplicateMetadataFieldsAsync(catalog);
+
+                if (catalog.ObjectType == "Document")
+                {
+                    try
+                    {
+                        await EnsureGlobalDocumentNumberConfigurationAsync();
+                        await NormalizeDocumentTableNumbersAsync(catalog);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Ошибка синхронизации нумерации для {catalog.Name}: {ex.Message}");
+                    }
+                }
+
+                sql = await BuildCatalogDataSelectSqlAsync(catalog);
+            }
+            finally
+            {
+                _contextAccess.Release();
+            }
+
+           
+
+var result = new List<Dictionary<string, object>>();
+            try
+            {
+                
+
+                await using var connection = context.Database.GetDbConnection();
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                await using var reader = await command.ExecuteReaderAsync();
 
                 // Безопасное создание fieldMapping (обрабатывает дубликаты)
                 var fieldMapping = new Dictionary<string, string>();
@@ -236,7 +288,7 @@ namespace BIS.ERP.Services
             }
             finally
             {
-                await _context.Database.CloseConnectionAsync();
+                await context.Database.CloseConnectionAsync();
             }
 
             return result;
@@ -602,37 +654,45 @@ namespace BIS.ERP.Services
 
         public async Task<List<MetadataObject>> GetCatalogsAsync()
         {
+            await _contextAccess.WaitAsync();
             try
             {
-                await EnsureTaxCatalogStructureAsync();
-                await EnsurePaymentKindCatalogStructureAsync();
-                await EnsureChartOfAccountsCatalogStructureAsync();
-                await EnsureOrganizationsCatalogStructureAsync();
-                await EnsureEmployeesCatalogStructureAsync();
-                await EnsureCashDesksCatalogStructureAsync();
-                await EnsureSupplyKindCatalogStructureAsync();
-                await EnsureDeliveryTypeCatalogStructureAsync();
-                await EnsureAdvancePaymentsCatalogStructureAsync();
-                await EnsureAccountAnalyticsLinksCatalogAsync();
-                await EnsurePositionCatalogDataAsync();
+                try
+                {
+                    await EnsureTaxCatalogStructureAsync();
+                    await EnsurePaymentKindCatalogStructureAsync();
+                    await EnsureChartOfAccountsCatalogStructureAsync();
+                    await EnsureOrganizationsCatalogStructureAsync();
+                    await EnsureEmployeesCatalogStructureAsync();
+                    await EnsureCashDesksCatalogStructureAsync();
+                    await EnsureSupplyKindCatalogStructureAsync();
+                    await EnsureDeliveryTypeCatalogStructureAsync();
+                    await EnsureAdvancePaymentsCatalogStructureAsync();
+                    await EnsureAccountAnalyticsLinksCatalogAsync();
+                    await EnsurePositionCatalogDataAsync();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации служебных справочников: {ex.Message}");
+                }
+
+                var catalogs = await _context.Set<MetadataObject>()
+                    .Where(m => m.ObjectType == "Catalog" && m.Name != "Контрагенты")
+                    .Include(m => m.Fields)
+                    .OrderBy(m => m.Order)
+                    .ToListAsync();
+
+                catalogs = CollapseDuplicateCatalogsForNavigation(catalogs);
+
+                foreach (var catalog in catalogs)
+                    await RemoveDuplicateMetadataFieldsAsync(catalog);
+
+                return catalogs;
             }
-            catch (Exception ex)
+            finally
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации служебных справочников: {ex.Message}");
+                _contextAccess.Release();
             }
-
-            var catalogs = await _context.Set<MetadataObject>()
-                .Where(m => m.ObjectType == "Catalog" && m.Name != "Контрагенты")
-                .Include(m => m.Fields)
-                .OrderBy(m => m.Order)
-                .ToListAsync();
-
-            catalogs = CollapseDuplicateCatalogsForNavigation(catalogs);
-
-            foreach (var catalog in catalogs)
-                await RemoveDuplicateMetadataFieldsAsync(catalog);
-
-            return catalogs;
         }
 
         public static List<MetadataObject> CollapseDuplicateCatalogsForNavigation(IEnumerable<MetadataObject> catalogs)
@@ -2091,45 +2151,48 @@ namespace BIS.ERP.Services
         {
             try
             {
-                // Проверяем существование колонки
+                // Проверяем существование колонки. Используем независимый контекст, чтобы не блокировать общий _context.
                 var checkSql = $@"
             SELECT COUNT(*) 
             FROM information_schema.columns 
             WHERE table_name = '{tableName}' 
             AND column_name = '{field.DbColumnName}'";
 
-                using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
-                checkCommand.CommandText = checkSql;
-                await _context.Database.OpenConnectionAsync();
-                var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
-                await _context.Database.CloseConnectionAsync();
-
-                if (exists > 0)
+                using (var ctx = CreateIndependentContext())
                 {
-                    System.Diagnostics.Debug.WriteLine($"Колонка {field.DbColumnName} уже существует");
-                    return;
+                    using var checkCommand = ctx.Database.GetDbConnection().CreateCommand();
+                        checkCommand.CommandText = checkSql;
+                        await ctx.Database.OpenConnectionAsync();
+                        var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+                        await ctx.Database.CloseConnectionAsync();
+
+                        if (exists > 0)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Колонка {field.DbColumnName} уже существует");
+                            return;
+                        }
+
+                        // Добавляем колонку
+                        var sqlType = GetSqlTypeForField(field);
+                        var nullable = field.IsRequired ? "NOT NULL" : "";
+
+                        var defaultValue = "";
+                        if (field.IsRequired)
+                        {
+                            defaultValue = field.FieldType switch
+                            {
+                                "String" => " DEFAULT ''",
+                                "Int" => " DEFAULT 0",
+                                "Decimal" => " DEFAULT 0",
+                                "DateTime" => " DEFAULT CURRENT_TIMESTAMP",
+                                "Bool" => " DEFAULT false",
+                                _ => ""
+                            };
+                        }
+
+                        var sql = $"ALTER TABLE \"{tableName}\" ADD COLUMN \"{field.DbColumnName}\" {sqlType} {nullable} {defaultValue}";
+                        await ctx.Database.ExecuteSqlRawAsync(sql);
                 }
-
-                // Добавляем колонку
-                var sqlType = GetSqlTypeForField(field);
-                var nullable = field.IsRequired ? "NOT NULL" : "";
-
-                var defaultValue = "";
-                if (field.IsRequired)
-                {
-                    defaultValue = field.FieldType switch
-                    {
-                        "String" => " DEFAULT ''",
-                        "Int" => " DEFAULT 0",
-                        "Decimal" => " DEFAULT 0",
-                        "DateTime" => " DEFAULT CURRENT_TIMESTAMP",
-                        "Bool" => " DEFAULT false",
-                        _ => ""
-                    };
-                }
-
-                var sql = $"ALTER TABLE \"{tableName}\" ADD COLUMN \"{field.DbColumnName}\" {sqlType} {nullable} {defaultValue}";
-                await _context.Database.ExecuteSqlRawAsync(sql);
 
                 System.Diagnostics.Debug.WriteLine($"Добавлена колонка {field.DbColumnName} в таблицу {tableName}");
             }
@@ -5018,3 +5081,6 @@ namespace BIS.ERP.Services
 
     }
 }
+
+
+

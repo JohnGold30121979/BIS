@@ -574,7 +574,8 @@ namespace BIS.ERP.Views
                      {
                          "Код организации", "organization_code", "Код", "code", "Счет", "account_number",
                          "Табельный номер", "personnel_number", "Наименование", "Наименование материала",
-                         "Наименование банка", "ФИО", "full_name", "name"
+                         "Наименование банка", "Наименование участка", "site_name", "Код участка", "site_code",
+                         "ФИО", "full_name", "name"
                      })
             {
                 var value = GetValue(row, name);

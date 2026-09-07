@@ -35,19 +35,23 @@ namespace BIS.ERP.Services
                     _ => JsonSerializer.Serialize(details)
                 };
 
-                await EnsureSchemaAsync();
-                await _context.Database.ExecuteSqlRawAsync(@"
+                await using var connection = await OpenLogConnectionAsync();
+                await EnsureSchemaAsync(connection);
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = @"
                     INSERT INTO events
                     (""Id"", event_time, user_name, action, entity_type, entity_name, record_id, details)
-                    VALUES (@id, @time, @user, @action, @entityType, @entityName, @recordId, @details);",
-                    new NpgsqlParameter("@id", eventId),
-                    new NpgsqlParameter("@time", timestamp),
-                    new NpgsqlParameter("@user", Environment.UserName),
-                    new NpgsqlParameter("@action", action),
-                    new NpgsqlParameter("@entityType", entityType),
-                    new NpgsqlParameter("@entityName", entityName),
-                    new NpgsqlParameter("@recordId", (object?)recordId ?? DBNull.Value),
-                    new NpgsqlParameter("@details", detailsText));
+                    VALUES (@id, @time, @user, @action, @entityType, @entityName, @recordId, @details);";
+                command.Parameters.Add(new NpgsqlParameter("@id", eventId));
+                command.Parameters.Add(new NpgsqlParameter("@time", timestamp));
+                command.Parameters.Add(new NpgsqlParameter("@user", Environment.UserName));
+                command.Parameters.Add(new NpgsqlParameter("@action", action));
+                command.Parameters.Add(new NpgsqlParameter("@entityType", entityType));
+                command.Parameters.Add(new NpgsqlParameter("@entityName", entityName));
+                command.Parameters.Add(new NpgsqlParameter("@recordId", (object?)recordId ?? DBNull.Value));
+                command.Parameters.Add(new NpgsqlParameter("@details", detailsText));
+                await command.ExecuteNonQueryAsync();
 
                 LogFileOnly(action, entityType, entityName, recordId, detailsText, timestamp);
             }
@@ -86,7 +90,35 @@ namespace BIS.ERP.Services
 
         public async Task EnsureSchemaAsync()
         {
-            await _context.Database.ExecuteSqlRawAsync(@"
+            await using var connection = await OpenLogConnectionAsync();
+            await EnsureSchemaAsync(connection);
+        }
+
+        private async Task<NpgsqlConnection> OpenLogConnectionAsync()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException("Не удалось определить строку подключения для журнала событий.");
+            }
+
+            var connection = new NpgsqlConnection(connectionString);
+            try
+            {
+                await connection.OpenAsync();
+                return connection;
+            }
+            catch
+            {
+                await connection.DisposeAsync();
+                throw;
+            }
+        }
+
+        private static async Task EnsureSchemaAsync(NpgsqlConnection connection)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
                 CREATE TABLE IF NOT EXISTS events (
                     ""Id"" uuid PRIMARY KEY,
                     event_time timestamp NOT NULL,
@@ -98,7 +130,8 @@ namespace BIS.ERP.Services
                     details text NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS ""IX_events_time"" ON events (event_time);
-                CREATE INDEX IF NOT EXISTS ""IX_events_entity"" ON events (entity_type, entity_name);");
+                CREATE INDEX IF NOT EXISTS ""IX_events_entity"" ON events (entity_type, entity_name);";
+            await command.ExecuteNonQueryAsync();
         }
 
         private static void WriteFileLog(
@@ -118,4 +151,3 @@ namespace BIS.ERP.Services
         }
     }
 }
-

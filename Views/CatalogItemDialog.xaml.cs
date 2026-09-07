@@ -19,6 +19,7 @@ namespace BIS.ERP.Views
         private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
         private AccountAnalyticsRegistry? _accountAnalytics;
         private string? _assignedModuleName;
+        private readonly TaskCompletionSource<bool> _formBuilt = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Dictionary<string, object> ItemData => _itemData;
 
@@ -103,10 +104,12 @@ namespace BIS.ERP.Views
                 AttachOrganizationNameSync();
 
                 System.Diagnostics.Debug.WriteLine($"=== BuildFieldsAsync COMPLETED ===");
+                _formBuilt.TrySetResult(true);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"BuildFieldsAsync ERROR: {ex.Message}");
+                _formBuilt.TrySetException(ex);
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 throw;
             }
@@ -922,10 +925,20 @@ namespace BIS.ERP.Views
                 System.Diagnostics.Debug.WriteLine($"AutoFillFromEmployee error: {ex.Message}");
             }
         }
-        private void OnSaveClick(object sender, RoutedEventArgs e)
+        private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
             try
             {
+                // Ждём завершения построения формы, чтобы не выполнять команды
+                // БД параллельно с ещё не законченной загрузкой (Npgsql:
+                // «A command is already in progress»).
+                if (_formBuilt.Task.IsCompletedSuccessfully == false)
+                {
+                    Cursor = System.Windows.Input.Cursors.Wait;
+                    await _formBuilt.Task;
+                    Cursor = null;
+                }
+
                 foreach (var field in GetEditableFields())
                 {
                     if (!_controls.ContainsKey(field.Name)) continue;
@@ -1366,4 +1379,3 @@ namespace BIS.ERP.Views
     }
 
 }
-

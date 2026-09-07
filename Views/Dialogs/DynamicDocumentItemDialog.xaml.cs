@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using System;
@@ -40,6 +40,18 @@ namespace BIS.ERP.Views.Dialogs
             new[] { "Налог с продаж", "sales_tax_amount" },
             new[] { "Сумма", "amount" },
             new[] { "Сумма в валюте", "amount_currency", "foreign_amount" }
+        };
+
+        private static readonly string[][] FixedAssetCommissioningLineFieldAliases =
+        {
+            new[] { "Основное средство", "fixed_asset_id", "asset_id" },
+            new[] { "Дата приобретения", "acquisition_date" },
+            new[] { "Дата ввода в эксплуатацию", "commissioning_date" },
+            new[] { "Дата начала амортизации", "depreciation_start_date", "Дата начисления износа" },
+            new[] { "Участок", "site_id" },
+            new[] { "МОЛ", "responsible_person_id" },
+            new[] { "Срок полезного использования", "useful_life_months" },
+            new[] { "Сумма", "amount", "Первоначальная стоимость", "initial_cost" }
         };
 
         public Dictionary<string, object> ItemData { get; private set; } = new();
@@ -90,7 +102,11 @@ namespace BIS.ERP.Views.Dialogs
 
             if (IsFixedAssetMovementDocument())
             {
-                await BuildFixedAssetMovementFormAsync(catalogsDict);
+                var movementType = await ResolveFixedAssetMovementTypeCaptionAsync(catalogsDict);
+                if (IsFixedAssetCommissioningMovementType(movementType))
+                    await BuildFixedAssetCommissioningFormAsync(catalogsDict, movementType);
+                else
+                    await BuildFixedAssetMovementFormAsync(catalogsDict, movementType);
                 await ApplyFixedAssetMovementDefaultsAsync(catalogsDict);
                 UpdateAccountControlledFieldsVisibility();
                 return;
@@ -309,7 +325,9 @@ namespace BIS.ERP.Views.Dialogs
                 : null;
         }
 
-        private async Task BuildFixedAssetMovementFormAsync(Dictionary<string, MetadataObject> catalogsDict)
+        private async Task BuildFixedAssetMovementFormAsync(
+            Dictionary<string, MetadataObject> catalogsDict,
+            string? movementType = null)
         {
             await LoadTaxCatalogRowsAsync(catalogsDict);
             Width = Math.Max(Width, 1040);
@@ -320,7 +338,7 @@ namespace BIS.ERP.Views.Dialogs
             FieldsPanel.MaxWidth = double.PositiveInfinity;
             FieldsPanel.Width = double.NaN;
             FieldsPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
-            FieldsPanel.Children.Add(await CreateFixedAssetMovementHeaderAsync(catalogsDict));
+            FieldsPanel.Children.Add(CreateFixedAssetMovementHeader(movementType));
 
             var usedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -414,13 +432,76 @@ namespace BIS.ERP.Views.Dialogs
             FieldsPanel.Children.Add(CreateSection("Дополнительно", additionalGrid));
         }
 
-        private async Task<Border> CreateFixedAssetMovementHeaderAsync(Dictionary<string, MetadataObject> catalogsDict)
+        private async Task BuildFixedAssetCommissioningFormAsync(
+            Dictionary<string, MetadataObject> catalogsDict,
+            string? movementType)
         {
-            var title = _editId.HasValue
-                ? "Редактирование документа движения ОС"
-                : "Новый документ движения ОС";
+            Width = Math.Max(Width, 1180);
+            Height = Math.Max(Height, 760);
+            MinWidth = Math.Max(MinWidth, 960);
+            MinHeight = Math.Max(MinHeight, 660);
 
-            var movementType = await ResolveFixedAssetMovementTypeCaptionAsync(catalogsDict);
+            FieldsPanel.MaxWidth = double.PositiveInfinity;
+            FieldsPanel.Width = double.NaN;
+            FieldsPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            FieldsPanel.Children.Add(CreateFixedAssetMovementHeader(movementType, "Ввод в эксплуатацию ОС"));
+
+            var usedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var documentGrid = CreateTwoColumnGrid(2);
+            await AddFieldToGridAsync(documentGrid, 0, 0, catalogsDict, usedFields, "Номер");
+            await AddFieldToGridAsync(documentGrid, 0, 1, catalogsDict, usedFields, "Дата");
+            await AddFieldToGridAsync(documentGrid, 1, 0, catalogsDict, usedFields, "Примечание", "description");
+            await AddHiddenFieldAsync(catalogsDict, usedFields, "Вид документа ОС", "asset_document_entry_id");
+            await AddHiddenFieldAsync(catalogsDict, usedFields, "Проведен", "is_posted");
+            FieldsPanel.Children.Add(CreateSection("Документ", documentGrid));
+
+            var lineGrid = CreateFixedAssetCommissioningLineGrid();
+            _fixedAssetLineGrid = lineGrid;
+            _fixedAssetMovementCatalogsDict = catalogsDict;
+            _fixedAssetLineRows.Clear();
+            _activeFixedAssetLineRow = null;
+            await AddFixedAssetCommissioningLineRowAsync(lineGrid, catalogsDict, usedFields);
+            FieldsPanel.Children.Add(CreateSection("Объекты, вводимые в эксплуатацию", CreateFixedAssetCommissioningLineArea(lineGrid)));
+
+            var postingGrid = CreateTwoColumnGrid(2);
+            await AddFieldToGridAsync(postingGrid, 0, 0, catalogsDict, usedFields, "Счет дебета", "debit_account");
+            await AddFieldToGridAsync(postingGrid, 0, 1, catalogsDict, usedFields, "Счет кредита", "credit_account");
+            await AddFieldToGridAsync(postingGrid, 1, 0, catalogsDict, usedFields, "Счет амортизации", "depreciation_account");
+            await AddFieldToGridAsync(postingGrid, 1, 1, catalogsDict, usedFields, "Затратный счет", "expense_account");
+            FieldsPanel.Children.Add(CreateSection("Проводка и амортизация", postingGrid));
+
+            var remainingFields = _metadata.Fields
+                .OrderBy(field => field.Order)
+                .Where(field => !usedFields.Contains(field.Name))
+                .ToList();
+
+            if (remainingFields.Count == 0)
+                return;
+
+            var additionalGrid = CreateTwoColumnGrid((remainingFields.Count + 1) / 2);
+            for (var index = 0; index < remainingFields.Count; index++)
+            {
+                await AddFieldByMetadataToGridAsync(
+                    additionalGrid,
+                    index / 2,
+                    index % 2,
+                    remainingFields[index],
+                    catalogsDict,
+                    usedFields);
+            }
+
+            FieldsPanel.Children.Add(CreateSection("Дополнительно", additionalGrid));
+        }
+
+        private Border CreateFixedAssetMovementHeader(
+            string? movementType,
+            string? customTitle = null)
+        {
+            var title = customTitle ?? (_editId.HasValue
+                ? "Редактирование документа движения ОС"
+                : "Новый документ движения ОС");
+
             var subtitle = string.IsNullOrWhiteSpace(movementType)
                 ? "Сначала выбран вид ввода, далее заполняются реквизиты документа."
                 : $"Вид документа: {movementType}";
@@ -461,10 +542,12 @@ namespace BIS.ERP.Views.Dialogs
         private async Task<string?> ResolveFixedAssetMovementTypeCaptionAsync(Dictionary<string, MetadataObject> catalogsDict)
         {
             var explicitTitle = ReadFixedAssetMovementText(_initialData, "_FixedAssetMovementTypeTitle");
-            if (!string.IsNullOrWhiteSpace(explicitTitle))
+            if (!string.IsNullOrWhiteSpace(explicitTitle) && !Guid.TryParse(explicitTitle, out _))
                 return explicitTitle;
 
-            var rawValue = ReadFixedAssetMovementText(_existingData, "Вид документа ОС", "asset_document_entry_id");
+            var rawValue = ReadFixedAssetMovementText(_initialData, "Вид документа ОС", "asset_document_entry_id");
+            if (string.IsNullOrWhiteSpace(rawValue))
+                rawValue = ReadFixedAssetMovementText(_existingData, "Вид документа ОС", "asset_document_entry_id");
             if (string.IsNullOrWhiteSpace(rawValue))
                 return null;
 
@@ -483,6 +566,15 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             return Guid.TryParse(rawValue, out _) ? null : rawValue;
+        }
+
+        private static bool IsFixedAssetCommissioningMovementType(string? movementType)
+        {
+            if (string.IsNullOrWhiteSpace(movementType))
+                return false;
+
+            return movementType.Contains("ввод", StringComparison.OrdinalIgnoreCase) &&
+                   movementType.Contains("эксплуата", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildFixedAssetMovementTypeCaption(Dictionary<string, object> row)
@@ -948,6 +1040,50 @@ namespace BIS.ERP.Views.Dialogs
             return grid;
         }
 
+        private static Grid CreateFixedAssetCommissioningLineGrid()
+        {
+            var grid = new Grid { MinWidth = 1040 };
+            foreach (var width in new[] { 300d, 130d, 130d, 130d, 190d, 170d, 90d, 120d })
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(width) });
+
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var headers = new[]
+            {
+                "Наименование ОС",
+                "Дата приобретения",
+                "Дата ввода",
+                "Дата нач. износа",
+                "Участок",
+                "МОЛ",
+                "Срок",
+                "Стоимость"
+            };
+
+            for (var index = 0; index < headers.Length; index++)
+            {
+                var header = new Border
+                {
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(213, 225, 236)),
+                    BorderThickness = new Thickness(0, 0, 1, 1),
+                    Background = new SolidColorBrush(Color.FromRgb(231, 240, 248)),
+                    Padding = new Thickness(6, 5, 6, 5),
+                    Child = new TextBlock
+                    {
+                        Text = headers[index],
+                        FontWeight = FontWeights.Bold,
+                        FontSize = 12,
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                };
+                Grid.SetRow(header, 0);
+                Grid.SetColumn(header, index);
+                grid.Children.Add(header);
+            }
+
+            return grid;
+        }
         private Grid CreateFixedAssetLineArea(Grid lineGrid)
         {
             var container = new Grid { MinHeight = 165 };
@@ -989,6 +1125,48 @@ namespace BIS.ERP.Views.Dialogs
             return container;
         }
 
+        private Grid CreateFixedAssetCommissioningLineArea(Grid lineGrid)
+        {
+            var container = new Grid { MinHeight = 220 };
+            container.RowDefinitions.Add(new RowDefinition { Height = new GridLength(175), MinHeight = 120 });
+            container.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            container.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var scrollViewer = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = lineGrid
+            };
+            Grid.SetRow(scrollViewer, 0);
+            container.Children.Add(scrollViewer);
+
+            var splitter = new GridSplitter
+            {
+                Height = 6,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                Background = new SolidColorBrush(Color.FromRgb(226, 236, 245)),
+                ResizeDirection = GridResizeDirection.Rows
+            };
+            Grid.SetRow(splitter, 1);
+            container.Children.Add(splitter);
+
+            var buttonsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            buttonsPanel.Children.Add(CreateFixedAssetLineButton("+ Добавить ОС", OnAddFixedAssetCommissioningLineClick, "#2BAE66"));
+            buttonsPanel.Children.Add(CreateFixedAssetLineButton("+ Добавить группу ОС", OnFixedAssetGroupCommissioningClick, "#3498DB"));
+            buttonsPanel.Children.Add(CreateFixedAssetLineButton("- Удалить строку", OnDeleteFixedAssetLineClick, "#E74C3C"));
+            buttonsPanel.Children.Add(CreateFixedAssetLineButton("Все пометить", OnFixedAssetMarkAllClick, "#34495E"));
+
+            Grid.SetRow(buttonsPanel, 2);
+            container.Children.Add(buttonsPanel);
+            return container;
+        }
         private Button CreateFixedAssetLineButton(string text, RoutedEventHandler clickHandler, string color)
         {
             var button = new Button
@@ -1019,6 +1197,35 @@ namespace BIS.ERP.Views.Dialogs
             FocusFixedAssetLineStart();
         }
 
+        private async void OnAddFixedAssetCommissioningLineClick(object sender, RoutedEventArgs e)
+        {
+            if (_isReadOnly)
+                return;
+
+            if (_fixedAssetLineGrid == null || _fixedAssetMovementCatalogsDict == null)
+                return;
+
+            await AddFixedAssetCommissioningLineRowAsync(_fixedAssetLineGrid, _fixedAssetMovementCatalogsDict, null);
+            FocusFixedAssetLineStart();
+        }
+
+        private void OnFixedAssetGroupCommissioningClick(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show(
+                "Групповое добавление ОС будет подключено отдельным шагом.",
+                "Ввод в эксплуатацию ОС",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        private void OnFixedAssetMarkAllClick(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show(
+                "Массовая отметка объектов ОС будет подключена вместе с групповым вводом.",
+                "Ввод в эксплуатацию ОС",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
         private void OnDeleteFixedAssetLineClick(object sender, RoutedEventArgs e)
         {
             if (_isReadOnly)
@@ -1038,13 +1245,7 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
-            foreach (var aliases in FixedAssetLineFieldAliases)
-            {
-                var field = FindDialogField(aliases);
-                if (field != null && rowToDelete.Controls.TryGetValue(field.Name, out var control))
-                    ClearControl(control);
-            }
-
+            ClearFixedAssetLineRow(rowToDelete);
             RecalculateFixedAssetMovementTotals();
             FocusFixedAssetLineStart();
         }
@@ -1091,6 +1292,47 @@ namespace BIS.ERP.Views.Dialogs
             RecalculateFixedAssetMovementTotals();
         }
 
+        private async Task AddFixedAssetCommissioningLineRowAsync(
+            Grid lineGrid,
+            Dictionary<string, MetadataObject> catalogsDict,
+            ISet<string>? usedFields)
+        {
+            var isAdditionalRow = _fixedAssetLineRows.Count > 0;
+            var rowIndex = _fixedAssetLineRows.Count == 0 ? 1 : lineGrid.RowDefinitions.Count;
+            while (lineGrid.RowDefinitions.Count <= rowIndex)
+                lineGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var row = new FixedAssetLineUiRow { RowIndex = rowIndex };
+            for (var column = 0; column < FixedAssetCommissioningLineFieldAliases.Length; column++)
+            {
+                var field = FindDialogField(FixedAssetCommissioningLineFieldAliases[column]);
+                if (field == null)
+                    continue;
+
+                var panel = await CreateFieldPanelAsync(field, catalogsDict, showLabel: false);
+                if (_fieldControls.TryGetValue(field.Name, out var control))
+                {
+                    if (control is FrameworkElement controlElement)
+                        controlElement.Name = $"{GetSafeControlName(field.Name)}_{rowIndex}_{column}";
+
+                    row.Controls[field.Name] = control;
+                    row.Panels[field.Name] = panel;
+                    AttachFixedAssetLineRowActivation(row, control, panel);
+                }
+
+                Grid.SetRow(panel, rowIndex);
+                Grid.SetColumn(panel, column);
+                lineGrid.Children.Add(panel);
+                usedFields?.Add(field.Name);
+            }
+
+            _fixedAssetLineRows.Add(row);
+            ActivateFixedAssetLineRow(row);
+            if (isAdditionalRow)
+                ClearFixedAssetLineRow(row);
+
+            RecalculateFixedAssetMovementTotals();
+        }
         private void AttachFixedAssetLineRowActivation(
             FixedAssetLineUiRow row,
             Control control,
@@ -1156,7 +1398,10 @@ namespace BIS.ERP.Views.Dialogs
         {
             var field = FindDialogField("Основное средство", "fixed_asset_id", "asset_id");
             if (field == null)
+            {
+                FocusFirstActiveFixedAssetLineControl();
                 return;
+            }
 
             if (_activeFixedAssetLineRow?.Controls.TryGetValue(field.Name, out var rowControl) == true)
             {
@@ -1167,7 +1412,23 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             if (_fieldControls.TryGetValue(field.Name, out var control))
+            {
                 control.Focus();
+                return;
+            }
+
+            FocusFirstActiveFixedAssetLineControl();
+        }
+
+        private void FocusFirstActiveFixedAssetLineControl()
+        {
+            if (_activeFixedAssetLineRow?.Controls.Values.FirstOrDefault() is not { } control)
+                return;
+
+            if (control is FrameworkElement element)
+                element.BringIntoView();
+
+            control.Focus();
         }
 
         private async Task<bool> AddFieldToGridAsync(
@@ -1812,6 +2073,7 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
 
 
 

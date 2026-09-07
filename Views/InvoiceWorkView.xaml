@@ -62,8 +62,7 @@
                             <TextBox x:Name="DateFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
                         </StackPanel>
                     </DataGridTextColumn.Header>
-                </DataGridTextColumn>
-                <DataGridTextColumn x:Name="ModuleColumn" Header="Модуль" Binding="{Binding ModuleCode}" Width="115"/>
+                </DataGridTextColumn>                
                 <DataGridTextColumn Binding="{Binding DocNumber}" Width="120">
                     <DataGridTextColumn.Header>
                         <StackPanel>
@@ -106,6 +105,7 @@
                 </DataGridTextColumn>
                 <DataGridTextColumn x:Name="BasisColumn" Header="Основание" Binding="{Binding Basis}" Width="220"/>
                 <DataGridTextColumn x:Name="EsfStatusColumn" Header="Статус документа" Binding="{Binding TaxStatusDisplay}" Width="125"/>
+                <DataGridTextColumn x:Name="ModuleColumn" Header="Модуль" Binding="{Binding ModuleCode}" Width="115"/>
             </DataGrid.Columns>
         </DataGrid>
 

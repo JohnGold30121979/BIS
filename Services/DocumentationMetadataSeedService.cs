@@ -823,19 +823,27 @@ namespace BIS.ERP.Services
                 Field(Guid.Empty, "Валюта", "currency_id", "Reference", 12, false, "Справочник валют"),
                 Field(Guid.Empty, "Курс валюты", "exchange_rate", "Decimal", 13),
                 Field(Guid.Empty, "Основное средство", "asset_id", "Reference", 14, false, "Основные средства"),
-                Field(Guid.Empty, "Счет операции", "operation_account", "Reference", 15, false, "План счетов"),
-                Field(Guid.Empty, "Без НДС", "amount_without_vat", "Decimal", 16),
-                Field(Guid.Empty, "НДС", "vat_amount", "Decimal", 17),
-                Field(Guid.Empty, "% НДС", "vat_rate", "Decimal", 18),
-                Field(Guid.Empty, "Налог с продаж", "sales_tax_amount", "Decimal", 19),
-                Field(Guid.Empty, "Итого", "total_amount", "Decimal", 20),
-                Field(Guid.Empty, "Сумма", "amount", "Decimal", 21, true),
-                Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 22),
-                Field(Guid.Empty, "Счет дебета", "debit_account", "Reference", 23, false, "План счетов"),
-                Field(Guid.Empty, "Счет кредита", "credit_account", "Reference", 24, false, "План счетов"),
-                Field(Guid.Empty, "Основание", "basis", "String", 25),
-                Field(Guid.Empty, "Примечание", "description", "String", 26),
-                Field(Guid.Empty, "Проведен", "is_posted", "Bool", 27)
+                Field(Guid.Empty, "Дата приобретения", "acquisition_date", "DateTime", 15),
+                Field(Guid.Empty, "Дата ввода в эксплуатацию", "commissioning_date", "DateTime", 16),
+                Field(Guid.Empty, "Дата начала амортизации", "depreciation_start_date", "DateTime", 17),
+                Field(Guid.Empty, "Участок", "site_id", "Reference", 18, false, "Участки"),
+                Field(Guid.Empty, "МОЛ", "responsible_person_id", "Reference", 19, false, "МОЛ"),
+                Field(Guid.Empty, "Срок полезного использования", "useful_life_months", "Int", 20),
+                Field(Guid.Empty, "Счет амортизации", "depreciation_account", "Reference", 21, false, "План счетов"),
+                Field(Guid.Empty, "Затратный счет", "expense_account", "Reference", 22, false, "План счетов"),
+                Field(Guid.Empty, "Счет операции", "operation_account", "Reference", 23, false, "План счетов"),
+                Field(Guid.Empty, "Без НДС", "amount_without_vat", "Decimal", 24),
+                Field(Guid.Empty, "НДС", "vat_amount", "Decimal", 25),
+                Field(Guid.Empty, "% НДС", "vat_rate", "Decimal", 26),
+                Field(Guid.Empty, "Налог с продаж", "sales_tax_amount", "Decimal", 27),
+                Field(Guid.Empty, "Итого", "total_amount", "Decimal", 28),
+                Field(Guid.Empty, "Сумма", "amount", "Decimal", 29, true),
+                Field(Guid.Empty, "Сумма в валюте", "amount_currency", "Decimal", 30),
+                Field(Guid.Empty, "Счет дебета", "debit_account", "Reference", 31, false, "План счетов"),
+                Field(Guid.Empty, "Счет кредита", "credit_account", "Reference", 32, false, "План счетов"),
+                Field(Guid.Empty, "Основание", "basis", "String", 33),
+                Field(Guid.Empty, "Примечание", "description", "String", 34),
+                Field(Guid.Empty, "Проведен", "is_posted", "Bool", 35)
             };
             Reorder(fields);
             return fields;
@@ -1154,6 +1162,7 @@ namespace BIS.ERP.Services
         }
     }
 }
+
 
 
 

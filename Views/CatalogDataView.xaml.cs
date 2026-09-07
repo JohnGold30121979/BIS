@@ -31,6 +31,12 @@ namespace BIS.ERP.Views
         private static readonly IValueConverter PrintModeConverter = new ChartOfAccountsModeDisplayConverter("Признак печати");
         private static readonly IValueConverter BalanceModeConverter = new ChartOfAccountsModeDisplayConverter("Сохранять остатки");
 
+        private sealed class CatalogDetailFieldView
+        {
+            public string Field { get; init; } = string.Empty;
+            public string Value { get; init; } = string.Empty;
+        }
+
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
             InitializeComponent();
@@ -89,6 +95,26 @@ namespace BIS.ERP.Views
             string.Equals(_catalog.Name, "Справочник валют", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, "catalog_currencies", StringComparison.OrdinalIgnoreCase);
 
+        private bool IsOrganizationsCatalog =>
+            string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_organizations", StringComparison.OrdinalIgnoreCase);
+
+        private Border? OrganizationDetailsPanelControl => FindName("OrganizationDetailsPanel") as Border;
+
+        private ItemsControl? OrganizationDetailsItemsControl => FindName("OrganizationDetailsItems") as ItemsControl;
+
+        private void SetOrganizationDetailsSource(IEnumerable<CatalogDetailFieldView>? details)
+        {
+            if (OrganizationDetailsItemsControl is { } items)
+                items.ItemsSource = details;
+        }
+
+        private void SetOrganizationDetailsVisibility(Visibility visibility)
+        {
+            if (OrganizationDetailsPanelControl is { } panel)
+                panel.Visibility = visibility;
+        }
+
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
             await LoadData();
@@ -101,6 +127,8 @@ namespace BIS.ERP.Views
             DeleteButton.IsEnabled = hasSelection;
             if (IsCurrencyRatesCatalog && ActivateRateButton != null)
                 ActivateRateButton.IsEnabled = hasSelection;
+
+            UpdateOrganizationDetailsPanel();
         }
 
         private async Task LoadCurrencyRateFilterAsync()
@@ -587,7 +615,7 @@ namespace BIS.ERP.Views
                     Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
                     Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
-                    Visibility = IsFixedAssetsCatalog ? Visibility.Collapsed : Visibility.Visible,
+                    Visibility = IsFixedAssetsCatalog || IsOrganizationsCatalog ? Visibility.Collapsed : Visibility.Visible,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -596,11 +624,14 @@ namespace BIS.ERP.Views
                     Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
                     Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
-                    Visibility = IsFixedAssetsCatalog ? Visibility.Collapsed : Visibility.Visible,
+                    Visibility = IsFixedAssetsCatalog || IsOrganizationsCatalog ? Visibility.Collapsed : Visibility.Visible,
                     ElementStyle = CreateCellTextStyle()
                 });
 
                 DataGrid.ItemsSource = _dataTable.DefaultView;
+
+                ApplyOrganizationGridPresentation();
+                UpdateOrganizationDetailsPanel();
 
                 ApplyCurrencyRateFilter();
 
@@ -651,26 +682,54 @@ namespace BIS.ERP.Views
         {
             _referenceCache.Clear();
 
-            foreach (var field in GetReferenceFieldsForDisplay())
-            {
-                if (!_catalogsDict.TryGetValue(field.ReferenceCatalog, out var refCatalog))
-                    continue;
+            var fields = GetReferenceFieldsForDisplay().ToList();
+            if (_catalogsDict == null || fields.Count == 0)
+                return;
 
-                var refData = await _metadataService.GetCatalogDataAsync(refCatalog.Id);
-                var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                foreach (var row in refData)
+            // Группируем поля по целевому каталогу и фильтруем отсутствующие справочники
+            var groups = fields
+                .GroupBy(f => f.ReferenceCatalog, StringComparer.OrdinalIgnoreCase)
+                .Select(g =>
                 {
-                    // Универсальное форматирование через шаблон из метаданных
-                    var displayValue = GetDisplayValueFromRow(row, field, refCatalog.Name);
-                    foreach (var key in GetReferenceLookupKeys(row))
+                    _catalogsDict.TryGetValue(g.Key, out var refCatalog);
+                    return (CatalogName: g.Key, RefCatalog: refCatalog, Fields: g.ToList());
+                })
+                .Where(t => t.RefCatalog != null)
+                .ToList();
+
+            // Запускаем параллельную загрузку и обработку по каждому справочнику
+            var loadTasks = groups.Select(async grp =>
+            {
+                var refData = await _metadataService.GetCatalogDataAsync(grp.RefCatalog.Id);
+
+                // Для каждого поля, ссылочного на этот каталог, формируем свой словарь отображения
+                var perFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var field in grp.Fields)
+                {
+                    var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var row in refData)
                     {
-                        if (!dict.ContainsKey(key))
-                            dict[key] = displayValue;
+                        var displayValue = GetDisplayValueFromRow(row, field, grp.CatalogName);
+                        foreach (var key in GetReferenceLookupKeys(row))
+                        {
+                            if (!dict.ContainsKey(key))
+                                dict[key] = displayValue;
+                        }
                     }
+
+                    perFieldDicts[field.Name] = dict;
                 }
 
-                _referenceCache[field.Name] = dict;
+                return perFieldDicts;
+            }).ToList();
+
+            var results = await Task.WhenAll(loadTasks);
+
+            // Объединяем результаты в общий кеш
+            foreach (var perFieldDicts in results)
+            {
+                foreach (var kv in perFieldDicts)
+                    _referenceCache[kv.Key] = kv.Value;
             }
         }
 
@@ -918,10 +977,148 @@ namespace BIS.ERP.Views
                 Binding = CreateColumnBinding(field),
                 Width = GetColumnWidth(field),
                 MinWidth = GetColumnMinWidth(field),
+                Visibility = IsCatalogFieldVisibleInMainGrid(field) ? Visibility.Visible : Visibility.Collapsed,
+                CanUserResize = true,
                 ElementStyle = CreateCellTextStyle(GetColumnTextAlignment(field))
             };
         }
 
+        private bool IsCatalogFieldVisibleInMainGrid(MetadataField field)
+        {
+            if (!IsOrganizationsCatalog)
+                return true;
+
+            return IsOrganizationMainColumn(field.Name, field.DbColumnName);
+        }
+
+        private static bool TryGetOrganizationColumnWidth(MetadataField field, out double width)
+        {
+            var key = GetOrganizationColumnKey(field);
+            width = key switch
+            {
+                "код" or "code" => 80,
+                "наименование" or "name" => 360,
+                "полноенаименование" or "полноенаменование" or "fullname" => 460,
+                "инн" or "inn" or "taxid" or "taxnumber" => 170,
+                _ => 0
+            };
+
+            return width > 0;
+        }
+
+        private static bool TryGetOrganizationColumnMinWidth(MetadataField field, out double minWidth)
+        {
+            var key = GetOrganizationColumnKey(field);
+            minWidth = key switch
+            {
+                "код" or "code" => 64,
+                "наименование" or "name" => 240,
+                "полноенаименование" or "полноенаменование" or "fullname" => 300,
+                "инн" or "inn" or "taxid" or "taxnumber" => 120,
+                _ => 0
+            };
+
+            return minWidth > 0;
+        }
+
+        private static string GetOrganizationColumnKey(MetadataField field)
+        {
+            var byName = NormalizeOrganizationColumnKey(field.Name);
+            if (IsOrganizationMainKey(byName))
+                return byName;
+
+            return NormalizeOrganizationColumnKey(field.DbColumnName);
+        }
+
+        private static bool IsOrganizationMainColumn(string? fieldName, string? dbColumnName = null)
+        {
+            return IsOrganizationMainKey(NormalizeOrganizationColumnKey(fieldName)) ||
+                   IsOrganizationMainKey(NormalizeOrganizationColumnKey(dbColumnName));
+        }
+
+        private static bool IsOrganizationMainKey(string key)
+        {
+            return key is "код" or "code" or
+                   "наименование" or "name" or
+                   "полноенаименование" or "полноенаменование" or "fullname" or
+                   "инн" or "inn" or "taxid" or "taxnumber";
+        }
+
+        private static string NormalizeOrganizationColumnKey(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return string.Empty;
+
+            var normalized = value.Trim().ToLowerInvariant().Replace('ё', 'е');
+            return new string(normalized.Where(char.IsLetterOrDigit).ToArray());
+        }
+
+        private void ApplyOrganizationGridPresentation()
+        {
+            if (!IsOrganizationsCatalog)
+            {
+                SetOrganizationDetailsVisibility(Visibility.Collapsed);
+                SetOrganizationDetailsSource(null);
+                return;
+            }
+
+            foreach (var column in DataGrid.Columns)
+                column.CanUserResize = true;
+        }
+
+        private void UpdateOrganizationDetailsPanel()
+        {
+            if (!IsOrganizationsCatalog)
+                return;
+
+            if (DataGrid.SelectedItem is not DataRowView selectedRow || _dataTable == null)
+            {
+                SetOrganizationDetailsSource(null);
+                SetOrganizationDetailsVisibility(Visibility.Collapsed);
+                return;
+            }
+
+            var details = _dataTable.Columns
+                .Cast<DataColumn>()
+                .Where(column => ShouldShowOrganizationDetailColumn(column.ColumnName))
+                .Select(column => new CatalogDetailFieldView
+                {
+                    Field = column.ColumnName,
+                    Value = FormatOrganizationDetailValue(selectedRow[column.ColumnName])
+                })
+                .ToList();
+
+            SetOrganizationDetailsSource(details);
+            SetOrganizationDetailsVisibility(details.Count > 0 ? Visibility.Visible : Visibility.Collapsed);
+        }
+
+        private static bool ShouldShowOrganizationDetailColumn(string columnName)
+        {
+            if (string.Equals(columnName, "Id", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(columnName, "CurrencyFilterFlag", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return !IsOrganizationMainColumn(columnName);
+        }
+
+        private static string FormatOrganizationDetailValue(object? value)
+        {
+            if (value == null || value == DBNull.Value)
+                return string.Empty;
+
+            return value switch
+            {
+                bool flag => flag ? "Да" : "Нет",
+                DateTime date => date.ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture),
+                DateTimeOffset date => date.ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture),
+                decimal number => number.ToString("N2", CultureInfo.CurrentCulture),
+                double number => number.ToString("N2", CultureInfo.CurrentCulture),
+                float number => number.ToString("N2", CultureInfo.CurrentCulture),
+                _ => Convert.ToString(value, CultureInfo.CurrentCulture)?.Trim() ?? string.Empty
+            };
+        }
         private object CreateColumnHeader(string fieldName)
         {
             if (!IsChartOfAccountsCatalog && !IsAdvancePaymentsCatalog && !IsFixedAssetsCatalog)
@@ -944,6 +1141,9 @@ namespace BIS.ERP.Views
         }
         private DataGridLength GetColumnWidth(MetadataField field)
         {
+            if (IsOrganizationsCatalog && TryGetOrganizationColumnWidth(field, out var organizationWidth))
+                return new DataGridLength(organizationWidth, DataGridLengthUnitType.Pixel);
+
             if (IsAdvancePaymentsCatalog)
             {
                 var advanceWidth = field.Name switch
@@ -1018,6 +1218,9 @@ namespace BIS.ERP.Views
         }
         private double GetColumnMinWidth(MetadataField field)
         {
+            if (IsOrganizationsCatalog && TryGetOrganizationColumnMinWidth(field, out var organizationMinWidth))
+                return organizationMinWidth;
+
             if (IsAdvancePaymentsCatalog)
                 return field.FieldType == "Bool" ? 40 : 62;
 

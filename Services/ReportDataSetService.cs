@@ -1,4 +1,4 @@
-using BIS.ERP.Data;
+﻿using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -29,9 +29,27 @@ public sealed class ReportDataSetService
         _context = context;
     }
 
+    private async Task<NpgsqlConnection> OpenStandaloneConnectionAsync()
+    {
+        var connectionString = _context.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new InvalidOperationException("Не удалось получить строку подключения к инфобазе.");
+
+        var connection = new NpgsqlConnection(connectionString);
+        try
+        {
+            await connection.OpenAsync();
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
     public async Task EnsureSchemaAsync()
     {
-        await _context.Database.ExecuteSqlRawAsync(@"
+        const string sql = @"
             CREATE TABLE IF NOT EXISTS ""ReportDataSets"" (
                 ""Id"" uuid NOT NULL,
                 ""Code"" varchar(160) NOT NULL,
@@ -63,9 +81,13 @@ public sealed class ReportDataSetService
 
             CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ReportDataSetFields_ReportDataSetId_DbColumnName""
                 ON ""ReportDataSetFields"" (""ReportDataSetId"", ""DbColumnName"");
-        ");
-    }
+        ";
 
+        await using var connection = await OpenStandaloneConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
     public async Task EnsureStandardDataSetsAsync()
     {
         await EnsureSchemaAsync();
@@ -166,7 +188,8 @@ public sealed class ReportDataSetService
             : $"SELECT * FROM ({sql}) AS report_dataset_result";
 
         var table = new DataTable(dataSet.Name);
-        using var command = _context.Database.GetDbConnection().CreateCommand();
+        await using var connection = await OpenStandaloneConnectionAsync();
+        await using var command = connection.CreateCommand();
         command.CommandText = wrappedSql;
         command.CommandTimeout = 60;
         AddSqlParameters(command, sql, parameters);
@@ -178,23 +201,10 @@ public sealed class ReportDataSetService
             command.Parameters.Add(limitParameter);
         }
 
-        var opened = false;
-        try
-        {
-            await _context.Database.OpenConnectionAsync();
-            opened = true;
-            using var reader = await command.ExecuteReaderAsync();
-            table.Load(reader);
-        }
-        finally
-        {
-            if (opened)
-                await _context.Database.CloseConnectionAsync();
-        }
-
+        await using var reader = await command.ExecuteReaderAsync();
+        table.Load(reader);
         return table;
     }
-
     public async Task<DataTable> TestAsync(ReportDataSet dataSet, int limit = 50)
     {
         dataSet.SqlText = NormalizeSql(dataSet.SqlText);
