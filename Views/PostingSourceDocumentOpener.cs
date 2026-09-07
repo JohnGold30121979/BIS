@@ -37,7 +37,7 @@ namespace BIS.ERP.Views
             {
                 effectiveReadOnly = true;
                 MessageBox.Show(
-                    $"Период, содержащий дату {posting.Date:dd.MM.yyyy}, закрыт. Документ открывается в режиме просмотра.",
+                    $"Период, содержащий дату {posting.Date:dd/MM/yyyy}, закрыт. Документ открывается в режиме просмотра.",
                     "Закрытый период",
                     MessageBoxButton.OK,
                     MessageBoxImage.Information);
@@ -277,4 +277,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 

@@ -35,7 +35,7 @@
                   CanUserDeleteRows="False"
                   HorizontalScrollBarVisibility="Auto">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="День" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="120"/>
+                <DataGridTextColumn Header="День" Binding="{Binding Date, StringFormat=dd/MM/yyyy}" Width="120"/>
                 <DataGridTextColumn Header="ДН" Binding="{Binding OpeningDebit, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="КН" Binding="{Binding OpeningCredit, StringFormat=N2}" Width="120"/>
                 <DataGridTextColumn Header="Дт оборот" Binding="{Binding DebitTurnover, StringFormat=N2}" Width="130"/>
@@ -56,3 +56,4 @@
                 Click="OnCloseClick"/>
     </Grid>
 </Window>
+

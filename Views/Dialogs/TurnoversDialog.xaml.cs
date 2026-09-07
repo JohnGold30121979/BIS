@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Data;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,7 +13,7 @@ namespace BIS.ERP.Views.Dialogs
         public TurnoversDialog(string accountCode, string accountName, DateTime startDate, DateTime endDate, PostingService service)
         {
             InitializeComponent();
-            TitleText.Text = $"Обороты по счету {accountCode} - {accountName} за {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            TitleText.Text = $"Обороты по счету {accountCode} - {accountName} за {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}";
             Loaded += async (_, _) =>
             {
                 try
@@ -42,3 +42,4 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+

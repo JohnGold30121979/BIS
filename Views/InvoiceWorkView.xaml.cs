@@ -156,7 +156,7 @@ namespace BIS.ERP.Views
         {
             IEnumerable<InvoiceListRow> query = _allInvoices;
 
-            query = ApplyColumnFilter(query, DateFilterBox.Text, invoice => invoice.DocDate.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture));
+            query = ApplyColumnFilter(query, DateFilterBox.Text, invoice => invoice.DocDate.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture));
             query = ApplyColumnFilter(query, DocumentFilterBox.Text, invoice => invoice.DocNumber);
             query = ApplyColumnFilter(query, AmountFilterBox.Text, invoice => FormatAmount(invoice.TotalAmount));
             query = ApplyColumnFilter(query, EsfNumberFilterBox.Text, invoice => invoice.EsfNumber);
@@ -489,4 +489,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 

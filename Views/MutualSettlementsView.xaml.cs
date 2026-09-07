@@ -192,10 +192,10 @@ namespace BIS.ERP.Views
                 organizationId, startDate, endDate);
 
             var details = string.Join("\n", data.Select(d =>
-                $"{d.GetValueOrDefault("Дата"):yyyy-MM-dd} | {d.GetValueOrDefault("Номер документа")} | {d.GetValueOrDefault("Дебет")} -> {d.GetValueOrDefault("Кредит")} | {d.GetValueOrDefault("Сумма"):N2}"));
+                $"{d.GetValueOrDefault("Дата"):dd/MM/yyyy} | {d.GetValueOrDefault("Номер документа")} | {d.GetValueOrDefault("Дебет")} -> {d.GetValueOrDefault("Кредит")} | {d.GetValueOrDefault("Сумма"):N2}"));
 
             var report = $"Акт сверки: {selected.organization_name}\n" +
-                        $"Период: {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}\n" +
+                        $"Период: {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}\n" +
                         $"Сальдо: {selected.balance:N2}\n\n" +
                         details;
 
@@ -264,3 +264,5 @@ namespace BIS.ERP.Views
         public bool is_total { get; set; }
     }
 }
+
+

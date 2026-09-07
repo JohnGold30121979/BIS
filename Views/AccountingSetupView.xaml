@@ -53,7 +53,7 @@
                     <DataGrid x:Name="OpeningGrid" Grid.Row="2" AutoGenerateColumns="False"
                               CanUserAddRows="False" SelectionMode="Single">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Дата остатка" Binding="{Binding BalanceDate, StringFormat=dd.MM.yyyy}" Width="120"/>
+                            <DataGridTextColumn Header="Дата остатка" Binding="{Binding BalanceDate, StringFormat=dd/MM/yyyy}" Width="120"/>
                             <DataGridTextColumn Header="Счет" Binding="{Binding AccountCode}" IsReadOnly="True" Width="120"/>
                             <DataGridTextColumn Header="Наименование" Binding="{Binding AccountName}" IsReadOnly="True" Width="*"/>
                             <DataGridTextColumn Header="Дебет" Binding="{Binding Debit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
@@ -158,3 +158,4 @@
         <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
     </Grid>
 </UserControl>
+

@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="BIS.ERP.Views.FinanceDocumentWorkView"
+<UserControl x:Class="BIS.ERP.Views.FinanceDocumentWorkView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -50,7 +50,7 @@
                   BorderThickness="1">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Номер" Binding="{Binding DocumentNumber}" Width="110"/>
-                <DataGridTextColumn Header="Дата" Binding="{Binding DocumentDate, StringFormat=dd.MM.yyyy}" Width="105"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding DocumentDate, StringFormat=dd/MM/yyyy}" Width="105"/>
                 <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding EmployeeName}" Width="190"/>
                 <DataGridTextColumn x:Name="AdvancePaymentColumn" Header="Вид расчета" Binding="{Binding AdvancePaymentName}" Width="210"/>
                 <DataGridTextColumn x:Name="PeriodColumn" Header="Период" Binding="{Binding PeriodDisplay}" Width="170"/>
@@ -61,7 +61,7 @@
                 <DataGridTextColumn x:Name="PayableAmountColumn" Header="К выплате" Binding="{Binding PayableAmount}" Width="105"/>
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="220"/>
                 <DataGridTextColumn x:Name="PostedColumn" Header="Проведен" Binding="{Binding IsPostedDisplay}" Width="90"/>
-                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
+                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt, StringFormat=dd/MM/yyyy HH:mm}" Width="140"/>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -105,4 +105,5 @@
         </StatusBar>
     </Grid>
 </UserControl>
+
 

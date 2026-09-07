@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="BIS.ERP.Views.InfoBasesView"
+<UserControl x:Class="BIS.ERP.Views.InfoBasesView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
@@ -51,7 +51,7 @@
                                         <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold"/>
                                         <TextBlock Text="{Binding TypeName}" Foreground="#666" FontSize="12"/>
                                         <TextBlock Text="{Binding PatchVersionDisplay}" Foreground="#2980B9" FontSize="12"/>
-                                        <TextBlock Text="{Binding CreatedAt, StringFormat=Created: dd.MM.yyyy HH:mm}" 
+                                        <TextBlock Text="{Binding CreatedAt, StringFormat=Created: dd/MM/yyyy HH:mm}" 
                                                    Foreground="#999" FontSize="11"/>
                                     </StackPanel>
 
@@ -74,3 +74,4 @@
         </ScrollViewer>
     </Grid>
 </UserControl>
+

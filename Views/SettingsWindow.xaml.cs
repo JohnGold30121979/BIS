@@ -158,7 +158,7 @@ namespace BIS.ERP.Views
 
                 var imported = results.Sum(result => result.Imported);
                 var skipped = results.Sum(result => result.Skipped);
-                var dates = string.Join(", ", results.Select(result => result.RateDate.ToString("dd.MM.yyyy")));
+                var dates = string.Join(", ", results.Select(result => result.RateDate.ToString("dd/MM/yyyy")));
                 var message = $"Курсы загружены. Даты: {dates}. Загружено: {imported}, пропущено: {skipped}.";
 
                 NationalBankRatesStatusText.Text = message;
@@ -197,5 +197,6 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 

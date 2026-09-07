@@ -240,7 +240,7 @@ namespace BIS.ERP.Views
         public string ActiveDisplay => User.Role == UserRole.Admin
             ? "Всегда"
             : User.IsActive ? "Да" : "Нет";
-        public string LastLoginDisplay => User.LastLoginDate?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "-";
+        public string LastLoginDisplay => User.LastLoginDate?.ToLocalTime().ToString("dd/MM/yyyy HH:mm") ?? "-";
     }
 
     public sealed class AccessTreeNode : INotifyPropertyChanged
@@ -315,3 +315,4 @@ namespace BIS.ERP.Views
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
+

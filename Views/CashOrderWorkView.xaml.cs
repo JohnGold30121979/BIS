@@ -143,7 +143,7 @@ namespace BIS.ERP.Views
             var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", row.DocNumber);
             SetPostingDetail(detail, "Тип документа", row.PostingDocumentType);
-            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd/MM/yyyy"));
             SetPostingDetail(detail, "Модуль", _moduleName);
             SetPostingDetail(detail, "Дебет", ExtractAccountCode(row.DebitAccount));
             SetPostingDetail(detail, "Кредит", ExtractAccountCode(row.CreditAccount));
@@ -458,8 +458,8 @@ namespace BIS.ERP.Views
                 var closeDate = GetSelectedCashDayDate();
                 var openDaySummary = await CalculateCurrentOpenCashDaySummaryAsync(selectedCashDesk, cashDayService, closeDate);
                 var dateText = openDaySummary.StartDate.Date == openDaySummary.EndDate.Date
-                    ? openDaySummary.EndDate.ToString("dd.MM.yyyy")
-                    : $"{openDaySummary.StartDate:dd.MM.yyyy}-{openDaySummary.EndDate:dd.MM.yyyy}";
+                    ? openDaySummary.EndDate.ToString("dd/MM/yyyy")
+                    : $"{openDaySummary.StartDate:dd/MM/yyyy}-{openDaySummary.EndDate:dd/MM/yyyy}";
                 DisplayOpenCashDaySummary(openDaySummary, $"Текущий открытый период по кассе {selectedCashDesk.DisplayNameWithAccount}", dateText);
             }
             catch (Exception ex)
@@ -488,8 +488,8 @@ namespace BIS.ERP.Views
         {
             CashTurnoverHintText.Text = hint ?? $"Остатки по кассе {summary.CashDeskName} (счет {summary.AccountCode})";
             CashTurnoverDateText.Text = summary.StartDate.Date == summary.EndDate.Date
-                ? summary.StartDate.ToString("dd.MM.yyyy")
-                : $"{summary.StartDate:dd.MM.yyyy}-{summary.EndDate:dd.MM.yyyy}";
+                ? summary.StartDate.ToString("dd/MM/yyyy")
+                : $"{summary.StartDate:dd/MM/yyyy}-{summary.EndDate:dd/MM/yyyy}";
             CashOpeningDebitText.Text = FormatCashAmount(summary.OpeningDebit);
             CashOpeningCreditText.Text = FormatCashAmount(summary.OpeningCredit);
             CashDebitTurnoverText.Text = FormatCashAmount(summary.DebitTurnover);
@@ -680,7 +680,7 @@ namespace BIS.ERP.Views
 
                 var dialog = new DocumentPostingsDialog(
                     "Продажи по кассе",
-                    $"{selectedCashDesk.DisplayNameWithAccount} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
+                    $"{selectedCashDesk.DisplayNameWithAccount} за {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}",
                     cashPostings,
                     BuildCashTurnoverSummaryFields(turnoverSummary))
                 {
@@ -1246,7 +1246,7 @@ namespace BIS.ERP.Views
             if (rows.Count > 8)
                 documents += $", ... и еще {rows.Count - 8}";
 
-            return $"Нельзя закрыть кассовый период датой {closeDate:dd.MM.yyyy}: есть непроведенные документы.{Environment.NewLine}" +
+            return $"Нельзя закрыть кассовый период датой {closeDate:dd/MM/yyyy}: есть непроведенные документы.{Environment.NewLine}" +
                    $"Непроведенных документов: {rows.Count}.{Environment.NewLine}" +
                    $"Документы: {documents}.{Environment.NewLine}" +
                    "Сначала проведите документы или снимите отметки с лишних записей.";
@@ -1300,8 +1300,8 @@ namespace BIS.ERP.Views
                 if (lastClosedDate.HasValue && row.DocDate.Date <= lastClosedDate.Value.Date)
                 {
                     var closedMessage = offerOpenDay
-                        ? $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" уже закрыт. Создание, изменение и проведение документов в закрытом периоде запрещено."
-                        : $"Кассовый день {row.DocDate:dd.MM.yyyy} по кассе \"{row.CashDeskName}\" уже закрыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".";
+                        ? $"Кассовый день {row.DocDate:dd/MM/yyyy} по кассе \"{row.CashDeskName}\" уже закрыт. Создание, изменение и проведение документов в закрытом периоде запрещено."
+                        : $"Кассовый день {row.DocDate:dd/MM/yyyy} по кассе \"{row.CashDeskName}\" уже закрыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".";
                     MessageBox.Show(closedMessage, caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return false;
                 }
@@ -1320,7 +1320,7 @@ namespace BIS.ERP.Views
                 }
 
                 var openDate = CashDayDatePicker.SelectedDate?.Date ?? DateTime.Today;
-                var answer = MessageBox.Show($"По кассе \"{row.CashDeskName}\" нет открытого кассового дня. Открыть текущий кассовый день {openDate:dd.MM.yyyy} для работы?",
+                var answer = MessageBox.Show($"По кассе \"{row.CashDeskName}\" нет открытого кассового дня. Открыть текущий кассовый день {openDate:dd/MM/yyyy} для работы?",
                     caption,
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question);
@@ -1527,13 +1527,13 @@ namespace BIS.ERP.Views
                 var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(cashDesk.Id);
                 if (lastClosedDate.HasValue && closeDate <= lastClosedDate.Value.Date)
                 {
-                    MessageBox.Show($"Дата закрытия {closeDate:dd.MM.yyyy} уже относится к закрытому кассовому периоду. Выберите дату позже последнего закрытого дня {lastClosedDate:dd.MM.yyyy}.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show($"Дата закрытия {closeDate:dd/MM/yyyy} уже относится к закрытому кассовому периоду. Выберите дату позже последнего закрытого дня {lastClosedDate:dd/MM/yyyy}.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
                 if (await cashDayService.IsDayClosedAsync(cashDesk.Id, closeDate))
                 {
-                    MessageBox.Show($"Кассовый день {closeDate:dd.MM.yyyy} уже закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show($"Кассовый день {closeDate:dd/MM/yyyy} уже закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
@@ -1544,7 +1544,7 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var confirm = MessageBox.Show($"Закрыть открытый кассовый период датой {closeDate:dd.MM.yyyy} по кассе \"{cashDesk.DisplayNameWithAccount}\"?",
+                var confirm = MessageBox.Show($"Закрыть открытый кассовый период датой {closeDate:dd/MM/yyyy} по кассе \"{cashDesk.DisplayNameWithAccount}\"?",
                     caption,
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question);
@@ -1565,7 +1565,7 @@ namespace BIS.ERP.Views
                     turnoverSummary.ClosingCredit);
 
                 await LoadData();
-                StatusText.Text = $"Кассовый период закрыт датой {closeDate:dd.MM.yyyy}";
+                StatusText.Text = $"Кассовый период закрыт датой {closeDate:dd/MM/yyyy}";
                 MessageBox.Show("Кассовый день закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
@@ -1596,7 +1596,7 @@ namespace BIS.ERP.Views
                 }
 
                 await LoadData();
-                StatusText.Text = $"Кассовый день {cashDate:dd.MM.yyyy} открыт";
+                StatusText.Text = $"Кассовый день {cashDate:dd/MM/yyyy} открыт";
                 MessageBox.Show("Кассовый день открыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (Exception ex)
@@ -1630,7 +1630,7 @@ namespace BIS.ERP.Views
 
                 var dialog = new CashClosedDaysTurnoversDialog(
                     caption,
-                    $"{cashDeskName} за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}",
+                    $"{cashDeskName} за {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}",
                     rows)
                 {
                     Owner = Window.GetWindow(this)
@@ -1694,14 +1694,14 @@ namespace BIS.ERP.Views
                 var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(cashDesk.Id);
                 if (lastClosedDate.HasValue && closeDate <= lastClosedDate.Value.Date)
                 {
-                    MessageBox.Show($"Дата {closeDate:dd.MM.yyyy} относится к закрытому кассовому периоду. Выберите дату открытого периода.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show($"Дата {closeDate:dd/MM/yyyy} относится к закрытому кассовому периоду. Выберите дату открытого периода.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
                 var turnoverSummary = await CalculateCurrentOpenCashDaySummaryAsync(cashDesk, cashDayService, closeDate);
                 var periodText = turnoverSummary.StartDate.Date == turnoverSummary.EndDate.Date
-                    ? turnoverSummary.EndDate.ToString("dd.MM.yyyy")
-                    : $"{turnoverSummary.StartDate:dd.MM.yyyy}-{turnoverSummary.EndDate:dd.MM.yyyy}";
+                    ? turnoverSummary.EndDate.ToString("dd/MM/yyyy")
+                    : $"{turnoverSummary.StartDate:dd/MM/yyyy}-{turnoverSummary.EndDate:dd/MM/yyyy}";
                 var dialog = new CashDayTurnoverDialog(
                     caption,
                     $"{cashDesk.DisplayNameWithAccount} | открытый кассовый период {periodText}",
@@ -1767,7 +1767,7 @@ namespace BIS.ERP.Views
                 Cursor = Cursors.Wait;
                 StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы кассовой книги..." : "Формирование Excel кассовой книги по.market конфигуратору...";
                 SystemLogService.Info(
-                    $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
+                    $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
                     "CashOrderWorkView.CashBook");
 
                 await OpenConfiguredCashReportAsync(
@@ -1832,7 +1832,7 @@ namespace BIS.ERP.Views
                 Cursor = Cursors.Wait;
                 StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы реестра приходов/расходов..." : "Формирование Excel-реестра приходов/расходов по market конфигуратору...";
                 SystemLogService.Info(
-                    $"Старт формирования реестра приходов/расходов. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}.",
+                    $"Старт формирования реестра приходов/расходов. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
                     "CashOrderWorkView.ReceiptExpenseRegister");
 
                 await OpenConfiguredCashReportAsync(
@@ -1918,7 +1918,7 @@ namespace BIS.ERP.Views
                 selectedFormat = selectionDialog.SelectedFormat;
             }
 
-            selectedReport.SubtitleText = $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            selectedReport.SubtitleText = $"{cashDeskName}; период {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}";
             var ruleService = new FoxProReportFieldRuleService(context);
             await ruleService.SeedDefaultRulesAsync();
             var rules = await ruleService.GetRulesAsync(includeInactive: false);
@@ -2138,7 +2138,7 @@ namespace BIS.ERP.Views
             SetCashOrderValue(dataRow, "Id", row.Id);
             SetCashOrderValue(dataRow, "report_name", "Расходный/Приходный КО");
             SetCashOrderValue(dataRow, "title", "Расходный / Приходный КО");
-            SetCashOrderValue(dataRow, "subtitle", $"{cashDeskName}; период {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}");
+            SetCashOrderValue(dataRow, "subtitle", $"{cashDeskName}; период {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}");
             SetCashOrderValue(dataRow, "period_start", startDate);
             SetCashOrderValue(dataRow, "period_end", endDate);
             SetCashOrderValue(dataRow, "cash_desk", cashDeskName);
@@ -2615,6 +2615,7 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 
 

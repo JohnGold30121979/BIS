@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.Win32;
 using System;
@@ -159,7 +159,7 @@ namespace BIS.ERP.Views
 
                     DetailsInfo.Text = $"📁 Файл: {fullDocument.SourceFile}\n" +
                                       $"📋 Тип: {fullDocument.DocumentType}\n" +
-                                      $"📅 Создан: {fullDocument.CreatedAt:dd.MM.yyyy HH:mm:ss}\n" +
+                                      $"📅 Создан: {fullDocument.CreatedAt:dd/MM/yyyy HH:mm:ss}\n" +
                                       $"📊 Всего строк: {fullDocument.TotalRows}\n" +
                                       $"🔢 Всего полей: {allFields.Count}\n\n" +
                                       $"🏷️ Список первых 20 полей:\n{string.Join("\n", allFields.Take(20))}" +
@@ -293,3 +293,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

@@ -842,7 +842,7 @@ namespace BIS.ERP.Views
 
                 if (lastClosedDate.HasValue && documentDate.Date <= lastClosedDate.Value.Date)
                 {
-                    MessageBox.Show($"Документ от {documentDate:dd.MM.yyyy} относится к закрытому кассовому периоду по кассе \"{cashDeskName}\". Создание и изменение документов в закрытом периоде запрещено.",
+                    MessageBox.Show($"Документ от {documentDate:dd/MM/yyyy} относится к закрытому кассовому периоду по кассе \"{cashDeskName}\". Создание и изменение документов в закрытом периоде запрещено.",
                         caption,
                         MessageBoxButton.OK,
                         MessageBoxImage.Warning);
@@ -853,7 +853,7 @@ namespace BIS.ERP.Views
                 if (currentOpenDay != null)
                     return true;
 
-                var answer = MessageBox.Show($"По кассе \"{cashDeskName}\" нет открытого кассового дня. Открыть день {documentDate:dd.MM.yyyy} для работы?",
+                var answer = MessageBox.Show($"По кассе \"{cashDeskName}\" нет открытого кассового дня. Открыть день {documentDate:dd/MM/yyyy} для работы?",
                     caption,
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Question);
@@ -898,7 +898,7 @@ namespace BIS.ERP.Views
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var cashDayService = new CashDayClosureService(context);
                 var openDay = await cashDayService.GetCurrentOpenDayAsync(_selectedCashDeskId);
-                var openDayText = openDay == null ? "не открыт" : openDay.CloseDate.ToString("dd.MM.yyyy");
+                var openDayText = openDay == null ? "не открыт" : openDay.CloseDate.ToString("dd/MM/yyyy");
                 DialogTitle.Text = $"{title} | открытый день: {openDayText}";
             }
             catch
@@ -1545,6 +1545,7 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
+
 
 
 

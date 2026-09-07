@@ -642,7 +642,7 @@ namespace BIS.ERP.Views
             grid.Columns.Add(new DataGridTextColumn
             {
                 Header = "Обновлен",
-                Binding = new Binding(nameof(RegulatedReportTemplate.UpdatedAt)) { StringFormat = "dd.MM.yyyy HH:mm" },
+                Binding = new Binding(nameof(RegulatedReportTemplate.UpdatedAt)) { StringFormat = "dd/MM/yyyy HH:mm" },
                 Width = 130
             });
             grid.Columns.Add(new DataGridTextColumn
@@ -1336,7 +1336,7 @@ namespace BIS.ERP.Views
             CreateCompactCard(
                 "📄",
                 $"№{document.Number}",
-                $"{document.DocumentType}; {document.Date:dd.MM.yyyy}",
+                $"{document.DocumentType}; {document.Date:dd/MM/yyyy}",
                 $"Строк: {document.TotalRows}; файл: {document.SourceFile}",
                 () => _ = ShowDynamicDocumentDetails(document),
                 "📋",
@@ -1999,7 +1999,7 @@ namespace BIS.ERP.Views
             var infoStack = new StackPanel();
             infoStack.Children.Add(new TextBlock
             {
-                Text = $"№{doc.Number} от {doc.Date:dd.MM.yyyy HH:mm:ss}",
+                Text = $"№{doc.Number} от {doc.Date:dd/MM/yyyy HH:mm:ss}",
                 FontSize = 14,
                 FontWeight = FontWeights.Bold
             });
@@ -2098,7 +2098,7 @@ namespace BIS.ERP.Views
             }
 
             var details = $"📄 Документ №{doc.Number}\n" +
-                          $"📅 Дата: {doc.Date:dd.MM.yyyy HH:mm:ss}\n" +
+                          $"📅 Дата: {doc.Date:dd/MM/yyyy HH:mm:ss}\n" +
                           $"📂 Тип: {doc.DocumentType}\n" +
                           $"📁 Файл: {doc.SourceFile}\n" +
                           $"📊 Строк: {doc.TotalRows}\n\n" +
@@ -3079,6 +3079,7 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 
 

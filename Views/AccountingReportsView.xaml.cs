@@ -579,7 +579,7 @@ namespace BIS.ERP.Views
             var organizationSuffix = selectedOrganization == null
                 ? string.Empty
                 : $", организация: {ResolveOrganizationTitle(selectedOrganization.Id, selectedOrganization.Name)}";
-            var reportTitle = $"Оборотно-сальдовая ведомость по {sideTitle} счета {_trialBalanceAccountCode} за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{organizationSuffix}";
+            var reportTitle = $"Оборотно-сальдовая ведомость по {sideTitle} счета {_trialBalanceAccountCode} за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}{organizationSuffix}";
             var report = CreateReport(table, reportTitle, true);
             report.ReportType = "TrialBalance";
             report.SubtitleText = variant?.IsStandard == false
@@ -775,7 +775,7 @@ namespace BIS.ERP.Views
                 0m, string.Empty, string.Empty, string.Empty, string.Empty);
 
             var report = CreateReport(table,
-                $"Реестр платежных поручений за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+                $"Реестр платежных поручений за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}", true);
             report.ShowGrandTotal = true;
             report.SummaryText = "Отчет строится по документам платежных поручений и показывает только документы выбранного периода.";
             return (table, report);
@@ -805,7 +805,7 @@ namespace BIS.ERP.Views
 
             var table = CreateReconciliationTable();
             AddReconciliationRow(table, scoped ? $"АКТ СВЕРКИ между нашей организацией и \"{titleName}\"" : "АКТЫ СВЕРКИ ПО ВСЕМ ОРГАНИЗАЦИЯМ");
-            AddReconciliationRow(table, $"Период: {start:dd.MM.yyyy} - {end:dd.MM.yyyy}");
+            AddReconciliationRow(table, $"Период: {start:dd/MM/yyyy} - {end:dd/MM/yyyy}");
             AddReconciliationRow(table, string.Empty);
 
             if (pairs.Count == 0)
@@ -839,9 +839,9 @@ namespace BIS.ERP.Views
             AddReconciliationRow(table, summary);
 
             var titlePrefix = variant?.IsStandard == false ? variant.DisplayName : "Акт сверки";
-            var report = CreateReport(table, scoped ? $"{titlePrefix}: {titleName} на {end:dd.MM.yyyy}" : $"{titlePrefix}: все организации на {end:dd.MM.yyyy}", true);
+            var report = CreateReport(table, scoped ? $"{titlePrefix}: {titleName} на {end:dd/MM/yyyy}" : $"{titlePrefix}: все организации на {end:dd/MM/yyyy}", true);
             report.ReportType = "ReconciliationAct";
-            report.SubtitleText = $"Период: {start:dd.MM.yyyy} - {end:dd.MM.yyyy}";
+            report.SubtitleText = $"Период: {start:dd/MM/yyyy} - {end:dd/MM/yyyy}";
             report.ShowGrandTotal = false;
             report.AlternateRowColors = false;
             report.FontSize = 8;
@@ -1431,7 +1431,7 @@ namespace BIS.ERP.Views
 
                 var pairName = string.IsNullOrWhiteSpace(pair.AccountPairName) ? pair.CounterAccountName : pair.AccountPairName;
                 AddReconciliationRow(table, $"Пара счетов : {pair.AccountCode} - {pair.CounterAccountCode} ({pairName})");
-                AddReconciliationRow(table, $"САЛЬДО НА {start:dd.MM.yyyy}", debitAmount: NonZeroAmount(pair.OpeningDebit), creditAmount: NonZeroAmount(pair.OpeningCredit));
+                AddReconciliationRow(table, $"САЛЬДО НА {start:dd/MM/yyyy}", debitAmount: NonZeroAmount(pair.OpeningDebit), creditAmount: NonZeroAmount(pair.OpeningCredit));
 
                 var pairMovements = movements
                     .Where(movement => AccountInPair(movement.DebitAccount, pair) || AccountInPair(movement.CreditAccount, pair))
@@ -1451,19 +1451,19 @@ namespace BIS.ERP.Views
                         AccountInPair(movement.DebitAccount, pair) ? (decimal?)movement.Amount : null,
                         AccountInPair(movement.CreditAccount, pair) ? (decimal?)movement.Amount : null,
                         movement.DocumentNumber,
-                        movement.Date.ToString("dd.MM.yyyy"),
+                        movement.Date.ToString("dd/MM/yyyy"),
                         movement.ModuleCode);
                 }
 
                 AddReconciliationRow(table, "ИТОГО ОБОРОТОВ", debitAmount: NonZeroAmount(pair.TurnoverDebit), creditAmount: NonZeroAmount(pair.TurnoverCredit));
-                AddReconciliationRow(table, $"САЛЬДО НА {end:dd.MM.yyyy}", debitAmount: NonZeroAmount(pair.ClosingDebit), creditAmount: NonZeroAmount(pair.ClosingCredit));
+                AddReconciliationRow(table, $"САЛЬДО НА {end:dd/MM/yyyy}", debitAmount: NonZeroAmount(pair.ClosingDebit), creditAmount: NonZeroAmount(pair.ClosingCredit));
             }
 
             if (total != null && pairs.Count > 1)
             {
                 AddReconciliationRow(table, string.Empty);
                 AddReconciliationRow(table, "ИТОГО ОБОРОТОВ ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.TurnoverDebit), creditAmount: NonZeroAmount(total.TurnoverCredit));
-                AddReconciliationRow(table, $"САЛЬДО НА {end:dd.MM.yyyy} ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.ClosingDebit), creditAmount: NonZeroAmount(total.ClosingCredit));
+                AddReconciliationRow(table, $"САЛЬДО НА {end:dd/MM/yyyy} ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.ClosingDebit), creditAmount: NonZeroAmount(total.ClosingCredit));
             }
 
             AddReconciliationRow(table, BuildDebtSummary(organizationTitle, total?.Balance ?? pairs.Sum(row => row.Balance)));
@@ -1837,7 +1837,7 @@ namespace BIS.ERP.Views
             table.Rows.Add("Капитал", string.Empty, "Итого капитал", balance.TotalEquity);
             table.Rows.Add("Контроль", string.Empty, "Расхождение баланса", balance.Difference);
 
-            var report = CreateReport(table, $"Баланс предприятия на {date:dd.MM.yyyy}", false);
+            var report = CreateReport(table, $"Баланс предприятия на {date:dd/MM/yyyy}", false);
             report.SummaryText = balance.IsBalanced
                 ? "Контроль пройден: активы равны обязательствам и капиталу."
                 : $"Контроль не пройден. Расхождение: {balance.Difference:N2}";
@@ -1863,7 +1863,7 @@ namespace BIS.ERP.Views
                 results.ProfitOrLoss >= 0 ? "Прибыль" : "Убыток", results.ProfitOrLoss);
 
             return (table, CreateReport(table,
-                $"Финансовые результаты за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false));
+                $"Финансовые результаты за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}", false));
         }
 
         private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
@@ -1908,7 +1908,7 @@ namespace BIS.ERP.Views
             }
 
             var report = CreateReport(table,
-                $"Журнал закупок и продаж за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", true);
+                $"Журнал закупок и продаж за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}", true);
             report.ShowGrandTotal = true;
             var amountField = report.Fields.First(field => field.FieldName == "Всего");
             amountField.AggregateType = "Sum";
@@ -1957,7 +1957,7 @@ namespace BIS.ERP.Views
                 ? $", фильтр: {_selectedOrganizationName}"
                 : string.Empty;
             var report = CreateReport(table,
-                $"Сальдо по организациям за {start:dd.MM.yyyy} - {end:dd.MM.yyyy}{titleSuffix}", true);
+                $"Сальдо по организациям за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}{titleSuffix}", true);
             report.SummaryText = calculation.Warnings.Count == 0
                 ? "Расчет выполнен по активным парам счетов справочника авансовых платежей."
                 : string.Join(Environment.NewLine, calculation.Warnings);
@@ -1995,7 +1995,7 @@ namespace BIS.ERP.Views
                 closingDebit, closingCredit, closingDebit - closingCredit);
 
             var report = CreateReport(table,
-                $"Сбор информации за периода {start:dd.MM.yyyy} - {end:dd.MM.yyyy}", false);
+                $"Сбор информации за периода {start:dd/MM/yyyy} - {end:dd/MM/yyyy}", false);
             var isBalanced = collection.IsBalanced && Math.Abs(openingDebit - openingCredit) < 0.01m &&
                              Math.Abs(closingDebit - closingCredit) < 0.01m;
             report.SummaryText = isBalanced
@@ -2517,3 +2517,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

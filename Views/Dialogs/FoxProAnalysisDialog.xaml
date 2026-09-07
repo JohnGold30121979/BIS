@@ -83,7 +83,7 @@
                         <DataGridTextColumn Header="Путь" Binding="{Binding RelativePath}" Width="*"/>
                         <DataGridTextColumn Header="Тип" Binding="{Binding Category}" Width="150"/>
                         <DataGridTextColumn Header="Размер" Binding="{Binding SizeBytes}" Width="100"/>
-                        <DataGridTextColumn Header="Изменен" Binding="{Binding LastWriteTime, StringFormat=dd.MM.yyyy HH:mm}" Width="140"/>
+                        <DataGridTextColumn Header="Изменен" Binding="{Binding LastWriteTime, StringFormat=dd/MM/yyyy HH:mm}" Width="140"/>
                     </DataGrid.Columns>
                 </DataGrid>
             </TabItem>
@@ -155,3 +155,4 @@
         </DockPanel>
     </Grid>
 </Window>
+

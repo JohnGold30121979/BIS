@@ -77,7 +77,7 @@ namespace BIS.ERP.Views
         {
             var query = _allPostings.AsEnumerable();
 
-            query = ApplyColumnFilter(query, DateFilterBox.Text, p => p.Date.ToString("dd.MM.yyyy"));
+            query = ApplyColumnFilter(query, DateFilterBox.Text, p => p.Date.ToString("dd/MM/yyyy"));
             query = ApplyColumnFilter(query, DocumentFilterBox.Text, p => p.DocumentNumber);
             query = ApplyColumnFilter(query, DocumentTypeFilterBox.Text, p => p.DocumentType);
             query = ApplyColumnFilter(query, ModuleFilterBox.Text, p => p.ModuleName);
@@ -241,7 +241,7 @@ namespace BIS.ERP.Views
             sheet.Cell(row, 1).Value = "Журнал проводок";
             sheet.Range(row, 1, row, 8).Merge().Style.Font.SetBold().Font.SetFontSize(14);
             row++;
-            sheet.Cell(row, 1).Value = $"Период: {startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}";
+            sheet.Cell(row, 1).Value = $"Период: {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}";
             sheet.Range(row, 1, row, 8).Merge();
             row++;
             sheet.Cell(row, 1).Value = $"Вид отчета: {GetJournalReportKindTitle(kind)}";
@@ -283,7 +283,7 @@ namespace BIS.ERP.Views
             foreach (var posting in rows.OrderBy(item => item.Date).ThenBy(item => item.DocumentNumber))
             {
                 sheet.Cell(row, 1).Value = posting.Date;
-                sheet.Cell(row, 1).Style.DateFormat.Format = "dd.MM.yyyy";
+                sheet.Cell(row, 1).Style.DateFormat.Format = "dd/MM/yyyy";
                 sheet.Cell(row, 2).Value = posting.DocumentNumber;
                 sheet.Cell(row, 3).Value = posting.DocumentType;
                 sheet.Cell(row, 4).Value = posting.ModuleName;
@@ -325,7 +325,7 @@ namespace BIS.ERP.Views
             foreach (var group in groups)
             {
                 sheet.Cell(row, 1).Value = group.Key.Date;
-                sheet.Cell(row, 1).Style.DateFormat.Format = "dd.MM.yyyy";
+                sheet.Cell(row, 1).Style.DateFormat.Format = "dd/MM/yyyy";
                 sheet.Cell(row, 2).Value = group.Key.DocumentNumber;
                 sheet.Cell(row, 3).Value = group.Key.DocumentType;
                 sheet.Cell(row, 4).Value = group.Key.ModuleName;
@@ -649,5 +649,6 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 

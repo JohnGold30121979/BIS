@@ -42,7 +42,7 @@ namespace BIS.ERP.Models
 
         public string DisplayName => $"{CloseOrder:000} - {ModuleName}";
         public string StateCaption => IsClosed
-            ? $"закрыт {ClosedAt:dd.MM.yyyy HH:mm}"
+            ? $"закрыт {ClosedAt:dd/MM/yyyy HH:mm}"
             : "открыт";
     }
 
@@ -172,3 +172,4 @@ namespace BIS.ERP.Models
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
 }
+

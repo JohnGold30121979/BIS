@@ -76,7 +76,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             SummaryText.Text =
                 $"Папка: {result.RootPath}\n" +
-                $"Дата анализа: {result.AnalyzedAt:dd.MM.yyyy HH:mm}\n\n" +
+                $"Дата анализа: {result.AnalyzedAt:dd/MM/yyyy HH:mm}\n\n" +
                 $"Файлов всего: {result.Summary.TotalFiles}\n" +
                 $"PRG: {result.Summary.PrgFiles}, формы SCX: {result.Summary.FormFiles}, отчеты FRX: {result.Summary.ReportFiles}, DBF-подобные: {result.Summary.DbfLikeFiles}\n" +
                 $"Определений процедур/классов: {result.Summary.ProcedureDefinitions}\n" +
@@ -312,3 +312,4 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -31,13 +31,13 @@ namespace BIS.ERP.Models
 
         // Вычисляемые свойства для отображения в UI (не сохраняются в БД)
         [NotMapped]
-        public string DisplayName => $"{Number} от {Date:dd.MM.yyyy HH:mm:ss}";
+        public string DisplayName => $"{Number} от {Date:dd/MM/yyyy HH:mm:ss}";
 
         [NotMapped]
         public string ShortInfo => $"{DocumentType} | {TotalRows} строк | {SourceFile}";
 
         [NotMapped]
-        public string DisplayDate => Date.ToString("dd.MM.yyyy");
+        public string DisplayDate => Date.ToString("dd/MM/yyyy");
     }
 
     // Строка документа с динамическими полями

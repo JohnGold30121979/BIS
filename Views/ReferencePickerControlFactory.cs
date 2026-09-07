@@ -423,7 +423,7 @@ namespace BIS.ERP.Views
                 var results = await metadataService.ImportLatestOfficialCurrencyRatesAsync();
                 var imported = results.Sum(item => item.Imported);
                 var skipped = results.Sum(item => item.Skipped);
-                var dates = string.Join(", ", results.Select(item => item.RateDate.ToString("dd.MM.yyyy")).Distinct());
+                var dates = string.Join(", ", results.Select(item => item.RateDate.ToString("dd/MM/yyyy")).Distinct());
                 MessageBox.Show(
                     $"Курсы НБКР обновлены. Загружено: {imported}; пропущено: {skipped}." +
                     (string.IsNullOrWhiteSpace(dates) ? string.Empty : $"\nДаты курсов: {dates}.") +
@@ -722,3 +722,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

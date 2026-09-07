@@ -26,7 +26,7 @@ namespace BIS.ERP.Views
             var rows = new List<(string Label, string?)>
             {
                 ("Документ", posting.DocumentNumber),
-                ("Дата", posting.Date.ToString("dd.MM.yyyy HH:mm")),
+                ("Дата", posting.Date.ToString("dd/MM/yyyy HH:mm")),
                 ("Модуль", string.IsNullOrWhiteSpace(posting.ModuleName) ? "нет данных" : posting.ModuleName),
                 ("Дебет", FormatAccountCode(posting.DebitAccount, posting.DebitAccountName)),
                 ("Кредит", FormatAccountCode(posting.CreditAccount, posting.CreditAccountName)),
@@ -36,7 +36,7 @@ namespace BIS.ERP.Views
                 ("Валюта", posting.Currency),
                 ("Организация", posting.Organization),
                 ("Сотрудник", posting.Employee),
-                ("Создана", posting.CreatedAt?.ToString("dd.MM.yyyy HH:mm")),
+                ("Создана", posting.CreatedAt?.ToString("dd/MM/yyyy HH:mm")),
                 ("Статус", posting.IsActive ? "Активна" : "Отключена"),
                 ("Примечание", posting.Note)
             };

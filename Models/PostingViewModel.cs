@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace BIS.ERP.Models
 {
@@ -28,9 +28,10 @@ namespace BIS.ERP.Models
         public DateTime? CreatedAt { get; set; }
         public bool IsActive { get; set; } = true;
         public string DetailHint =>
-            $"{Date:dd.MM.yyyy} {FormatModuleHint()}{DocumentType} N {DocumentNumber}: Дт {DebitAccount} / Кт {CreditAccount}, {Amount:N2} сом";
+            $"{Date:dd/MM/yyyy} {FormatModuleHint()}{DocumentType} N {DocumentNumber}: Дт {DebitAccount} / Кт {CreditAccount}, {Amount:N2} сом";
 
         private string FormatModuleHint() =>
             string.IsNullOrWhiteSpace(ModuleName) ? string.Empty : $"{ModuleName}: ";
     }
 }
+

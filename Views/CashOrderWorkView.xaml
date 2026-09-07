@@ -243,7 +243,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" Width="100" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd/MM/yyyy}" Width="100" IsReadOnly="True"/>
                 <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120" IsReadOnly="True"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" Width="120" IsReadOnly="True"/>
                 <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="180" IsReadOnly="True"/>
@@ -304,6 +304,7 @@
         </StatusBar>
     </Grid>
 </UserControl>
+
 
 
 

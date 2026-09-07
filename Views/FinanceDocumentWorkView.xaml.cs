@@ -317,7 +317,7 @@ namespace BIS.ERP.Views
             var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", posting.DocumentNumber);
             SetPostingDetail(detail, "Тип документа", posting.DocumentType);
-            SetPostingDetail(detail, "Дата", posting.Date.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Дата", posting.Date.ToString("dd/MM/yyyy"));
             SetPostingDetail(detail, "Модуль", posting.ModuleName);
             SetPostingDetail(detail, "Дебет", ExtractAccountCode(posting.DebitAccount));
             SetPostingDetail(detail, "Кредит", ExtractAccountCode(posting.CreditAccount));
@@ -476,9 +476,9 @@ namespace BIS.ERP.Views
             var end = ReadDate(row, "Дата окончания отчета", "report_end_date", "Дата окончания периода", "period_end_date");
             return (start, end) switch
             {
-                ({ } startDate, { } endDate) => $"{startDate:dd.MM.yyyy} - {endDate:dd.MM.yyyy}",
-                ({ } startDate, null) => $"с {startDate:dd.MM.yyyy}",
-                (null, { } endDate) => $"по {endDate:dd.MM.yyyy}",
+                ({ } startDate, { } endDate) => $"{startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}",
+                ({ } startDate, null) => $"с {startDate:dd/MM/yyyy}",
+                (null, { } endDate) => $"по {endDate:dd/MM/yyyy}",
                 _ => string.Empty
             };
         }
@@ -617,5 +617,6 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 

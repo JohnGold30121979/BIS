@@ -248,7 +248,7 @@ namespace BIS.ERP.Views.Dialogs
             Close();
         }
 
-        private const string DateInputMask = "../../....";
+        private const string DateInputMask = "DD/MM/YYYY";
         private static readonly int[] DateInputPositions = { 0, 1, 3, 4, 6, 7, 8, 9 };
 
         private static void SetDateText(TextBox textBox, DateTime? value)
@@ -267,11 +267,11 @@ namespace BIS.ERP.Views.Dialogs
                 return null;
 
             if (!IsCompleteDateText(text))
-                throw new InvalidOperationException($"{fieldName}: заполните дату полностью по шаблону ../../....");
+                throw new InvalidOperationException($"{fieldName}: заполните дату полностью по шаблону DD/MM/YYYY");
 
             if (DateTime.TryParseExact(
                     text,
-                    new[] { "dd/MM/yyyy", "dd.MM.yyyy" },
+                    "dd/MM/yyyy",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
                     out var date))
@@ -279,7 +279,7 @@ namespace BIS.ERP.Views.Dialogs
                 return date;
             }
 
-            throw new InvalidOperationException($"{fieldName}: неверная дата. Введите дату по шаблону ../../....");
+            throw new InvalidOperationException($"{fieldName}: неверная дата. Введите дату по шаблону DD/MM/YYYY");
         }
 
         private void DatePicker_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
@@ -500,4 +500,7 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
+
+
 

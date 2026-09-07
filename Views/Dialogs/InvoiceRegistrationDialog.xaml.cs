@@ -45,7 +45,7 @@ namespace BIS.ERP.Views.Dialogs
                 DialogTitle.Text = _isReadOnly
                     ? $"Просмотр: {_document.Name}"
                     : $"Регистрация: {_document.Name}";
-                DateBox.Text = _invoice.DocDate.ToString("dd.MM.yyyy");
+                DateBox.Text = _invoice.DocDate.ToString("dd/MM/yyyy");
                 DocumentNumberBox.Text = _invoice.DocNumber;
                 OrganizationBox.Text = _invoice.OrganizationName;
                 EsfNumberBox.Text = _invoice.EsfNumber;
@@ -106,4 +106,5 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
 

@@ -26,7 +26,7 @@ namespace BIS.ERP.Views.Dialogs
             else
             {
                 SelectedInvoiceText.Text =
-                    $"{_selectedInvoice.DocDate:dd.MM.yyyy} / {_selectedInvoice.DocNumber} / {_selectedInvoice.OrganizationName}";
+                    $"{_selectedInvoice.DocDate:dd/MM/yyyy} / {_selectedInvoice.DocNumber} / {_selectedInvoice.OrganizationName}";
                 SelectedInvoiceRadio.IsChecked = true;
             }
 
@@ -88,5 +88,6 @@ namespace BIS.ERP.Views.Dialogs
         Period
     }
 }
+
 
 

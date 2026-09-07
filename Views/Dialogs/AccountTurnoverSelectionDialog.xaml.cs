@@ -34,7 +34,7 @@ namespace BIS.ERP.Views.Dialogs
             _startDate = startDate.Date;
             _endDate = endDate.Date;
             DetailsGrid.ItemsSource = _details;
-            PeriodText.Text = $"Период: {_startDate:dd.MM.yyyy} - {_endDate:dd.MM.yyyy}. Счета берутся из текущего журнала проводок.";
+            PeriodText.Text = $"Период: {_startDate:dd/MM/yyyy} - {_endDate:dd/MM/yyyy}. Счета берутся из текущего журнала проводок.";
 
             var initialSide = AccountTurnoverSide.Both;
             SelectSide(initialSide);
@@ -259,7 +259,7 @@ namespace BIS.ERP.Views.Dialogs
             sheet.Cell(row, 1).Value = "Обороты по счету";
             sheet.Range(row, 1, row, 8).Merge().Style.Font.SetBold().Font.SetFontSize(14);
             row++;
-            sheet.Cell(row, 1).Value = $"Период: {_startDate:dd.MM.yyyy} - {_endDate:dd.MM.yyyy}";
+            sheet.Cell(row, 1).Value = $"Период: {_startDate:dd/MM/yyyy} - {_endDate:dd/MM/yyyy}";
             sheet.Range(row, 1, row, 8).Merge();
             row++;
             sheet.Cell(row, 1).Value = $"Сторона: {GetSideTitle(side)}";
@@ -310,7 +310,7 @@ namespace BIS.ERP.Views.Dialogs
             foreach (var posting in rows)
             {
                 sheet.Cell(row, 1).Value = posting.Date;
-                sheet.Cell(row, 1).Style.DateFormat.Format = "dd.MM.yyyy";
+                sheet.Cell(row, 1).Style.DateFormat.Format = "dd/MM/yyyy";
                 sheet.Cell(row, 2).Value = posting.DocumentNumber;
                 sheet.Cell(row, 3).Value = posting.DocumentType;
                 sheet.Cell(row, 4).Value = posting.ModuleName;
@@ -350,7 +350,7 @@ namespace BIS.ERP.Views.Dialogs
             foreach (var group in groups)
             {
                 sheet.Cell(row, 1).Value = group.Key.Date;
-                sheet.Cell(row, 1).Style.DateFormat.Format = "dd.MM.yyyy";
+                sheet.Cell(row, 1).Style.DateFormat.Format = "dd/MM/yyyy";
                 sheet.Cell(row, 2).Value = group.Key.DocumentNumber;
                 sheet.Cell(row, 3).Value = group.Key.DocumentType;
                 sheet.Cell(row, 4).Value = group.Key.DebitAccount;
@@ -553,4 +553,5 @@ namespace BIS.ERP.Views.Dialogs
         }
     }
 }
+
 

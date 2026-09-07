@@ -21,7 +21,7 @@
                   HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                   CanUserResizeColumns="True">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="95" MinWidth="85"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding Date, StringFormat=dd/MM/yyyy}" Width="95" MinWidth="85"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="120" MinWidth="90"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="120" MinWidth="90"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, StringFormat=N2}" Width="105" MinWidth="85"/>
@@ -37,4 +37,5 @@
         </StackPanel>
     </Grid>
 </Window>
+
 

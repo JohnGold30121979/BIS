@@ -88,7 +88,7 @@ namespace BIS.ERP.Views
                 FixedAssetCardMode.Edit => "Редактирование: Основное средство",
                 _ => "Детально: Основное средство"
             };
-            HeaderSubtitleText.Text = $"Справочник ОС на {_asOfDate:dd.MM.yyyy}";
+            HeaderSubtitleText.Text = $"Справочник ОС на {_asOfDate:dd/MM/yyyy}";
             Title = HeaderTitleText.Text;
 
             PopulateScalarFields();
@@ -1134,3 +1134,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

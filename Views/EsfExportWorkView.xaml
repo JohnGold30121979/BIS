@@ -54,7 +54,7 @@
                   AlternatingRowBackground="#F8FAFC">
             <DataGrid.Columns>
                 <DataGridCheckBoxColumn Header="Выгр." Binding="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="58"/>
-                <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd.MM.yyyy}" IsReadOnly="True" Width="105"/>
+                <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd/MM/yyyy}" IsReadOnly="True" Width="105"/>
                 <DataGridTextColumn Header="Модуль" Binding="{Binding ModuleCode}" IsReadOnly="True" Width="110"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" IsReadOnly="True" Width="130"/>
                 <DataGridTextColumn Header="Сумма" Binding="{Binding TotalAmount, StringFormat=N2}" IsReadOnly="True" Width="120"/>

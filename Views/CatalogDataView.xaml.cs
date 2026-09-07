@@ -194,7 +194,7 @@ namespace BIS.ERP.Views
             try
             {
                 UpdateNbkrRatesButton.IsEnabled = false;
-                StatusText.Text = $"Загрузка курсов НБКР за {startDate:dd.MM.yyyy}-{endDate:dd.MM.yyyy}...";
+                StatusText.Text = $"Загрузка курсов НБКР за {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}...";
 
                 var results = await _metadataService.ImportOfficialCurrencyRatesAsync(startDate, endDate);
                 var imported = results.Sum(item => item.Imported);
@@ -1111,8 +1111,8 @@ namespace BIS.ERP.Views
             return value switch
             {
                 bool flag => flag ? "Да" : "Нет",
-                DateTime date => date.ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture),
-                DateTimeOffset date => date.ToString("dd.MM.yyyy HH:mm", CultureInfo.CurrentCulture),
+                DateTime date => date.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture),
+                DateTimeOffset date => date.ToString("dd/MM/yyyy HH:mm", CultureInfo.CurrentCulture),
                 decimal number => number.ToString("N2", CultureInfo.CurrentCulture),
                 double number => number.ToString("N2", CultureInfo.CurrentCulture),
                 float number => number.ToString("N2", CultureInfo.CurrentCulture),
@@ -1369,7 +1369,7 @@ namespace BIS.ERP.Views
             }
 
             if (field.FieldType == "DateTime")
-                binding.StringFormat = "dd.MM.yyyy";
+                binding.StringFormat = "dd/MM/yyyy";
 
             return binding;
         }
@@ -1423,7 +1423,7 @@ namespace BIS.ERP.Views
             _dataTable.DefaultView.RowFilter = string.Join(" AND ", filterParts);
 
             StatusText.Text = IsFixedAssetsCatalog
-                ? $"📊 Карточек ОС на {GetFixedAssetAsOfDate():dd.MM.yyyy}: {_dataTable.DefaultView.Count}"
+                ? $"📊 Карточек ОС на {GetFixedAssetAsOfDate():dd/MM/yyyy}: {_dataTable.DefaultView.Count}"
                 : string.IsNullOrWhiteSpace(searchText)
                     ? $"📊 Загружено записей: {_dataTable.Rows.Count}"
                     : $"🔍 Найдено записей: {_dataTable.DefaultView.Count}";
@@ -1661,10 +1661,10 @@ namespace BIS.ERP.Views
                 return FormatFixedAssetClass(value);
 
             if (value is DateTime dateTime)
-                return dateTime.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture);
+                return dateTime.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture);
 
             if (value is DateTimeOffset dateTimeOffset)
-                return dateTimeOffset.ToString("dd.MM.yyyy", CultureInfo.CurrentCulture);
+                return dateTimeOffset.ToString("dd/MM/yyyy", CultureInfo.CurrentCulture);
 
             if (field.FieldType == "Decimal")
                 return FormatFixedAssetNumber(value);
@@ -2230,6 +2230,7 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 
 

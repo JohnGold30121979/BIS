@@ -26,6 +26,7 @@ namespace BIS.ERP
                 EnterKeyNavigationBehavior.Initialize();
                 ResponsiveWindowBehavior.Initialize();
                 MouseWheelScrollBehavior.Initialize();
+                DatePickerInputMaskBehavior.Initialize();
 
                 // Регистрируем кодировки для поддержки CP866 (DOS кириллица)
                 Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -229,4 +230,5 @@ namespace BIS.ERP
         }
     }
 }
+
 

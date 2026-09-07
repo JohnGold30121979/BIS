@@ -287,7 +287,7 @@ namespace BIS.ERP.Views
                 return;
 
             if (string.Equals(header, "Дата", StringComparison.OrdinalIgnoreCase))
-                ApplyBindingStringFormat(textColumn, "{0:dd.MM.yyyy HH:mm:ss}");
+                ApplyBindingStringFormat(textColumn, "{0:dd/MM/yyyy HH:mm:ss}");
             else if (IsAmountGridColumn(header))
                 ApplyBindingStringFormat(textColumn, "{0:N2}");
 
@@ -628,5 +628,6 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
 

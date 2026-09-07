@@ -124,7 +124,7 @@ namespace BIS.ERP.Views
             var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", row.DocNumber);
             SetPostingDetail(detail, "Тип документа", ResolvePaymentOrderPostingType(row.OrderType));
-            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Дата", row.DocDate.ToString("dd/MM/yyyy"));
             SetPostingDetail(detail, "Модуль", _moduleName);
             SetPostingDetail(detail, "Дебет", ExtractAccountCode(row.OurAccountName));
             SetPostingDetail(detail, "Кредит", ExtractAccountCode(row.CorrespondentAccountName));
@@ -738,7 +738,7 @@ namespace BIS.ERP.Views
             dataRow["md_mfo"] = receiverParty.BankBic;
             dataRow["mt_adr2"] = receiverParty.BankAddress;
             dataRow["dok1"] = row.DocNumber;
-            dataRow["dat1"] = row.DocDate.ToString("dd.MM.yyyy");
+            dataRow["dat1"] = row.DocDate.ToString("dd/MM/yyyy");
             dataRow["KODPL_1"] = string.Empty;
             dataRow["sch1"] = debit;
             dataRow["sum1"] = row.Amount.ToString("0.##");
@@ -944,5 +944,6 @@ namespace BIS.ERP.Views
         public DateTime UpdatedAt { get; set; }
     }
 }
+
 
 

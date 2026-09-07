@@ -149,7 +149,7 @@ namespace BIS.ERP.Views
                 FileText = text;
                 SelectedFileName = SelectedLogFile.DisplayName;
                 SelectedFilePath = SelectedLogFile.FullPath;
-                StatusText = $"Строк: {lineCount:N0} | Размер: {FormatBytes(info.Length)} | Изменен: {info.LastWriteTime:dd.MM.yyyy HH:mm:ss}";
+                StatusText = $"Строк: {lineCount:N0} | Размер: {FormatBytes(info.Length)} | Изменен: {info.LastWriteTime:dd/MM/yyyy HH:mm:ss}";
             }
             catch (Exception ex)
             {
@@ -211,7 +211,7 @@ namespace BIS.ERP.Views
         {
             FullPath = file.FullName;
             DisplayName = file.Name;
-            Info = $"{file.LastWriteTime:dd.MM.yyyy HH:mm:ss} | {FormatBytes(file.Length)}";
+            Info = $"{file.LastWriteTime:dd/MM/yyyy HH:mm:ss} | {FormatBytes(file.Length)}";
         }
 
         public string FullPath { get; }
@@ -236,3 +236,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

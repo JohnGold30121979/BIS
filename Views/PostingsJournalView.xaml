@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="BIS.ERP.Views.PostingsJournalView"
+<UserControl x:Class="BIS.ERP.Views.PostingsJournalView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
@@ -98,7 +98,7 @@
             </DataGrid.Resources>
 
             <DataGrid.Columns>
-                <DataGridTextColumn Binding="{Binding Date, StringFormat=dd.MM.yyyy}" Width="110">
+                <DataGridTextColumn Binding="{Binding Date, StringFormat=dd/MM/yyyy}" Width="110">
                     <DataGridTextColumn.Header>
                         <StackPanel>
                             <TextBlock Text="Дата"/>

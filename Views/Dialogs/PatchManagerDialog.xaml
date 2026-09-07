@@ -39,7 +39,7 @@
                 <DataGridTextColumn Header="Версия" Binding="{Binding Version}" Width="80"/>
                 <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="180"/>
                 <DataGridTextColumn Header="Статус" Binding="{Binding Status}" Width="90"/>
-                <DataGridTextColumn Header="Применен" Binding="{Binding AppliedAt, StringFormat=dd.MM.yyyy HH:mm}" Width="135"/>
+                <DataGridTextColumn Header="Применен" Binding="{Binding AppliedAt, StringFormat=dd/MM/yyyy HH:mm}" Width="135"/>
                 <DataGridTextColumn Header="Пользователь" Binding="{Binding AppliedBy}" Width="120"/>
                 <DataGridTextColumn Header="Ошибка" Binding="{Binding Error}" Width="*"/>
             </DataGrid.Columns>
@@ -54,3 +54,4 @@
         </DockPanel>
     </Grid>
 </Window>
+

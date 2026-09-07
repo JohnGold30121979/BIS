@@ -212,7 +212,7 @@ namespace BIS.ERP.Views
         {
             var calculationDate = ExchangeDifferenceDatePicker.SelectedDate?.Date ?? DateTime.Today.Date;
             var confirmation = MessageBox.Show(
-                $"Расчет курсовой разницы на {calculationDate:dd.MM.yyyy} перезапишет ранее созданные расчетные проводки за эту дату. Продолжить?",
+                $"Расчет курсовой разницы на {calculationDate:dd/MM/yyyy} перезапишет ранее созданные расчетные проводки за эту дату. Продолжить?",
                 "Расчет курсовой разницы",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
@@ -231,7 +231,7 @@ namespace BIS.ERP.Views
                     : Environment.NewLine + "Предупреждения:" + Environment.NewLine + string.Join(Environment.NewLine, result.Warnings);
 
                 ExchangeDifferenceStatusText.Text =
-                    $"Дата: {result.PeriodEnd:dd.MM.yyyy}. Проверено остатков: {result.ProcessedBalances}. " +
+                    $"Дата: {result.PeriodEnd:dd/MM/yyyy}. Проверено остатков: {result.ProcessedBalances}. " +
                     $"Создано проводок: {result.CreatedPostings}. Доход: {result.GainAmount:N2}. Расход: {result.LossAmount:N2}." +
                     warningText;
 
@@ -280,3 +280,4 @@ namespace BIS.ERP.Views
         public string AccountCodes { get; set; } = string.Empty;
     }
 }
+

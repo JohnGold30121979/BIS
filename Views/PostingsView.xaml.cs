@@ -76,7 +76,7 @@ namespace BIS.ERP.Views
                 UpdateSelectedPostingDetails();
 
                 var periodText = periodFrom.HasValue || periodTo.HasValue
-                    ? $", период: {(periodFrom?.ToString("dd.MM.yyyy") ?? "…")}—{(periodTo?.ToString("dd.MM.yyyy") ?? "…")}"
+                    ? $", период: {(periodFrom?.ToString("dd/MM/yyyy") ?? "…")}—{(periodTo?.ToString("dd/MM/yyyy") ?? "…")}"
                     : ", весь период";
                 StatusText.Text = $"📊 Загружено проводок: {_postings.Count}{periodText}";
             }
@@ -169,7 +169,7 @@ namespace BIS.ERP.Views
             var detail = PostingDetailRowFactory.Create();
             SetPostingDetail(detail, "Документ", posting.DocumentNumber);
             SetPostingDetail(detail, "Тип документа", posting.DocumentType);
-            SetPostingDetail(detail, "Дата", posting.Date.ToString("dd.MM.yyyy"));
+            SetPostingDetail(detail, "Дата", posting.Date.ToString("dd/MM/yyyy"));
             SetPostingDetail(detail, "Модуль", module);
             SetPostingDetail(detail, "Дебет", FormatAccountCode(posting.DebitAccount));
             SetPostingDetail(detail, "Кредит", FormatAccountCode(posting.CreditAccount));
@@ -479,4 +479,5 @@ namespace BIS.ERP.Views
         }
     }
 }
+
 
