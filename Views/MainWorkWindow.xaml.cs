@@ -73,6 +73,18 @@ namespace BIS.ERP
             "Платежная ведомость"
         };
 
+        private const string ModuleCatalogsGroupKey = "ModuleCatalogs";
+        private const string ModuleDocumentsGroupKey = "ModuleDocuments";
+        private const string ModuleReportsGroupKey = "ModuleReports";
+        private const string FinanceToolsGroupKey = "FinanceTools";
+
+        private static readonly IReadOnlyDictionary<string, int> ModuleGroupDefaultOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            [ModuleCatalogsGroupKey] = 1,
+            [ModuleDocumentsGroupKey] = 2,
+            [ModuleReportsGroupKey] = 3,
+            [FinanceToolsGroupKey] = 4
+        };
         // Скрывает временные объекты разработки из навигации независимо от модуля.
         private static readonly HashSet<string> DevelopmentHiddenNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -213,80 +225,134 @@ namespace BIS.ERP
             {
                 Id = "DirectoriesSection", Name = "СПРАВОЧНИКИ", Icon = "📚", Type = "Section"
             };
-            foreach (var catalog in catalogs.OrderBy(item => item.Name))
+            foreach (var catalog in catalogs
+                .OrderBy(item => item.Order <= 0 ? int.MaxValue : item.Order)
+                .ThenBy(item => item.Name))
             {
-                directoriesSection.Children.Add(new NavigationItem
-                {
-                    Id = catalog.Id.ToString(),
-                    Name = catalog.Name == "Сотрудники (Списочный состав)" ? "Сотрудники" : catalog.Name,
-                    Icon = catalog.Icon,
-                    Type = catalog.Name == "Сотрудники (Списочный состав)" ? "EmployeesCatalog" : "Catalog",
-                    Tag = catalog,
-                    Order = catalog.Order
-                });
-            }
-            NavigationItems.Add(directoriesSection);
+                directoriesSection.Children.Add(CreateCatalogNavigationItem(catalog));
+            }            NavigationItems.Add(directoriesSection);
 
             foreach (var module in modules)
             {
                 var moduleSection = new NavigationItem
                 {
-                    Id = $"Module:{module.Id}", Name = module.Name.ToUpperInvariant(), Icon = module.Icon, Type = "Section",
-                    Order = module.Order, Tag = module
+                    Id = $"Module:{module.Id}",
+                    Name = module.Name.ToUpperInvariant(),
+                    Icon = module.Icon,
+                    Type = "Section",
+                    Order = module.Order,
+                    Tag = module
                 };
-                var documentIds = moduleItems.Where(item => item.ModuleId == module.Id && item.ObjectType == "Document")
-                    .OrderBy(item => item.Order).Select(item => item.ObjectId).ToHashSet();
-                var reportIds = moduleItems.Where(item => item.ModuleId == module.Id && item.ObjectType == "Report")
-                    .OrderBy(item => item.Order).Select(item => item.ObjectId).ToHashSet();
 
-                var moduleDocuments = documents.Where(document => documentIds.Contains(document.Id))
-                    .OrderBy(document => document.Name)
+                var groupOrders = await _moduleMetadataService.GetNavigationGroupOrdersAsync(module.Id);
+                var moduleGroups = new List<NavigationItem>();
+
+                var catalogOrderById = GetModuleItemOrderMap(moduleItems, module.Id, "Catalog");
+                var moduleCatalogs = catalogs
+                    .Where(catalog => catalogOrderById.ContainsKey(catalog.Id))
+                    .OrderBy(catalog => GetNavigationObjectOrder(catalogOrderById, catalog.Id, catalog.Order))
+                    .ThenBy(catalog => catalog.Name)
+                    .ToList();
+                if (moduleCatalogs.Count > 0)
+                {
+                    var group = new NavigationItem
+                    {
+                        Id = $"{ModuleCatalogsGroupKey}:{module.Id}",
+                        Name = "Справочники",
+                        Icon = "📚",
+                        Type = "Group",
+                        Tag = ModuleCatalogsGroupKey,
+                        Order = GetModuleGroupOrder(groupOrders, ModuleCatalogsGroupKey)
+                    };
+                    foreach (var catalog in moduleCatalogs)
+                    {
+                        group.Children.Add(CreateCatalogNavigationItem(catalog));
+                    }
+                    moduleGroups.Add(group);
+                }
+
+                var documentOrderById = GetModuleItemOrderMap(moduleItems, module.Id, "Document");
+                var moduleDocuments = documents
+                    .Where(document => documentOrderById.ContainsKey(document.Id))
+                    .OrderBy(document => GetNavigationObjectOrder(documentOrderById, document.Id, document.Order))
+                    .ThenBy(document => document.Name)
                     .ToList();
                 if (moduleDocuments.Count > 0)
                 {
                     var group = new NavigationItem
                     {
-                        Id = $"ModuleDocuments:{module.Id}", Name = "Документы", Icon = "📄", Type = "Group"
+                        Id = $"{ModuleDocumentsGroupKey}:{module.Id}",
+                        Name = "Документы",
+                        Icon = "📄",
+                        Type = "Group",
+                        Tag = ModuleDocumentsGroupKey,
+                        Order = GetModuleGroupOrder(groupOrders, ModuleDocumentsGroupKey)
                     };
-                    AddDocumentNavigationItems(group, moduleDocuments);
-                    moduleSection.Children.Add(group);
+                    AddDocumentNavigationItems(group, moduleDocuments, documentOrderById);
+                    moduleGroups.Add(group);
                 }
 
-                var moduleReports = reports.Where(report => reportIds.Contains(report.Id))
-                    .OrderBy(report => report.Name)
+                var reportOrderById = GetModuleItemOrderMap(moduleItems, module.Id, "Report");
+                var moduleReports = reports
+                    .Where(report => reportOrderById.ContainsKey(report.Id))
+                    .OrderBy(report => GetNavigationObjectOrder(reportOrderById, report.Id, report.Order))
+                    .ThenBy(report => report.Name)
                     .ToList();
                 if (moduleReports.Count > 0)
                 {
                     var group = new NavigationItem
                     {
-                        Id = $"ModuleReports:{module.Id}", Name = "Отчеты", Icon = "📊", Type = "Group"
+                        Id = $"{ModuleReportsGroupKey}:{module.Id}",
+                        Name = "Отчеты",
+                        Icon = "📊",
+                        Type = "Group",
+                        Tag = ModuleReportsGroupKey,
+                        Order = GetModuleGroupOrder(groupOrders, ModuleReportsGroupKey)
                     };
                     foreach (var report in moduleReports)
+                    {
                         group.Children.Add(new NavigationItem
                         {
-                            Id = report.Id.ToString(), Name = report.Name, Icon = report.Icon,
-                            Type = "Report", Tag = report, Order = report.Order
+                            Id = report.Id.ToString(),
+                            Name = report.Name,
+                            Icon = report.Icon,
+                            Type = "Report",
+                            Tag = report,
+                            Order = GetNavigationObjectOrder(reportOrderById, report.Id, report.Order)
                         });
-                    moduleSection.Children.Add(group);
+                    }
+                    moduleGroups.Add(group);
                 }
 
                 if (module.Code == ModuleMetadataService.FinanceCode)
                 {
                     var financeTools = new NavigationItem
                     {
-                        Id = "FinanceTools", Name = "Операции и отчетность", Icon = "📈", Type = "Group"
+                        Id = $"{FinanceToolsGroupKey}:{module.Id}",
+                        Name = "Операции и отчетность",
+                        Icon = "📈",
+                        Type = "Group",
+                        Tag = FinanceToolsGroupKey,
+                        Order = GetModuleGroupOrder(groupOrders, FinanceToolsGroupKey)
                     };
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
                     financeTools.Children.Add(new NavigationItem { Id = "EsfExport", Name = "Выгрузка ЭСФ", Icon = "📤", Type = "EsfExport" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
-                    moduleSection.Children.Add(financeTools);
+                    moduleGroups.Add(financeTools);
+                }
+
+                foreach (var moduleGroup in moduleGroups
+                    .OrderBy(group => group.Order)
+                    .ThenBy(group => GetModuleGroupDefaultOrder(group.Tag as string))
+                    .ThenBy(group => group.Name))
+                {
+                    moduleSection.Children.Add(moduleGroup);
                 }
 
                 if (moduleSection.Children.Count > 0)
                     NavigationItems.Add(moduleSection);
             }
-
             var unassignedDocuments = documents.Where(document => !assignmentByObject.ContainsKey(document.Id)).ToList();
             var unassignedReports = reports.Where(report => !assignmentByObject.ContainsKey(report.Id)).ToList();
             if (!ModuleMetadataService.HideUnassignedObjectsInNavigationDuringDevelopment && (unassignedDocuments.Count > 0 || unassignedReports.Count > 0))
@@ -440,18 +506,61 @@ namespace BIS.ERP
                    normalizedTable.Contains("inventory", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static Dictionary<Guid, int> GetModuleItemOrderMap(IEnumerable<MetadataModuleItem> moduleItems, Guid moduleId, string objectType)
+        {
+            return moduleItems
+                .Where(item => item.ModuleId == moduleId && item.ObjectType == objectType)
+                .GroupBy(item => item.ObjectId)
+                .ToDictionary(group => group.Key, group => group.Min(item => item.Order));
+        }
+
+        private static int GetNavigationObjectOrder(IReadOnlyDictionary<Guid, int>? orderById, Guid objectId, int fallbackOrder)
+        {
+            if (orderById != null && orderById.TryGetValue(objectId, out var savedOrder) && savedOrder > 0)
+                return savedOrder;
+
+            return fallbackOrder > 0 ? fallbackOrder : int.MaxValue;
+        }
+
+        private static int GetModuleGroupOrder(IReadOnlyDictionary<string, int> savedGroupOrders, string groupKey)
+        {
+            if (savedGroupOrders.TryGetValue(groupKey, out var savedOrder) && savedOrder > 0)
+                return savedOrder;
+
+            return GetModuleGroupDefaultOrder(groupKey);
+        }
+
+        private static int GetModuleGroupDefaultOrder(string? groupKey)
+        {
+            return !string.IsNullOrWhiteSpace(groupKey) && ModuleGroupDefaultOrder.TryGetValue(groupKey, out var order)
+                ? order
+                : int.MaxValue;
+        }
+
+        private static NavigationItem CreateCatalogNavigationItem(MetadataObject catalog)
+        {
+            return new NavigationItem
+            {
+                Id = catalog.Id.ToString(),
+                Name = catalog.Name == "Сотрудники (Списочный состав)" ? "Сотрудники" : catalog.Name,
+                Icon = catalog.Icon,
+                Type = catalog.Name == "Сотрудники (Списочный состав)" ? "EmployeesCatalog" : "Catalog",
+                Tag = catalog,
+                Order = catalog.Order
+            };
+        }
         private static bool IsCashOrderDocument(MetadataObject document)
             => document.Name == "Расходный/Приходный КО" || document.TableName == "doc_cash_orders";
 
-        private static void AddDocumentNavigationItems(NavigationItem group, IEnumerable<MetadataObject> documents)
+        private static void AddDocumentNavigationItems(NavigationItem group, IEnumerable<MetadataObject> documents, IReadOnlyDictionary<Guid, int>? orderById = null)
         {
             var orderedDocuments = documents
-                .OrderBy(document => document.Order)
+                .OrderBy(document => GetNavigationObjectOrder(orderById, document.Id, document.Order))
                 .ThenBy(document => document.Name)
                 .ToList();
             var cashOrderDocuments = orderedDocuments
                 .Where(IsCashOrderDocument)
-                .OrderBy(document => document.Order)
+                .OrderBy(document => GetNavigationObjectOrder(orderById, document.Id, document.Order))
                 .ThenBy(document => document.Name)
                 .ToArray();
             var cashOrdersNavigationAdded = false;
@@ -1695,9 +1804,6 @@ namespace BIS.ERP
             var targetItem = GetTargetNavigationItem(e.GetPosition(NavigationTree));
             if (targetItem == null || targetItem == draggedItem) return;
 
-            // Нельзя перемещать между разными родителями
-            if (draggedItem.Type != targetItem.Type) return;
-
             await ReorderNavigationItems(draggedItem, targetItem);
         }
 
@@ -1726,52 +1832,139 @@ namespace BIS.ERP
 
         private async Task ReorderNavigationItems(NavigationItem draggedItem, NavigationItem targetItem)
         {
-            // Находим родительские коллекции
-            ObservableCollection<NavigationItem> draggedCollection = null;
-            ObservableCollection<NavigationItem> targetCollection = null;
+            var draggedParent = FindParentCollection(draggedItem);
+            var targetParent = FindParentCollection(targetItem);
 
-            foreach (var section in NavigationItems)
-            {
-                if (section.Children.Contains(draggedItem))
-                    draggedCollection = section.Children;
-                if (section.Children.Contains(targetItem))
-                    targetCollection = section.Children;
+            if (draggedParent == null || targetParent == null)
+                return;
+            if (draggedParent.Value.Items != targetParent.Value.Items)
+                return;
 
-                foreach (var child in section.Children)
-                {
-                    if (child.Children.Contains(draggedItem))
-                        draggedCollection = child.Children;
-                    if (child.Children.Contains(targetItem))
-                        targetCollection = child.Children;
-                }
-            }
+            var collection = draggedParent.Value.Items;
+            var draggedIndex = collection.IndexOf(draggedItem);
+            var targetIndex = collection.IndexOf(targetItem);
+            if (draggedIndex < 0 || targetIndex < 0 || draggedIndex == targetIndex)
+                return;
 
-            if (draggedCollection == null || targetCollection == null) return;
-            if (draggedCollection != targetCollection) return;
-
-            var draggedIndex = draggedCollection.IndexOf(draggedItem);
-            var targetIndex = targetCollection.IndexOf(targetItem);
-
-            draggedCollection.Move(draggedIndex, targetIndex);
-
-            await SaveOrderToDatabaseAsync(draggedCollection);
+            collection.Move(draggedIndex, targetIndex);
+            await SaveOrderToDatabaseAsync(collection, draggedParent.Value.Owner);
         }
 
-        private async Task SaveOrderToDatabaseAsync(ObservableCollection<NavigationItem> items)
+        private (ObservableCollection<NavigationItem> Items, NavigationItem? Owner)? FindParentCollection(NavigationItem target)
         {
-            for (int i = 0; i < items.Count; i++)
-            {
-                var item = items[i];
-                item.Order = i + 1;
+            return FindParentCollection(NavigationItems, null, target);
+        }
 
-                if (item.Tag is MetadataObject metadata)
+        private (ObservableCollection<NavigationItem> Items, NavigationItem? Owner)? FindParentCollection(
+            ObservableCollection<NavigationItem> items,
+            NavigationItem? owner,
+            NavigationItem target)
+        {
+            if (items.Contains(target))
+                return (items, owner);
+
+            foreach (var item in items)
+            {
+                var found = FindParentCollection(item.Children, item, target);
+                if (found != null)
+                    return found;
+            }
+
+            return null;
+        }
+
+        private async Task SaveOrderToDatabaseAsync(ObservableCollection<NavigationItem> items, NavigationItem? ownerItem)
+        {
+            if (TryGetModuleId(ownerItem, "Module:", out var moduleForGroups))
+            {
+                for (var i = 0; i < items.Count; i++)
                 {
-                    metadata.Order = item.Order;
-                    await _metadataService.UpdateMetadataObjectOrderAsync(metadata.Id, item.Order);
+                    var item = items[i];
+                    item.Order = i + 1;
+                    if (item.Tag is string groupKey && !string.IsNullOrWhiteSpace(groupKey))
+                        await _moduleMetadataService.SaveNavigationGroupOrderAsync(moduleForGroups, groupKey, item.Order);
+                }
+
+                return;
+            }
+
+            if (TryGetModuleItemsOwner(ownerItem, out var moduleId, out var objectType))
+            {
+                for (var i = 0; i < items.Count; i++)
+                {
+                    var item = items[i];
+                    item.Order = i + 1;
+                    await SaveModuleNavigationItemOrderAsync(item, moduleId, objectType, item.Order);
+                }
+
+                return;
+            }
+
+            if (ownerItem?.Id == "DirectoriesSection")
+            {
+                for (var i = 0; i < items.Count; i++)
+                {
+                    var item = items[i];
+                    item.Order = i + 1;
+                    if (item.Tag is MetadataObject metadata)
+                    {
+                        metadata.Order = item.Order;
+                        await _metadataService.UpdateMetadataObjectOrderAsync(metadata.Id, item.Order);
+                    }
                 }
             }
         }
 
+        private async Task SaveModuleNavigationItemOrderAsync(NavigationItem item, Guid moduleId, string objectType, int order)
+        {
+            switch (item.Tag)
+            {
+                case MetadataObject metadata:
+                    await _moduleMetadataService.SaveModuleNavigationItemOrderAsync(moduleId, objectType, metadata.Id, order);
+                    break;
+                case MetadataObject[] metadataObjects:
+                    foreach (var metadataObject in metadataObjects)
+                        await _moduleMetadataService.SaveModuleNavigationItemOrderAsync(moduleId, objectType, metadataObject.Id, order);
+                    break;
+                case Report report:
+                    await _moduleMetadataService.SaveModuleNavigationItemOrderAsync(moduleId, objectType, report.Id, order);
+                    break;
+            }
+        }
+
+        private static bool TryGetModuleItemsOwner(NavigationItem? ownerItem, out Guid moduleId, out string objectType)
+        {
+            if (TryGetModuleId(ownerItem, $"{ModuleCatalogsGroupKey}:", out moduleId))
+            {
+                objectType = "Catalog";
+                return true;
+            }
+
+            if (TryGetModuleId(ownerItem, $"{ModuleDocumentsGroupKey}:", out moduleId))
+            {
+                objectType = "Document";
+                return true;
+            }
+
+            if (TryGetModuleId(ownerItem, $"{ModuleReportsGroupKey}:", out moduleId))
+            {
+                objectType = "Report";
+                return true;
+            }
+
+            moduleId = Guid.Empty;
+            objectType = string.Empty;
+            return false;
+        }
+
+        private static bool TryGetModuleId(NavigationItem? ownerItem, string prefix, out Guid moduleId)
+        {
+            moduleId = Guid.Empty;
+            if (ownerItem?.Id?.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) != true)
+                return false;
+
+            return Guid.TryParse(ownerItem.Id[prefix.Length..], out moduleId);
+        }
         #endregion
 
         private async Task OpenAccountingReportsAsync(string? selectedReportType = null)

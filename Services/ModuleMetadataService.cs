@@ -1,6 +1,7 @@
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace BIS.ERP.Services
 {
@@ -57,6 +58,16 @@ namespace BIS.ERP.Services
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_MetadataModuleItems_Object""
                     ON ""MetadataModuleItems"" (""ObjectType"", ""ObjectId"");
                 CREATE INDEX IF NOT EXISTS ""IX_MetadataModuleItems_Module"" ON ""MetadataModuleItems"" (""ModuleId"");
+                CREATE TABLE IF NOT EXISTS ""NavigationGroupOrders"" (
+                    ""Id"" uuid PRIMARY KEY,
+                    ""ModuleId"" uuid NOT NULL,
+                    ""GroupKey"" varchar(60) NOT NULL,
+                    ""Order"" integer NOT NULL DEFAULT 0,
+                    ""CreatedAt"" timestamptz NOT NULL DEFAULT NOW(),
+                    ""UpdatedAt"" timestamptz NOT NULL DEFAULT NOW()
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_NavigationGroupOrders_Module_Key""
+                    ON ""NavigationGroupOrders"" (""ModuleId"", ""GroupKey"");
             ");
         }
 
@@ -282,6 +293,8 @@ namespace BIS.ERP.Services
                 "Проводки", "Расходный/Приходный КО", "Платежное поручение",
                 "Авансовые платежи", "Расчет курсовой разницы",
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
+            await AssignMissingByNameAsync(modules[FinanceCode].Id, "Catalog", catalogs.Select(item => (item.Id, item.Name)),
+                FinanceCatalogNames);
             await AssignMissingByNameAsync(modules[FixedAssetsCode].Id, "Catalog", catalogs.Select(item => (item.Id, item.Name)),
                 FixedAssetCatalogNames);
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Catalog", catalogs.Select(item => (item.Id, item.Name)),
@@ -371,6 +384,54 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        /// <summary>
+        /// Возвращает сохранённый пользователем порядок групп навигации внутри модуля.
+        /// Ключ значения: имя группы, значение: порядок (1..N). Если порядок не задан — пустой словарь.
+        /// </summary>
+        public async Task<Dictionary<string, int>> GetNavigationGroupOrdersAsync(Guid moduleId)
+        {
+            await EnsureSchemaAsync();
+            var rows = await _context.Database
+                .SqlQueryRaw<NavigationGroupOrderRow>(
+                    @"SELECT ""GroupKey"", ""Order"" FROM ""NavigationGroupOrders"" WHERE ""ModuleId"" = @moduleId",
+                    new NpgsqlParameter("@moduleId", moduleId))
+                .ToListAsync();
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+                result[row.GroupKey] = row.Order;
+            return result;
+        }
+
+        /// <summary>
+        /// Сохраняет порядок одной группы навигации внутри модуля (upsert по ModuleId+GroupKey).
+        /// </summary>
+        public async Task SaveNavigationGroupOrderAsync(Guid moduleId, string groupKey, int order)
+        {
+            await EnsureSchemaAsync();
+            await _context.Database.ExecuteSqlRawAsync(@"
+                INSERT INTO ""NavigationGroupOrders"" (""Id"", ""ModuleId"", ""GroupKey"", ""Order"")
+                VALUES (@id, @moduleId, @groupKey, @order)
+                ON CONFLICT (""ModuleId"", ""GroupKey"") DO UPDATE SET ""Order"" = @order, ""UpdatedAt"" = NOW()",
+                new NpgsqlParameter("@id", Guid.NewGuid()),
+                new NpgsqlParameter("@moduleId", moduleId),
+                new NpgsqlParameter("@groupKey", groupKey),
+                new NpgsqlParameter("@order", order));
+        }
+
+        public async Task SaveModuleNavigationItemOrderAsync(Guid moduleId, string objectType, Guid objectId, int order)
+        {
+            await EnsureSchemaAsync();
+            var item = await _context.MetadataModuleItems.FirstOrDefaultAsync(moduleItem =>
+                moduleItem.ModuleId == moduleId &&
+                moduleItem.ObjectType == objectType &&
+                moduleItem.ObjectId == objectId);
+
+            if (item == null)
+                return;
+
+            item.Order = order;
+            await _context.SaveChangesAsync();
+        }
         private static string NormalizeCode(string code, string name)
         {
             var source = string.IsNullOrWhiteSpace(code) ? name : code;
@@ -390,6 +451,15 @@ namespace BIS.ERP.Services
         {
             "Виды материалов", "Справочник материалов", "Наименования категорий"
         };
+        public static readonly string[] FinanceCatalogNames =
+        {
+            "Банки", "Кассы", "Организации", "Расчетные счета организаций",
+            "Справочник валют", "Справочник курсов валют", "План счетов",
+            "Связи счетов со справочниками", "Пары счетов", "Виды оплаты",
+            "Виды поставки", "Типы поставки", "Классификация платежей",
+            "Налоги", "Настройки XML ЭСФ", "XML Настройки XML ЭСФ",
+            "Государства", "Сотрудники (Списочный состав)", "Подразделения"
+        };
 
         public static readonly string[] FixedAssetDocumentNames =
         {
@@ -400,6 +470,11 @@ namespace BIS.ERP.Services
             "Консервация ОС", "Расконсервация ОС", "Передача ОС в подотчет", "Смена затратного счета",
             "Смена группы ОС"
         };
+    }
+public class NavigationGroupOrderRow
+    {
+        public string GroupKey { get; set; }
+        public int Order { get; set; }
     }
 }
 
