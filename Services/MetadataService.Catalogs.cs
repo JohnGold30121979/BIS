@@ -19,20 +19,26 @@ namespace BIS.ERP.Services
             if (string.IsNullOrWhiteSpace(name))
                 return null;
 
-            return await _context.MetadataObjects.AsNoTracking()
+            // Используем независимый контекст для безопасного параллельного чтения
+            await using var context = CreateIndependentContext();
+            return await context.MetadataObjects.AsNoTracking()
                 .Include(item => item.Fields)
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == name);
         }
 
         public async Task<IReadOnlyList<CurrencyRateImportResult>> ImportLatestOfficialCurrencyRatesAsync()
         {
-            var importService = new NationalBankCurrencyRateImportService(_context);
+            // Создаём локальный контекст для импортера — чтобы избежать параллельного использования _context
+            await using var context = CreateIndependentContext();
+            var importService = new NationalBankCurrencyRateImportService(context);
             return await importService.ImportLatestOfficialRatesAsync();
         }
 
         public async Task<IReadOnlyList<CurrencyRateImportResult>> ImportOfficialCurrencyRatesAsync(DateTime startDate, DateTime endDate)
         {
-            var importService = new NationalBankCurrencyRateImportService(_context);
+            // Создаём локальный контекст для импортера — чтобы избежать параллельного использования _context
+            await using var context = CreateIndependentContext();
+            var importService = new NationalBankCurrencyRateImportService(context);
             return await importService.ImportOfficialRatesForPeriodAsync(startDate, endDate);
         }
 

@@ -52,7 +52,8 @@ namespace BIS.ERP.Services
 
         private async Task DeactivateLegacyCurrencyRowsAsync(string tableName)
         {
-            await _context.Database.ExecuteSqlRawAsync($@"
+            await using var ctx = CreateIndependentContext();
+            await ctx.Database.ExecuteSqlRawAsync($@"
                 UPDATE ""{tableName}""
                 SET ""is_active"" = false,
                     ""UpdatedAt"" = NOW()
@@ -85,7 +86,8 @@ namespace BIS.ERP.Services
                 NOW(),
                 NOW()
             )";
-                await _context.Database.ExecuteSqlRawAsync(sql);
+                await using var ctx = CreateIndependentContext();
+                await ctx.Database.ExecuteSqlRawAsync(sql);
             }
             System.Diagnostics.Debug.WriteLine($"Добавлено категорий: {categories.Length}");
         }
@@ -127,7 +129,8 @@ namespace BIS.ERP.Services
                             NOW(),
                             NOW()
                         )";
-                    await _context.Database.ExecuteSqlRawAsync(sql);
+                    await using var ctx = CreateIndependentContext();
+                    await ctx.Database.ExecuteSqlRawAsync(sql);
                 }
                 catch (Exception ex)
                 {

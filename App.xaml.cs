@@ -1,5 +1,8 @@
 using BIS.ERP.Behaviors;
 using BIS.ERP.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using BIS.ERP.Data;
 using BIS.ERP.Views;
 using System.Diagnostics;
 using System.Text;
@@ -10,6 +13,8 @@ namespace BIS.ERP
 {
     public partial class App : Application
     {
+        public static IServiceProvider Services { get; private set; }
+
         private static bool _systemLoggingConfigured;
         private TrayManager? _trayManager;
         private InfoBaseSelectionWindow? _infoBaseWindow;
@@ -18,6 +23,17 @@ namespace BIS.ERP
         {
             base.OnStartup(e);
             ConfigureSystemLogging();
+            // Инициализация контейнера сервисов и фабрики DbContext
+            var services = new ServiceCollection();
+            services.AddDbContextFactory<AppDbContext>(options =>
+                options.UseNpgsql(AppSettings.Instance.GetMasterConnectionString()));
+            services.AddTransient<MetadataService>(sp =>
+            {
+                var factory = sp.GetRequiredService<IDbContextFactory<AppDbContext>>();
+                var ctx = factory.CreateDbContext();
+                return new MetadataService(ctx, factory);
+            });
+            Services = services.BuildServiceProvider();
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             try
