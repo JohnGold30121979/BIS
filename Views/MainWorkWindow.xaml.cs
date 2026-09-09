@@ -230,7 +230,8 @@ namespace BIS.ERP
                 .ThenBy(item => item.Name))
             {
                 directoriesSection.Children.Add(CreateCatalogNavigationItem(catalog));
-            }            NavigationItems.Add(directoriesSection);
+            }
+            NavigationItems.Add(directoriesSection);
 
             foreach (var module in modules)
             {
@@ -1778,8 +1779,9 @@ namespace BIS.ERP
             _draggedItem = GetSelectedNavigationItem();
             if (_draggedItem == null) return;
 
-            // Нельзя перетаскивать заголовки секций
-            if (_draggedItem.Type == "Section" || _draggedItem.Type == "Group") return;
+            // Нельзя перетаскивать только верхние заголовки секций.
+            // Группы внутри модулей ("Справочники", "Документы", "Отчеты") пользователь может менять местами.
+            if (_draggedItem.Type == "Section") return;
 
             DragDrop.DoDragDrop(NavigationTree, _draggedItem, DragDropEffects.Move);
         }

@@ -96,7 +96,7 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), details, $"Детали проводки: {row.DocNumber}");
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), details, $"Детали проводки: {row.DocNumber}", null, fillWorkspace: true);
         }
 
         private void UpdateSelectedPostingDetails()

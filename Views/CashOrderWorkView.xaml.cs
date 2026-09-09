@@ -2498,7 +2498,7 @@ namespace BIS.ERP.Views
             };
 
             var dialog = new PostingDetailsDialog(posting) { Owner = Window.GetWindow(this) };
-            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}");
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}", null, fillWorkspace: true);
         }
 
         private static string ResolveCorrespondentAccount(CashOrderRow selected)

@@ -344,7 +344,7 @@ namespace BIS.ERP.Views
             var posting = BuildPostingViewModel(selected);
             var dialog = new PostingDetailsDialog(posting);
             dialog.Owner = Window.GetWindow(this);
-            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}");
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}", null, fillWorkspace: true);
         }
 
         private async Task<bool> TryOpenInvoiceFromPostingAsync(

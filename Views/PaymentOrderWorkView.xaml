@@ -31,7 +31,7 @@
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
             <Button x:Name="PostButton" Content="✅ Провести" Width="155" Height="35" Margin="0,0,10,0"
                     Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
-            <Button x:Name="PrintButton" Content="Просмотр" Width="110" Height="35" Margin="0,0,10,0"
+            <Button x:Name="PrintButton" Content="Печать" Width="110" Height="35" Margin="0,0,10,0"
                     Background="#2C3E50" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
                         <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,0"/>
 <Button x:Name="RefreshButton" Content="🔄 Обновить" Width="100" Height="35"

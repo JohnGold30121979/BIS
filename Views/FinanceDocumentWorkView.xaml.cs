@@ -353,7 +353,7 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}");
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Детали проводки: {posting.DocumentNumber}", null, fillWorkspace: true);
         }
 
         private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) =>
