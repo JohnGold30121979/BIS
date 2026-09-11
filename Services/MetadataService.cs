@@ -236,11 +236,9 @@ namespace BIS.ERP.Services
 
            
 
-var result = new List<Dictionary<string, object>>();
+             var result = new List<Dictionary<string, object>>();
             try
             {
-                
-
                 await using var connection = context.Database.GetDbConnection();
                 await connection.OpenAsync();
                 await using var command = connection.CreateCommand();

@@ -401,6 +401,9 @@ namespace BIS.ERP.Views
                     selectedItem => UpdateRatesAndOpenCurrencyRatesCatalogAsync(metadataService, owner, selectedItem),
                     "Обновить курсы НБКР и открыть справочник курсов валют");
             }
+            // Кнопки «Добавить»/«Изменить»: можно редактировать справочник,
+            // не закрывая окно выбора.
+            dialog.ConfigureCatalogEditing(referenceCatalog, metadataService);
             if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) == true &&
                 dialog.SelectedItem != null &&
                 dialog.SelectedItem.TryGetValue("Id", out var idValue) &&

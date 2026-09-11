@@ -490,8 +490,6 @@ namespace BIS.ERP.Views.Dialogs
                     catalogsDict,
                     usedFields);
             }
-
-            FieldsPanel.Children.Add(CreateSection("Дополнительно", additionalGrid));
         }
 
         private Border CreateFixedAssetMovementHeader(

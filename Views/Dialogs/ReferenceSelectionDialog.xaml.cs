@@ -1,3 +1,4 @@
+using BIS.ERP.Models;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -6,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using BIS.ERP.Services;
 
 namespace BIS.ERP.Views
@@ -16,8 +18,11 @@ namespace BIS.ERP.Views
         private readonly List<Dictionary<string, object>> _items;
         private readonly string _firstField;
         private readonly string _secondField;
+        private readonly IReadOnlyDictionary<string, Dictionary<Guid, string>>? _referenceMaps;
         private List<Dictionary<string, object>> _filteredItems;
         private Func<Dictionary<string, object>?, Task>? _extraAction;
+        private MetadataObject? _catalog;
+        private MetadataService? _metadataService;
 
         public Dictionary<string, object> SelectedItem { get; private set; }
 
@@ -29,6 +34,7 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             var sourceItems = items ?? new List<Dictionary<string, object>>();
+            _referenceMaps = referenceMaps;
             _items = referenceMaps != null && referenceMaps.Count > 0
                 ? ReferenceDisplayHelper.ResolveRows(sourceItems, referenceMaps)
                 : sourceItems;
@@ -36,7 +42,26 @@ namespace BIS.ERP.Views
             _secondField = secondField;
             _filteredItems = _items;
 
-            // Динамически создаем колонки
+            RebuildGrid();
+        }
+
+        /// <summary>
+        /// Включает кнопки «Добавить» и «Изменить», позволяя создавать и
+        /// редактировать записи нужного справочника прямо из окна выбора.
+        /// </summary>
+        public void ConfigureCatalogEditing(MetadataObject catalog, MetadataService metadataService)
+        {
+            _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+            _metadataService = metadataService ?? throw new ArgumentNullException(nameof(metadataService));
+
+            AddButton.Visibility = Visibility.Visible;
+            EditButton.Visibility = Visibility.Visible;
+            AddButton.IsEnabled = true;
+            EditButton.IsEnabled = ItemsGrid.SelectedItem != null;
+        }
+
+        private void RebuildGrid()
+        {
             if (_items.Count > 0)
             {
                 // Определяем все возможные ключи (поля)
@@ -46,22 +71,22 @@ namespace BIS.ERP.Views
                 var displayKeys = allKeys.Where(k => !excludeKeys.Contains(k) && k != "Id").ToList();
 
                 // Если заданы поля для отображения, используем их в первую очередь
-                if (!string.IsNullOrEmpty(firstField) && displayKeys.Contains(firstField))
+                if (!string.IsNullOrEmpty(_firstField) && displayKeys.Contains(_firstField))
                 {
                     // Помещаем firstField на первое место
-                    displayKeys.Remove(firstField);
-                    displayKeys.Insert(0, firstField);
+                    displayKeys.Remove(_firstField);
+                    displayKeys.Insert(0, _firstField);
                 }
-                if (!string.IsNullOrEmpty(secondField) && displayKeys.Contains(secondField))
+                if (!string.IsNullOrEmpty(_secondField) && displayKeys.Contains(_secondField))
                 {
                     // Помещаем secondField на второе место, если оно не firstField
-                    if (displayKeys.Contains(secondField) && secondField != firstField)
+                    if (displayKeys.Contains(_secondField) && _secondField != _firstField)
                     {
-                        displayKeys.Remove(secondField);
-                        if (displayKeys.Count > 0 && displayKeys[0] == firstField)
-                            displayKeys.Insert(1, secondField);
+                        displayKeys.Remove(_secondField);
+                        if (displayKeys.Count > 0 && displayKeys[0] == _firstField)
+                            displayKeys.Insert(1, _secondField);
                         else
-                            displayKeys.Insert(0, secondField);
+                            displayKeys.Insert(0, _secondField);
                     }
                 }
 
@@ -95,7 +120,7 @@ namespace BIS.ERP.Views
                 ItemsGrid.AutoGenerateColumns = false;
                 ItemsGrid.Columns.Clear();
 
-                foreach (var key in new[] { firstField, secondField }
+                foreach (var key in new[] { _firstField, _secondField }
                              .Where(key => !string.IsNullOrWhiteSpace(key))
                              .Distinct(StringComparer.OrdinalIgnoreCase))
                 {
@@ -118,8 +143,7 @@ namespace BIS.ERP.Views
 
             ItemsGrid.ItemsSource = _filteredItems;
         }
-
-        public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>?, Task> action, string tooltip = null)
+public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>?, Task> action, string tooltip = null)
         {
             _extraAction = action ?? throw new ArgumentNullException(nameof(action));
             ExtraActionButton.Content = caption;
@@ -131,23 +155,25 @@ namespace BIS.ERP.Views
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             var search = SearchBox.Text?.Trim() ?? string.Empty;
-            if (string.IsNullOrEmpty(search))
-            {
-                _filteredItems = _items;
-            }
-            else
-            {
-                _filteredItems = _items
-                    .Where(item => item.Values.Any(v => v?.ToString()?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
-                    .ToList();
-            }
+            _filteredItems = FilterItems(search);
             ItemsGrid.ItemsSource = _filteredItems;
+        }
+
+        private List<Dictionary<string, object>> FilterItems(string search)
+        {
+            if (string.IsNullOrEmpty(search))
+                return _items;
+
+            return _items
+                .Where(item => item.Values.Any(v => v?.ToString()?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
+                .ToList();
         }
 
         private void ItemsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             SelectButton.IsEnabled = ItemsGrid.SelectedItem != null;
             ExtraActionButton.IsEnabled = ExtraActionButton.Visibility == Visibility.Visible && ItemsGrid.SelectedItem != null;
+            EditButton.IsEnabled = EditButton.Visibility == Visibility.Visible && ItemsGrid.SelectedItem != null;
         }
 
         private void ItemsGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -183,6 +209,118 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnAddClick(object sender, RoutedEventArgs e)
+        {
+            if (_catalog == null || _metadataService == null)
+                return;
+
+            try
+            {
+                var dialog = new CatalogItemDialog(_catalog, _metadataService);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, $"Добавление: {_catalog.Name}") != true)
+                    return;
+
+                Cursor = Cursors.Wait;
+                var newId = await _metadataService.CreateDynamicRecordAsync(_catalog.Id, dialog.ItemData);
+                await ReloadItemsAsync(newId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка добавления записи: {ex.Message}", Title,
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
+private async void OnEditClick(object sender, RoutedEventArgs e)
+        {
+            if (_catalog == null || _metadataService == null)
+                return;
+
+            var selectedItem = ItemsGrid.SelectedItem as Dictionary<string, object>;
+            if (selectedItem == null)
+            {
+                MessageBox.Show("Сначала выберите запись для редактирования.", Title,
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var recordId = GetRecordId(selectedItem);
+            if (!recordId.HasValue)
+            {
+                MessageBox.Show("У выбранной записи не найден идентификатор.", Title,
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                // Всегда берём свежие «сырые» данные из БД, чтобы поля-ссылки
+                // не оказались подменены отображаемыми значениями при сохранении.
+                var rawRows = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+                var existingData = rawRows.FirstOrDefault(row => GetRecordId(row) == recordId);
+                if (existingData == null)
+                {
+                    MessageBox.Show("Выбранная запись справочника не найдена.", _catalog.Name,
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new CatalogItemDialog(_catalog, _metadataService, existingData);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, $"Редактирование: {_catalog.Name}") != true)
+                    return;
+
+                Cursor = Cursors.Wait;
+                await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, recordId.Value, dialog.ItemData);
+                await ReloadItemsAsync(recordId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка обновления записи: {ex.Message}", Title,
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
+
+        private async Task ReloadItemsAsync(Guid? selectRecordId = null)
+        {
+            if (_catalog == null || _metadataService == null)
+                return;
+
+            var rows = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+            var reloaded = _referenceMaps != null && _referenceMaps.Count > 0
+                ? ReferenceDisplayHelper.ResolveRows(rows, _referenceMaps)
+                : rows;
+
+            _items.Clear();
+            foreach (var row in reloaded)
+                _items.Add(row);
+
+            var search = SearchBox.Text?.Trim() ?? string.Empty;
+            _filteredItems = FilterItems(search);
+            ItemsGrid.ItemsSource = _filteredItems;
+
+            if (selectRecordId.HasValue)
+            {
+                var target = _filteredItems.FirstOrDefault(row => GetRecordId(row) == selectRecordId);
+                if (target != null)
+                    ItemsGrid.SelectedItem = target;
+            }
+        }
+
+        private static Guid? GetRecordId(Dictionary<string, object> row)
+        {
+            if (row.TryGetValue("Id", out var idValue) && Guid.TryParse(idValue?.ToString(), out var id))
+                return id;
+
+            return null;
+        }
+
         private void OnSelectClick(object sender, RoutedEventArgs e)
         {
             SelectItem();
@@ -201,6 +339,7 @@ namespace BIS.ERP.Views
         {
             MdiDialogService.CloseWithResult(this, false);
         }
+
         private static Binding CreateValueBinding(string key)
         {
             return new Binding($"[{key}]")
@@ -214,41 +353,27 @@ namespace BIS.ERP.Views
         {
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
-                if (TryGetBool(value, out var boolValue))
-                {
-                    if (IsActiveField(parameter?.ToString()))
-                        return boolValue ? "Активен" : "Неактивен";
+                var key = parameter as string ?? string.Empty;
+                var current = value?.ToString();
 
-                    return boolValue ? "Да" : "Нет";
+                if (current == null)
+                    return "—";
+
+                if (current.Equals("True", StringComparison.OrdinalIgnoreCase) ||
+                    current.Equals("False", StringComparison.OrdinalIgnoreCase))
+                {
+                    return current.Equals("True", StringComparison.OrdinalIgnoreCase)
+                        ? (key.Equals("IsActive", StringComparison.OrdinalIgnoreCase) ? "Активен" : "Да")
+                        : (key.Equals("IsActive", StringComparison.OrdinalIgnoreCase) ? "Неактивен" : "Нет");
                 }
 
-                return value ?? string.Empty;
+                return current;
             }
 
             public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
             {
-                return Binding.DoNothing;
-            }
-
-            private static bool IsActiveField(string? fieldName)
-            {
-                return fieldName?.Equals("Активен", StringComparison.OrdinalIgnoreCase) == true ||
-                       fieldName?.Equals("Активна", StringComparison.OrdinalIgnoreCase) == true ||
-                       fieldName?.Equals("is_active", StringComparison.OrdinalIgnoreCase) == true;
-            }
-
-            private static bool TryGetBool(object value, out bool result)
-            {
-                if (value is bool boolValue)
-                {
-                    result = boolValue;
-                    return true;
-                }
-
-                return bool.TryParse(value?.ToString(), out result);
+                throw new NotSupportedException();
             }
         }
     }
 }
-
-
