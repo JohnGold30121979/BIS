@@ -219,6 +219,12 @@
                                 Background="Transparent" BorderBrush="#27AE60" BorderThickness="1"
                                 Foreground="#27AE60" Cursor="Hand"/>
 
+                        <Button x:Name="AttachButton" Content="🔗 Подключить существующую..." 
+                                Height="35" Margin="0,5" Command="{Binding AttachCommand}"
+                                Background="Transparent" BorderBrush="#16A085" BorderThickness="1"
+                                Foreground="#16A085" Cursor="Hand"
+                                ToolTip="Укажите сервер (путь по локальной сети), порт, имя существующей базы данных и учётные данные"/>
+
                         <Button x:Name="EditButton" Content="✏️ Изменить..." 
                                 Height="35" Margin="0,5" Command="{Binding EditCommand}"
                                 Background="Transparent" BorderBrush="#3498DB" BorderThickness="1"

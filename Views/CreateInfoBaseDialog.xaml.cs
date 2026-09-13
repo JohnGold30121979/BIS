@@ -31,9 +31,16 @@ namespace BIS.ERP.Views
         private string? logoContentType;
         private string? logoFileName;
 
-        public CreateInfoBaseDialog()
+        public CreateInfoBaseDialog(bool attachMode = false, string? infoBaseName = null)
         {
             InitializeComponent();
+
+            // Если открываем сразу в режиме «Подключить существующую базу» — переключаем режим.
+            if (attachMode)
+                ModeCombo.SelectedIndex = 1;
+
+            if (!string.IsNullOrWhiteSpace(infoBaseName))
+                NameBox.Text = infoBaseName.Trim();
 
             // Загружаем настройки из AppSettings
             var settings = AppSettings.Instance;
@@ -95,7 +102,12 @@ namespace BIS.ERP.Views
         private void GenerateDatabaseName()
         {
             if (AttachExisting)
+            {
+                // В режиме подключения существующей базы имя БД не генерируем,
+                // но кнопку включаем по заполненному названию.
+                CreateButton.IsEnabled = !string.IsNullOrWhiteSpace(NameBox.Text);
                 return;
+            }
             // Генерируем имя БД только из латинских букв, цифр и подчеркиваний
             var baseName = NameBox.Text.Trim()
                 .Replace(" ", "_")

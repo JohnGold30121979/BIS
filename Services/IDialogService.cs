@@ -20,6 +20,7 @@ namespace BIS.ERP.Services
         bool Confirm(string message, string title = "Подтверждение");
         Task<bool> ShowLoginAsync(bool isConfiguratorMode = false);
         bool ShowCreateInfoBase(out string? infoBaseName);
+        bool ShowAttachInfoBase(out string? infoBaseName);
         bool ShowEditInfoBase(
             InfoBase infoBase,
             out string? infoBaseName,

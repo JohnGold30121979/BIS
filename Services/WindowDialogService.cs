@@ -61,6 +61,14 @@ namespace BIS.ERP.Services
             return result;
         }
 
+        public bool ShowAttachInfoBase(out string? infoBaseName)
+        {
+            var dialog = new CreateInfoBaseDialog(attachMode: true) { Owner = _owner };
+            var result = dialog.ShowDialog() == true;
+            infoBaseName = result ? dialog.InfoBaseName : null;
+            return result;
+        }
+
         public bool ShowEditInfoBase(
             InfoBase infoBase,
             out string? infoBaseName,

@@ -96,6 +96,19 @@ namespace BIS.ERP.ViewModels
             }
         }
 
+        // Подключение к существующей базе (например, по локальной сети): открывает диалог
+        // сразу в режиме «Подключить существующую базу» с указанием сервера, порта,
+        // имени существующей базы данных и учётных данных.
+        [RelayCommand]
+        private async Task AttachAsync()
+        {
+            if (_dialogService.ShowAttachInfoBase(out var infoBaseName))
+            {
+                await LoadAsync();
+                _dialogService.ShowInformation($"База данных '{infoBaseName}' успешно подключена!", "Успех");
+            }
+        }
+
         [RelayCommand(CanExecute = nameof(HasSelectedInfoBase))]
         private async Task EditAsync()
         {
