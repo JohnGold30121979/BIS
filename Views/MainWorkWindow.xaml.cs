@@ -54,6 +54,9 @@ namespace BIS.ERP
         private UserAccessService _userAccessService;
         private ModuleMetadataService _moduleMetadataService;
         private InfoBase _currentInfoBase;
+        // Полное дерево навигации (без применения фильтра доступов) для окна «Пользователи и права»,
+        // чтобы второй администратор мог сам включать/выключать себе любые модули.
+        private List<NavigationItem> _fullNavigationItemsForAccess;
         private bool _isLoadingReport = false;
         private Point _dragStartPoint;
         private NavigationItem _draggedItem;
@@ -136,6 +139,12 @@ namespace BIS.ERP
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
                 LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, systemConfiguration.Icon);
+                if (_authService.CurrentUser != null)
+                {
+                    var currentUser = _authService.CurrentUser;
+                    var displayName = string.IsNullOrWhiteSpace(currentUser.FullName) ? currentUser.Login : currentUser.FullName;
+                    CurrentUserText.Text = $"👤 {displayName} ({currentUser.Login})";
+                }
                 _currentInfoBase = await _infoBaseManager.GetCurrentInfoBaseAsync();
                 if (_currentInfoBase != null)
                 {
@@ -386,7 +395,12 @@ namespace BIS.ERP
 
             AddHelpAndAdministrationSections();
 
-            if (!_authService.IsAdmin && _authService.CurrentUser != null)
+            _fullNavigationItemsForAccess = new List<NavigationItem>();
+            foreach (var rootItem in NavigationItems)
+                _fullNavigationItemsForAccess.Add(CloneNavigationItem(rootItem));
+
+            if (_authService.CurrentUser != null &&
+                await _userAccessService.ShouldFilterNavigationAsync(_authService.CurrentUser.Id))
                 await ApplyUserPermissionsAsync(_authService.CurrentUser.Id);
 
             NavigationTree.SelectedItemChanged -= OnNavigationItemSelected;
@@ -957,7 +971,12 @@ namespace BIS.ERP
 
             NavigationItems.Add(adminSection);
 
-            if (!_authService.IsAdmin && _authService.CurrentUser != null)
+            _fullNavigationItemsForAccess = new List<NavigationItem>();
+            foreach (var rootItem in NavigationItems)
+                _fullNavigationItemsForAccess.Add(CloneNavigationItem(rootItem));
+
+            if (_authService.CurrentUser != null &&
+                await _userAccessService.ShouldFilterNavigationAsync(_authService.CurrentUser.Id))
                 await ApplyUserPermissionsAsync(_authService.CurrentUser.Id);
 
             // Подписываемся на события выбора
@@ -1579,7 +1598,13 @@ namespace BIS.ERP
 
                 case "UserAccessManagement":
                     var accessContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                    _navigation.NavigateTo(new UserAccessManagementView(accessContext, NavigationItems, _authService.CurrentUser), item.Name, item.Id);
+                    // Важно: окно прав должно видеть ПОЛНОЕ дерево, а не уже отфильтрованное под текущего пользователя.
+                    var fullItemsForAccess = _fullNavigationItemsForAccess != null && _fullNavigationItemsForAccess.Count > 0
+                        ? _fullNavigationItemsForAccess
+                        : NavigationItems.ToList();
+                    var accessView = new UserAccessManagementView(accessContext, fullItemsForAccess, _authService.CurrentUser);
+                    accessView.PermissionsChanged += async (_, _) => await RefreshNavigationVisibilityAsync();
+                    _navigation.NavigateTo(accessView, item.Name, item.Id);
                     break;
 
                 case "AboutSystem":
@@ -1710,6 +1735,48 @@ namespace BIS.ERP
             {
                 if (!FilterNavigationItem(NavigationItems[index], allowedKeys))
                     NavigationItems.RemoveAt(index);
+            }
+        }
+
+        private static NavigationItem CloneNavigationItem(NavigationItem source)
+        {
+            var clone = new NavigationItem
+            {
+                Id = source.Id,
+                Name = source.Name,
+                Icon = source.Icon,
+                Type = source.Type,
+                Badge = source.Badge,
+                Order = source.Order,
+                Tag = source.Tag
+            };
+            foreach (var child in source.Children)
+                clone.Children.Add(CloneNavigationItem(child));
+            return clone;
+        }
+
+        private async Task RefreshNavigationVisibilityAsync()
+        {
+            if (_authService.CurrentUser == null)
+                return;
+            if (await _userAccessService.ShouldFilterNavigationAsync(_authService.CurrentUser.Id))
+            {
+                await ApplyUserPermissionsAsync(_authService.CurrentUser.Id);
+                if (NavigationItems.Count > 0)
+                    ShowNavigationOverview(NavigationItems[0]);
+            }
+        }
+
+        private async Task RefreshNavigationAfterPermissionsChangedAsync()
+        {
+            // Перестраиваем дерево заново: сначала полное, затем фильтр по свежим правам.
+            await BuildNavigationTree();
+            // Обновляем подпись текущего пользователя (на случай смены контекста).
+            if (_authService.CurrentUser != null)
+            {
+                var currentUser = _authService.CurrentUser;
+                var displayName = string.IsNullOrWhiteSpace(currentUser.FullName) ? currentUser.Login : currentUser.FullName;
+                CurrentUserText.Text = $"👤 {displayName} ({currentUser.Login})";
             }
         }
 

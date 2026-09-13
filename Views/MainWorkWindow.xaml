@@ -72,6 +72,12 @@
                             <TextBlock x:Name="CurrentInfoBaseText" Text="Рабочий режим" 
                                        FontSize="11" Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}" 
                                        VerticalAlignment="Center"/>
+                            <TextBlock Text="•" FontSize="11" Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}"
+                                       Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="CurrentUserText" FontSize="11"
+                                       Foreground="{DynamicResource AppBrandSubtitleForegroundBrush}"
+                                       Margin="8,0,0,0" VerticalAlignment="Center"
+                                       ToolTip="Текущий пользователь"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>

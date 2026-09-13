@@ -31,6 +31,7 @@
                             <DataGridTextColumn Header="Логин" Binding="{Binding Login}" Width="95"/>
                             <DataGridTextColumn Header="Пользователь" Binding="{Binding FullName}" Width="135"/>
                             <DataGridTextColumn Header="Роль" Binding="{Binding RoleDisplay}" Width="100"/>
+                            <DataGridTextColumn Header="Системный" Binding="{Binding SystemDisplay}" Width="90"/>
                             <DataGridTextColumn Header="Активен" Binding="{Binding ActiveDisplay}" Width="85"/>
                             <DataGridTextColumn Header="Последний вход" Binding="{Binding LastLoginDisplay}" Width="120"/>
                         </DataGrid.Columns>

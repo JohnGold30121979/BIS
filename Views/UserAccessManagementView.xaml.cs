@@ -16,6 +16,8 @@ namespace BIS.ERP.Views
         private readonly User? _currentUser;
         private UserAccessRow? _selectedUser;
 
+        public event EventHandler? PermissionsChanged;
+
         public ObservableCollection<AccessTreeNode> Capabilities { get; } = new();
 
         public UserAccessManagementView(AppDbContext context, IEnumerable<NavigationItem> navigationItems, User? currentUser = null)
@@ -23,7 +25,10 @@ namespace BIS.ERP.Views
             InitializeComponent();
             DataContext = this;
             _accessService = new UserAccessService(context);
-            _navigationItems = navigationItems.Where(item => item.Id != "AdminSection").ToList();
+            // АДМИНИСТРИРОВАНИЕ тоже показываем: BuildNode сам скрывает служебные
+            // UserProfile/SwitchMode/Logout/AboutSystem/HelpSection, а Settings/SystemLogs
+            // и «Пользователи и права» должны быть настраиваемыми для второго администратора.
+            _navigationItems = navigationItems.ToList();
             _currentUser = currentUser;
             AddUserButton.IsEnabled = UserAccessService.CanManageUsers(_currentUser);
             Loaded += async (_, _) => await LoadUsersAsync();
@@ -48,31 +53,36 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var isAdmin = _selectedUser.User.Role == UserRole.Admin;
+            var isSelf = _currentUser != null && _selectedUser.User.Id == _currentUser.Id;
+            // Полный доступ закреплён только за главным системным администратором.
+            var isFixedAdmin = await _accessService.IsPrimarySystemAdminAsync(_selectedUser.User.Id);
             var canManageTarget = _currentUser != null &&
                                   UserAccessService.CanManageTargetRole(_currentUser.Role, _selectedUser.User.Role);
-            var allowedKeys = isAdmin
+            // Второй администратор может менять видимость модулей для себя
+            // (любой неглавный пользователь с правом управления — и для других).
+            var isEditable = !isFixedAdmin && (isSelf || canManageTarget);
+            var allowedKeys = isFixedAdmin
                 ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 : await _accessService.GetAllowedKeysAsync(_selectedUser.User.Id);
 
             foreach (var item in _navigationItems)
             {
-                var node = BuildNode(item, null, allowedKeys, isAdmin);
+                var node = BuildNode(item, null, allowedKeys, isFixedAdmin);
                 if (node != null)
                     Capabilities.Add(node);
             }
 
             SelectedUserText.Text = $"Доступ для: {_selectedUser.FullName} ({_selectedUser.Login})";
-            AccessTree.IsEnabled = !isAdmin && canManageTarget;
-            SelectAllButton.IsEnabled = !isAdmin && canManageTarget;
-            ClearButton.IsEnabled = !isAdmin && canManageTarget;
-            SaveButton.IsEnabled = !isAdmin && canManageTarget;
+            AccessTree.IsEnabled = isEditable;
+            SelectAllButton.IsEnabled = isEditable;
+            ClearButton.IsEnabled = isEditable;
+            SaveButton.IsEnabled = isEditable;
             DeleteUserButton.IsEnabled = CanDeleteSelectedUser();
             ToggleActiveButton.IsEnabled = CanToggleSelectedUser();
             ToggleActiveButton.Content = _selectedUser.User.IsActive ? "Отключить" : "Включить";
-            StatusText.Text = isAdmin
-                ? "Администратор всегда имеет полный доступ и не имеет признака активности."
-                : canManageTarget
+            StatusText.Text = isFixedAdmin
+                ? "Главный системный администратор всегда имеет полный доступ; права и видимость модулей не редактируются."
+                : isEditable
                     ? "Изменения ещё не сохранены."
                     : "Недостаточно прав для изменения этого пользователя.";
         }
@@ -119,12 +129,16 @@ namespace BIS.ERP.Views
                 return;
             try
             {
+                // Второй администратор может менять видимость модулей для себя,
+                // поэтому self-разрешаем даже если CanManageTargetRole по роли не проходит.
+                var isSelf = _currentUser != null && _selectedUser.User.Id == _currentUser.Id;
                 if (_currentUser == null ||
-                    !UserAccessService.CanManageTargetRole(_currentUser.Role, _selectedUser.User.Role))
+                    (!isSelf && !UserAccessService.CanManageTargetRole(_currentUser.Role, _selectedUser.User.Role)))
                     throw new InvalidOperationException("Недостаточно прав для изменения доступа этого пользователя.");
                 var keys = Capabilities.SelectMany(node => node.CheckedLeafKeys()).ToList();
                 await _accessService.SavePermissionsAsync(_selectedUser.User.Id, keys);
-                StatusText.Text = $"Права сохранены: {DateTime.Now:HH:mm:ss}. Применятся при следующем входе пользователя.";
+                StatusText.Text = $"Права сохранены: {DateTime.Now:HH:mm:ss}.";
+                PermissionsChanged?.Invoke(this, EventArgs.Empty);
             }
             catch (Exception ex)
             {
@@ -151,7 +165,8 @@ namespace BIS.ERP.Views
                     dialog.FullName,
                     dialog.Email,
                     dialog.SelectedRole,
-                    dialog.IsUserActive);
+                    dialog.IsUserActive,
+                    dialog.IsSystemUser);
                 await LoadUsersAsync();
                 StatusText.Text = "Пользователь добавлен.";
             }
@@ -237,6 +252,7 @@ namespace BIS.ERP.Views
         public string Login => User.Login;
         public string FullName => string.IsNullOrWhiteSpace(User.FullName) ? User.Login : User.FullName;
         public string RoleDisplay => UserAccessService.GetRoleDisplayName(User.Role);
+        public string SystemDisplay => User.IsSystem ? "Да" : "—";
         public string ActiveDisplay => User.Role == UserRole.Admin
             ? "Всегда"
             : User.IsActive ? "Да" : "Нет";

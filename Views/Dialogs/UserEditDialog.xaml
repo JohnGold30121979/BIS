@@ -39,7 +39,10 @@
                           DisplayMemberPath="Name"
                           SelectionChanged="OnRoleSelectionChanged"/>
 
-                <CheckBox x:Name="ActiveCheckBox" Content="Активен" IsChecked="True" Margin="0,0,0,14"/>
+                <CheckBox x:Name="ActiveCheckBox" Content="Активен" IsChecked="True" Margin="0,0,0,6"/>
+
+                <CheckBox x:Name="SystemCheckBox" Content="Системный администратор" Margin="0,0,0,14"
+                          ToolTip="Системный администратор всегда имеет полный доступ. Если появляется второй системный администратор, для него доступна настройка видимости модулей."/>
 
                 <TextBlock Text="Пароль" Foreground="#243B53" Margin="0,0,0,5"/>
                 <PasswordBox x:Name="PasswordBox" Height="34" Padding="9" Margin="0,0,0,10"/>

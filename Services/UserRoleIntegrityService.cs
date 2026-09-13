@@ -37,7 +37,8 @@ namespace BIS.ERP.Services
                 "v2",
                 user.Id,
                 NormalizeLogin(user.Login),
-                (int)user.Role);
+                (int)user.Role,
+                user.IsSystem ? "1" : "0");
         }
 
         private static string NormalizeLogin(string login) =>

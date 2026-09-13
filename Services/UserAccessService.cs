@@ -6,7 +6,7 @@ namespace BIS.ERP.Services
 {
     public class UserAccessService
     {
-        private const string RoleChecksumPatchId = "system-user-role-checksum-v2";
+        private const string RoleChecksumPatchId = "system-user-role-checksum-v3";
         private static readonly HashSet<string> ProtectedLogins = new(StringComparer.OrdinalIgnoreCase)
         {
             "admin",
@@ -30,6 +30,7 @@ namespace BIS.ERP.Services
                     ""FullName"" varchar(200) NOT NULL DEFAULT '',
                     ""Role"" integer NOT NULL DEFAULT 0,
                     ""RoleChecksum"" text NOT NULL DEFAULT '',
+                    ""IsSystem"" boolean NOT NULL DEFAULT false,
                     ""CreatedAt"" timestamp with time zone NOT NULL,
                     ""IsActive"" boolean NOT NULL DEFAULT true,
                     ""LastLoginDate"" timestamp with time zone NULL,
@@ -51,10 +52,20 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""Users""
                 ADD COLUMN IF NOT EXISTS ""RoleChecksum"" text NOT NULL DEFAULT '';
             ");
+            await _context.Database.ExecuteSqlRawAsync(@"
+                ALTER TABLE ""Users""
+                ADD COLUMN IF NOT EXISTS ""IsSystem"" boolean NOT NULL DEFAULT false;
+            ");
+            // Единственный системный администратор по умолчанию — встроенный admin.
+            await _context.Database.ExecuteSqlRawAsync(@"
+                UPDATE ""Users""
+                SET ""IsSystem"" = true
+                WHERE ""Login"" = 'admin' AND ""IsSystem"" = false;
+            ");
 
-            await SeedUserAsync("admin", "admin", "Администратор", "admin@local", UserRole.Admin);
-            await SeedUserAsync("accountant", "accountant", "Бухгалтер", "accountant@local", UserRole.Accountant);
-            await SeedUserAsync("user", "user", "Пользователь", "user@local", UserRole.User);
+            await SeedUserAsync("admin", "admin", "Администратор", "admin@local", UserRole.Admin, true);
+            await SeedUserAsync("accountant", "accountant", "Бухгалтер", "accountant@local", UserRole.Accountant, false);
+            await SeedUserAsync("user", "user", "Пользователь", "user@local", UserRole.User, false);
             await EnsureSeededUserRoleAsync("admin", UserRole.Admin);
             await EnsureSeededUserRoleAsync("accountant", UserRole.Accountant);
             await EnsureSeededUserRoleAsync("user", UserRole.User);
@@ -78,11 +89,12 @@ namespace BIS.ERP.Services
             string fullName,
             string email,
             UserRole role,
-            bool isActive)
+            bool isActive,
+            bool isSystem = false)
         {
             await EnsureSchemaAsync();
             EnsureCanManageUsers(actor);
-            if (!CanCreateRole(actor!.Role, role))
+            if (!CanCreateRole(actor!.Role, isSystem ? UserRole.Admin : role))
                 throw new InvalidOperationException("Недостаточно прав для создания пользователя с выбранной ролью.");
 
             var normalizedLogin = NormalizeLogin(login);
@@ -93,14 +105,17 @@ namespace BIS.ERP.Services
             if (await _context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
                 throw new InvalidOperationException("Пользователь с таким логином уже существует.");
 
+            // Системный администратор — всегда роль Администратор и всегда активен.
+            var safeRole = isSystem ? UserRole.Admin : role;
             var user = new User
             {
                 Login = normalizedLogin,
                 FullName = fullName.Trim(),
                 Email = email.Trim(),
                 PasswordHash = global::BCrypt.Net.BCrypt.HashPassword(password),
-                Role = role,
-                IsActive = role == UserRole.Admin || isActive,
+                Role = safeRole,
+                IsSystem = isSystem,
+                IsActive = safeRole == UserRole.Admin || isActive,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -163,13 +178,60 @@ namespace BIS.ERP.Services
             return keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <summary>Существует ли пользователь с IsSystem = true.</summary>
+        public static bool IsSystemAdmin(User user) => user?.IsSystem == true;
+
+        /// <summary>
+        /// Главный (единственный по умолчанию) системный администратор — это системный
+        /// администратор с наименьшим Id (по умолчанию встроенный admin).
+        /// </summary>
+        public async Task<bool> IsPrimarySystemAdminAsync(int userId)
+        {
+            await EnsureSchemaAsync();
+            var primary = await _context.Users.AsNoTracking()
+                .Where(user => user.IsSystem == true)
+                .OrderBy(user => user.Id)
+                .FirstOrDefaultAsync();
+            return primary != null && primary.Id == userId;
+        }
+
+        /// <summary>
+        /// Закреплённый полный доступ имеет только главный системный администратор.
+        /// Второй администратор и остальные пользователи могут редактировать видимость модулей.
+        /// </summary>
+        public async Task<bool> HasFixedFullAccessAsync(int userId)
+        {
+            await EnsureSchemaAsync();
+            var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(item => item.Id == userId);
+            if (user == null)
+                return false;
+            return await IsPrimarySystemAdminAsync(userId);
+        }
+
+        /// <summary>
+        /// Нужно ли фильтровать доступные модули навигации пользователя.
+        /// Только главный системный администратор видит всё автоматически (false).
+        /// Второй администратор и остальные пользователи фильтруются по настроенной
+        /// видимости модулей (true).
+        /// </summary>
+        public async Task<bool> ShouldFilterNavigationAsync(int userId)
+        {
+            await EnsureSchemaAsync();
+            var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(item => item.Id == userId);
+            if (user == null)
+                return false;
+            if (user.Role != UserRole.Admin)
+                return true;
+            return !await IsPrimarySystemAdminAsync(userId);
+        }
+
         public async Task SavePermissionsAsync(int userId, IEnumerable<string> allowedKeys)
         {
             await EnsureSchemaAsync();
             var user = await _context.Users.FindAsync(userId)
                 ?? throw new InvalidOperationException("Пользователь не найден.");
-            if (user.Role == UserRole.Admin)
-                throw new InvalidOperationException("Администратор всегда имеет полный доступ.");
+            if (await IsPrimarySystemAdminAsync(userId))
+                throw new InvalidOperationException("Системный администратор всегда имеет полный доступ; его видимость модулей не редактируется.");
 
             var oldPermissions = await _context.UserAccessPermissions
                 .Where(permission => permission.UserId == userId)
@@ -235,7 +297,7 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
-        private async Task SeedUserAsync(string login, string password, string fullName, string email, UserRole role)
+        private async Task SeedUserAsync(string login, string password, string fullName, string email, UserRole role, bool isSystem = false)
         {
             var normalizedLogin = NormalizeLogin(login);
             if (await _context.Users.AnyAsync(user => user.Login.ToLower() == normalizedLogin))
@@ -248,6 +310,7 @@ namespace BIS.ERP.Services
                 Email = email,
                 PasswordHash = global::BCrypt.Net.BCrypt.HashPassword(password),
                 Role = role,
+                IsSystem = isSystem,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };

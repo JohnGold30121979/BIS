@@ -16,6 +16,7 @@ namespace BIS.ERP.Views.Dialogs
             InitializeComponent();
             RoleBox.ItemsSource = allowedRoles.Select(role => new RoleOption(role)).ToList();
             RoleBox.SelectedIndex = RoleBox.Items.Count > 0 ? 0 : -1;
+            SystemCheckBox.IsEnabled = allowedRoles.Contains(UserRole.Admin);
             Loaded += (_, _) => LoginBox.Focus();
         }
 
@@ -23,8 +24,11 @@ namespace BIS.ERP.Views.Dialogs
         public string FullName => FullNameBox.Text.Trim();
         public string Email => EmailBox.Text.Trim();
         public string Password => PasswordBox.Password;
-        public UserRole SelectedRole => RoleBox.SelectedItem is RoleOption option ? option.Role : UserRole.User;
-        public bool IsUserActive => ActiveCheckBox.IsChecked == true;
+        public bool IsSystemUser => SystemCheckBox.IsChecked == true;
+        public UserRole SelectedRole => IsSystemUser
+            ? UserRole.Admin
+            : RoleBox.SelectedItem is RoleOption option ? option.Role : UserRole.User;
+        public bool IsUserActive => IsSystemUser || ActiveCheckBox.IsChecked == true;
 
         private void OnRoleSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
