@@ -223,7 +223,7 @@ namespace BIS.ERP.Views
             var catalogsItem = new TreeViewItem
             {
                 Header = "📚 Справочники",
-                IsExpanded = true
+                IsExpanded = false
             };
             catalogsItem.Selected += (s, e) =>
             {

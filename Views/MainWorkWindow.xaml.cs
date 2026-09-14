@@ -29,6 +29,13 @@ namespace BIS.ERP
         public object Tag { get; set; }
         public ObservableCollection<NavigationItem> Children { get; set; } = new ObservableCollection<NavigationItem>();
 
+        private bool _isExpanded = true;
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set { _isExpanded = value; OnPropertyChanged(nameof(IsExpanded)); }
+        }
+
         private int _order;
         public int Order
         {
@@ -232,7 +239,7 @@ namespace BIS.ERP
 
             var directoriesSection = new NavigationItem
             {
-                Id = "DirectoriesSection", Name = "СПРАВОЧНИКИ", Icon = "📚", Type = "Section"
+                Id = "DirectoriesSection", Name = "СПРАВОЧНИКИ", Icon = "📚", Type = "Section", IsExpanded = false
             };
             foreach (var catalog in catalogs
                 .OrderBy(item => item.Order <= 0 ? int.MaxValue : item.Order)
@@ -271,6 +278,7 @@ namespace BIS.ERP
                         Name = "Справочники",
                         Icon = "📚",
                         Type = "Group",
+                        IsExpanded = false,
                         Tag = ModuleCatalogsGroupKey,
                         Order = GetModuleGroupOrder(groupOrders, ModuleCatalogsGroupKey)
                     };
@@ -686,7 +694,8 @@ namespace BIS.ERP
                     Id = "CatalogsGroup",
                     Name = "Справочники",
                     Icon = "📚",
-                    Type = "Group"
+                    Type = "Group",
+                    IsExpanded = false
                 };
 
                 foreach (var catalog in catalogs.OrderBy(c => c.Order).ThenBy(c => c.Name))
