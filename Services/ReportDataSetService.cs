@@ -245,6 +245,12 @@ public sealed class ReportDataSetService
 
     public async Task SyncMetadataSourceAsync(ReportDataSet dataSet)
     {
+        // ВАЖНО: лог 09:35 — сырой INSERT в MetadataFields падал по FK
+        // (MetadataObjectId указывал на отсутствующий MetadataObject), после чего
+        // PostgreSQL помечал транзакцию импорта как aborted (25P02) и валил всю
+        // загрузку конфигурации. Поэтому: 1) сначала убеждаемся, что родитель
+        // реально существует в БД; 2) сиротскую ссылку чиним вместо вставки;
+        // 3) ошибку НЕ глотаем — импорт обязан откатить транзакцию, а не продолжать.
         // Detach the dataSet entity so EF Core doesn't try to update it during SaveChangesAsync,
         // which would cause a DbUpdateConcurrencyException.
         _context.Entry(dataSet).State = EntityState.Detached;
@@ -294,22 +300,51 @@ public sealed class ReportDataSetService
         }
         else
         {
-            // Update existing metadata via raw SQL
-            await _context.Database.ExecuteSqlRawAsync(
-                @"UPDATE ""MetadataObjects""
-                  SET ""Name"" = @p0, ""Description"" = @p1, ""TableName"" = @p2, ""IsSystem"" = @p3, ""Icon"" = @p4,
-                      ""ReferenceFields"" = @p5
-                  WHERE ""Id"" = @p6",
-                dataSet.Name,
-                dataSet.Description,
-                $"dataset_{SanitizeIdentifier(dataSet.Code)}",
-                dataSet.IsSystem,
-                "🧩",
-                JsonSerializer.Serialize(new Dictionary<string, string>
-                {
-                    [DataSetReferenceKey] = dataSet.Code
-                }),
-                metadataId.Value);
+            // Ссылка могла остаться сиротской после ReplaceMetadataAsync при импорте
+            // (в транзакции старый MetadataObjects удалён, а ReportDataSets.MetadataObjectId
+            // ещё указывает на него). Проверяем родителя ДО вставки полей, иначе
+            // получим FK 23503 и отравим транзакцию (25P02).
+            var parentExists = await _context.MetadataObjects
+                .AnyAsync(item => item.Id == metadataId.Value);
+            if (!parentExists)
+            {
+                metadataId = Guid.NewGuid();
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"INSERT INTO ""MetadataObjects"" (""Id"", ""Name"", ""TableName"", ""ObjectType"", ""Description"", ""Icon"", ""Order"", ""IsSystem"", ""ParentId"", ""MetadataConfigId"", ""UsePostings"", ""UseBalances"", ""UseMovements"", ""BalanceTable"", ""MovementTable"", ""ReferenceFields"")
+                      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, NULL, @p8, false, false, false, NULL, NULL, @p9)",
+                    metadataId.Value,
+                    dataSet.Name,
+                    $"dataset_{SanitizeIdentifier(dataSet.Code)}",
+                    "ReportSource",
+                    dataSet.Description,
+                    "🧩",
+                    0,
+                    dataSet.IsSystem,
+                    configId,
+                    JsonSerializer.Serialize(new Dictionary<string, string>
+                    {
+                        [DataSetReferenceKey] = dataSet.Code
+                    }));
+            }
+            else
+            {
+                // Update existing metadata via raw SQL
+                await _context.Database.ExecuteSqlRawAsync(
+                    @"UPDATE ""MetadataObjects""
+                      SET ""Name"" = @p0, ""Description"" = @p1, ""TableName"" = @p2, ""IsSystem"" = @p3, ""Icon"" = @p4,
+                          ""ReferenceFields"" = @p5
+                      WHERE ""Id"" = @p6",
+                    dataSet.Name,
+                    dataSet.Description,
+                    $"dataset_{SanitizeIdentifier(dataSet.Code)}",
+                    dataSet.IsSystem,
+                    "🧩",
+                    JsonSerializer.Serialize(new Dictionary<string, string>
+                    {
+                        [DataSetReferenceKey] = dataSet.Code
+                    }),
+                    metadataId.Value);
+            }
         }
 
         // Update MetadataObjectId via raw SQL

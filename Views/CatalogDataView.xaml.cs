@@ -531,21 +531,23 @@ namespace BIS.ERP.Views
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 _catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
-                _dataTable = new DataTable();
-                _dataTable.TableName = _catalog.Name;
+                // Та же защита, что и в DynamicDocumentWorkView: строим таблицу
+                // локально и привязываем атомарно (лог 09:49 — рассинхрон ItemsGrid).
+                var dataTable = new DataTable();
+                dataTable.TableName = _catalog.Name;
                 var visibleFields = GetUniqueCatalogFields();
 
                 // Добавляем колонки
-                _dataTable.Columns.Add("Id", typeof(Guid));
+                dataTable.Columns.Add("Id", typeof(Guid));
                 foreach (var field in visibleFields)
                 {
                     var columnType = GetColumnType(field.FieldType);
-                    _dataTable.Columns.Add(field.Name, columnType);
+                    dataTable.Columns.Add(field.Name, columnType);
                 }
-                _dataTable.Columns.Add("Дата создания", typeof(DateTime));
-                _dataTable.Columns.Add("Дата изменения", typeof(DateTime));
+                dataTable.Columns.Add("Дата создания", typeof(DateTime));
+                dataTable.Columns.Add("Дата изменения", typeof(DateTime));
                 if (IsCurrencyRatesCatalog)
-                    _dataTable.Columns.Add("CurrencyFilterFlag", typeof(bool));
+                    dataTable.Columns.Add("CurrencyFilterFlag", typeof(bool));
 
                 // Загружаем данные справочников для подстановки имен (универсально)
                 await LoadReferenceDataAsync();
@@ -560,7 +562,7 @@ namespace BIS.ERP.Views
                 // Добавляем строки
                 foreach (var row in data)
                 {
-                    var dataRow = _dataTable.NewRow();
+                    var dataRow = dataTable.NewRow();
                     var rowId = GetRowId(row);
                     dataRow["Id"] = rowId;
 
@@ -599,8 +601,12 @@ namespace BIS.ERP.Views
                     if (IsCurrencyRatesCatalog)
                         dataRow["CurrencyFilterFlag"] = true;
 
-                    _dataTable.Rows.Add(dataRow);
+                    dataTable.Rows.Add(dataRow);
                 }
+
+                // Атомарная привязка: публикуем готовую таблицу одной заменой.
+                _dataTable = dataTable;
+                DataGrid.ItemsSource = null;
 
                 // Настраиваем DataGrid
                 DataGrid.Columns.Clear();
@@ -686,6 +692,9 @@ namespace BIS.ERP.Views
             if (_catalogsDict == null || fields.Count == 0)
                 return;
 
+            // ПАРАЛЛЕЛЬНЫЙ GetCatalogDataAsync НА ОБЩЕМ DbContext ДАВАЛ
+            // "A command is already in progress" (лог 09:43). Грузим строго
+            // последовательно — это справочные данные для сетки.
             // Группируем поля по целевому каталогу и фильтруем отсутствующие справочники
             var groups = fields
                 .GroupBy(f => f.ReferenceCatalog, StringComparer.OrdinalIgnoreCase)
@@ -697,8 +706,8 @@ namespace BIS.ERP.Views
                 .Where(t => t.RefCatalog != null)
                 .ToList();
 
-            // Запускаем параллельную загрузку и обработку по каждому справочнику
-            var loadTasks = groups.Select(async grp =>
+            // Загружаем данные справочников последовательно и формируем словарь отображения
+            foreach (var grp in groups)
             {
                 var refData = await _metadataService.GetCatalogDataAsync(grp.RefCatalog.Id);
 
@@ -720,14 +729,6 @@ namespace BIS.ERP.Views
                     perFieldDicts[field.Name] = dict;
                 }
 
-                return perFieldDicts;
-            }).ToList();
-
-            var results = await Task.WhenAll(loadTasks);
-
-            // Объединяем результаты в общий кеш
-            foreach (var perFieldDicts in results)
-            {
                 foreach (var kv in perFieldDicts)
                     _referenceCache[kv.Key] = kv.Value;
             }

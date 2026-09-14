@@ -12,6 +12,11 @@ namespace BIS.ERP.Services
     {
         private readonly AppDbContext _context;
 
+        // Сериализует конкурентные вызовы EnsureSchemaAsync, которые идут через один
+        // общий AppDbContext (Npgsql не допускает параллельные команды на соединении:
+        // "A command is already in progress"). См. лог 10:45, SeedFinancialReportLinesAsync.
+        private static readonly System.Threading.SemaphoreSlim _ensureSchemaGate = new(1, 1);
+
         private sealed record FinancialReportLinePreset(
             string ReportCode,
             string LineCode,
@@ -55,6 +60,11 @@ namespace BIS.ERP.Services
 
         public async Task EnsureSchemaAsync()
         {
+            // Лог 10:45: параллельные команды на общем соединении
+            // (NpgsqlOperationInProgress) роняли процесс. Сериализуем вход.
+            await _ensureSchemaGate.WaitAsync();
+            try
+            {
             const string sql = @"
                 CREATE TABLE IF NOT EXISTS ""AccountingPeriods"" (
                     ""Id"" uuid PRIMARY KEY, ""StartDate"" timestamp with time zone NOT NULL,
@@ -152,6 +162,11 @@ namespace BIS.ERP.Services
                     ""SourceRecordId"" uuid NULL, ""CreatedAt"" timestamp with time zone NOT NULL);";
             await _context.Database.ExecuteSqlRawAsync(sql);
             await SeedFinancialReportLinesAsync();
+            }
+            finally
+            {
+                _ensureSchemaGate.Release();
+            }
         }
 
         public async Task<AccountingPeriod> CollectAsync(DateTime startDate, DateTime endDate)

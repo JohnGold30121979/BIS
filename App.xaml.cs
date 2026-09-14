@@ -176,6 +176,16 @@ namespace BIS.ERP
         private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
         {
             SystemLogService.Error("Необработанное исключение UI-потока.", "Dispatcher", e.Exception);
+
+            // Не даём recoverable-ошибкам (конкурентный Npgsql, рассинхрон DataGrid)
+            // ронять процесс через AppDomain (лог 09:49, 10:45).
+            if (e.Exception is InvalidOperationException ||
+                e.Exception is Npgsql.NpgsqlException ||
+                e.Exception?.InnerException is InvalidOperationException ||
+                e.Exception?.InnerException is Npgsql.NpgsqlException)
+            {
+                e.Handled = true;
+            }
         }
 
         /// <summary>

@@ -26,6 +26,36 @@ namespace BIS.ERP.Services
         private readonly string _connectionString;
         private readonly System.Threading.SemaphoreSlim _contextAccess = new(1, 1);
 
+        // Лог 09:43/09:59/10:45: DbContext/NpgsqlConnection НЕ потокобезопасны,
+        // параллельные команды на одном соединении дают
+        // "A command is already in progress" и валят транзакции/процесс.
+        // Сериализуем ВЕСЬ доступ к общему _context через ворота ниже.
+        public async Task<T> WithContextLockAsync<T>(Func<Task<T>> action)
+        {
+            await _contextAccess.WaitAsync();
+            try
+            {
+                return await action();
+            }
+            finally
+            {
+                _contextAccess.Release();
+            }
+        }
+
+        public async Task WithContextLockAsync(Func<Task> action)
+        {
+            await _contextAccess.WaitAsync();
+            try
+            {
+                await action();
+            }
+            finally
+            {
+                _contextAccess.Release();
+            }
+        }
+
         public MetadataService(AppDbContext context)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -198,63 +228,96 @@ namespace BIS.ERP.Services
         // Получение данных справочника
         public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
         {
-            await using var context = CreateIndependentContext();
-            MetadataObject? catalog;
-            string sql;
-
+            // ПАРАЛЛЕЛЬНЫЙ GetCatalogDataAsync НА ОБЩЕМ DbContext ДАВАЛ
+            // "A command is already in progress" (лог 09:43/09:59): DbContext и
+            // NpgsqlConnection не потокобезопасны. Поэтому сам метод тоже
+            // сериализован воротами _contextAccess — конкурентные окна/диалоги
+            // встают в очередь вместо падения соединения.
             await _contextAccess.WaitAsync();
+            MetadataObject? catalogEntity;
+            string selectSql;
+            List<MetadataField> catalogFieldsSnapshot;
+            string catalogObjectType;
             try
             {
-                catalog = await _context.MetadataObjects
+                catalogEntity = await _context.MetadataObjects
                     .Include(c => c.Fields)
                     .FirstOrDefaultAsync(m => m.Id == catalogId);
 
-                if (catalog == null) return new List<Dictionary<string, object>>();
-
-                await RemoveDuplicateMetadataFieldsAsync(catalog);
-
-                if (catalog.ObjectType == "Document")
+                if (catalogEntity == null)
                 {
-                    try
-                    {
-                        await EnsureGlobalDocumentNumberConfigurationAsync();
-                        await NormalizeDocumentTableNumbersAsync(catalog);
-                    }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"Ошибка синхронизации нумерации для {catalog.Name}: {ex.Message}");
-                    }
+                    catalogFieldsSnapshot = new List<MetadataField>();
+                    catalogObjectType = string.Empty;
+                    selectSql = string.Empty;
                 }
+                else
+                {
+                    await RemoveDuplicateMetadataFieldsAsync(catalogEntity);
 
-                sql = await BuildCatalogDataSelectSqlAsync(catalog);
+                    if (catalogEntity.ObjectType == "Document")
+                    {
+                        try
+                        {
+                            await EnsureGlobalDocumentNumberConfigurationAsync();
+                            await NormalizeDocumentTableNumbersAsync(catalogEntity);
+                        }
+                        catch (Exception docNumEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"Ошибка синхронизации нумерации для {catalogEntity.Name}: {docNumEx.Message}");
+                        }
+                    }
+
+                    selectSql = await BuildCatalogDataSelectSqlAsync(catalogEntity);
+
+                    // Снимаем копию полей под теми же воротами, чтобы не держать
+                    // _context открытым на время чтения строк.
+                    catalogFieldsSnapshot = catalogEntity.Fields
+                        .Select(f => new MetadataField
+                        {
+                            Id = f.Id,
+                            Name = f.Name,
+                            DbColumnName = f.DbColumnName,
+                            FieldType = f.FieldType
+                        })
+                        .ToList();
+                    catalogObjectType = catalogEntity.ObjectType;
+                }
             }
             finally
             {
                 _contextAccess.Release();
             }
 
-           
+            if (string.IsNullOrEmpty(selectSql))
+                return new List<Dictionary<string, object>>();
 
-             var result = new List<Dictionary<string, object>>();
+            // Чтение строк — на НЕЗАВИСИМОМ контексте/соединении, чтобы конкурентные
+            // окна не делили один NpgsqlConnection (лог 09:43/09:59: "A command is
+            // already in progress"). part1 (метаданные) уже под _contextAccess.
+            await using var context = CreateIndependentContext();
+            var result = new List<Dictionary<string, object>>();
+            var tableNameForLog = catalogEntity?.TableName ?? catalogId.ToString();
+            var catalogDisplayName = catalogEntity?.Name ?? tableNameForLog;
+
             try
             {
                 await using var connection = context.Database.GetDbConnection();
                 await connection.OpenAsync();
                 await using var command = connection.CreateCommand();
-                command.CommandText = sql;
+                command.CommandText = selectSql;
                 await using var reader = await command.ExecuteReaderAsync();
 
                 // Безопасное создание fieldMapping (обрабатывает дубликаты)
                 var fieldMapping = new Dictionary<string, string>();
-                foreach (var field in catalog.Fields)
+                foreach (var field in catalogFieldsSnapshot)
                 {
                     if (string.IsNullOrEmpty(field.DbColumnName)) continue;
 
                     if (!fieldMapping.ContainsKey(field.DbColumnName))
                         fieldMapping[field.DbColumnName] = field.Name;
                     else
-                        System.Diagnostics.Debug.WriteLine($"⚠️ Дубликат колонки: {field.DbColumnName} в {catalog.Name}");
+                        System.Diagnostics.Debug.WriteLine($"⚠️ Дубликат колонки: {field.DbColumnName} в {catalogDisplayName}");
                 }
 
                 // Системные поля
@@ -271,7 +334,7 @@ namespace BIS.ERP.Services
                         var displayName = fieldMapping.TryGetValue(dbName, out var name) ? name : dbName;
                         var value = reader.GetValue(i);
 
-                        if (catalog.ObjectType == "Document" &&
+                        if (catalogObjectType == "Document" &&
                             IsDocumentNumberFieldName(displayName))
                         {
                             row[displayName] = NormalizeLegacyDocumentNumber(value?.ToString());
@@ -283,6 +346,11 @@ namespace BIS.ERP.Services
                     }
                     result.Add(row);
                 }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetCatalogDataAsync ({tableNameForLog}): {ex.Message}");
+                throw;
             }
             finally
             {
@@ -321,8 +389,13 @@ namespace BIS.ERP.Services
 
         private async Task<HashSet<string>> GetExistingColumnNamesAsync(string tableName)
         {
+            // Лог 10:45: этот raw-запрос на общем соединении падал с
+            // "A command is already in progress" (вызван из EnsureDateCanBeModified
+            // параллельно с другим запросом на том же _context). Самый надёжный фикс:
+            // выполняем на НЕЗАВИСИМОМ соединении, а не на общем.
+            await using var context = CreateIndependentContext();
             var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            using var command = _context.Database.GetDbConnection().CreateCommand();
+            await using var command = context.Database.GetDbConnection().CreateCommand();
             command.CommandText = @"
                 SELECT column_name
                 FROM information_schema.columns
@@ -335,13 +408,13 @@ namespace BIS.ERP.Services
             var connectionOpened = false;
             try
             {
-                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                if (context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
                 {
-                    await _context.Database.OpenConnectionAsync();
+                    await context.Database.OpenConnectionAsync();
                     connectionOpened = true;
                 }
 
-                using var reader = await command.ExecuteReaderAsync();
+                await using var reader = await command.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
                     if (!reader.IsDBNull(0))
@@ -351,7 +424,7 @@ namespace BIS.ERP.Services
             finally
             {
                 if (connectionOpened)
-                    await _context.Database.CloseConnectionAsync();
+                    await context.Database.CloseConnectionAsync();
             }
 
             return columns;
@@ -1096,6 +1169,13 @@ namespace BIS.ERP.Services
 
         public async Task<Guid> CreateDynamicRecordAsync(Guid metadataId, Dictionary<string, object> data)
         {
+            // Лог 10:45: создание документа шло по цепочке
+            // CreateDynamicRecord -> EnsureDocumentDateCanBeModified ->
+            // AccountingPeriod.EnsureSchema параллельно с другим запросом на том же
+            // соединении (NpgsqlOperationInProgress). Сериализуем запись.
+            await _contextAccess.WaitAsync();
+            try
+            {
             var metadata = await _context.MetadataObjects
                 .Include(m => m.Fields)
                 .FirstOrDefaultAsync(m => m.Id == metadataId);
@@ -1161,10 +1241,20 @@ namespace BIS.ERP.Services
                 new { Number = GetDocumentNumberFromData(data) });
 
             return recordId;
+            }
+            finally
+            {
+                _contextAccess.Release();
+            }
         }
 
         public async Task UpdateDynamicRecordAsync(Guid metadataId, Guid recordId, Dictionary<string, object> data)
         {
+            // Та же причина, что и в CreateDynamicRecordAsync: лог 09:43 —
+            // UPDATE catalog_taxes падал с "A command is already in progress".
+            await _contextAccess.WaitAsync();
+            try
+            {
             var metadata = await _context.MetadataObjects
                 .Include(m => m.Fields)
                 .FirstOrDefaultAsync(m => m.Id == metadataId);
@@ -1228,6 +1318,11 @@ namespace BIS.ERP.Services
                 metadata.Name,
                 recordId,
                 new { Number = GetDocumentNumberFromData(data) });
+            }
+            finally
+            {
+                _contextAccess.Release();
+            }
         }
 
         private static void ApplyCreateRecordDefaults(MetadataObject metadata, Dictionary<string, object> data)

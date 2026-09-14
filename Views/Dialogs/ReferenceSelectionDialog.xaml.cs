@@ -156,13 +156,24 @@ public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>
         {
             var search = SearchBox.Text?.Trim() ?? string.Empty;
             _filteredItems = FilterItems(search);
+            // Обновление источника — только через UI-очередь и с полной
+            // заменой коллекции (reset), а не мутацией привязанного списка.
+            ItemsGrid.ItemsSource = null;
             ItemsGrid.ItemsSource = _filteredItems;
+        }
+
+        private void ApplySort()
+        {
+            // Сортировка отключена: порядок задаётся уже отфильтрованным списком.
         }
 
         private List<Dictionary<string, object>> FilterItems(string search)
         {
             if (string.IsNullOrEmpty(search))
-                return _items;
+                // ВАЖНО: возвращаем НОВЫЙ список, а не ссылку на _items.
+                // Мутация общего экземпляра, привязанного к ItemsGrid, без уведомлений
+                // коллекции рассинхронизирует генератор DataGrid (лог 09:49).
+                return new List<Dictionary<string, object>>(_items);
 
             return _items
                 .Where(item => item.Values.Any(v => v?.ToString()?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
@@ -297,20 +308,29 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
                 ? ReferenceDisplayHelper.ResolveRows(rows, _referenceMaps)
                 : rows;
 
-            _items.Clear();
-            foreach (var row in reloaded)
-                _items.Add(row);
-
-            var search = SearchBox.Text?.Trim() ?? string.Empty;
-            _filteredItems = FilterItems(search);
-            ItemsGrid.ItemsSource = _filteredItems;
-
-            if (selectRecordId.HasValue)
+            // Безопасное обновление ItemsGrid через одну UI-очередь:
+            // сбрасываем привязку, затем заменяем содержимое новым списком.
+            // Мутация привязанного списка по месту рассинхронизирует
+            // генератор DataGrid (лог 09:49).
+            await Dispatcher.InvokeAsync(() =>
             {
-                var target = _filteredItems.FirstOrDefault(row => GetRecordId(row) == selectRecordId);
-                if (target != null)
-                    ItemsGrid.SelectedItem = target;
-            }
+                ItemsGrid.ItemsSource = null;
+                _items.Clear();
+                foreach (var row in reloaded)
+                    _items.Add(row);
+
+                var search = SearchBox.Text?.Trim() ?? string.Empty;
+                _filteredItems = FilterItems(search);
+                ApplySort();
+                ItemsGrid.ItemsSource = _filteredItems;
+
+                if (selectRecordId.HasValue)
+                {
+                    var target = _filteredItems.FirstOrDefault(row => GetRecordId(row) == selectRecordId);
+                    if (target != null)
+                        ItemsGrid.SelectedItem = target;
+                }
+            });
         }
 
         private static Guid? GetRecordId(Dictionary<string, object> row)

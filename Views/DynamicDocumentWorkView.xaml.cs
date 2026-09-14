@@ -64,18 +64,21 @@ namespace BIS.ERP.Views
                 var allCatalogs = await _metadataService.GetCatalogsAsync();
                 var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
 
-                _dataTable = new DataTable();
-                _dataTable.TableName = _documentMetadata.Name;
+                // Строим таблицу в локальной переменной и привязываем разом:
+                // частичная мутация привязанного DefaultView без Reset рассинхронизирует
+                // генератор DataGrid (лог 09:49).
+                var dataTable = new DataTable();
+                dataTable.TableName = _documentMetadata.Name;
 
                 // Добавляем колонки
-                _dataTable.Columns.Add("Id", typeof(Guid));
+                dataTable.Columns.Add("Id", typeof(Guid));
                 foreach (var field in _documentMetadata.Fields.OrderBy(f => f.Order))
                 {
                     var columnType = GetColumnType(field.FieldType);
-                    _dataTable.Columns.Add(field.Name, columnType);
+                    dataTable.Columns.Add(field.Name, columnType);
                 }
-                _dataTable.Columns.Add("Дата создания", typeof(DateTime));
-                _dataTable.Columns.Add("Дата изменения", typeof(DateTime));
+                dataTable.Columns.Add("Дата создания", typeof(DateTime));
+                dataTable.Columns.Add("Дата изменения", typeof(DateTime));
 
                 // Загружаем справочники для подстановки имен
                 var referenceCatalogs = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -102,7 +105,7 @@ namespace BIS.ERP.Views
                 // Добавляем строки
                 foreach (var row in data)
                 {
-                    var dataRow = _dataTable.NewRow();
+                    var dataRow = dataTable.NewRow();
                     dataRow["Id"] = row.ContainsKey("Id") ? row["Id"] : Guid.NewGuid();
 
                     foreach (var field in _documentMetadata.Fields.OrderBy(f => f.Order))
@@ -129,9 +132,13 @@ namespace BIS.ERP.Views
                     dataRow["Дата создания"] = row.ContainsKey("CreatedAt") ? row["CreatedAt"] : DateTime.Now;
                     dataRow["Дата изменения"] = row.ContainsKey("UpdatedAt") ? row["UpdatedAt"] : DateTime.Now;
 
-                    _dataTable.Rows.Add(dataRow);
+                    dataTable.Rows.Add(dataRow);
                 }
 
+                // Атомарная привязка через одну UI-очередь: сначала сбрасываем
+                // старую привязку, потом публикуем готовую таблицу.
+                _dataTable = dataTable;
+                DataGrid.ItemsSource = null;
                 DataGrid.ItemsSource = _dataTable.DefaultView;
 
                 // Настройка колонок

@@ -80,6 +80,24 @@ namespace BIS.ERP.Services
                 await ReplaceModulesAsync(package.Modules, package.ModuleItems);
                 await _context.SaveChangesAsync();
 
+                // ВАЖНО: лог 09:35 — сырой INSERT в MetadataFields ронял транзакцию
+                // (FK 23503), а следующий запрос падал с 25P02. Поэтому: 1) фиксируем
+                // транзакцию СРАЗУ после SaveChanges (ядро импорта атомарно);
+                // 2) побочные действия (DDL динамических таблиц, сид системных
+                // наборов) выполняем уже ВНЕ транзакции — их ошибка не должна
+                // отравлять импорт и откатывать успешно загруженные данные.
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                // Строгий rollback: продолжать импорт после SQL-ошибки нельзя —
+                // PostgreSQL помечает транзакцию aborted. Откатываем целиком.
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            try
+            {
                 var metadataService = new MetadataService(_context);
                 foreach (var obj in package.MetadataObjects.Where(item => !string.IsNullOrWhiteSpace(item.TableName)))
                     await metadataService.CreateDynamicTableAsync(obj);
@@ -90,14 +108,22 @@ namespace BIS.ERP.Services
                     await ReplaceTableDataAsync(table);
 
                 // Досоздаем встроенные FRX из текущей сборки после импорта старой/чужой конфигурации.
+                // ВНЕ транзакции ядра: сбой сида/EnsureCashOrderTurnoverDataSetAsync
+                // (лог 09:35: FK в MetadataFields) не должен откатывать уже
+                // зафиксированный импорт и травить соединение.
                 await metadataService.EnsureStandardReportsAsync();
-
-                await transaction.CommitAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                await transaction.RollbackAsync();
-                throw;
+                // Пост-этап: ядро уже закоммичено выше, здесь только предупреждаем.
+                // Пробрасываем InvalidOperationException с понятным текстом, чтобы UI
+                // показал причину, но данные импорта остались в БД.
+                SystemLogService.Warning(
+                    $"Пост-обработка импорта завершилась с ошибкой: {ex.Message}",
+                    "ConfigurationExchange",
+                    ex);
+                throw new InvalidOperationException(
+                    $"Конфигурация загружена, но пост-обработка завершилась с ошибкой: {ex.Message}", ex);
             }
 
             return package;
@@ -454,10 +480,46 @@ namespace BIS.ERP.Services
             if (string.IsNullOrWhiteSpace(table.TableName) || !await TableExistsAsync(table.TableName))
                 return;
 
+            // ВАЖНО: лог 09:43/09:59 — INSERT/UPDATE каталогов падали с
+            // "A command is already in progress", потому что команда создавалась на
+            // ОБЩЕМ соединении _context, уже занятом другим запросом. Выполняем
+            // каждую вставку на отдельном соединении из пула, а ошибку НЕ глотаем:
+            // проглоченная ошибка SQL отравляет транзакцию импорта (25P02).
             await _context.Database.ExecuteSqlRawAsync($"TRUNCATE TABLE {Quote(table.TableName)};");
 
             foreach (var row in table.Rows)
-                await InsertRowAsync(table.TableName, row);
+                await InsertRowOnStandaloneConnectionAsync(table.TableName, row);
+        }
+
+        private async Task InsertRowOnStandaloneConnectionAsync(string tableName, Dictionary<string, object?> row)
+        {
+            if (row.Count == 0)
+                return;
+
+            var connectionString = _context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось получить строку подключения к инфобазе.");
+
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            try
+            {
+                await using var command = connection.CreateCommand();
+                var columns = row.Keys.ToList();
+                var parameterNames = columns.Select((_, index) => $"@p{index}").ToList();
+                command.CommandText =
+                    $"INSERT INTO {Quote(tableName)} ({string.Join(", ", columns.Select(Quote))}) VALUES ({string.Join(", ", parameterNames)})";
+
+                for (var i = 0; i < columns.Count; i++)
+                    command.Parameters.AddWithValue(parameterNames[i], NormalizeValue(row[columns[i]]) ?? DBNull.Value);
+
+                await command.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Ошибка загрузки данных таблицы '{tableName}': {ex.Message}", ex);
+            }
         }
 
         private async Task InsertRowAsync(string tableName, Dictionary<string, object?> row)
