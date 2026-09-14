@@ -4,7 +4,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:converters="clr-namespace:BIS.ERP.Converters"
         Title="Запуск BIS ERP"
-        Height="550" Width="750"
+        Height="631" Width="768"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize"
         MinHeight="400" MinWidth="600"
@@ -88,78 +88,78 @@
                                  HorizontalContentAlignment="Stretch"
                                  ItemsSource="{Binding InfoBases}"
                                  SelectedItem="{Binding SelectedInfoBase, Mode=TwoWay}">
-                            <ListBox.ItemContainerStyle>
-                                <Style TargetType="ListBoxItem">
-                                    <Setter Property="Padding" Value="0"/>
-                                    <Setter Property="Margin" Value="0,3"/>
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                    <Setter Property="HorizontalAlignment" Value="Stretch"/>
-                                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-                                    <Setter Property="Template">
-                                        <Setter.Value>
-                                            <ControlTemplate TargetType="ListBoxItem">
-                                                <Border x:Name="ItemBorder"
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Margin" Value="0,3"/>
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="ItemBorder"
                                                         Background="{DynamicResource AppReadOnlyBackgroundBrush}"
                                                         BorderBrush="{DynamicResource AppBorderBrush}"
                                                         BorderThickness="1"
                                                         CornerRadius="8"
                                                         Padding="{TemplateBinding Padding}">
-                                                    <ContentPresenter HorizontalAlignment="Stretch"
+                                                        <ContentPresenter HorizontalAlignment="Stretch"
                                                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
-                                                </Border>
-                                                <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
-                                                    </Trigger>
-                                                    <Trigger Property="IsSelected" Value="True">
-                                                        <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
-                                                        <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
-                                                    </Trigger>
-                                                </ControlTemplate.Triggers>
-                                            </ControlTemplate>
-                                        </Setter.Value>
-                                    </Setter>
-                                </Style>
-                            </ListBox.ItemContainerStyle>
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="10" HorizontalAlignment="Stretch">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AppSurfaceBrush}"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="10" HorizontalAlignment="Stretch">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
 
-                                            <!-- Круглая иконка -->
-                                            <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20" 
+                                                <!-- Круглая иконка -->
+                                                <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20" 
                                     Background="{DynamicResource AppAccentBrush}" Margin="0,0,12,0">
-                                                <Grid>
-                                                    <Ellipse Visibility="{Binding HasLogoImage, Converter={StaticResource BoolToVisibilityConverter}}">
-                                                        <Ellipse.Fill>
-                                                            <ImageBrush ImageSource="{Binding LogoImage, Converter={StaticResource ByteArrayToImageSourceConverter}}"
+                                                    <Grid>
+                                                        <Ellipse Visibility="{Binding HasLogoImage, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                            <Ellipse.Fill>
+                                                                <ImageBrush ImageSource="{Binding LogoImage, Converter={StaticResource ByteArrayToImageSourceConverter}}"
                                                                         Stretch="UniformToFill"/>
-                                                        </Ellipse.Fill>
-                                                    </Ellipse>
-                                                    <TextBlock Text="{Binding DisplayIcon}" FontSize="20"
+                                                            </Ellipse.Fill>
+                                                        </Ellipse>
+                                                        <TextBlock Text="{Binding DisplayIcon}" FontSize="20"
                                                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                                                Visibility="{Binding UsesTextIcon, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                                                </Grid>
-                                            </Border>
+                                                    </Grid>
+                                                </Border>
 
-                                            <!-- Информация о базе -->
-                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" 
+                                                <!-- Информация о базе -->
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" 
                                            Foreground="{DynamicResource AppBodyTextBrush}"/>
-                                                <TextBlock Text="Информационная база" FontSize="11" 
+                                                    <TextBlock Text="Информационная база" FontSize="11" 
                                            Foreground="{DynamicResource AppSecondaryTextBrush}" Margin="0,2,0,0"/>
-                                                <TextBlock Text="{Binding PatchVersionDisplay}" FontSize="11"
+                                                    <TextBlock Text="{Binding PatchVersionDisplay}" FontSize="11"
                                            Foreground="{DynamicResource AppAccentBrush}" Margin="0,2,0,0"/>
-                                            </StackPanel>
+                                                </StackPanel>
+                                            </Grid>
                                         </Grid>
-                                    </Grid>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
 
                             <!-- Пустое сообщение -->
                             <TextBlock x:Name="EmptyTextBlock" Text="Нет информационных баз"
@@ -195,51 +195,53 @@
                 <Border Grid.Column="2" Background="{DynamicResource AppSurfaceBrush}"
                         BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
                         CornerRadius="8">
-                    <StackPanel Margin="15">
-                        <TextBlock Text="⚙️ Режим работы" FontSize="16" FontWeight="Bold" 
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="15">
+                            <TextBlock Text="⚙️ Режим работы" FontSize="16" FontWeight="Bold" 
                                    Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,15"/>
 
-                        <Button x:Name="WorkModeButton" Content="💼 Рабочий режим" 
+                            <Button x:Name="WorkModeButton" Content="💼 Рабочий режим" 
                                 Height="40" Margin="0,5" Command="{Binding StartWorkModeCommand}"
                                 Background="#27AE60" Foreground="White" FontWeight="Bold"
                                 Cursor="Hand"/>
 
-                        <Button x:Name="ConfigModeButton" Content="⚙️ Конфигуратор" 
+                            <Button x:Name="ConfigModeButton" Content="⚙️ Конфигуратор" 
                                 Height="40" Margin="0,5" Command="{Binding StartConfigModeCommand}"
                                 Background="#3498DB" Foreground="White" FontWeight="Bold"
                                 Cursor="Hand"/>
 
-                        <Separator Margin="0,15" Background="{DynamicResource AppBorderBrush}" Height="1"/>
+                            <Separator Margin="0,15" Background="{DynamicResource AppBorderBrush}" Height="1"/>
 
-                        <TextBlock Text="📁 Управление базами" FontSize="13" FontWeight="SemiBold" 
+                            <TextBlock Text="📁 Управление базами" FontSize="13" FontWeight="SemiBold" 
                                    Foreground="{DynamicResource AppBodyTextBrush}" Margin="0,0,0,10"/>
 
-                        <Button x:Name="AddButton" Content="➕ Добавить..." 
+                            <Button x:Name="AddButton" Content="➕ Добавить..." 
                                 Height="35" Margin="0,5" Command="{Binding AddCommand}"
                                 Background="Transparent" BorderBrush="#27AE60" BorderThickness="1"
                                 Foreground="#27AE60" Cursor="Hand"/>
 
-                        <Button x:Name="AttachButton" Content="🔗 Подключить существующую..." 
+                            <Button x:Name="AttachButton" Content="🔗 Подключить существующую..." 
                                 Height="35" Margin="0,5" Command="{Binding AttachCommand}"
                                 Background="Transparent" BorderBrush="#16A085" BorderThickness="1"
                                 Foreground="#16A085" Cursor="Hand"
                                 ToolTip="Укажите сервер (путь по локальной сети), порт, имя существующей базы данных и учётные данные"/>
 
-                        <Button x:Name="EditButton" Content="✏️ Изменить..." 
+                            <Button x:Name="EditButton" Content="✏️ Изменить..." 
                                 Height="35" Margin="0,5" Command="{Binding EditCommand}"
                                 Background="Transparent" BorderBrush="#3498DB" BorderThickness="1"
                                 Foreground="#3498DB" Cursor="Hand"/>
 
-                        <Button x:Name="DeleteButton" Content="🗑️ Удалить" 
+                            <Button x:Name="DeleteButton" Content="🗑️ Удалить" 
                                 Height="35" Margin="0,5" Command="{Binding DeleteCommand}"
                                 Background="Transparent" BorderBrush="#E74C3C" BorderThickness="1"
                                 Foreground="#E74C3C" Cursor="Hand"/>
 
-                        <Button x:Name="SettingsButton" Content="🔧 Настройка..." 
+                            <Button x:Name="SettingsButton" Content="🔧 Настройка..." 
                                 Height="35" Margin="0,5" Command="{Binding SettingsCommand}"
                                 Background="Transparent" BorderBrush="#9B59B6" BorderThickness="1"
                                 Foreground="#9B59B6" Cursor="Hand"/>
-                    </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Border>
             </Grid>
 

@@ -20,8 +20,12 @@
             <DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.3"/>
         </Border.Effect>
 
-        <Grid Margin="25">
-            <Grid.RowDefinitions>
+        <Grid>
+            <ScrollViewer x:Name="RootScroll" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      PreviewMouseWheel="OnScrollPreviewMouseWheel">
+            <Grid Margin="25">
+                <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -94,9 +98,25 @@
                        Visibility="{Binding HasTestResult, Converter={StaticResource BoolToVisibilityConverter}}" Margin="0,0,0,10" 
                        TextAlignment="Center" TextWrapping="Wrap"/>
 
-            <Button x:Name="SaveButton" Grid.Row="14" Content="Сохранить" Height="40" 
-                    Background="#27AE60" Foreground="White" Command="{Binding SaveCommand}"
-                    FontSize="13" FontWeight="SemiBold" Margin="0,5,0,0"/>
+            <StackPanel Grid.Row="14" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,5,0,0">
+                <Button x:Name="CancelButton" Content="Отмена" Height="40" Width="130" Margin="0,0,12,0"
+                        Background="#95A5A6" Foreground="White" Click="OnCloseClick"
+                        FontSize="13" FontWeight="SemiBold"/>
+                <Button x:Name="SaveButton" Content="Сохранить" Height="40" Width="130"
+                        Background="#27AE60" Foreground="White" Command="{Binding SaveCommand}"
+                        FontSize="13" FontWeight="SemiBold"/>
+            </StackPanel>
+            </Grid>
+            </ScrollViewer>
+
+            <!-- Кнопка закрытия окна -->
+            <Button x:Name="CloseButton" Content="✕" Width="36" Height="36"
+                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,14,14,0" Cursor="Hand"
+                    Background="Transparent" BorderThickness="0"
+                    Foreground="{DynamicResource AppBodyTextBrush}" FontSize="18"
+                    ToolTip="Закрыть"
+                    Click="OnCloseClick"/>
         </Grid>
-    </Border>
+        </Border>
 </Window>
