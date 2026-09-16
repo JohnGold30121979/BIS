@@ -52,16 +52,13 @@ namespace BIS.ERP.Views
 
             button.Click += async (_, _) =>
             {
-                var dialog = new AccountSelectionDialog(
-                    BuildAccountRows(accountAnalytics.GetAccountsForModule(moduleCodeOrName)))
-                {
-                    Title = "Выбор счета"
-                };
+                var selection = new AccountSelectionView(
+                    BuildAccountRows(accountAnalytics.GetAccountsForModule(moduleCodeOrName)));
 
-                if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true || dialog.SelectedAccount == null)
+                if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(owner, "Выбор счета", selection) != true || selection.SelectedAccount == null)
                     return;
 
-                var selected = accountAnalytics.FindAccount(dialog.SelectedAccount.GetValueOrDefault("Id"));
+                var selected = accountAnalytics.FindAccount(selection.SelectedAccount.GetValueOrDefault("Id"));
                 if (selected == null)
                     return;
 

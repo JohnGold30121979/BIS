@@ -90,7 +90,15 @@ namespace BIS.ERP.Views
             {
                 var selectedId = await SelectReferenceAsync(metadataService, referenceCatalog, owner);
                 if (selectedId.HasValue)
-                    SelectReferenceValue(comboBox, selectedId.Value.ToString());
+                {
+                    // Список комбобокса мог устареть: в окне выбора запись могли
+                    // ДОБАВИТЬ (ConfigureCatalogEditing). Перезагружаем элементы из БД,
+                    // иначе SelectReferenceValue не найдёт новый Id и поле останется
+                    // пустым, а новая запись не появится в выпадающем списке до
+                    // перезапуска программы (баг «нет добавленной организации»).
+                    currentValue = selectedId.Value.ToString();
+                    await RefreshAsync(selectedId.Value);
+                }
             };
 
             addButton.Click += async (_, _) =>
@@ -141,7 +149,18 @@ namespace BIS.ERP.Views
             {
                 var selectedId = await SelectReferenceAsync(metadataService, referenceCatalog, owner, firstDisplayField, secondDisplayField);
                 if (selectedId.HasValue)
-                    SelectReferenceValue(comboBox, selectedId.Value.ToString());
+                {
+                    // Окно выбора могло добавить/изменить записи — перезагружаем список,
+                    // чтобы новый Id гарантированно нашёлся при выборе.
+                    await ReloadExistingComboBoxAsync(
+                        comboBox,
+                        metadataService,
+                        referenceCatalog,
+                        selectedId.Value,
+                        itemsReloaded,
+                        firstDisplayField,
+                        secondDisplayField);
+                }
             }));
             contextMenu.Items.Add(CreateMenuItem("Добавить...", async () =>
             {
@@ -198,7 +217,18 @@ namespace BIS.ERP.Views
                 {
                     var selectedId = await SelectReferenceAsync(metadataService, referenceCatalog, owner, firstDisplayField, secondDisplayField);
                     if (selectedId.HasValue)
-                        SelectReferenceValue(comboBox, selectedId.Value.ToString());
+                    {
+                        // Аналогично контекстному меню: перезагружаем список после
+                        // окна выбора, иначе добавленная там запись не выбирается.
+                        await ReloadExistingComboBoxAsync(
+                            comboBox,
+                            metadataService,
+                            referenceCatalog,
+                            selectedId.Value,
+                            itemsReloaded,
+                            firstDisplayField,
+                            secondDisplayField);
+                    }
                 },
                 async () =>
                 {

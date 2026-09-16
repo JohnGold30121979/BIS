@@ -558,18 +558,18 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new AccountSelectionDialog(accountsData) { Title = "Выбор счета" };
+                var selection = new AccountSelectionView(accountsData);
 
-                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
+                if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(this, "Выбор счета", selection) == true && selection.SelectedAccount != null)
                 {
-                    var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
-                    var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
+                    var accountCode = selection.SelectedAccount.ContainsKey("Код") ? selection.SelectedAccount["Код"].ToString() : "";
+                    var accountName = selection.SelectedAccount.ContainsKey("Наименование") ? selection.SelectedAccount["Наименование"].ToString() : "";
 
                     CorrAccountBox.Text = $"{accountCode} - {accountName}";
 
-                    if (dialog.SelectedAccount.ContainsKey("Id"))
+                    if (selection.SelectedAccount.ContainsKey("Id"))
                     {
-                        _selectedCorrAccountId = Guid.Parse(dialog.SelectedAccount["Id"].ToString());
+                        _selectedCorrAccountId = Guid.Parse(selection.SelectedAccount["Id"].ToString());
                     }
 
                     _selectedCorrAccountCode = accountCode;

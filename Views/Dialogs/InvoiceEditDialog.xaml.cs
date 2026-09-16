@@ -690,10 +690,10 @@ namespace BIS.ERP.Views.Dialogs
             if (_accounts.Count == 0)
                 return;
 
-            var dialog = new AccountSelectionDialog(_accounts) { Title = "Выбор счета" };
-            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
+            var selection = new AccountSelectionView(_accounts);
+            if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(this, "Выбор счета", selection) == true && selection.SelectedAccount != null)
             {
-                SetHeaderAccount(dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty);
+                SetHeaderAccount(selection.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty);
             }
         }
 
@@ -702,11 +702,11 @@ namespace BIS.ERP.Views.Dialogs
             if (_isReadOnlyMode || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
                 return;
 
-            var dialog = new AccountSelectionDialog(_accounts) { Title = "Выбор счета" };
+            var selection = new AccountSelectionView(_accounts);
 
-            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
+            if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(this, "Выбор счета", selection) == true && selection.SelectedAccount != null)
             {
-                var accountCode = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
+                var accountCode = selection.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
                 if (IsSameAccount(accountCode, _selectedHeaderAccountCode))
                 {
                     accountCode = GetDefaultLineAccountCode();

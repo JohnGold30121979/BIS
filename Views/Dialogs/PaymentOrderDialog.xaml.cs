@@ -365,13 +365,13 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var dialog = new AccountSelectionDialog(accountsData) { Title = "Выбор счета" };
+                var selection = new AccountSelectionView(accountsData);
 
-                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true && dialog.SelectedAccount != null)
+                if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(this, "Выбор счета", selection) == true && selection.SelectedAccount != null)
                 {
-                    var accountCode = dialog.SelectedAccount.ContainsKey("Код") ? dialog.SelectedAccount["Код"].ToString() : "";
-                    var accountName = dialog.SelectedAccount.ContainsKey("Наименование") ? dialog.SelectedAccount["Наименование"].ToString() : "";
-                    if (Guid.TryParse(dialog.SelectedAccount["Id"].ToString(), out var accountId))
+                    var accountCode = selection.SelectedAccount.ContainsKey("Код") ? selection.SelectedAccount["Код"].ToString() : "";
+                    var accountName = selection.SelectedAccount.ContainsKey("Наименование") ? selection.SelectedAccount["Наименование"].ToString() : "";
+                    if (Guid.TryParse(selection.SelectedAccount["Id"].ToString(), out var accountId))
                         applySelection(accountId, BuildAccountCodeDisplay(accountCode, accountName));
                 }
             }

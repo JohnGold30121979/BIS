@@ -95,13 +95,13 @@ namespace BIS.ERP.Views
                 }
 
                 var owner = Window.GetWindow(this);
-                var dialog = new AccountSelectionDialog(accounts);
+                var selection = new AccountSelectionView(accounts);
 
-                if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true || dialog.SelectedAccount == null)
+                if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(owner, "Выбор счета", selection) != true || selection.SelectedAccount == null)
                     return;
 
-                _trialBalanceAccountCode = ReadReportString(dialog.SelectedAccount, "Код", "code", "Code", "Счет", "account_code");
-                _trialBalanceAccountName = ReadReportString(dialog.SelectedAccount, "Наименование", "name", "Name");
+                _trialBalanceAccountCode = ReadReportString(selection.SelectedAccount, "Код", "code", "Code", "Счет", "account_code");
+                _trialBalanceAccountName = ReadReportString(selection.SelectedAccount, "Наименование", "name", "Name");
                 UpdateTrialBalanceAccountText();
             }
             catch (Exception ex)

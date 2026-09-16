@@ -81,7 +81,7 @@
 
 ### 2.2. Модуль «Основные средства» — реализация в сентябре 2026 г.
 
-**Статус сейчас:** Метаданные + бизнес‑логика в `AccountingPeriodService` + smoke‑тест. **Нет** пользовательского UI и диалогов документов.
+**Статус сейчас:** Метаданные + бизнес‑логика в `AccountingPeriodService` + smoke‑тест. Документы открываются через универсальный `DynamicDocumentItemDialog.BuildFormAsync`; для «Учета движения ОС» уже есть кастомные построители (движение, ввод в эксплуатацию, передача под отчет). **Нет** рабочего окна модуля (`FixedAssetsWorkView`) и навигации.
 
 #### Этап 1. Метаданные (✅ уже готово)
 - Каталог «Основные средства» (39 полей) ✅
@@ -98,20 +98,47 @@
 - Проведение документов через `MetadataService.PostDocumentAsync` ✅
 
 #### Этап 3. UI (🟡 сентябрь — основной объём работы)
-**Нужно реализовать:**
+
+**Ключевое решение (переработано):** отдельные XAML‑диалоги под каждый документ ОС **не создаём**. Все документы (включая «Передача под отчет») добавляются как **метаданные** и открываются через единый универсальный диалог `DynamicDocumentItemDialog`, а форма строится автоматически в `BuildFormAsync`. Новый документ = (1) `MetadataObject` + поля + правила проводок, (2) регистрация в `ModuleMetadataService.FixedAssetDocumentNames`, (3) при необходимости — точечная доработка `BuildFormAsync` (для документов с табличной частью).
+
+**Единый конвейер добавления документа ОС (на примере «Передача под отчет»):**
+
+```text
+ModuleMetadataService.FixedAssetDocumentNames
+        │  (имя документа)
+        ▼
+MetadataObjects: объект типа Document (таблица doc_…) 
+        │  + MetadataFields: Номер/Дата/Примечание, реквизиты,
+        │    ReferenceCatalog → «Основные средства», «Сотрудники (МОЛ)», «Участки»…
+        │  + MetadataPostingRules: правила проводок
+        ▼
+SynchronizeDefaultAssignmentsAsync / AssignMissingByNameAsync → модуль «FixedAssets»
+        ▼
+DynamicDocumentWorkView (журнал документов, кнопки Добавить/Провести)
+        ▼
+DynamicDocumentItemDialog.BuildFormAsync ──► форма документа
+   ├─ «Учет движения ОС» → кастомные построители (см. ниже)
+   └─ остальные 16 документов → универсальный цикл по _metadata.Fields:
+        CreateControlAsync → ReferencePickerControl / ComboBox / Дата / Сумма / Скрытые
+        (номер подставляется автоматически, is_posted — скрытое поле)
+        ▼
+OnSaveClick → ItemData → CreateDynamicRecordAsync / UpdateDynamicRecordAsync
+        ▼
+Проведение → MetadataService.PostDocumentAsync → ProcessFixedAsset*DocumentAsync
+```
 
 | № | Компонент | Описание | Сложность |
 |---|---|---|---|
 | 1 | `FixedAssetsWorkView.xaml` | Рабочее окно модуля: журнал ОС, список документов, кнопки создания | Средняя |
 | 2 | `FixedAssetCatalogView.xaml` | Браузер справочника «Основные средства» (DataGrid + фильтры) | Средняя |
-| 3 | `FixedAssetDialog.xaml` | Диалог карточки ОС (создание/редактирование) — на базе `CatalogItemDialog` | Средняя |
-| 4 | `FixedAssetDocumentDialog.xaml` | Диалог всех 17 документов ОС (универсальный, как `DynamicDocumentWorkView`) | Высокая |
-| 5 | `FixedAssetDetailsDialog.xaml` | Уже существует — доработать и подключить | Низкая |
+| 3 | `FixedAssetDetailsDialog.xaml` | Уже существует — основная карточка ОС, доработать и подключить | Низкая |
+| 4 | `DynamicDocumentItemDialog.BuildFormAsync` — документы через метаданные | Все 17 документов ОС рендерятся универсально; добавление документов «Передача под отчет» и остальных = метаданные + регистрация в `FixedAssetDocumentNames` | Низкая (на документ) |
+| 5 | Кастомные построители «Учет движения ОС» в `BuildFormAsync` | `BuildFixedAssetMovementFormAsync`, `BuildFixedAssetCommissioningFormAsync`, `BuildFixedAssetTransferFormAsync` (вкл. «Передача под отчет», код 13), табличные части `FixedAssetLineFieldAliases` / `FixedAssetCommissioningLineFieldAliases` | Частично готово |
 | 6 | Навигация в `MainWorkWindow` | Пункт «Основные средства» в дереве модулей (через `ModuleMetadataService`) | Низкая |
 
 **Порядок реализации UI в сентябре:**
-1. **Неделя 1:** `FixedAssetCatalogView` + `FixedAssetDialog` — просмотр/создание/редактирование карточек ОС, поддержка групп/подгрупп/видов.
-2. **Неделя 2:** `FixedAssetDocumentDialog` — универсальная форма для всех 17 документов. Поля формируются динамически из метаданных, как в `DynamicDocumentWorkView`.
+1. **Неделя 1:** `FixedAssetCatalogView` + `FixedAssetDetailsDialog` — просмотр/создание/редактирование карточек ОС, поддержка групп/подгрупп/видов.
+2. **Неделя 2:** Документы через `DynamicDocumentItemDialog.BuildFormAsync`. Для каждого из 16 «обычных» документов — проверить метаданные (поля, порядок, ссылки) и провести ручной прогон формы; для «Учета движения ОС» — кастомные построители (движение, ввод в эксплуатацию, **передача под отчет**).
 3. **Неделя 3:** `FixedAssetsWorkView` — главное окно модуля: вкладки «Справочник ОС», «Документы», «Отчёты».
 4. **Неделя 4:** Подключение модуля в навигацию `MainWorkWindow`, включение модуля по умолчанию в тестовых инфобазах, интеграция с периодом закрытия.
 
@@ -126,25 +153,31 @@
 
 #### Документы, которые будут доступны пользователю в сентябре:
 
-| № | Наименование | Таблица | Кратко |
-|---|---|---|---|
-| 1 | Покупка ОС | `doc_fixed_asset_purchase` | Приход ОС по договору/счёту |
-| 2 | Ввод ОС в эксплуатацию | `doc_fixed_asset_commissioning` | Ввод в эксплуатацию |
-| 3 | Вывод из эксплуатации | `doc_fixed_asset_decommissioning` | Снятие с учёта |
-| 4 | Переоценка ОС | `doc_fixed_asset_revaluation` | Переоценка стоимости |
-| 5 | Реализация ОС | `doc_fixed_asset_sales` | Полное выбытие |
-| 6 | Частичная реализация ОС | `doc_fixed_asset_partial_sales` | Частичное выбытие |
-| 7 | Начисление амортизации | `doc_fixed_asset_depreciation` | Ручное/авто начисление |
-| 8 | Списание амортизации | `doc_fixed_asset_depreciation_writeoff` | Списание амортизации |
-| 9 | Консервация ОС | `doc_fixed_asset_conservation` | Приостановка амортизации |
-| 10 | Расконсервация ОС | `doc_fixed_asset_reopening` | Возобновление амортизации |
-| 11 | Передача ОС в подотчёт | `doc_fixed_asset_to_employee` | Передача МОЛ |
-| 12 | Смена затратного счета | `doc_fixed_asset_account_change` | Изменение счета расходов |
-| 13 | Смена группы ОС | `doc_fixed_asset_group_change` | Смена классификатора ОС |
-| 14 | Укомплектация ОС | `doc_fixed_asset_assembly` | Сборка из деталей |
-| 15 | Разукомплектация ОС | `doc_fixed_asset_disassembly` | Разборка на детали |
-| 16 | Приход из производства ОС | `doc_fixed_asset_from_production` | Поступление из Производства |
-| 17 | Учёт движения ОС | `doc_fixed_asset_movement` | Специальный документ учёта движения |
+Все формы строятся автоматически в `DynamicDocumentItemDialog.BuildFormAsync`:
+- **Универсальный цикл** — документ без табличной части рендерится по полям из метаданных (требуется только качественно настроенные поля/порядок/ссылки).
+- **«Учет движения ОС»** — общий документ‑конверт: вид движения выбирается из справочника «Ввод нового документа ОС», а `BuildFormAsync` по подстроке вида открывает нужный построитель формы.
+
+| № | Наименование | Таблица | Кратко | Форма в `BuildFormAsync` |
+|---|---|---|---|---|
+| 1 | Покупка ОС | `doc_fixed_asset_purchase` | Приход ОС по договору/счёту | Универсальный цикл + строка ОС |
+| 2 | Ввод ОС в эксплуатацию | `doc_fixed_asset_commissioning` | Ввод в эксплуатацию | Универсальный цикл + строка ОС |
+| 3 | Вывод из эксплуатации | `doc_fixed_asset_decommissioning` | Снятие с учёта | Универсальный цикл |
+| 4 | Переоценка ОС | `doc_fixed_asset_revaluation` | Переоценка стоимости | Универсальный цикл |
+| 5 | Реализация ОС | `doc_fixed_asset_sales` | Полное выбытие | Универсальный цикл |
+| 6 | Частичная реализация ОС | `doc_fixed_asset_partial_sales` | Частичное выбытие | Универсальный цикл |
+| 7 | Начисление амортизации | `doc_fixed_asset_depreciation` | Ручное/авто начисление | Универсальный цикл |
+| 8 | Списание амортизации | `doc_fixed_asset_depreciation_writeoff` | Списание амортизации | Универсальный цикл |
+| 9 | Консервация ОС | `doc_fixed_asset_conservation` | Приостановка амортизации | Универсальный цикл |
+| 10 | Расконсервация ОС | `doc_fixed_asset_reopening` | Возобновление амортизации | Универсальный цикл |
+| 11 | Передача ОС в подотчёт | `doc_fixed_asset_to_employee` | Передача МОЛ | `BuildFixedAssetTransferFormAsync` (вид движения «Передача под отчет», код 13) |
+| 12 | Смена затратного счета | `doc_fixed_asset_account_change` | Изменение счета расходов | Универсальный цикл |
+| 13 | Смена группы ОС | `doc_fixed_asset_group_change` | Смена классификатора ОС | Универсальный цикл |
+| 14 | Укомплектация ОС | `doc_fixed_asset_assembly` | Сборка из деталей | Универсальный цикл |
+| 15 | Разукомплектация ОС | `doc_fixed_asset_disassembly` | Разборка на детали | Универсальный цикл |
+| 16 | Приход из производства ОС | `doc_fixed_asset_from_production` | Поступление из Производства | Универсальный цикл + строка ОС |
+| 17 | Учёт движения ОС | `doc_fixed_asset_movement` | Специальный документ учёта движения | Конверт движений: `BuildFixedAssetMovementFormAsync` / `BuildFixedAssetCommissioningFormAsync` / `BuildFixedAssetTransferFormAsync` |
+
+> Обозначения форм: **Универсальный цикл** — общая ветка `BuildFormAsync` (поля из метаданных, авто‑подстановка номера, скрытое `is_posted`); **+ строка ОС** — табличная часть строк основного средства (`FixedAssetLineFieldAliases` / `FixedAssetCommissioningLineFieldAliases`), которую также дорабатываем прямо внутри `BuildFormAsync`, без отдельных XAML.
 
 ---
 

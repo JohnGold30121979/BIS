@@ -10,7 +10,7 @@ namespace BIS.ERP.Services;
 
 public static class MdiDialogService
 {
-    private static readonly Dictionary<Window, HostedDialogSession> HostedDialogs = new();
+    private static readonly Dictionary<object, HostedDialogSession> HostedDialogs = new();
 
     public static bool TryShowInWorkspace(
         Window? owner,
@@ -97,6 +97,70 @@ public static class MdiDialogService
         return completionSource.Task;
     }
 
+    /// <summary>
+    /// Открывает UserControl (например, AccountSelectionView) как документ MDI
+    /// и возвращает результат подтверждения: true — «Выбрать», false — «Отмена»
+    /// либо закрытие вкладки пользователем. Контент сам инициирует закрытие через
+    /// MdiDialogService.CloseWithResult(this, ...). Если MDI недоступен, контрол
+    /// размещается в обычном модальном окне.
+    /// </summary>
+    public static Task<bool?> ShowControlInWorkspaceForResultAsync(
+        Window? owner,
+        string title,
+        UserControl content,
+        bool activate = true)
+    {
+        var workspace = ResolveWorkspace(owner);
+        if (workspace == null)
+        {
+            // fallback — обычное модальное окно
+            var fallback = new Window
+            {
+                Title = title,
+                Content = content,
+                Width = 860,
+                Height = 600,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false
+            };
+            SetSafeOwner(fallback, owner);
+            return Task.FromResult(fallback.ShowDialog());
+        }
+
+        var actualKey = $"{content.GetType().FullName}:{Guid.NewGuid():N}";
+        var completionSource = new TaskCompletionSource<bool?>();
+        var session = new HostedDialogSession(
+            actualKey,
+            completionSource,
+            () => workspace.CloseDocumentByKey(actualKey));
+
+        // Регистрируем сам контрол: он закроет документ через CloseWithResult(this, ...)
+        HostedDialogs[content] = session;
+
+        workspace.OpenDocument(actualKey, title, content, activate);
+
+        // Закрытие вкладки из MDI (кнопка «x») тоже должно завершить ожидание
+        void OnDocumentsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Remove || e.OldItems == null)
+                return;
+
+            foreach (var item in e.OldItems)
+            {
+                if (item is MdiDocumentItem document && ReferenceEquals(document.Content, content))
+                {
+                    workspace.Documents.CollectionChanged -= OnDocumentsChanged;
+                    CompleteHostedDialog(content, false, closeDocument: false);
+                    return;
+                }
+            }
+        }
+
+        workspace.Documents.CollectionChanged += OnDocumentsChanged;
+
+        return completionSource.Task;
+    }
+
     public static bool TryOpenDocumentInWorkspace(
         Window? owner,
         string key,
@@ -112,31 +176,38 @@ public static class MdiDialogService
         return true;
     }
 
-    public static void CloseWithResult(Window dialog, bool? result)
+    public static void CloseWithResult(object source, bool? result)
     {
-        if (CompleteHostedDialog(dialog, result))
+        if (CompleteHostedDialog(source, result))
+            return;
+
+        // source — Window (классические диалоги) либо UserControl внутри окна
+        // (fallback-режим для контролов). Закрываем окно с результатом.
+        var window = source as Window ??
+            (source is DependencyObject dependency ? Window.GetWindow(dependency) : null);
+        if (window == null)
             return;
 
         try
         {
-            dialog.DialogResult = result;
+            window.DialogResult = result;
         }
         catch (InvalidOperationException)
         {
-            dialog.Close();
+            window.Close();
         }
     }
 
-    private static bool CompleteHostedDialog(Window dialog, bool? result, bool closeDocument = true)
+    private static bool CompleteHostedDialog(object source, bool? result, bool closeDocument = true)
     {
-        if (!HostedDialogs.TryGetValue(dialog, out var session))
+        if (!HostedDialogs.TryGetValue(source, out var session))
             return false;
 
         if (session.IsCompleted)
             return true;
 
         session.IsCompleted = true;
-        HostedDialogs.Remove(dialog);
+        HostedDialogs.Remove(source);
         session.CompletionSource.TrySetResult(result);
 
         if (closeDocument)

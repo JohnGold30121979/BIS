@@ -105,6 +105,8 @@ namespace BIS.ERP.Views.Dialogs
                 var movementType = await ResolveFixedAssetMovementTypeCaptionAsync(catalogsDict);
                 if (IsFixedAssetCommissioningMovementType(movementType))
                     await BuildFixedAssetCommissioningFormAsync(catalogsDict, movementType);
+                else if (IsFixedAssetTransferMovementType(movementType))
+                    await BuildFixedAssetTransferFormAsync(catalogsDict, movementType);
                 else
                     await BuildFixedAssetMovementFormAsync(catalogsDict, movementType);
                 await ApplyFixedAssetMovementDefaultsAsync(catalogsDict);
@@ -492,6 +494,65 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
+        /// <summary>
+        /// Форма «Передача в подотчет» (код 13, «Передача под отчет»).
+        /// Упрощённая шапка: основной объект — одно ОС, получатель — МОЛ/сотрудник.
+        /// Проводка/исполнение уже реализованы в MetadataService
+        /// (ProcessFixedAssetAssignmentDocumentAsync), здесь только удобный ввод.
+        /// </summary>
+        private async Task BuildFixedAssetTransferFormAsync(
+            Dictionary<string, MetadataObject> catalogsDict,
+            string? movementType)
+        {
+            Width = Math.Max(Width, 1180);
+            Height = Math.Max(Height, 760);
+            MinWidth = Math.Max(MinWidth, 960);
+            MinHeight = Math.Max(MinHeight, 660);
+
+            FieldsPanel.MaxWidth = double.PositiveInfinity;
+            FieldsPanel.Width = double.NaN;
+            FieldsPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            FieldsPanel.Children.Add(CreateFixedAssetMovementHeader(movementType, "Передача ОС в подотчет"));
+
+            var usedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var documentGrid = CreateTwoColumnGrid(2);
+            await AddFieldToGridAsync(documentGrid, 0, 0, catalogsDict, usedFields, "Номер");
+            await AddFieldToGridAsync(documentGrid, 0, 1, catalogsDict, usedFields, "Дата");
+            await AddFieldToGridAsync(documentGrid, 1, 0, catalogsDict, usedFields, "Примечание", "description");
+            await AddHiddenFieldAsync(catalogsDict, usedFields, "Вид документа ОС", "asset_document_entry_id");
+            await AddHiddenFieldAsync(catalogsDict, usedFields, "Проведен", "is_posted");
+            FieldsPanel.Children.Add(CreateSection("Документ", documentGrid));
+
+            var assetGrid = CreateTwoColumnGrid(3);
+            await AddFieldToGridAsync(assetGrid, 0, 0, catalogsDict, usedFields, "Основное средство", "asset_id");
+            await AddFieldToGridAsync(assetGrid, 0, 1, catalogsDict, usedFields, "МОЛ", "responsible_person_id");
+            await AddFieldToGridAsync(assetGrid, 1, 0, catalogsDict, usedFields, "Участок", "site_id");
+            await AddFieldToGridAsync(assetGrid, 1, 1, catalogsDict, usedFields, "Организация", "organization_id");
+            await AddFieldToGridAsync(assetGrid, 2, 0, catalogsDict, usedFields, "Основание", "basis");
+            FieldsPanel.Children.Add(CreateSection("Передача в подотчет", assetGrid));
+
+            var remainingFields = _metadata.Fields
+                .OrderBy(field => field.Order)
+                .Where(field => !usedFields.Contains(field.Name))
+                .ToList();
+
+            if (remainingFields.Count == 0)
+                return;
+
+            var additionalGrid = CreateTwoColumnGrid((remainingFields.Count + 1) / 2);
+            for (var index = 0; index < remainingFields.Count; index++)
+            {
+                await AddFieldByMetadataToGridAsync(
+                    additionalGrid,
+                    index / 2,
+                    index % 2,
+                    remainingFields[index],
+                    catalogsDict,
+                    usedFields);
+            }
+        }
+
         private Border CreateFixedAssetMovementHeader(
             string? movementType,
             string? customTitle = null)
@@ -573,6 +634,19 @@ namespace BIS.ERP.Views.Dialogs
 
             return movementType.Contains("ввод", StringComparison.OrdinalIgnoreCase) &&
                    movementType.Contains("эксплуата", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Определяет тип движения «Передача под отчет» (код 13).
+        /// Капитель вида «13 - Передача под отчет», возможны варианты «подотчет».
+        /// </summary>
+        private static bool IsFixedAssetTransferMovementType(string? movementType)
+        {
+            if (string.IsNullOrWhiteSpace(movementType))
+                return false;
+
+            return movementType.Contains("под отчет", StringComparison.OrdinalIgnoreCase) ||
+                   movementType.Contains("подотчет", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string BuildFixedAssetMovementTypeCaption(Dictionary<string, object> row)

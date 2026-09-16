@@ -62,13 +62,13 @@ namespace BIS.ERP.Views
         {
             var accounts = await LoadAccountsAsync();
             var owner = Window.GetWindow(this);
-            var dialog = new AccountSelectionDialog(accounts);
-            if (await MdiDialogService.ShowInWorkspaceForResultAsync(owner, dialog, dialog.Title) != true)
+            var selection = new AccountSelectionView(accounts);
+            if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(owner, "Выбор счета", selection) != true)
                 return;
             _openings.Add(new OpeningBalanceEditorRow
             {
-                AccountCode = dialog.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty,
-                AccountName = dialog.SelectedAccount.GetValueOrDefault("Наименование")?.ToString() ?? string.Empty,
+                AccountCode = selection.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty,
+                AccountName = selection.SelectedAccount.GetValueOrDefault("Наименование")?.ToString() ?? string.Empty,
                 BalanceDate = new DateTime(DateTime.Today.Year, 1, 1)
             });
         }
