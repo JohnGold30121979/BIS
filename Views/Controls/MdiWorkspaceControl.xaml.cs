@@ -16,11 +16,14 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
     private MdiDocumentItem? _selectedDocument;
     private MdiDocumentItem? _draggedDocument;
     private Point _dragStartPoint;
+    private Window? _hostWindow;
 
     public MdiWorkspaceControl()
     {
         InitializeComponent();
         Documents.CollectionChanged += (_, _) => UpdateEmptyState();
+        Loaded += OnWorkspaceLoaded;
+        Unloaded += OnWorkspaceUnloaded;
     }
 
     public ObservableCollection<MdiDocumentItem> Documents { get; } = new();
@@ -130,14 +133,11 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
 
     public void CloseAllDocuments()
     {
+        // Закрываем вкладки по одной: для каждой корректно срабатывает
+        // уведомление хостируемого диалога (Window и UserControl),
+        // а коллекция получает отдельное событие Remove на каждую вкладку
         foreach (var document in Documents.ToList())
-        {
-            if (document.Content is MdiDialogHostControl hostedDialog)
-                hostedDialog.NotifyDocumentClosed();
-        }
-
-        Documents.Clear();
-        SelectedDocument = null;
+            CloseDocument(document);
     }
 
     private void OnCloseCurrentClick(object sender, RoutedEventArgs e) => CloseCurrentDocument();
@@ -148,6 +148,33 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
     {
         if ((sender as FrameworkElement)?.Tag is MdiDocumentItem document)
             CloseDocument(document);
+    }
+
+    private void OnWorkspaceLoaded(object sender, RoutedEventArgs e)
+    {
+        _hostWindow = Window.GetWindow(this);
+        if (_hostWindow != null)
+            _hostWindow.KeyDown += OnHostWindowKeyDown;
+    }
+
+    private void OnWorkspaceUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (_hostWindow == null)
+            return;
+
+        _hostWindow.KeyDown -= OnHostWindowKeyDown;
+        _hostWindow = null;
+    }
+
+    // ESC: закрываем только активную вкладку. При повторных нажатиях
+    // окна закрываются последовательно, по одному за каждое нажатие.
+    private void OnHostWindowKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Handled || e.Key != Key.Escape || SelectedDocument == null)
+            return;
+
+        CloseDocument(SelectedDocument);
+        e.Handled = true;
     }
 
     private void DocumentsTabControl_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

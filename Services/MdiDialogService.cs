@@ -79,7 +79,7 @@ public static class MdiDialogService
             ? $"{dialog.GetType().FullName}:{actualTitle}:{Guid.NewGuid():N}"
             : key;
 
-        var completionSource = new TaskCompletionSource<bool?>();
+        var completionSource = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new HostedDialogSession(
             actualKey,
             completionSource,
@@ -128,7 +128,7 @@ public static class MdiDialogService
         }
 
         var actualKey = $"{content.GetType().FullName}:{Guid.NewGuid():N}";
-        var completionSource = new TaskCompletionSource<bool?>();
+        var completionSource = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new HostedDialogSession(
             actualKey,
             completionSource,
@@ -142,6 +142,14 @@ public static class MdiDialogService
         // Закрытие вкладки из MDI (кнопка «x») тоже должно завершить ожидание
         void OnDocumentsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
         {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            {
+                // Вкладки очищены разом (например, «Закрыть все») — завершаем ожидание как отмену
+                workspace.Documents.CollectionChanged -= OnDocumentsChanged;
+                CompleteHostedDialog(content, false, closeDocument: false);
+                return;
+            }
+
             if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Remove || e.OldItems == null)
                 return;
 
