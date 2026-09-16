@@ -65,8 +65,43 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
+
+                    <!-- Быстрый поиск по дереву объектов -->
+                    <Border Grid.Row="1" Margin="10,10,10,2"
+                            Background="{DynamicResource ConfiguratorSidebarCardBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1" CornerRadius="8">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="MetadataSearchBox"
+                                     Height="30" Margin="10,0,0,0"
+                                     VerticalAlignment="Center" VerticalContentAlignment="Center"
+                                     Background="Transparent" BorderThickness="0"
+                                     Foreground="{DynamicResource ConfiguratorTreeItemForegroundBrush}"
+                                     ToolTip="Быстрый поиск: Enter — следующее совпадение, Esc — очистить"
+                                     TextChanged="OnMetadataSearchTextChanged"
+                                     KeyDown="OnMetadataSearchKeyDown"/>
+                            <TextBlock x:Name="MetadataSearchWatermark"
+                                       Grid.Column="0" Margin="12,0,0,0"
+                                       VerticalAlignment="Center" IsHitTestVisible="False"
+                                       Text="🔍 Поиск объекта..."
+                                       Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"/>
+                            <Button x:Name="MetadataSearchClearButton"
+                                    Grid.Column="1" Width="24" Height="24" Margin="4,0,6,0"
+                                    VerticalAlignment="Center" Content="✕" FontSize="11"
+                                    Cursor="Hand" Background="Transparent" BorderThickness="0"
+                                    Foreground="{DynamicResource ConfiguratorTreeGroupForegroundBrush}"
+                                    Visibility="Collapsed"
+                                    ToolTip="Очистить поиск"
+                                    Click="OnMetadataSearchClearClick"/>
+                        </Grid>
+                    </Border>
 
                     <Border Grid.Row="0" Background="{DynamicResource ConfiguratorHeaderBackgroundBrush}" Padding="16">
                         <Border Background="{DynamicResource ConfiguratorSidebarCardBrush}"
@@ -122,7 +157,7 @@
                         </Border>
                     </Border>
 
-                    <ScrollViewer x:Name="LeftNavigationScrollViewer" Grid.Row="1"
+                    <ScrollViewer x:Name="LeftNavigationScrollViewer" Grid.Row="2"
                                   VerticalScrollBarVisibility="Auto"
                                   PreviewMouseWheel="OnLeftNavigationPreviewMouseWheel">
                         <StackPanel>

@@ -118,6 +118,15 @@ namespace BIS.ERP
         };
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
+        // Быстрый поиск по дереву объектов
+        private readonly Dictionary<NavigationItem, bool> _navExpandedBackup = new();
+        private readonly Dictionary<NavigationItem, bool> _navVisibilityMap = new();
+        private readonly List<NavigationItem> _navMatches = new();
+        private bool _navSearchActive;
+        private bool _navSearchReapplyScheduled;
+        private int _navMatchIndex = -1;
+        private int _navVisibilityApplyPasses;
+
         public MainWorkWindow(IAuthService authService)
         {
             InitializeComponent();
@@ -126,8 +135,266 @@ namespace BIS.ERP
             _navigation = new AppNavigationService(ContentArea);
             NavigationItems = new ObservableCollection<NavigationItem>();
             NavigationTree.ItemsSource = NavigationItems;
+            NavigationItems.CollectionChanged += OnNavigationItemsCollectionChanged;
             this.Loaded += OnLoaded;
             this.Closing += OnWindowClosing;
+        }
+
+        // Пересборка дерева (Clear + Add) сбрасывает состояние поиска:
+        // ссылки на старые узлы становятся недействительными.
+        private void OnNavigationItemsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+                return;
+
+            _navExpandedBackup.Clear();
+            _navVisibilityMap.Clear();
+            _navMatches.Clear();
+            _navMatchIndex = -1;
+            _navSearchActive = false;
+            if (NavigationSearchWatermark != null)
+            {
+                NavigationSearchWatermark.Text = "🔍 Поиск объекта...";
+                NavigationSearchWatermark.Visibility = Visibility.Visible;
+            }
+        }
+
+        // ================= Быстрый поиск по дереву объектов =================
+
+        private void OnNavigationSearchTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_navSearchReapplyScheduled)
+                return;
+
+            // Объединяем быстрые нажатия клавиш в один проход фильтрации
+            _navSearchReapplyScheduled = true;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                _navSearchReapplyScheduled = false;
+                ApplyNavigationSearch();
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        private void OnNavigationSearchKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                SelectNextNavigationMatch();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                if (NavigationSearchBox.Text.Length > 0)
+                    NavigationSearchBox.Text = string.Empty; // вызовет ApplyNavigationSearch
+                else
+                    NavigationTree.Focus();
+
+                e.Handled = true;
+            }
+        }
+
+        private void OnNavigationSearchClearClick(object sender, RoutedEventArgs e)
+        {
+            NavigationSearchBox.Text = string.Empty;
+            NavigationSearchBox.Focus();
+        }
+
+        private void ApplyNavigationSearch()
+        {
+            if (NavigationSearchBox == null || NavigationSearchWatermark == null || NavigationSearchClearButton == null)
+                return;
+
+            var query = NavigationSearchBox.Text.Trim();
+
+            if (query.Length == 0)
+            {
+                RestoreNavigationTreeAfterSearch();
+                return;
+            }
+
+            if (!_navSearchActive)
+            {
+                _navSearchActive = true;
+                BackupNavigationExpansion(NavigationItems);
+            }
+
+            _navVisibilityMap.Clear();
+            _navMatches.Clear();
+
+            var matchCount = 0;
+            foreach (var root in NavigationItems)
+                matchCount += ApplyNavigationFilterToItem(root, query, ancestorMatched: false);
+
+            NavigationSearchWatermark.Text = matchCount == 0 ? "Не найдено" : string.Empty;
+            NavigationSearchWatermark.Visibility = matchCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _navMatchIndex = -1;
+
+            // Контейнеры дочерних узлов создаются лениво: после раскрытия
+            // предков ждём генерации контейнеров и скрываем лишние ветки.
+            Dispatcher.BeginInvoke(
+                new Action(() => ApplyNavigationContainerVisibility(NavigationItems, null)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        private bool NavigationItemMatches(NavigationItem item, string query) =>
+            item.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private int ApplyNavigationFilterToItem(NavigationItem item, string query, bool ancestorMatched)
+        {
+            var selfMatched = ancestorMatched || NavigationItemMatches(item, query);
+            if (selfMatched)
+                _navMatches.Add(item);
+
+            var childMatchCount = 0;
+            foreach (var child in item.Children)
+                childMatchCount += ApplyNavigationFilterToItem(child, query, selfMatched);
+
+            var visible = selfMatched || childMatchCount > 0;
+            _navVisibilityMap[item] = visible;
+            item.IsExpanded = visible && item.Children.Count > 0; // TwoWay — раскроет контейнер
+
+            return (selfMatched ? 1 : 0) + childMatchCount;
+        }
+
+        private void BackupNavigationExpansion(IEnumerable<NavigationItem> items)
+        {
+            foreach (var item in items)
+            {
+                if (!_navExpandedBackup.ContainsKey(item))
+                    _navExpandedBackup[item] = item.IsExpanded;
+
+                BackupNavigationExpansion(item.Children);
+            }
+        }
+
+        private void RestoreNavigationTreeAfterSearch()
+        {
+            _navSearchActive = false;
+            _navMatchIndex = -1;
+
+            foreach (var root in NavigationItems)
+                RestoreNavigationExpansion(root);
+
+            _navExpandedBackup.Clear();
+            _navVisibilityMap.Clear();
+
+            NavigationSearchWatermark.Text = "🔍 Поиск объекта...";
+            NavigationSearchWatermark.Visibility = Visibility.Visible;
+
+            // Возвращаем видимость всех контейнеров после их (пере)генерации
+            Dispatcher.BeginInvoke(
+                new Action(() => ApplyNavigationContainerVisibility(NavigationItems, true)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        private void RestoreNavigationExpansion(NavigationItem item)
+        {
+            if (_navExpandedBackup.TryGetValue(item, out var wasExpanded))
+                item.IsExpanded = wasExpanded;
+
+            foreach (var child in item.Children)
+                RestoreNavigationExpansion(child);
+        }
+
+        private void SelectNextNavigationMatch()
+        {
+            if (_navMatches.Count == 0)
+                return;
+
+            _navMatchIndex = (_navMatchIndex + 1) % _navMatches.Count;
+            SelectNavigationMatchContainer(_navMatches[_navMatchIndex]);
+        }
+
+        private void SelectNavigationMatchContainer(NavigationItem match)
+        {
+            if (GetNavigationContainer(match) is TreeViewItem container)
+            {
+                container.IsSelected = true;
+                container.Focus();
+                container.BringIntoView();
+                return;
+            }
+
+            // Контейнеры создаются лениво: после генерации повторяем выбор
+            Dispatcher.BeginInvoke(
+                new Action(() =>
+                {
+                    if (GetNavigationContainer(match) is TreeViewItem lateContainer)
+                    {
+                        lateContainer.IsSelected = true;
+                        lateContainer.Focus();
+                        lateContainer.BringIntoView();
+                    }
+                }),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        private void ApplyNavigationContainerVisibility(IEnumerable<NavigationItem> items, bool? visibleOverride)
+        {
+            _navVisibilityApplyPasses = 0;
+            ApplyNavigationContainerVisibilityCore(items, visibleOverride);
+        }
+
+        private void ApplyNavigationContainerVisibilityCore(IEnumerable<NavigationItem> items, bool? visibleOverride)
+        {
+            var hasMissingContainers = false;
+
+            foreach (var item in items)
+            {
+                var container = GetNavigationContainer(item);
+                if (container != null)
+                {
+                    var visible = visibleOverride ?? (_navVisibilityMap.TryGetValue(item, out var mapVisible) && mapVisible);
+                    container.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+                }
+                else if (visibleOverride != true)
+                {
+                    hasMissingContainers = true;
+                }
+
+                if (item.Children.Count > 0)
+                    ApplyNavigationContainerVisibilityCore(item.Children, visibleOverride);
+            }
+
+            if (hasMissingContainers && _navVisibilityApplyPasses < 5)
+            {
+                _navVisibilityApplyPasses++;
+                Dispatcher.BeginInvoke(
+                    new Action(() => ApplyNavigationContainerVisibilityCore(items, visibleOverride)),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+        }
+
+        private TreeViewItem? GetNavigationContainer(NavigationItem item)
+        {
+            if (NavigationTree.ItemContainerGenerator.ContainerFromItem(item) is TreeViewItem direct)
+                return direct;
+
+            foreach (var root in NavigationItems)
+            {
+                if (NavigationTree.ItemContainerGenerator.ContainerFromItem(root) is not TreeViewItem rootContainer)
+                    continue;
+
+                if (FindNavigationContainerRecursive(rootContainer, item) is TreeViewItem found)
+                    return found;
+            }
+
+            return null;
+        }
+
+        private static TreeViewItem? FindNavigationContainerRecursive(ItemsControl parent, NavigationItem item)
+        {
+            if (parent.ItemContainerGenerator.ContainerFromItem(item) is TreeViewItem direct)
+                return direct;
+
+            foreach (var child in parent.Items.OfType<NavigationItem>())
+            {
+                if (parent.ItemContainerGenerator.ContainerFromItem(child) is TreeViewItem childContainer &&
+                    FindNavigationContainerRecursive(childContainer, item) is TreeViewItem found)
+                    return found;
+            }
+
+            return null;
         }
 
         private void OnWindowClosing(object? sender, CancelEventArgs e)

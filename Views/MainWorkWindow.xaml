@@ -82,6 +82,40 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Быстрый поиск по дереву объектов -->
+                <Border DockPanel.Dock="Top" Margin="12,4,12,8"
+                        Background="{DynamicResource AppContentBackgroundBrush}"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="1" CornerRadius="8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="NavigationSearchBox"
+                                 Height="30" Margin="10,0,0,0"
+                                 VerticalAlignment="Center" VerticalContentAlignment="Center"
+                                 Background="Transparent" BorderThickness="0"
+                                 Foreground="{DynamicResource AppNavigationForegroundBrush}"
+                                 ToolTip="Быстрый поиск: Enter — следующее совпадение, Esc — очистить"
+                                 TextChanged="OnNavigationSearchTextChanged"
+                                 KeyDown="OnNavigationSearchKeyDown"/>
+                        <TextBlock x:Name="NavigationSearchWatermark"
+                                   Grid.Column="0" Margin="12,0,0,0"
+                                   VerticalAlignment="Center" IsHitTestVisible="False"
+                                   Text="🔍 Поиск объекта..."
+                                   Foreground="{DynamicResource AppNavigationMutedForegroundBrush}"/>
+                        <Button x:Name="NavigationSearchClearButton"
+                                Grid.Column="1" Width="24" Height="24" Margin="4,0,6,0"
+                                VerticalAlignment="Center" Content="✕" FontSize="11"
+                                Cursor="Hand" Background="Transparent" BorderThickness="0"
+                                Foreground="{DynamicResource AppNavigationMutedForegroundBrush}"
+                                Visibility="Collapsed"
+                                ToolTip="Очистить поиск"
+                                Click="OnNavigationSearchClearClick"/>
+                    </Grid>
+                </Border>
+
                 <!-- Дерево навигации -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" 
                               Background="{DynamicResource AppSidebarBackgroundBrush}">

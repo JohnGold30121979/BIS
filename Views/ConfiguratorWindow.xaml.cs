@@ -28,6 +28,9 @@ namespace BIS.ERP.Views
         private List<MetadataObject> _documents;
         private List<Report> _reports;
         private RegulatedReportTemplateService? _regulatedTemplateService;
+        private readonly Dictionary<TreeViewItem, bool> _treeExpandedBackup = new();
+        private bool _treeSearchActive;
+        private int _treeMatchIndex = -1;
         private bool _isLoading = false;
         private AppDbContext _context;
         private bool _closeForModeSwitch;
@@ -47,6 +50,143 @@ namespace BIS.ERP.Views
             this.Loaded += async (s, e) => await LoadMetadata();
             this.Closing += OnWindowClosing;
             PropertiesScrollViewer.SizeChanged += (_, _) => UpdateFixedPropertiesContentHeight();
+        }
+
+        // ================= Быстрый поиск по дереву объектов =================
+
+        private void OnMetadataSearchTextChanged(object sender, TextChangedEventArgs e) =>
+            ApplyMetadataTreeSearch();
+
+        private void OnMetadataSearchKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                SelectNextTreeMatch();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                if (MetadataSearchBox.Text.Length > 0)
+                    MetadataSearchBox.Text = string.Empty; // вызовет ApplyMetadataTreeSearch
+                else
+                    MetadataTree.Focus();
+
+                e.Handled = true;
+            }
+        }
+
+        private void OnMetadataSearchClearClick(object sender, RoutedEventArgs e)
+        {
+            MetadataSearchBox.Text = string.Empty;
+            MetadataSearchBox.Focus();
+        }
+
+        private static bool TreeTextContains(string text, string query) =>
+            text.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+
+        private static string GetTreeItemText(TreeViewItem item) =>
+            item.Header as string ?? item.Header?.ToString() ?? string.Empty;
+
+        private static IEnumerable<TreeViewItem> EnumerateTreeItems(IEnumerable<TreeViewItem> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                yield return node;
+                foreach (var descendant in EnumerateTreeItems(node.Items.OfType<TreeViewItem>()))
+                    yield return descendant;
+            }
+        }
+
+        private void ApplyMetadataTreeSearch()
+        {
+            if (MetadataSearchBox == null || MetadataSearchWatermark == null || MetadataSearchClearButton == null)
+                return;
+
+            var query = MetadataSearchBox.Text.Trim();
+            MetadataSearchClearButton.Visibility = query.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            var roots = MetadataTree.Items.OfType<TreeViewItem>().ToList();
+
+            if (query.Length == 0)
+            {
+                foreach (var node in EnumerateTreeItems(roots))
+                {
+                    node.Visibility = Visibility.Visible;
+                    if (_treeExpandedBackup.TryGetValue(node, out var wasExpanded))
+                        node.IsExpanded = wasExpanded;
+                }
+
+                _treeExpandedBackup.Clear();
+                _treeSearchActive = false;
+                _treeMatchIndex = -1;
+                MetadataSearchWatermark.Text = "🔍 Поиск объекта...";
+                MetadataSearchWatermark.Visibility = Visibility.Visible;
+                return;
+            }
+
+            if (!_treeSearchActive)
+            {
+                _treeSearchActive = true;
+                foreach (var node in EnumerateTreeItems(roots))
+                    _treeExpandedBackup[node] = node.IsExpanded;
+            }
+
+            var matchCount = 0;
+            foreach (var root in roots)
+                matchCount += ApplyTreeFilterToNode(root, query, ancestorMatched: false);
+
+            MetadataSearchWatermark.Text = matchCount == 0 ? "Не найдено" : string.Empty;
+            MetadataSearchWatermark.Visibility = matchCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+            _treeMatchIndex = -1;
+        }
+
+        private int ApplyTreeFilterToNode(TreeViewItem node, string query, bool ancestorMatched)
+        {
+            var selfMatched = ancestorMatched || TreeTextContains(GetTreeItemText(node), query);
+            var children = node.Items.OfType<TreeViewItem>().ToList();
+            var childMatchCount = 0;
+
+            foreach (var child in children)
+                childMatchCount += ApplyTreeFilterToNode(child, query, selfMatched);
+
+            var visible = selfMatched || childMatchCount > 0;
+            node.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            node.IsExpanded = visible && children.Count > 0;
+
+            return (selfMatched ? 1 : 0) + childMatchCount;
+        }
+
+        private IEnumerable<TreeViewItem> CollectTreeMatches(TreeViewItem node, string query)
+        {
+            if (TreeTextContains(GetTreeItemText(node), query))
+                yield return node;
+
+            foreach (var child in node.Items.OfType<TreeViewItem>())
+                foreach (var match in CollectTreeMatches(child, query))
+                    yield return match;
+        }
+
+        private void SelectNextTreeMatch()
+        {
+            var query = MetadataSearchBox.Text.Trim();
+            if (query.Length == 0)
+                return;
+
+            MetadataTree.UpdateLayout();
+
+            var matches = MetadataTree.Items.OfType<TreeViewItem>()
+                .SelectMany(root => CollectTreeMatches(root, query))
+                .Where(item => item.Visibility == Visibility.Visible)
+                .ToList();
+
+            if (matches.Count == 0)
+                return;
+
+            _treeMatchIndex = (_treeMatchIndex + 1) % matches.Count;
+            var target = matches[_treeMatchIndex];
+
+            target.IsSelected = true;
+            target.BringIntoView();
+            MetadataTree.Focus();
         }
 
         private void OnWindowClosing(object? sender, CancelEventArgs e)
@@ -207,6 +347,8 @@ namespace BIS.ERP.Views
         private void BuildMetadataTree()
         {
             MetadataTree.Items.Clear();
+            _treeExpandedBackup.Clear();
+            _treeSearchActive = false;
 
             var rootItem = new TreeViewItem
             {
@@ -365,6 +507,7 @@ namespace BIS.ERP.Views
             };
             rootItem.Items.Add(translationsItem);
             MetadataTree.Items.Add(rootItem);
+            ApplyMetadataTreeSearch();
         }
 
         private void ShowModulesEditor()
