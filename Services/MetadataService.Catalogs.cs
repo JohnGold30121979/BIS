@@ -907,8 +907,42 @@ namespace BIS.ERP.Services
                 existingColumns.Add(field.DbColumnName);
             }
 
+            await RemoveLegacyOrganizationBankFieldsAsync(catalog);
+
             await _context.SaveChangesAsync();
             await EnsurePrimaryOrganizationDataAsync(catalog);
+        }
+
+        /// <summary>
+        /// Легаси-реквизиты организации «Банк»/«БИК»/«Расчетный счет».
+        /// Банки и расчётные счета ведутся в отдельных справочниках
+        /// («Банки», «Расчетные счета организаций»), поэтому из карточки
+        /// организации эти поля убираются как из метаданных, так и из формы.
+        /// Физические колонки оставлены — их читают печатные формы и отчёты.
+        /// </summary>
+        private static readonly string[] LegacyOrganizationBankColumns =
+        {
+            "bank_name",
+            "bank_account",
+            "bic"
+        };
+
+        private async Task RemoveLegacyOrganizationBankFieldsAsync(MetadataObject catalog)
+        {
+            foreach (var column in LegacyOrganizationBankColumns)
+            {
+                var legacyFields = catalog.Fields
+                    .Where(field => string.Equals(field.DbColumnName, column, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var legacyField in legacyFields)
+                {
+                    _context.MetadataFields.Remove(legacyField);
+                    catalog.Fields.Remove(legacyField);
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Из справочника 'Организации' удалён легаси-реквизит '{legacyField.Name}' ({column})");
+                }
+            }
         }
 
         public async Task<string> GetPrimaryOrganizationIdAsync()

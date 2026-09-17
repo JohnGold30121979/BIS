@@ -774,40 +774,7 @@ public partial class MetadataService
           IsRequired = false,
           Order = 13,
           MetadataObjectId = metadataObjectId
-      },
-      new MetadataField
-      {
-          Id = Guid.NewGuid(),
-          Name = "Банк",
-          DbColumnName = "bank_name",
-          FieldType = "String",
-          Length = 250,
-          IsRequired = false,
-          Order = 14,
-          MetadataObjectId = metadataObjectId
-      },
-      new MetadataField
-      {
-          Id = Guid.NewGuid(),
-          Name = "Расчетный счет",
-          DbColumnName = "bank_account",
-          FieldType = "String",
-          Length = 100,
-          IsRequired = false,
-          Order = 15,
-          MetadataObjectId = metadataObjectId
-      },
-      new MetadataField
-      {
-          Id = Guid.NewGuid(),
-          Name = "БИК",
-          DbColumnName = "bic",
-          FieldType = "String",
-          Length = 50,
-          IsRequired = false,
-          Order = 16,
-          MetadataObjectId = metadataObjectId
-      },
+      },   
       new MetadataField
       {
           Id = Guid.NewGuid(),

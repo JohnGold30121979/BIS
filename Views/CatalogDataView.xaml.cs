@@ -99,20 +99,125 @@ namespace BIS.ERP.Views
             string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, "catalog_organizations", StringComparison.OrdinalIgnoreCase);
 
+        private MetadataObject? _bankAccountsCatalog;
+        private Dictionary<string, Dictionary<string, string>>? _bankAccountsReferenceMaps;
+        private int _organizationAccountsRequestId;
+        private string _currentOrganizationId = string.Empty;
+        private List<Dictionary<string, object>> _organizationAccountRows = new();
+
         private Border? OrganizationDetailsPanelControl => FindName("OrganizationDetailsPanel") as Border;
 
-        private ItemsControl? OrganizationDetailsItemsControl => FindName("OrganizationDetailsItems") as ItemsControl;
+        private DataGrid? OrganizationDetailsGridControl => FindName("OrganizationDetailsGrid") as DataGrid;
+
+        private TextBlock? OrganizationListHeaderControl => FindName("OrganizationListHeaderText") as TextBlock;
+
+        /// <summary>
+        /// Заголовок группы с таблицей: для справочника «Организации» — имя выбранной
+        /// организации, для остальных справочников — название справочника.
+        /// </summary>
+        private void UpdateOrganizationListHeader(DataRowView? selectedRow)
+        {
+            var header = OrganizationListHeaderControl;
+            if (header == null)
+                return;
+
+            if (!IsOrganizationsCatalog)
+            {
+                header.Text = _catalog.Name;
+                return;
+            }
+
+            var name = selectedRow == null ? string.Empty : GetOrganizationRowName(selectedRow);
+            header.Text = string.IsNullOrWhiteSpace(name)
+                ? "Организации"
+                : $"Организация: {name}";
+        }
+
+        private static string GetOrganizationRowName(DataRowView row)
+        {
+            foreach (var key in new[] { "Наименование", "name", "Полное наименование", "full_name", "Код", "code" })
+            {
+                if (!row.Row.Table.Columns.Contains(key))
+                    continue;
+
+                var value = Convert.ToString(row[key], CultureInfo.CurrentCulture)?.Trim();
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+
+            return string.Empty;
+        }
 
         private void SetOrganizationDetailsSource(IEnumerable<CatalogDetailFieldView>? details)
         {
-            if (OrganizationDetailsItemsControl is { } items)
-                items.ItemsSource = details;
+            var grid = OrganizationDetailsGridControl;
+            if (grid == null)
+                return;
+
+            var fields = details?.ToList();
+            if (fields == null || fields.Count == 0)
+            {
+                grid.ItemsSource = null;
+                return;
+            }
+
+            // Обычный грид: колонки — реквизиты организации, строка — их значения
+            var table = new DataTable();
+            foreach (var field in fields)
+            {
+                var columnName = GetOrganizationDetailColumnName(field.Field);
+                if (!table.Columns.Contains(columnName))
+                    table.Columns.Add(columnName, typeof(string));
+            }
+
+            var row = table.NewRow();
+            foreach (var field in fields)
+            {
+                var columnName = GetOrganizationDetailColumnName(field.Field);
+                if (table.Columns.Contains(columnName))
+                    row[columnName] = field.Value ?? string.Empty;
+            }
+
+            table.Rows.Add(row);
+            grid.ItemsSource = table.DefaultView;
         }
+
+        private static string GetOrganizationDetailColumnName(string? fieldName) =>
+            string.IsNullOrWhiteSpace(fieldName) ? "Реквизит" : fieldName.Trim();
 
         private void SetOrganizationDetailsVisibility(Visibility visibility)
         {
             if (OrganizationDetailsPanelControl is { } panel)
                 panel.Visibility = visibility;
+
+            var isVisible = visibility == Visibility.Visible;
+
+            if (FindName("OrganizationPanelSplitter") is GridSplitter splitter)
+                splitter.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+
+            // Строки 3 (сплиттер) и 4 (панель организации) корневой сетки:
+            // при показе панель получает высоту, при скрытии — строки схлопываются
+            if (RootLayout.RowDefinitions.Count > 4)
+            {
+                var panelRow = RootLayout.RowDefinitions[4];
+
+                RootLayout.RowDefinitions[3].Height = new GridLength(isVisible ? 6 : 0);
+
+                if (!isVisible)
+                {
+                    panelRow.Height = new GridLength(0);
+                }
+                else if (panelRow.ActualHeight <= 0)
+                {
+                    // Первый показ — стартовая высота панели
+                    panelRow.Height = new GridLength(320);
+                }
+                else
+                {
+                    // Сохраняем высоту, выставленную пользователем сплиттером
+                    panelRow.Height = new GridLength(panelRow.ActualHeight);
+                }
+            }
         }
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
@@ -1056,6 +1161,8 @@ namespace BIS.ERP.Views
 
         private void ApplyOrganizationGridPresentation()
         {
+            UpdateOrganizationListHeader(DataGrid.SelectedItem as DataRowView);
+
             if (!IsOrganizationsCatalog)
             {
                 SetOrganizationDetailsVisibility(Visibility.Collapsed);
@@ -1070,12 +1177,18 @@ namespace BIS.ERP.Views
         private void UpdateOrganizationDetailsPanel()
         {
             if (!IsOrganizationsCatalog)
+            {
+                ClearOrganizationAccounts();
+                UpdateOrganizationListHeader(null);
                 return;
+            }
 
             if (DataGrid.SelectedItem is not DataRowView selectedRow || _dataTable == null)
             {
                 SetOrganizationDetailsSource(null);
                 SetOrganizationDetailsVisibility(Visibility.Collapsed);
+                ClearOrganizationAccounts();
+                UpdateOrganizationListHeader(null);
                 return;
             }
 
@@ -1091,6 +1204,380 @@ namespace BIS.ERP.Views
 
             SetOrganizationDetailsSource(details);
             SetOrganizationDetailsVisibility(details.Count > 0 ? Visibility.Visible : Visibility.Collapsed);
+
+            UpdateOrganizationListHeader(selectedRow);
+            _ = RefreshOrganizationAccountsAsync(selectedRow);
+        }
+
+        private DataGrid? OrganizationAccountsGridControl => FindName("OrganizationAccountsGrid") as DataGrid;
+
+        private TextBlock? OrganizationAccountsSummaryControl => FindName("OrganizationAccountsSummary") as TextBlock;
+
+        private void ClearOrganizationAccounts()
+        {
+            _organizationAccountsRequestId++;
+            _currentOrganizationId = string.Empty;
+            _organizationAccountRows.Clear();
+            if (OrganizationAccountsGridControl is { } grid)
+                grid.ItemsSource = null;
+            if (OrganizationAccountsSummaryControl is { } summary)
+                summary.Text = string.Empty;
+            UpdateOrganizationAccountButtons();
+        }
+
+        /// <summary>
+        /// Показывает расчётные счета выбранной организации из справочника
+        /// «Расчетные счета организаций» (связь через реквизит «Организация»).
+        /// </summary>
+        private async Task RefreshOrganizationAccountsAsync(DataRowView selectedRow)
+        {
+            _currentOrganizationId = selectedRow.Row.Table.Columns.Contains("Id")
+                ? Convert.ToString(selectedRow["Id"], CultureInfo.InvariantCulture)?.Trim() ?? string.Empty
+                : string.Empty;
+
+            await RefreshOrganizationAccountsAsync(_currentOrganizationId);
+        }
+
+        private async Task RefreshOrganizationAccountsAsync(string organizationId)
+        {
+            var requestId = ++_organizationAccountsRequestId;
+            var grid = OrganizationAccountsGridControl;
+            var summary = OrganizationAccountsSummaryControl;
+
+            if (grid == null)
+                return;
+
+            grid.ItemsSource = null;
+            _organizationAccountRows.Clear();
+            UpdateOrganizationAccountButtons();
+
+            if (string.IsNullOrWhiteSpace(organizationId))
+            {
+                if (summary != null)
+                    summary.Text = string.Empty;
+                return;
+            }
+
+            try
+            {
+                var accountsCatalog = await GetBankAccountsCatalogAsync();
+                if (accountsCatalog == null)
+                {
+                    if (summary != null)
+                        summary.Text = "Справочник «Расчетные счета организаций» не найден";
+                    return;
+                }
+
+                var rows = await _metadataService.GetCatalogDataAsync(accountsCatalog.Id);
+                var referenceMaps = await GetBankAccountsReferenceMapsAsync(accountsCatalog);
+
+                // Пока грузились данные, пользователь мог выбрать другую организацию
+                if (requestId != _organizationAccountsRequestId)
+                    return;
+
+                var organizationAccounts = rows
+                    .Where(row => IsOrganizationAccountRow(row, organizationId))
+                    .ToList();
+
+                _organizationAccountRows = organizationAccounts;
+
+                var table = new DataTable();
+                table.Columns.Add("Id", typeof(Guid));
+                table.Columns.Add("Счёт", typeof(string));
+                table.Columns.Add("Банк", typeof(string));
+                table.Columns.Add("БИК", typeof(string));
+                table.Columns.Add("Валюта", typeof(string));
+                table.Columns.Add("Основной", typeof(string));
+                table.Columns.Add("Остаток", typeof(string));
+
+                foreach (var row in organizationAccounts)
+                {
+                    table.Rows.Add(
+                        TryReadGuid(GetAccountRawValue(row, "Id"), out var accountId) ? accountId : Guid.Empty,
+                        GetAccountCellText(row, "Счет", "account_number"),
+                        GetAccountReferenceText(referenceMaps, "Банк", "bank_id", row),
+                        GetAccountCellText(row, "БИК", "bic"),
+                        GetAccountReferenceText(referenceMaps, "Валюта", "currency_id", row),
+                        FormatOrganizationDetailValue(GetAccountRawValue(row, "Основной счет", "is_main")),
+                        FormatOrganizationDetailValue(GetAccountRawValue(row, "Текущий остаток", "current_balance")));
+                }
+
+                grid.ItemsSource = table.DefaultView;
+                UpdateOrganizationAccountButtons();
+
+                if (summary != null)
+                {
+                    summary.Text = organizationAccounts.Count == 0
+                        ? "Счета не добавлены. Добавьте их в справочнике «Расчетные счета организаций»."
+                        : $"Всего счетов: {organizationAccounts.Count}";
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Не удалось загрузить расчётные счета организации: {ex.Message}");
+                if (summary != null)
+                    summary.Text = "Не удалось загрузить расчётные счета организации";
+            }
+        }
+
+        private void OrganizationAccountsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+            UpdateOrganizationAccountButtons();
+
+        private void UpdateOrganizationAccountButtons()
+        {
+            var hasSelection = OrganizationAccountsGridControl?.SelectedItem != null;
+            if (FindName("OrganizationAccountEditButton") is Button editButton)
+                editButton.IsEnabled = hasSelection;
+            if (FindName("OrganizationAccountDeleteButton") is Button deleteButton)
+                deleteButton.IsEnabled = hasSelection;
+        }
+
+        private (Guid Id, Dictionary<string, object>? Row) GetSelectedOrganizationAccount()
+        {
+            if (OrganizationAccountsGridControl?.SelectedItem is not DataRowView selectedRow)
+                return (Guid.Empty, null);
+
+            if (!selectedRow.Row.Table.Columns.Contains("Id") ||
+                !TryReadGuid(selectedRow["Id"], out var accountId) ||
+                accountId == Guid.Empty)
+            {
+                return (Guid.Empty, null);
+            }
+
+            var raw = _organizationAccountRows.FirstOrDefault(row =>
+                TryReadGuid(GetAccountRawValue(row, "Id"), out var id) && id == accountId);
+
+            return (accountId, raw);
+        }
+
+        private async void OrganizationAccountAddButton_Click(object sender, RoutedEventArgs e)
+        {
+            var accountsCatalog = await GetBankAccountsCatalogAsync();
+            if (accountsCatalog == null)
+            {
+                MessageBox.Show("Справочник «Расчетные счета организаций» не найден.", "Расчётные счета",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var initialData = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(_currentOrganizationId))
+            {
+                var organizationField = accountsCatalog.Fields.FirstOrDefault(field =>
+                    field.DbColumnName.Equals("organization_id", StringComparison.OrdinalIgnoreCase));
+                initialData[organizationField?.Name ?? "Организация"] = _currentOrganizationId;
+            }
+
+            var dialog = new CatalogItemDialog(accountsCatalog, _metadataService, initialData, isNewRecord: true)
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this), dialog, "Добавление: Расчётный счёт") != true)
+            {
+                return;
+            }
+
+            try
+            {
+                StatusText.Text = "💾 Сохранение...";
+                ProgressText.Text = "⏳ Сохранение...";
+                await _metadataService.AddCatalogItemAsync(accountsCatalog.Id, dialog.ItemData);
+                await RefreshOrganizationAccountsAsync(_currentOrganizationId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProgressText.Text = string.Empty;
+                StatusText.Text = "✅ Готово";
+            }
+        }
+
+        private async void OrganizationAccountEditButton_Click(object sender, RoutedEventArgs e)
+        {
+            var (accountId, rawRow) = GetSelectedOrganizationAccount();
+            if (accountId == Guid.Empty)
+                return;
+
+            var accountsCatalog = await GetBankAccountsCatalogAsync();
+            if (accountsCatalog == null)
+                return;
+
+            var existingData = rawRow != null
+                ? new Dictionary<string, object>(rawRow, StringComparer.OrdinalIgnoreCase)
+                : null;
+
+            var dialog = new CatalogItemDialog(accountsCatalog, _metadataService, existingData)
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this), dialog, "Редактирование: Расчётный счёт") != true)
+            {
+                return;
+            }
+
+            try
+            {
+                StatusText.Text = "💾 Обновление...";
+                ProgressText.Text = "⏳ Обновление...";
+                await _metadataService.UpdateDynamicRecordAsync(accountsCatalog.Id, accountId, dialog.ItemData);
+                await RefreshOrganizationAccountsAsync(_currentOrganizationId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка обновления: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProgressText.Text = string.Empty;
+                StatusText.Text = "✅ Готово";
+            }
+        }
+
+        private async void OrganizationAccountDeleteButton_Click(object sender, RoutedEventArgs e)
+        {
+            var (accountId, rawRow) = GetSelectedOrganizationAccount();
+            if (accountId == Guid.Empty)
+                return;
+
+            var accountsCatalog = await GetBankAccountsCatalogAsync();
+            if (accountsCatalog == null)
+                return;
+
+            var accountNumber = rawRow != null
+                ? GetAccountCellText(rawRow, "Счет", "account_number")
+                : string.Empty;
+
+            var question = string.IsNullOrWhiteSpace(accountNumber)
+                ? "Удалить выбранный расчётный счёт?"
+                : $"Удалить расчётный счёт '{accountNumber}'?";
+
+            if (MessageBox.Show($"{question}\nВосстановление будет невозможно!", "Подтверждение удаления",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                StatusText.Text = "🗑️ Удаление...";
+                ProgressText.Text = "⏳ Удаление...";
+                await _metadataService.DeleteDynamicRecordAsync(accountsCatalog.Id, accountId);
+                await RefreshOrganizationAccountsAsync(_currentOrganizationId);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                ProgressText.Text = string.Empty;
+                StatusText.Text = "✅ Готово";
+            }
+        }
+
+        private async Task<MetadataObject?> GetBankAccountsCatalogAsync()
+        {
+            if (_bankAccountsCatalog != null)
+                return _bankAccountsCatalog;
+
+            if (_catalogsDict != null &&
+                _catalogsDict.TryGetValue("Расчетные счета организаций", out var fromDictionary))
+            {
+                _bankAccountsCatalog = fromDictionary;
+                return _bankAccountsCatalog;
+            }
+
+            _bankAccountsCatalog = await _metadataService.GetCatalogByNameAsync("Расчетные счета организаций");
+            return _bankAccountsCatalog;
+        }
+
+        private async Task<Dictionary<string, Dictionary<string, string>>> GetBankAccountsReferenceMapsAsync(
+            MetadataObject accountsCatalog)
+        {
+            if (_bankAccountsReferenceMaps != null)
+                return _bankAccountsReferenceMaps;
+
+            var maps = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            var referenceFields = accountsCatalog.Fields
+                .Where(field => !string.IsNullOrEmpty(field.ReferenceCatalog))
+                .GroupBy(field => field.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderBy(field => field.Order).First())
+                .ToList();
+
+            foreach (var field in referenceFields)
+            {
+                MetadataObject? referenceCatalog = null;
+                if (_catalogsDict != null)
+                    _catalogsDict.TryGetValue(field.ReferenceCatalog!, out referenceCatalog);
+
+                referenceCatalog ??= await _metadataService.GetCatalogByNameAsync(field.ReferenceCatalog!);
+                if (referenceCatalog == null)
+                    continue;
+
+                var rows = await _metadataService.GetCatalogDataAsync(referenceCatalog.Id);
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var row in rows)
+                {
+                    var displayValue = GetDisplayValueFromRow(row, field, referenceCatalog.Name);
+                    foreach (var key in GetReferenceLookupKeys(row))
+                    {
+                        if (!map.ContainsKey(key))
+                            map[key] = displayValue;
+                    }
+                }
+
+                maps[field.Name] = map;
+            }
+
+            _bankAccountsReferenceMaps = maps;
+            return maps;
+        }
+
+        private static bool IsOrganizationAccountRow(Dictionary<string, object> row, string organizationId)
+        {
+            var rawValue = GetAccountRawValue(row, "organization_id", "Организация", "organization");
+            return rawValue != null &&
+                   TryReadGuid(rawValue, out var id) &&
+                   string.Equals(id.ToString(), organizationId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static object? GetAccountRawValue(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value;
+            }
+
+            return null;
+        }
+
+        private static string GetAccountCellText(Dictionary<string, object> row, params string[] keys) =>
+            FormatOrganizationDetailValue(GetAccountRawValue(row, keys));
+
+        private static string GetAccountReferenceText(
+            Dictionary<string, Dictionary<string, string>> maps,
+            string fieldName,
+            string dbColumnName,
+            Dictionary<string, object> row)
+        {
+            if (!maps.TryGetValue(fieldName, out var map))
+                return string.Empty;
+
+            var key = NormalizeReferenceKey(GetAccountRawValue(row, fieldName, dbColumnName));
+            return !string.IsNullOrWhiteSpace(key) && map.TryGetValue(key, out var displayValue)
+                ? displayValue
+                : string.Empty;
         }
 
         private static bool ShouldShowOrganizationDetailColumn(string columnName)

@@ -3,13 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Loaded="UserControl_Loaded">
 
-    <Grid Margin="0">
+    <Grid x:Name="RootLayout" Margin="0">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>                <!-- 0: заголовок и кнопки -->
+            <RowDefinition Height="Auto"/>                <!-- 1: поиск -->
+            <RowDefinition Height="*" MinHeight="120"/>   <!-- 2: таблица справочника -->
+            <RowDefinition Height="0"/>                   <!-- 3: сплиттер панели организации -->
+            <RowDefinition Height="0"/>                   <!-- 4: панель организации -->
+            <RowDefinition Height="Auto"/>                <!-- 5: статус бар -->
         </Grid.RowDefinitions>
 
         <!-- Заголовок и кнопки -->
@@ -121,9 +122,23 @@
             </Grid>
         </Border>
 
-        <!-- Таблица данных -->
-        <DataGrid x:Name="DataGrid" Grid.Row="2" 
-                  AutoGenerateColumns="False"
+        <!-- Таблица данных. Заголовок группы — имя выбранной организации -->
+        <GroupBox x:Name="OrganizationListGroup"
+                  Grid.Row="2"
+                  Background="White"
+                  BorderBrush="#D6E2EC"
+                  BorderThickness="1"
+                  Padding="4">
+            <GroupBox.Header>
+                <TextBlock x:Name="OrganizationListHeaderText"
+                           Text="Организации"
+                           Foreground="#2C3E50"
+                           FontWeight="Bold"
+                           FontSize="12"
+                           Margin="0,0,0,2"/>
+            </GroupBox.Header>
+            <DataGrid x:Name="DataGrid"
+                      AutoGenerateColumns="False"
                   CanUserResizeColumns="True"
                   CanUserAddRows="False"
                   CanUserDeleteRows="False"
@@ -157,11 +172,27 @@
                     <Setter Property="FontWeight" Value="Bold"/>
                 </Style>
             </DataGrid.ColumnHeaderStyle>
-        </DataGrid>
+            </DataGrid>
+        </GroupBox>
 
-        <!-- Дополнительные поля выбранной организации -->
+        <!-- Сплиттер: таблица справочника / панель выбранной организации -->
+        <GridSplitter x:Name="OrganizationPanelSplitter"
+                      Grid.Row="3"
+                      Height="6"
+                      Margin="0,6,0,0"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
+                      Background="#D6E2EC"
+                      ResizeDirection="Rows"
+                      ResizeBehavior="PreviousAndNext"
+                      ShowsPreview="True"
+                      Cursor="SizeNS"
+                      Visibility="Collapsed"/>
+
+        <!-- Панель выбранной организации -->
         <Border x:Name="OrganizationDetailsPanel"
-                Grid.Row="3"
+                Grid.Row="4"
+                MinHeight="220"
                 Background="#F8FBFE"
                 BorderBrush="#D6E2EC"
                 BorderThickness="1"
@@ -169,49 +200,127 @@
                 Padding="10"
                 Margin="0,10,0,0"
                 Visibility="Collapsed">
-            <DockPanel LastChildFill="True">
-                <TextBlock DockPanel.Dock="Top"
-                           Text="Дополнительные поля организации"
-                           Foreground="#2C3E50"
-                           FontWeight="Bold"
-                           FontSize="12"
-                           Margin="0,0,0,8"/>
-                <ItemsControl x:Name="OrganizationDetailsItems">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Width="260"
-                                    MinHeight="48"
-                                    Background="White"
-                                    BorderBrush="#D6E2EC"
-                                    BorderThickness="1"
-                                    CornerRadius="6"
-                                    Padding="8,6"
-                                    Margin="0,0,8,8">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Field}"
-                                               Foreground="#526B7A"
-                                               FontSize="11"
-                                               FontWeight="SemiBold"
-                                               TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding Value}"
-                                               Foreground="#102A43"
-                                               FontSize="12"
-                                               Margin="0,3,0,0"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </DockPanel>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="60"/> <!-- 0: группа «Дополнительные поля» -->
+                    <RowDefinition Height="6"/>                <!-- 1: сплиттер -->
+                    <RowDefinition Height="*" MinHeight="80"/> <!-- 2: группа «Расчётные счета» -->
+                </Grid.RowDefinitions>
+
+                <GroupBox Grid.Row="0"
+                          Background="White"
+                          BorderBrush="#D6E2EC"
+                          Padding="4">
+                    <GroupBox.Header>
+                        <TextBlock Text="Дополнительные поля организации"
+                                   Foreground="#2C3E50"
+                                   FontWeight="Bold"
+                                   FontSize="12"/>
+                    </GroupBox.Header>
+                    <!-- Обычный грид: колонки — реквизиты, строка — значения организации -->
+                    <DataGrid x:Name="OrganizationDetailsGrid"
+                              AutoGenerateColumns="True"
+                          CanUserSortColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          Background="White"
+                          BorderBrush="#D6E2EC"
+                          BorderThickness="1"
+                          FontSize="12"
+                          RowHeight="22"
+                          MinHeight="60"
+                          SelectionMode="Single"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Auto"/>
+                </GroupBox>
+
+                <GridSplitter Grid.Row="1"
+                              Height="6"
+                              Margin="0,4,0,4"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              Background="#D6E2EC"
+                              ResizeDirection="Rows"
+                              ResizeBehavior="PreviousAndNext"
+                              ShowsPreview="True"
+                              Cursor="SizeNS"/>
+
+                <GroupBox Grid.Row="2"
+                          Background="White"
+                          BorderBrush="#D6E2EC"
+                          Padding="4">
+                    <GroupBox.Header>
+                        <TextBlock Text="Расчётные счета организации"
+                                   Foreground="#2C3E50"
+                                   FontWeight="Bold"
+                                   FontSize="12"/>
+                    </GroupBox.Header>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>             <!-- 0: кнопки -->
+                            <RowDefinition Height="Auto"/>             <!-- 1: итог -->
+                            <RowDefinition Height="*" MinHeight="80"/> <!-- 2: грид счетов -->
+                        </Grid.RowDefinitions>
+
+                <WrapPanel Grid.Row="0" Margin="0,0,0,6">
+                    <Button x:Name="OrganizationAccountAddButton" Content="➕ Добавить счёт"
+                            MinWidth="130" Height="30" Margin="0,0,6,0"
+                            Background="#27AE60" Foreground="White"
+                            Click="OrganizationAccountAddButton_Click"/>
+                    <Button x:Name="OrganizationAccountEditButton" Content="✏️ Изменить счёт"
+                            MinWidth="130" Height="30" Margin="0,0,6,0"
+                            Background="#3498DB" Foreground="White"
+                            Click="OrganizationAccountEditButton_Click"
+                            IsEnabled="False"/>
+                    <Button x:Name="OrganizationAccountDeleteButton" Content="🗑️ Удалить счёт"
+                            MinWidth="130" Height="30"
+                            Background="#E74C3C" Foreground="White"
+                            Click="OrganizationAccountDeleteButton_Click"
+                            IsEnabled="False"/>
+                </WrapPanel>
+                <TextBlock x:Name="OrganizationAccountsSummary"
+                           Grid.Row="1"
+                           Text=""
+                           Foreground="#526B7A"
+                           FontSize="11"
+                           Margin="0,0,0,6"/>
+                <DataGrid x:Name="OrganizationAccountsGrid"
+                          Grid.Row="2"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          Background="White"
+                          BorderBrush="#D6E2EC"
+                          BorderThickness="1"
+                          FontSize="12"
+                          RowHeight="24"
+                          MinHeight="80"
+                          SelectionMode="Single"
+                          SelectionChanged="OrganizationAccountsGrid_SelectionChanged"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Auto">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Binding="{Binding [Id]}" Visibility="Collapsed"/>
+                        <DataGridTextColumn Header="Счёт" Binding="{Binding [Счёт]}" Width="150"/>
+                        <DataGridTextColumn Header="Банк" Binding="{Binding [Банк]}" Width="230"/>
+                        <DataGridTextColumn Header="БИК" Binding="{Binding [БИК]}" Width="80"/>
+                        <DataGridTextColumn Header="Валюта" Binding="{Binding [Валюта]}" Width="150"/>
+                        <DataGridTextColumn Header="Основной" Binding="{Binding [Основной]}" Width="90"/>
+                        <DataGridTextColumn Header="Остаток" Binding="{Binding [Остаток]}" Width="110"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                    </Grid>
+                </GroupBox>
+            </Grid>
         </Border>
         <!-- Статус бар -->
-        <Border Grid.Row="4" Background="White" CornerRadius="8" Padding="10" Margin="0,10,0,0">
+        <Border Grid.Row="5" Background="White" CornerRadius="8" Padding="10" Margin="0,10,0,0">
             <Grid>
                 <TextBlock x:Name="StatusText" Text="Готово" Foreground="#666" FontSize="11" VerticalAlignment="Center"/>
                 <TextBlock x:Name="ProgressText" Text="" Foreground="#3498DB" FontSize="11" 

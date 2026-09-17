@@ -23,7 +23,16 @@ namespace BIS.ERP.Views
 
         public Dictionary<string, object> ItemData => _itemData;
 
-        public CatalogItemDialog(MetadataObject catalog, MetadataService metadataService, Dictionary<string, object> existingData = null)
+        /// <param name="isNewRecord">
+        /// true — форма открывается для новой записи, даже если переданы значения
+        /// по умолчанию (например, «Организация» при добавлении счёта из карточки
+        /// организации). Тогда в форму подставляются дефолты (валюта — сом).
+        /// </param>
+        public CatalogItemDialog(
+            MetadataObject catalog,
+            MetadataService metadataService,
+            Dictionary<string, object> existingData = null,
+            bool isNewRecord = false)
         {
             InitializeComponent();
             _catalog = catalog;
@@ -31,9 +40,9 @@ namespace BIS.ERP.Views
             _itemData = new Dictionary<string, object>();
             _controls = new Dictionary<string, Control>();
             _referenceCache = new Dictionary<string, Dictionary<Guid, string>>();
-            _isNewRecord = existingData == null;
+            _isNewRecord = existingData == null || isNewRecord;
 
-            DialogTitle.Text = existingData == null
+            DialogTitle.Text = _isNewRecord
                 ? $"Добавление в справочник: {catalog.Name}"
                 : $"Редактирование справочника: {catalog.Name}";
 
@@ -50,6 +59,9 @@ namespace BIS.ERP.Views
                 var catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
                 _assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(_catalog.Id, _catalog.ObjectType);
+
+                // Для новой записи дозаполняем дефолты (валюта расчётного счёта — сом)
+                existingData = await ApplyNewRecordDefaultsAsync(existingData, catalogsDict);
 
                 foreach (var field in GetEditableFields())
                 {
@@ -73,14 +85,6 @@ namespace BIS.ERP.Views
                             GetExistingValue(field, existingData),
                             this,
                             moduleCodeOrName: _assignedModuleName);
-                    }
-                    else if (ShouldUseOrganizationBankPicker(field, catalogsDict))
-                    {
-                        inputControl = await CreateOrganizationBankPickerControlAsync(field, catalogsDict, existingData);
-                    }
-                    else if (ShouldUseOrganizationBankAccountPicker(field, catalogsDict))
-                    {
-                        inputControl = await CreateOrganizationBankAccountPickerControlAsync(field, catalogsDict, existingData);
                     }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
                     else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -201,78 +205,11 @@ namespace BIS.ERP.Views
                    _accountAnalytics?.Accounts.Count > 0;
         }
 
-        private bool ShouldUseOrganizationBankPicker(
-            MetadataField field,
-            IReadOnlyDictionary<string, MetadataObject> catalogsDict)
-        {
-            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
-                   (field.Name.Equals("Банк", StringComparison.OrdinalIgnoreCase) ||
-                    field.DbColumnName.Equals("bank_name", StringComparison.OrdinalIgnoreCase)) &&
-                   catalogsDict.ContainsKey("Банки");
-        }
-
-        private async Task<Control> CreateOrganizationBankPickerControlAsync(
-            MetadataField field,
-            IReadOnlyDictionary<string, MetadataObject> catalogsDict,
-            Dictionary<string, object> existingData)
-        {
-            var bankPickerField = new MetadataField
-            {
-                Id = field.Id,
-                Name = field.Name,
-                DbColumnName = field.DbColumnName,
-                FieldType = "Reference",
-                ReferenceCatalog = "Банки",
-                IsRequired = field.IsRequired,
-                Order = field.Order,
-                MetadataObjectId = field.MetadataObjectId
-            };
-
-            return await ReferencePickerControlFactory.CreateAsync(
-                _metadataService,
-                bankPickerField,
-                catalogsDict["Банки"],
-                GetExistingValue(field, existingData),
-                this);
-        }
-
-
-        private bool ShouldUseOrganizationBankAccountPicker(
-            MetadataField field,
-            IReadOnlyDictionary<string, MetadataObject> catalogsDict)
-        {
-            return string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) &&
-                   (field.Name.Equals("Расчетный счет", StringComparison.OrdinalIgnoreCase) ||
-                    field.DbColumnName.Equals("bank_account", StringComparison.OrdinalIgnoreCase)) &&
-                   catalogsDict.ContainsKey("Расчетные счета организаций");
-        }
-
-        private async Task<Control> CreateOrganizationBankAccountPickerControlAsync(
-            MetadataField field,
-            IReadOnlyDictionary<string, MetadataObject> catalogsDict,
-            Dictionary<string, object> existingData)
-        {
-            var bankAccountPickerField = new MetadataField
-            {
-                Id = field.Id,
-                Name = field.Name,
-                DbColumnName = field.DbColumnName,
-                FieldType = "Reference",
-                ReferenceCatalog = "Расчетные счета организаций",
-                DisplayPattern = "{Счет}",
-                DisplayFields = "Счет",
-                IsRequired = field.IsRequired,
-                Order = field.Order,
-                MetadataObjectId = field.MetadataObjectId
-            };
-
-            return await ReferencePickerControlFactory.CreateAsync(
-                _metadataService,
-                bankAccountPickerField,
-                catalogsDict["Расчетные счета организаций"],
-                GetExistingValue(field, existingData),
-                this);
-        }
+        // Пикеры «Банк» и «Расчетный счет» для карточки организации удалены:
+        // эти реквизиты больше не входят в метаданные организаций.
+        // Банк, счёт и валюта выбираются в справочниках «Банки» и
+        // «Расчетные счета организаций» (в карточке счёта — «Организация»,
+        // «Банк», «Счет», «Валюта»).
 
         private static object? GetExistingValue(MetadataField field, Dictionary<string, object> existingData)
         {
@@ -988,6 +925,100 @@ namespace BIS.ERP.Views
             {
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        /// <summary>
+        /// Дефолты новой записи. Для справочника расчётных счетов сразу выбирается
+        /// валюта по умолчанию — базовая (киргизский сом): счёт не должен
+        /// сохраняться без валюты.
+        /// </summary>
+        private async Task<Dictionary<string, object>> ApplyNewRecordDefaultsAsync(
+            Dictionary<string, object> existingData,
+            IReadOnlyDictionary<string, MetadataObject> catalogsDict)
+        {
+            if (!_isNewRecord)
+                return existingData;
+
+            var result = existingData == null
+                ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, object>(existingData, StringComparer.OrdinalIgnoreCase);
+
+            if (!IsBankAccountsCatalog())
+                return result;
+
+            var currencyField = GetEditableFields().FirstOrDefault(field =>
+                string.Equals(field.DbColumnName, "currency_id", StringComparison.OrdinalIgnoreCase));
+
+            if (currencyField == null || HasMeaningfulValue(result, currencyField))
+                return result;
+
+            var defaultCurrencyId = await ResolveDefaultCurrencyIdAsync(catalogsDict);
+            if (!string.IsNullOrWhiteSpace(defaultCurrencyId))
+                result[currencyField.Name] = defaultCurrencyId;
+
+            return result;
+        }
+
+        private bool IsBankAccountsCatalog() =>
+            string.Equals(_catalog.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase);
+
+        private async Task<string?> ResolveDefaultCurrencyIdAsync(
+            IReadOnlyDictionary<string, MetadataObject> catalogsDict)
+        {
+            if (catalogsDict == null || !catalogsDict.TryGetValue("Справочник валют", out var currenciesCatalog))
+                return null;
+
+            var rows = await _metadataService.GetCatalogDataAsync(currenciesCatalog.Id);
+            if (rows.Count == 0)
+                return null;
+
+            // 1) базовая валюта (киргизский сом), 2) страховка по коду KGS
+            var baseRow = rows.FirstOrDefault(row => IsTrueFlag(GetRowValue(row, "is_base", "Основная", "Базовая")));
+            var row = baseRow ?? rows.FirstOrDefault(candidate =>
+                string.Equals(GetRowValue(candidate, "code", "Код")?.ToString()?.Trim(), "KGS",
+                    StringComparison.OrdinalIgnoreCase));
+
+            return row == null ? null : GetRowValue(row, "Id")?.ToString();
+        }
+
+        private static object? GetRowValue(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                    return value;
+            }
+
+            return null;
+        }
+
+        private static bool IsTrueFlag(object? value) =>
+            value switch
+            {
+                bool flag => flag,
+                string text => text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                               text == "1" ||
+                               text.Equals("Да", StringComparison.OrdinalIgnoreCase),
+                _ => false
+            };
+
+        private static bool HasMeaningfulValue(IReadOnlyDictionary<string, object> data, MetadataField field)
+        {
+            object? value = null;
+            if (!string.IsNullOrWhiteSpace(field.Name))
+                data.TryGetValue(field.Name, out value);
+
+            if (value == null && !string.IsNullOrWhiteSpace(field.DbColumnName))
+                data.TryGetValue(field.DbColumnName, out value);
+
+            return value switch
+            {
+                null => false,
+                DBNull => false,
+                string text => !string.IsNullOrWhiteSpace(text),
+                _ => true
+            };
         }
 
         private bool ShouldStoreReferenceDisplayValue(MetadataField field)

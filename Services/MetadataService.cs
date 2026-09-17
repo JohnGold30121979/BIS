@@ -479,6 +479,10 @@ namespace BIS.ERP.Services
 
             if (catalog == null) throw new Exception("Справочник не найден");
 
+            // Дефолты записи (в т.ч. валюта «Киргизский сом» для расчётного счёта):
+            // этот путь добавления используется справочниками, а не документами.
+            await ApplyCreateRecordDefaultsAsync(catalog, itemData);
+
             var columns = new List<string>();
             var values = new List<string>();
             var parameters = new Dictionary<string, object>();
@@ -1187,7 +1191,7 @@ namespace BIS.ERP.Services
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
-            ApplyCreateRecordDefaults(metadata, data);
+            await ApplyCreateRecordDefaultsAsync(metadata, data);
 
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
@@ -1325,7 +1329,7 @@ namespace BIS.ERP.Services
             }
         }
 
-        private static void ApplyCreateRecordDefaults(MetadataObject metadata, Dictionary<string, object> data)
+        private async Task ApplyCreateRecordDefaultsAsync(MetadataObject metadata, Dictionary<string, object> data)
         {
             if (!IsBankAccountsCatalog(metadata))
                 return;
@@ -1333,6 +1337,86 @@ namespace BIS.ERP.Services
             SetDefaultIfMissing(data, metadata, "current_balance", 0m);
             SetDefaultIfMissing(data, metadata, "is_main", false);
             SetDefaultIfMissing(data, metadata, "is_active", true);
+
+            // Расчётный счёт не должен сохраняться без валюты: если валюта не выбрана,
+            // подставляем валюту по умолчанию (базовую — киргизский сом).
+            await ApplyDefaultCurrencyAsync(metadata, data);
+        }
+
+        private async Task ApplyDefaultCurrencyAsync(MetadataObject metadata, Dictionary<string, object> data)
+        {
+            var currencyField = metadata.Fields
+                .OrderBy(item => item.Order)
+                .FirstOrDefault(item =>
+                    string.Equals(item.DbColumnName, "currency_id", StringComparison.OrdinalIgnoreCase));
+
+            if (currencyField == null || HasUsableFieldValue(data, currencyField))
+                return;
+
+            var currencyId = await GetDefaultCurrencyIdAsync();
+            if (currencyId == null)
+            {
+                throw new Exception(
+                    "Не выбрана валюта счёта, а валюта по умолчанию не найдена. " +
+                    "Заполните справочник 'Справочник валют' (базовая валюта или код KGS).");
+            }
+
+            data[currencyField.Name] = currencyId.Value.ToString();
+        }
+
+        private async Task<Guid?> GetDefaultCurrencyIdAsync()
+        {
+            // 1) Базовая валюта (is_base = true) — по умолчанию киргизский сом.
+            var baseId = await TryReadCurrencyIdAsync(
+                "SELECT \"Id\" FROM \"catalog_currencies\" WHERE COALESCE(\"is_base\", false) = true ORDER BY \"code\" LIMIT 1");
+            if (baseId != null)
+                return baseId;
+
+            // 2) Валюта с кодом KGS — страховка, если базовая не отмечена.
+            return await TryReadCurrencyIdAsync(
+                "SELECT \"Id\" FROM \"catalog_currencies\" WHERE UPPER(\"code\") = 'KGS' LIMIT 1");
+        }
+
+        private async Task<Guid?> TryReadCurrencyIdAsync(string sql)
+        {
+            try
+            {
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = sql;
+
+                await _context.Database.OpenConnectionAsync();
+                var value = await command.ExecuteScalarAsync();
+                await _context.Database.CloseConnectionAsync();
+
+                if (value == null || value == DBNull.Value)
+                    return null;
+
+                return Guid.TryParse(value.ToString(), out var id) ? id : null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Не удалось получить валюту по умолчанию: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Значение поля считается заполненным, только если оно не null, не DBNull
+        /// и не пустая строка. Важно для дефолтов: диалог добавляет в данные все
+        /// поля с DBNull.Value, из-за чего HasFieldValue давал ложное «заполнено».
+        /// </summary>
+        private static bool HasUsableFieldValue(IReadOnlyDictionary<string, object> data, MetadataField field)
+        {
+            if (!TryGetFieldValue(data, field, out var value))
+                return false;
+
+            return value switch
+            {
+                null => false,
+                DBNull => false,
+                string text => !string.IsNullOrWhiteSpace(text),
+                _ => true
+            };
         }
 
         private static void SetDefaultIfMissing(
