@@ -105,6 +105,15 @@ namespace BIS.ERP.Views
         private string _currentOrganizationId = string.Empty;
         private List<Dictionary<string, object>> _organizationAccountRows = new();
 
+        // Панель организации: стартовая высота и минимально допустимая высота.
+        // Стартовая высота подобрана так, чтобы грид «Расчётные счета организации»
+        // показывал несколько строк сразу (см. дефект: грид счетов показывал одну
+        // строку, хотя счетов у организации несколько).
+        private const double OrganizationPanelDefaultHeight = 380;
+        private const double OrganizationPanelMinHeight = 240;
+        private const double OrganizationListMinHeight = 120;
+        private bool _organizationPanelHeightInitialized;
+
         private Border? OrganizationDetailsPanelControl => FindName("OrganizationDetailsPanel") as Border;
 
         private DataGrid? OrganizationDetailsGridControl => FindName("OrganizationDetailsGrid") as DataGrid;
@@ -207,17 +216,51 @@ namespace BIS.ERP.Views
                 {
                     panelRow.Height = new GridLength(0);
                 }
-                else if (panelRow.ActualHeight <= 0)
+                else if (!_organizationPanelHeightInitialized)
                 {
-                    // Первый показ — стартовая высота панели
-                    panelRow.Height = new GridLength(320);
+                    // Первый показ — стартовая высота панели, ограниченная окном.
+                    _organizationPanelHeightInitialized = true;
+
+                    var panelHeight = Math.Min(
+                        OrganizationPanelDefaultHeight,
+                        GetOrganizationPanelAvailableHeight());
+
+                    panelRow.Height = new GridLength(
+                        Math.Max(OrganizationPanelMinHeight, panelHeight),
+                        GridUnitType.Pixel);
                 }
-                else
-                {
-                    // Сохраняем высоту, выставленную пользователем сплиттером
-                    panelRow.Height = new GridLength(panelRow.ActualHeight);
-                }
+                // При последующих показах высоту панели НЕ перезаписываем:
+                // её задаёт пользователь сплиттером (строка 3 корневой сетки).
             }
+        }
+
+        /// <summary>
+        /// Максимальная высота панели организации, при которой строка списка
+        /// организаций (минимум 120px) и статус-бар остаются видимыми целиком.
+        /// </summary>
+        private double GetOrganizationPanelAvailableHeight()
+        {
+            var total = RootLayout.ActualHeight;
+            if (total <= 0 || double.IsNaN(total) || double.IsInfinity(total))
+                return OrganizationPanelDefaultHeight;
+
+            var fixedRows = 0d;
+            for (var i = 0; i < RootLayout.RowDefinitions.Count; i++)
+            {
+                // 2 — звёздная строка списка организаций (учитываем её минимум),
+                // 4 — сама панель организации.
+                if (i == 2 || i == 4)
+                    continue;
+
+                var row = RootLayout.RowDefinitions[i];
+                var actual = row.ActualHeight;
+                if (actual > 0 && !double.IsNaN(actual) && !double.IsInfinity(actual))
+                    fixedRows += actual;
+                else if (row.Height.IsAbsolute)
+                    fixedRows += row.Height.Value;
+            }
+
+            return Math.Max(OrganizationPanelMinHeight, total - fixedRows - OrganizationListMinHeight);
         }
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
