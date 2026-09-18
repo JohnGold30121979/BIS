@@ -39,7 +39,7 @@
                     <TextBlock x:Name="DescriptionText" Foreground="#666" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
 
-                <WrapPanel Grid.Row="1" HorizontalAlignment="Right" Margin="0,8,0,0">
+                <WrapPanel Grid.Row="1" HorizontalAlignment="Left" Margin="0,8,0,0">
                     <Button x:Name="AddButton" Content="➕ Добавить"
                             MinWidth="108" Height="32" Margin="4,2"
                             Background="#27AE60" Foreground="White" Click="OnAddClick"/>
