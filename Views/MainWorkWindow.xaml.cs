@@ -2122,6 +2122,13 @@ namespace BIS.ERP
 
         #region Drag & Drop
 
+        // Точка нажатия левой кнопки: по ней PreviewMouseMove решает,
+        // начинать ли перетаскивание узла (порог SystemParameters).
+        private void NavigationTree_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            _dragStartPoint = e.GetPosition(null);
+        }
+
         private void NavigationTree_PreviewMouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton == MouseButtonState.Pressed)
