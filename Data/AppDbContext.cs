@@ -8,14 +8,33 @@ public class AppDbContext : DbContext
 {
     private readonly string _connectionString;
 
-    public AppDbContext() : this(AppSettings.Instance.GetMasterConnectionString())
+    // ВАЖНО: конструкторы без DbContextOptions НЕ должны быть public.
+    // DI-контейнер (AddDbContextFactory/AddDbContext) при создании AppDbContext
+    // требует ровно один применимый публичный конструктор; наличие public AppDbContext()
+    // вместе с public AppDbContext(DbContextOptions<AppDbContext>) приводило к
+    // System.InvalidOperationException: "Multiple constructors accepting all given
+    // argument types have been found in type 'BIS.ERP.Data.AppDbContext'".
+    // Внутри сборки используйте new AppDbContext(connectionString) / new AppDbContext();
+    // тестовая сборка BIS.ERP.TESTS.Core имеет доступ через InternalsVisibleTo.
+    internal AppDbContext() : this(AppSettings.Instance.GetMasterConnectionString())
     {
     }
 
-    public AppDbContext(string connectionString)
+    internal AppDbContext(string connectionString)
     {
         _connectionString = connectionString;
     }
+
+    // Единственный публичный конструктор — используется EF Core и DI
+    // (AddDbContextFactory, AddDbContext, инструменты дизайн-времени).
+    public AppDbContext(DbContextOptions<AppDbContext> options)
+        : base(options)
+    {
+        // При использовании этого конструктора параметры провайдера (UseNpgsql и т.д.)
+        // устанавливаются через переданные options; _connectionString используется
+        // только если контекст создаётся через другие конструкторы.
+    }
+
 
     // Существующие DbSet
     public DbSet<InfoBase> InfoBases { get; set; }

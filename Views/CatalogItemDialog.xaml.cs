@@ -668,6 +668,12 @@ namespace BIS.ERP.Views
 
         private async Task ApplyGeneratedCodeAsync(MetadataField field, Control inputControl)
         {
+            // Для плана счетов код счёта вводится вручную (например «1210»):
+            // автогенерация «макс+1» не подходит, т.к. коды счетов
+            // регламентированы планом счетов. Поле остаётся пустым и редактируемым.
+            if (IsChartOfAccountsCatalog())
+                return;
+
             if (!_isNewRecord || !IsCatalogCodeField(field) || inputControl is not TextBox textBox)
                 return;
 
@@ -675,6 +681,11 @@ namespace BIS.ERP.Views
             textBox.IsReadOnly = true;
             textBox.ToolTip = "Код формируется автоматически при добавлении записи.";
             textBox.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
+        }
+
+        private bool IsChartOfAccountsCatalog()
+        {
+            return string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase);
         }
 
         private void ApplyCatalogFieldState(MetadataField field, Control inputControl)

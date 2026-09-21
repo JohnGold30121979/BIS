@@ -1,0 +1,5 @@
+﻿=== GetCatalogDataAsync definition ===
+MetadataService.cs:229: public async Task<List<Dictionary<string, object>>> GetCatalogDataAsync(Guid catalogId)
+=== AccountsDataView filtering/sorting ===
+ADV:146: _dataView.RowFilter = string.Empty;
+ADV:153: _dataView.RowFilter = $"[Код] LIKE '%{esc}%' OR [Наименование] LIKE '%{esc}%'";
