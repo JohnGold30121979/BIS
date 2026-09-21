@@ -145,25 +145,18 @@
 
                     <DataGrid x:Name="AdvanceExpenseGrid" Grid.Row="0" AutoGenerateColumns="False" CanUserAddRows="False"
                               HeadersVisibility="Column" Height="230" Margin="0,0,0,8"
+                              Language="ru-RU"
                               CellEditEnding="AdvanceExpenseGrid_CellEditEnding"
                               CurrentCellChanged="AdvanceExpenseGrid_CurrentCellChanged"
                               SelectionChanged="AdvanceExpenseGrid_SelectionChanged">
                         <DataGrid.Columns>
-                            <DataGridTemplateColumn Header="Дата" Width="115">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding LineDate, StringFormat=dd/MM/yyyy}" VerticalAlignment="Center"/>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                                <DataGridTemplateColumn.CellEditingTemplate>
-                                    <DataTemplate>
-                                        <DatePicker SelectedDate="{Binding LineDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellEditingTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridComboBoxColumn x:Name="AdvancePaymentPairColumn" Header="Пара счетов" Width="340"
-                                                    DisplayMemberPath="DisplayName" SelectedValuePath="Id"
-                                                    SelectedValueBinding="{Binding PairId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <DataGridTextColumn Header="№" Binding="{Binding RowNumber}" Width="42" IsReadOnly="True"/>
+                            <DataGridTextColumn x:Name="AdvanceExpenseDateColumn" Header="Дата"
+                                                Binding="{Binding LineDate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=dd.MM.yyyy}"
+                                                Width="115"/>
+                            <DataGridTextColumn Header="Детали проводки"
+                                                Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                Width="*" MinWidth="260"/>
                             <DataGridTextColumn Header="Счет расхода" Binding="{Binding ExpenseAccountDisplay}" Width="190" IsReadOnly="True"/>
                             <DataGridTemplateColumn Header="" Width="42">
                                 <DataGridTemplateColumn.CellTemplate>
@@ -172,7 +165,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=0.##}" Width="105"/>
+                            <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=N2}" Width="115"/>
                             <DataGridComboBoxColumn x:Name="AdvanceCurrencyColumn" Header="Валюта" Width="130"
                                                     DisplayMemberPath="DisplayName" SelectedValuePath="Id"
                                                     SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -183,7 +176,6 @@
                             <DataGridTextColumn x:Name="AdvanceExchangeRateColumn" Header="Курс"
                                                 Binding="{Binding ExchangeRate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=0.####}"
                                                 Width="95" Visibility="Collapsed"/>
-                            <DataGridTextColumn Header="Примечание" Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
 

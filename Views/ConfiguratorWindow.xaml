@@ -166,6 +166,7 @@
                                       Margin="10,12,10,0" Padding="0,2"
                                       SelectedItemChanged="OnTreeSelectedChanged"
                                       MouseRightButtonUp="OnTreeRightClick"
+                                      PreviewMouseLeftButtonUp="OnMetadataTreePreviewMouseLeftButtonUp"
                                       PreviewMouseWheel="OnLeftNavigationPreviewMouseWheel">
                                 <TreeView.Resources>
                                     <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#2F80C9"/>

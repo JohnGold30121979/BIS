@@ -125,6 +125,8 @@
                               AllowDrop="True"
                               DragOver="NavigationTree_DragOver"
                               Drop="NavigationTree_Drop"
+                              PreviewMouseLeftButtonDown="NavigationTree_PreviewMouseLeftButtonDown"
+                              PreviewMouseLeftButtonUp="NavigationTree_PreviewMouseLeftButtonUp"
                               PreviewMouseMove="NavigationTree_PreviewMouseMove">
                         <TreeView.Resources>
                             <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" 

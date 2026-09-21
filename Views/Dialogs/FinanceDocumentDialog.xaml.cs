@@ -168,7 +168,6 @@ namespace BIS.ERP.Views
             if (personnelAdvanceRows.Count == 0)
                 personnelAdvanceRows = _advancePaymentRows;
             _advancePayments = BuildAdvancePaymentReferenceItems(personnelAdvanceRows);
-            AdvancePaymentPairColumn.ItemsSource = _advancePayments;
             AdvanceCurrencyColumn.ItemsSource = _currencies;
 
             ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
@@ -292,7 +291,6 @@ namespace BIS.ERP.Views
                     personnelAdvanceRows = _advancePaymentRows;
 
                 _advancePayments = BuildAdvancePaymentReferenceItems(personnelAdvanceRows);
-                AdvancePaymentPairColumn.ItemsSource = _advancePayments;
                 ReferenceComboBoxSearchHelper.Attach(AdvancePaymentCombo, _advancePayments);
 
                 if (selectedId.HasValue && selectedId.Value != Guid.Empty)
@@ -686,6 +684,7 @@ namespace BIS.ERP.Views
             AdvanceExpenseGrid.ItemsSource = _advanceExpenseLines;
             if (_advanceExpenseLines.Count == 0)
                 _advanceExpenseLines.Add(CreateAdvanceExpenseLineRow());
+            RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
         }
 
@@ -730,6 +729,7 @@ namespace BIS.ERP.Views
             if (_advanceExpenseLines.Count == 0)
                 _advanceExpenseLines.Add(CreateAdvanceExpenseLineRow());
 
+            RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
         }
 
@@ -776,7 +776,7 @@ namespace BIS.ERP.Views
                 if (row.PairId == Guid.Empty && headerPairId != Guid.Empty)
                     row.PairId = headerPairId;
                 if (row.PairId == Guid.Empty)
-                    throw new InvalidOperationException($"В строке {rowNumber} выберите пару счетов.");
+                    throw new InvalidOperationException($"Выберите пару счетов в шапке документа.");
                 if (IsEmptyAccountValue(row.ExpenseAccountValue))
                     throw new InvalidOperationException($"В строке {rowNumber} выберите счет расхода.");
 
@@ -793,12 +793,12 @@ namespace BIS.ERP.Views
                     throw new InvalidOperationException($"В строке {rowNumber} выберите валюту.");
 
                 var pair = FindAdvancePaymentRow(row.PairId) ??
-                    throw new InvalidOperationException($"В строке {rowNumber} пара счетов не найдена в справочнике.");
+                    throw new InvalidOperationException($"Пара счетов из шапки документа не найдена в справочнике.");
                 var creditAccount = GetString(pair, "credit_account", "Кредит");
                 if (string.IsNullOrWhiteSpace(creditAccount))
                     creditAccount = GetString(pair, "debit_account", "Дебет");
                 if (string.IsNullOrWhiteSpace(creditAccount))
-                    throw new InvalidOperationException($"В строке {rowNumber} в паре счетов не указан расчетный счет.");
+                    throw new InvalidOperationException($"В выбранной паре счетов не указан расчетный счет.");
 
                 var pairItem = _advancePayments.FirstOrDefault(item => item.Id == row.PairId);
                 var pairCode = GetString(pair, "code", "Код");
@@ -866,8 +866,10 @@ namespace BIS.ERP.Views
             TryCommitAdvanceExpenseGridEdit();
             var row = CreateAdvanceExpenseLineRow();
             _advanceExpenseLines.Add(row);
+            RefreshAdvanceExpenseLineNumbers();
             AdvanceExpenseGrid.SelectedItem = row;
             AdvanceExpenseGrid.ScrollIntoView(row);
+            FocusAdvanceExpenseDateCell(row);
             RecalculateAdvanceExpenseTotal();
         }
 
@@ -877,6 +879,7 @@ namespace BIS.ERP.Views
                 _advanceExpenseLines.Remove(row);
             if (_advanceExpenseLines.Count == 0)
                 _advanceExpenseLines.Add(CreateAdvanceExpenseLineRow());
+            RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
         }
 
@@ -913,6 +916,23 @@ namespace BIS.ERP.Views
 
         private void AdvanceExpenseGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (AdvanceExpenseGrid.SelectedItem is AdvanceExpenseLineRow row)
+                FocusAdvanceExpenseDateCell(row);
+        }
+
+        private void FocusAdvanceExpenseDateCell(AdvanceExpenseLineRow row)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                AdvanceExpenseGrid.CurrentCell = new DataGridCellInfo(row, AdvanceExpenseDateColumn);
+                AdvanceExpenseGrid.BeginEdit();
+            }));
+        }
+
+        private void RefreshAdvanceExpenseLineNumbers()
+        {
+            for (var index = 0; index < _advanceExpenseLines.Count; index++)
+                _advanceExpenseLines[index].RowNumber = index + 1;
         }
 
         private void RecalculateAdvanceExpenseTotal()
@@ -1479,6 +1499,7 @@ namespace BIS.ERP.Views
     }
     public sealed class AdvanceExpenseLineRow : INotifyPropertyChanged
     {
+        private int _rowNumber;
         private DateTime? _lineDate;
         private Guid _pairId;
         private object? _expenseAccountValue;
@@ -1490,6 +1511,18 @@ namespace BIS.ERP.Views
         private string _description = string.Empty;
 
         public event PropertyChangedEventHandler? PropertyChanged;
+
+        public int RowNumber
+        {
+            get => _rowNumber;
+            set
+            {
+                if (_rowNumber == value)
+                    return;
+                _rowNumber = value;
+                OnPropertyChanged(nameof(RowNumber));
+            }
+        }
 
         public DateTime? LineDate
         {

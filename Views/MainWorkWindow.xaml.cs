@@ -2004,6 +2004,28 @@ namespace BIS.ERP
             }
         }
 
+        private async void NavigationTree_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            var clickedItem = FindVisualParent<TreeViewItem>(e.OriginalSource as DependencyObject);
+            if (clickedItem?.DataContext is not NavigationItem item)
+                return;
+
+            if (!ReferenceEquals(NavigationTree.SelectedItem, item))
+                return;
+
+            if (_isLoadingReport)
+                return;
+
+            try
+            {
+                await OpenNavigationItemAsync(item);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private async Task ApplyUserPermissionsAsync(int userId)
         {
             var allowedKeys = await _userAccessService.GetAllowedKeysAsync(userId);

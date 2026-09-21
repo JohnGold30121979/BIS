@@ -2891,6 +2891,29 @@ namespace BIS.ERP.Views
             }
         }
 
+        private void OnMetadataTreePreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            var treeItem = FindVisualParent<TreeViewItem>(e.OriginalSource as DependencyObject);
+            if (treeItem == null || !treeItem.IsSelected)
+                return;
+
+            treeItem.RaiseEvent(new RoutedEventArgs(TreeViewItem.SelectedEvent, treeItem));
+        }
+
+        private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
+        {
+            var parent = child;
+            while (parent != null)
+            {
+                if (parent is T typedParent)
+                    return typedParent;
+
+                parent = VisualTreeHelper.GetParent(parent);
+            }
+
+            return null;
+        }
+
         private void OnTreeRightClick(object sender, MouseButtonEventArgs e)
         {
             var treeItem = sender as TreeViewItem;
