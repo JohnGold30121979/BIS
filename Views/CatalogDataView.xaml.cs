@@ -99,6 +99,18 @@ namespace BIS.ERP.Views
             string.Equals(_catalog.Name, "Организации", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, "catalog_organizations", StringComparison.OrdinalIgnoreCase);
 
+        private bool IsBankAccountsCatalog =>
+            string.Equals(_catalog.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Служебные колонки «Дата создания»/«Дата изменения» (добавляются кодом
+        /// в LoadData(), а не метаданными) не показываем в основных гридах этих
+        /// справочников — иначе они занимают место и дублируют информацию карточки.
+        /// </summary>
+        private bool HideServiceDateColumnsInMainGrid =>
+            IsFixedAssetsCatalog || IsOrganizationsCatalog || IsBankAccountsCatalog;
+
         private MetadataObject? _bankAccountsCatalog;
         private Dictionary<string, Dictionary<string, string>>? _bankAccountsReferenceMaps;
         private int _organizationAccountsRequestId;
@@ -692,6 +704,7 @@ namespace BIS.ERP.Views
                     var columnType = GetColumnType(field.FieldType);
                     dataTable.Columns.Add(field.Name, columnType);
                 }
+
                 dataTable.Columns.Add("Дата создания", typeof(DateTime));
                 dataTable.Columns.Add("Дата изменения", typeof(DateTime));
                 if (IsCurrencyRatesCatalog)
@@ -769,7 +782,7 @@ namespace BIS.ERP.Views
                     Header = CreateColumnHeader("Дата создания"),
                     Binding = new System.Windows.Data.Binding("Дата создания"),
                     Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
-                    Visibility = IsFixedAssetsCatalog || IsOrganizationsCatalog ? Visibility.Collapsed : Visibility.Visible,
+                    Visibility = HideServiceDateColumnsInMainGrid ? Visibility.Collapsed : Visibility.Visible,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -778,7 +791,7 @@ namespace BIS.ERP.Views
                     Header = CreateColumnHeader("Дата изменения"),
                     Binding = new System.Windows.Data.Binding("Дата изменения"),
                     Width = IsChartOfAccountsCatalog || IsAdvancePaymentsCatalog ? 110 : 130,
-                    Visibility = IsFixedAssetsCatalog || IsOrganizationsCatalog ? Visibility.Collapsed : Visibility.Visible,
+                    Visibility = HideServiceDateColumnsInMainGrid ? Visibility.Collapsed : Visibility.Visible,
                     ElementStyle = CreateCellTextStyle()
                 });
 
@@ -1134,10 +1147,17 @@ namespace BIS.ERP.Views
 
         private bool IsCatalogFieldVisibleInMainGrid(MetadataField field)
         {
-            if (!IsOrganizationsCatalog)
-                return true;
+            if (IsOrganizationsCatalog)
+                return IsOrganizationMainColumn(field.Name, field.DbColumnName);
 
-            return IsOrganizationMainColumn(field.Name, field.DbColumnName);
+            // Справочник «Расчетные счета организаций»: служебные реквизиты (даты,
+            // «Активен») скрываем тем же фильтром, что и панель «Дополнительные
+            // поля организации» — метод ShouldShowOrganizationDetailColumn общий.
+            if (IsBankAccountsCatalog)
+                return !IsCatalogServiceColumn(field.Name) &&
+                       !IsCatalogServiceColumn(field.DbColumnName);
+
+            return true;
         }
 
         private static bool TryGetOrganizationColumnWidth(MetadataField field, out double width)
@@ -1330,8 +1350,6 @@ namespace BIS.ERP.Views
                 table.Columns.Add("Банк", typeof(string));
                 table.Columns.Add("БИК", typeof(string));
                 table.Columns.Add("Валюта", typeof(string));
-                table.Columns.Add("Основной", typeof(string));
-                table.Columns.Add("Остаток", typeof(string));
 
                 foreach (var row in organizationAccounts)
                 {
@@ -1340,9 +1358,7 @@ namespace BIS.ERP.Views
                         GetAccountCellText(row, "Счет", "account_number"),
                         GetAccountReferenceText(referenceMaps, "Банк", "bank_id", row),
                         GetAccountCellText(row, "БИК", "bic"),
-                        GetAccountReferenceText(referenceMaps, "Валюта", "currency_id", row),
-                        FormatOrganizationDetailValue(GetAccountRawValue(row, "Основной счет", "is_main")),
-                        FormatOrganizationDetailValue(GetAccountRawValue(row, "Текущий остаток", "current_balance")));
+                        GetAccountReferenceText(referenceMaps, "Валюта", "currency_id", row));
                 }
 
                 grid.ItemsSource = table.DefaultView;
@@ -1623,13 +1639,38 @@ namespace BIS.ERP.Views
                 : string.Empty;
         }
 
+        /// <summary>
+        /// Общий фильтр служебных (технических) колонок справочника: первичный ключ,
+        /// служебные флаги UI и системные реквизиты «Дата создания», «Дата изменения»,
+        /// «Активен»/«Активна». Применяется и панелью «Дополнительные поля организации»,
+        /// и основным гридом справочника «Расчетные счета организаций».
+        /// </summary>
+        private static bool IsCatalogServiceColumn(string? columnName)
+        {
+            if (string.IsNullOrWhiteSpace(columnName))
+                return false;
+
+            var name = columnName.Trim();
+
+            return string.Equals(name, "Id", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "CurrencyFilterFlag", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "Дата создания", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "Дата изменения", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "Активен", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "Активна", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(name, "is_active", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Показывать ли колонку в панели «Дополнительные поля организации»:
+        /// служебные колонки (см. <see cref="IsCatalogServiceColumn"/>) и основные
+        /// реквизиты самой таблицы организации (Код, Наименование, ИНН) не показываем —
+        /// они уже есть в основном гриде.
+        /// </summary>
         private static bool ShouldShowOrganizationDetailColumn(string columnName)
         {
-            if (string.Equals(columnName, "Id", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(columnName, "CurrencyFilterFlag", StringComparison.OrdinalIgnoreCase))
-            {
+            if (IsCatalogServiceColumn(columnName))
                 return false;
-            }
 
             return !IsOrganizationMainColumn(columnName);
         }

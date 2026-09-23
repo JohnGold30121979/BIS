@@ -906,29 +906,6 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Основной счет",
-            DbColumnName = "is_main",
-            FieldType = "Bool",
-            IsRequired = true,
-            IsUnique = false,
-            Order = 6,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
-            Name = "Текущий остаток",
-            DbColumnName = "current_balance",
-            FieldType = "Decimal",
-            Precision = 18,
-            Scale = 2,
-            IsRequired = false,
-            Order = 7,
-            MetadataObjectId = metadataObjectId
-        },
-        new MetadataField
-        {
-            Id = Guid.NewGuid(),
             Name = "Активен",
             DbColumnName = "is_active",
             FieldType = "Bool",

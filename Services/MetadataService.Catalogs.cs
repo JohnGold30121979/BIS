@@ -1041,6 +1041,11 @@ namespace BIS.ERP.Services
 
             await RemoveDuplicateMetadataFieldsAsync(catalog);
 
+            var desiredFields = GetBankAccountFields(catalog.Id);
+            var desiredColumns = new HashSet<string>(
+                desiredFields.Select(field => field.DbColumnName),
+                StringComparer.OrdinalIgnoreCase);
+
             var existingByColumn = catalog.Fields
                 .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
                 .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
@@ -1049,7 +1054,7 @@ namespace BIS.ERP.Services
                     group => group.OrderBy(field => field.Order).First(),
                     StringComparer.OrdinalIgnoreCase);
 
-            foreach (var desired in GetBankAccountFields(catalog.Id))
+            foreach (var desired in desiredFields)
             {
                 if (existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
                 {
@@ -1075,23 +1080,20 @@ namespace BIS.ERP.Services
                 existingByColumn[desired.DbColumnName] = desired;
             }
 
+            // Поля, исчезнувшие из эталона (is_main, current_balance), убираем
+            // и из метаданных, и из самой таблицы — иначе UI продолжает их показывать.
+            var obsoleteFields = existingByColumn.Values
+                .Where(field => !desiredColumns.Contains(field.DbColumnName))
+                .ToList();
+
+            foreach (var field in obsoleteFields)
+            {
+                catalog.Fields.Remove(field);
+                _context.MetadataFields.Remove(field);
+                await DropColumnFromTableAsync(catalog.TableName, field.DbColumnName!);
+            }
+
             await _context.SaveChangesAsync();
-
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync($@"
-                    UPDATE ""{catalog.TableName}""
-                    SET ""current_balance"" = 0
-                    WHERE ""current_balance"" IS NULL;
-
-                    ALTER TABLE ""{catalog.TableName}""
-                    ALTER COLUMN ""current_balance"" DROP NOT NULL,
-                    ALTER COLUMN ""current_balance"" SET DEFAULT 0;");
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации остатков расчетных счетов организаций: {ex.Message}");
-            }
         }
         private async Task CreateCashDesksCatalog(MetadataConfiguration config)
         {

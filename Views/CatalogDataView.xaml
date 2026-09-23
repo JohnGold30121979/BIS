@@ -1,32 +1,37 @@
-<UserControl
+<UserControl x:Class="BIS.ERP.Views.CatalogDataView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d" x:Class="BIS.ERP.Views.CatalogDataView"
-             Loaded="UserControl_Loaded" d:DesignHeight="480.36" d:DesignWidth="600.93">
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             Loaded="UserControl_Loaded"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
 
-    <!-- ScrollViewer: при уменьшении окна контент (панель организации и т.д.)
-         не обрезается, а прокручивается. -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                  HorizontalScrollBarVisibility="Auto"
-                  Padding="0">
-        <Grid x:Name="RootLayout" Margin="0" MinWidth="640"
-              MinHeight="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <!-- 0: заголовок и кнопки -->
-                <RowDefinition Height="Auto"/>
-                <!-- 1: поиск -->
-                <RowDefinition Height="*" MinHeight="120"/>
-                <!-- 2: таблица справочника -->
-                <RowDefinition Height="0"/>
-                <!-- 3: сплиттер панели организации -->
-                <RowDefinition Height="0"/>
-                <!-- 4: панель организации -->
-                <RowDefinition Height="Auto"/>
-                <!-- 5: статус бар -->
-            </Grid.RowDefinitions>
+    <!--
+        Корневой Grid растягивается на всю ширину и высоту ContentPresenter MDI.
+        Внешний ScrollViewer НЕ оборачивает корень: иначе он даёт Grid бесконечную
+        ширину, DataGrid со Star-колонками не растягивается, таблица «прилипает»
+        влево, а колонки нельзя тянуть мышью.
+        Скролл живёт внутри DataGrid и внутри панели организации.
+    -->
+    <Grid x:Name="RootLayout" Margin="0" MinWidth="640">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- 0: заголовок и кнопки -->
+            <RowDefinition Height="Auto"/>
+            <!-- 1: поиск -->
+            <RowDefinition Height="*" MinHeight="120"/>
+            <!-- 2: таблица справочника -->
+            <RowDefinition Height="0"/>
+            <!-- 3: сплиттер панели организации -->
+            <RowDefinition Height="0"/>
+            <!-- 4: панель организации -->
+            <RowDefinition Height="Auto"/>
+            <!-- 5: статус-бар -->
+        </Grid.RowDefinitions>
 
-        <!-- Заголовок и кнопки -->
+        <!-- ===================== Заголовок и кнопки ===================== -->
         <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
@@ -35,8 +40,10 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0">
-                    <TextBlock x:Name="TitleText" FontSize="20" FontWeight="Bold" Foreground="#2C3E50"/>
-                    <TextBlock x:Name="DescriptionText" Foreground="#666" FontSize="11" Margin="0,3,0,0"/>
+                    <TextBlock x:Name="TitleText"
+                               FontSize="20" FontWeight="Bold" Foreground="#2C3E50"/>
+                    <TextBlock x:Name="DescriptionText"
+                               Foreground="#666" FontSize="11" Margin="0,3,0,0"/>
                 </StackPanel>
 
                 <WrapPanel Grid.Row="1" HorizontalAlignment="Left" Margin="0,8,0,0">
@@ -65,9 +72,11 @@
             </Grid>
         </Border>
 
-        <!-- Поиск по справочнику -->
-        <Border x:Name="SearchPanel" Grid.Row="1" Background="White" CornerRadius="8" Padding="10" Margin="0,0,0,10"
-                Visibility="Collapsed">
+        <!-- ===================== Поиск ===================== -->
+        <Border x:Name="SearchPanel" Grid.Row="1"
+                Background="White" CornerRadius="8" Padding="10" Margin="0,0,0,10"
+                Visibility="Collapsed"
+                HorizontalAlignment="Stretch">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -119,7 +128,7 @@
                             MinWidth="150" Height="32" Margin="8,0,0,0"
                             Background="#27AE60" Foreground="White"
                             IsEnabled="False" Click="OnActivateRateClick"
-                            ToolTip="Сделать выбранный курс активным для его валюты (остальные курсы этой валюты станут неактивными)"/>
+                            ToolTip="Сделать выбранный курс активным для его валюты"/>
                 </WrapPanel>
 
                 <TextBox x:Name="SearchBox" Grid.Column="1"
@@ -135,13 +144,15 @@
             </Grid>
         </Border>
 
-        <!-- Таблица данных. Заголовок группы — имя выбранной организации -->
+        <!-- ===================== Таблица справочника ===================== -->
         <GroupBox x:Name="OrganizationListGroup"
                   Grid.Row="2"
                   Background="White"
                   BorderBrush="#D6E2EC"
                   BorderThickness="1"
-                  Padding="4">
+                  Padding="4"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Stretch">
             <GroupBox.Header>
                 <TextBlock x:Name="OrganizationListHeaderText"
                            Text="Организации"
@@ -150,45 +161,57 @@
                            FontSize="12"
                            Margin="0,0,0,2"/>
             </GroupBox.Header>
+
             <DataGrid x:Name="DataGrid"
                       AutoGenerateColumns="False"
-                  CanUserResizeColumns="True"
-                  CanUserAddRows="False"
-                  CanUserDeleteRows="False"
-                  IsReadOnly="True"
-                  SelectionMode="Single"
-                  SelectionUnit="FullRow"
-                  RowHeaderWidth="0"
-                  AlternatingRowBackground="#F8F9FA"
-                  Background="White"
-                  BorderBrush="#E0E0E0"
-                  BorderThickness="0"
-                  RowHeight="28"
-                  ColumnHeaderHeight="42"
-                  FontSize="12"
-                  EnableRowVirtualization="True"
-                  EnableColumnVirtualization="True"
-                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                  LoadingRow="DataGrid_LoadingRow"
-                  MouseDoubleClick="DataGrid_MouseDoubleClick"
-                  SelectionChanged="DataGrid_SelectionChanged">
+                      CanUserResizeColumns="True"
+                      CanUserResizeRows="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      SelectionUnit="FullRow"
+                      RowHeaderWidth="0"
+                      AlternatingRowBackground="#F8F9FA"
+                      Background="White"
+                      BorderBrush="#E0E0E0"
+                      BorderThickness="0"
+                      RowHeight="28"
+                      ColumnHeaderHeight="42"
+                      FontSize="12"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      MinColumnWidth="40"
+                      MaxColumnWidth="1200"
+                      CanUserReorderColumns="True"
+                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                      LoadingRow="DataGrid_LoadingRow"
+                      MouseDoubleClick="DataGrid_MouseDoubleClick"
+                      SelectionChanged="DataGrid_SelectionChanged">
                 <DataGrid.Resources>
-                    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#3498DB" Opacity="0.3"/>
+                    <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}"
+                                     Color="#3498DB" Opacity="0.3"/>
                 </DataGrid.Resources>
+
                 <DataGrid.ColumnHeaderStyle>
-                    <Style TargetType="{x:Type DataGridColumnHeader}" BasedOn="{StaticResource AppDataGridColumnHeaderStyle}">
+                    <Style TargetType="{x:Type DataGridColumnHeader}"
+                           BasedOn="{StaticResource AppDataGridColumnHeaderStyle}">
                         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
                         <Setter Property="Padding" Value="3,3"/>
                         <Setter Property="FontSize" Value="12"/>
                         <Setter Property="FontWeight" Value="Bold"/>
+                        <Setter Property="SeparatorBrush" Value="#BFD0DF"/>
+                        <Setter Property="SeparatorVisibility" Value="Visible"/>
                     </Style>
                 </DataGrid.ColumnHeaderStyle>
             </DataGrid>
         </GroupBox>
 
-        <!-- Сплиттер: таблица справочника / панель выбранной организации -->
+        <!-- ===================== Сплиттер панели организации ===================== -->
         <GridSplitter x:Name="OrganizationPanelSplitter"
                       Grid.Row="3"
                       Height="6"
@@ -202,7 +225,7 @@
                       Cursor="SizeNS"
                       Visibility="Collapsed"/>
 
-        <!-- Панель выбранной организации -->
+        <!-- ===================== Панель выбранной организации ===================== -->
         <Border x:Name="OrganizationDetailsPanel"
                 Grid.Row="4"
                 MinHeight="240"
@@ -212,15 +235,14 @@
                 CornerRadius="8"
                 Padding="10"
                 Margin="0,10,0,0"
-                Visibility="Collapsed">
+                Visibility="Collapsed"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" MinHeight="60"/>
-                    <!-- 0: группа «Дополнительные поля» (1* — меньше, значения одной организации) -->
                     <RowDefinition Height="6"/>
-                    <!-- 1: сплиттер -->
                     <RowDefinition Height="2*" MinHeight="150"/>
-                    <!-- 2: группа «Расчётные счета» (2* — больше места под список счетов) -->
                 </Grid.RowDefinitions>
 
                 <GroupBox Grid.Row="0"
@@ -233,24 +255,23 @@
                                    FontWeight="Bold"
                                    FontSize="12"/>
                     </GroupBox.Header>
-                    <!-- Обычный грид: колонки — реквизиты, строка — значения организации -->
                     <DataGrid x:Name="OrganizationDetailsGrid"
                               AutoGenerateColumns="True"
-                          CanUserSortColumns="False"
-                          IsReadOnly="True"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal"
-                          Background="White"
-                          BorderBrush="#D6E2EC"
-                          BorderThickness="1"
-                          FontSize="12"
-                          RowHeight="22"
-                          MinHeight="60"
-                          SelectionMode="Single"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Auto"/>
+                              CanUserSortColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              Background="White"
+                              BorderBrush="#D6E2EC"
+                              BorderThickness="1"
+                              FontSize="12"
+                              RowHeight="22"
+                              MinHeight="60"
+                              SelectionMode="Single"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Auto"/>
                 </GroupBox>
 
                 <GridSplitter Grid.Row="1"
@@ -277,76 +298,87 @@
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
-                            <!-- 0: кнопки -->
                             <RowDefinition Height="Auto"/>
-                            <!-- 1: итог -->
                             <RowDefinition Height="*" MinHeight="150"/>
-                            <!-- 2: грид счетов -->
                         </Grid.RowDefinitions>
 
                         <WrapPanel Grid.Row="0" Margin="0,0,0,6">
                             <Button x:Name="OrganizationAccountAddButton" Content="➕ Добавить счёт"
-                            MinWidth="130" Height="30" Margin="0,0,6,0"
-                            Background="#27AE60" Foreground="White"
-                            Click="OrganizationAccountAddButton_Click"/>
+                                    MinWidth="130" Height="30" Margin="0,0,6,0"
+                                    Background="#27AE60" Foreground="White"
+                                    Click="OrganizationAccountAddButton_Click"/>
                             <Button x:Name="OrganizationAccountEditButton" Content="✏️ Изменить счёт"
-                            MinWidth="130" Height="30" Margin="0,0,6,0"
-                            Background="#3498DB" Foreground="White"
-                            Click="OrganizationAccountEditButton_Click"
-                            IsEnabled="False"/>
+                                    MinWidth="130" Height="30" Margin="0,0,6,0"
+                                    Background="#3498DB" Foreground="White"
+                                    Click="OrganizationAccountEditButton_Click"
+                                    IsEnabled="False"/>
                             <Button x:Name="OrganizationAccountDeleteButton" Content="🗑️ Удалить счёт"
-                            MinWidth="130" Height="30"
-                            Background="#E74C3C" Foreground="White"
-                            Click="OrganizationAccountDeleteButton_Click"
-                            IsEnabled="False"/>
+                                    MinWidth="130" Height="30"
+                                    Background="#E74C3C" Foreground="White"
+                                    Click="OrganizationAccountDeleteButton_Click"
+                                    IsEnabled="False"/>
                         </WrapPanel>
+
                         <TextBlock x:Name="OrganizationAccountsSummary"
-                           Grid.Row="1"
-                           Text=""
-                           Foreground="#526B7A"
-                           FontSize="11"
-                           Margin="0,0,0,6"/>
+                                   Grid.Row="1"
+                                   Text=""
+                                   Foreground="#526B7A"
+                                   FontSize="11"
+                                   Margin="0,0,0,6"/>
+
                         <DataGrid x:Name="OrganizationAccountsGrid"
-                          Grid.Row="2"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          HeadersVisibility="Column"
-                          GridLinesVisibility="Horizontal"
-                          Background="White"
-                          BorderBrush="#D6E2EC"
-                          BorderThickness="1"
-                          FontSize="12"
-                          RowHeight="24"
-                          MinHeight="150"
-                          SelectionMode="Single"
-                          SelectionChanged="OrganizationAccountsGrid_SelectionChanged"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Auto">
+                                  Grid.Row="2"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  CanUserDeleteRows="False"
+                                  HeadersVisibility="Column"
+                                  GridLinesVisibility="Horizontal"
+                                  CanUserResizeColumns="True"
+                                  CanUserReorderColumns="True"
+                                  Background="White"
+                                  BorderBrush="#D6E2EC"
+                                  BorderThickness="1"
+                                  FontSize="12"
+                                  RowHeight="24"
+                                  MinHeight="150"
+                                  SelectionMode="Single"
+                                  SelectionChanged="OrganizationAccountsGrid_SelectionChanged"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Auto">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Binding="{Binding [Id]}" Visibility="Collapsed"/>
-                                <DataGridTextColumn Header="Счёт" Binding="{Binding [Счёт]}" Width="150"/>
-                                <DataGridTextColumn Header="Банк" Binding="{Binding [Банк]}" Width="230"/>
-                                <DataGridTextColumn Header="БИК" Binding="{Binding [БИК]}" Width="80"/>
-                                <DataGridTextColumn Header="Валюта" Binding="{Binding [Валюта]}" Width="150"/>
-                                <DataGridTextColumn Header="Основной" Binding="{Binding [Основной]}" Width="90"/>
-                                <DataGridTextColumn Header="Остаток" Binding="{Binding [Остаток]}" Width="110"/>
+                                <DataGridTextColumn Header="Счёт"
+                                                    Binding="{Binding [Счёт]}"
+                                                    Width="15*" MinWidth="90"/>
+                                <DataGridTextColumn Header="Банк"
+                                                    Binding="{Binding [Банк]}"
+                                                    Width="23*" MinWidth="140"/>
+                                <DataGridTextColumn Header="БИК"
+                                                    Binding="{Binding [БИК]}"
+                                                    Width="8*" MinWidth="70"/>
+                                <DataGridTextColumn Header="Валюта"
+                                                    Binding="{Binding [Валюта]}"
+                                                    Width="15*" MinWidth="90"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
                 </GroupBox>
             </Grid>
         </Border>
-        <!-- Статус бар -->
+
+        <!-- ===================== Статус-бар ===================== -->
         <Border Grid.Row="5" Background="White" CornerRadius="8" Padding="10" Margin="0,10,0,0">
             <Grid>
-                <TextBlock x:Name="StatusText" Text="Готово" Foreground="#666" FontSize="11" VerticalAlignment="Center"/>
-                <TextBlock x:Name="ProgressText" Text="" Foreground="#3498DB" FontSize="11"
+                <TextBlock x:Name="StatusText"
+                           Text="Готово"
+                           Foreground="#666" FontSize="11"
+                           VerticalAlignment="Center"/>
+                <TextBlock x:Name="ProgressText"
+                           Text=""
+                           Foreground="#3498DB" FontSize="11"
                            HorizontalAlignment="Right" VerticalAlignment="Center"/>
             </Grid>
         </Border>
-        </Grid>
-    </ScrollViewer>
+    </Grid>
 </UserControl>
-

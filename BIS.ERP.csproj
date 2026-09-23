@@ -27,6 +27,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Внутренние конструкторы AppDbContext (в т.ч. AppDbContext(string)) используются
+         тестовыми сценариями из сборки BIS.ERP.TESTS.Core (см. комментарий в AppDbContext.cs). -->
+    <InternalsVisibleTo Include="BIS.ERP.TESTS.Core" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="Assets\AppIcon.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

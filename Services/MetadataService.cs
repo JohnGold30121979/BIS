@@ -1334,8 +1334,6 @@ namespace BIS.ERP.Services
             if (!IsBankAccountsCatalog(metadata))
                 return;
 
-            SetDefaultIfMissing(data, metadata, "current_balance", 0m);
-            SetDefaultIfMissing(data, metadata, "is_main", false);
             SetDefaultIfMissing(data, metadata, "is_active", true);
 
             // Расчётный счёт не должен сохраняться без валюты: если валюта не выбрана,
