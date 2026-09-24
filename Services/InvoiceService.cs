@@ -211,7 +211,7 @@ namespace BIS.ERP.Services
                        ""tax_blank_number"", ""module_code"", ""exchange_code"", ""tax_status"", ""currency_id"", ""exchange_rate"",
                        ""amount_currency"", ""exported_at"", ""tax_status_date""
                 FROM ""{HeaderTableName}""
-                ORDER BY ""doc_date"" DESC, ""doc_number"" DESC";
+                ORDER BY ""doc_date""";
 
             var result = new List<InvoiceListRow>();
             await using var command = _context.Database.GetDbConnection().CreateCommand();

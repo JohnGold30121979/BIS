@@ -1,6 +1,7 @@
 <Window x:Class="BIS.ERP.Views.Dialogs.InvoiceEditDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:dialogs="clr-namespace:BIS.ERP.Views.Dialogs"
         Title="Счет-фактура" 
         MinHeight="540"
         MinWidth="700"
@@ -67,7 +68,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBox x:Name="AccountBox" Height="28" IsReadOnly="True"/>
+                    <TextBox x:Name="AccountBox" Height="28" IsReadOnly="False"/>
                     <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="?" Width="34" Height="28" Margin="4,0,0,0"
                             Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
                             Click="OnSelectAccountClick" FontWeight="Bold" FontFamily="Calibri"/>
@@ -171,12 +172,29 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Без налогов" Binding="{Binding AmountWithoutTax, UpdateSourceTrigger=PropertyChanged, StringFormat=N2}" Width="105"/>
-                <DataGridTextColumn Header="% НДС" Binding="{Binding VatRate, StringFormat=N2}" Width="70" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Сумма НДС" Binding="{Binding VatAmount, StringFormat=N2}" Width="90" IsReadOnly="True"/>
-                <DataGridTextColumn Header="НСП" Binding="{Binding SalesTaxRate, StringFormat=N2}" Width="70" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Сумма НП" Binding="{Binding SalesTaxAmount, StringFormat=N2}" Width="90" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, StringFormat=N2}" Width="100" IsReadOnly="True"/>
+                <DataGridTemplateColumn Header="Без налогов" Width="105">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBox Height="24"
+                             Padding="2,0"
+                             TextAlignment="Right"
+                             Text="{Binding AmountWithoutTax,
+                                             Mode=TwoWay,
+                                             UpdateSourceTrigger=LostFocus,
+                                             Converter={x:Static dialogs:InvoiceEditDialog.AmountFieldConverter}}"
+                             IsReadOnly="{Binding DataContext.IsAmountInputReadOnly,
+                                                 RelativeSource={RelativeSource AncestorType=Window}}"
+                     PreviewTextInput="OnAmountPreviewTextInput"
+                     GotFocus="OnAmountGotFocus"
+                     LostFocus="OnAmountLostFocus"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="% НДС" Binding="{Binding VatRate, Converter={x:Static dialogs:InvoiceEditDialog.AmountDisplayConverter}}" Width="70" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Сумма НДС" Binding="{Binding VatAmount, Converter={x:Static dialogs:InvoiceEditDialog.AmountDisplayConverter}}" Width="90" IsReadOnly="True"/>
+                <DataGridTextColumn Header="НСП" Binding="{Binding SalesTaxRate, Converter={x:Static dialogs:InvoiceEditDialog.AmountDisplayConverter}}" Width="70" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Сумма НП" Binding="{Binding SalesTaxAmount, Converter={x:Static dialogs:InvoiceEditDialog.AmountDisplayConverter}}" Width="90" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, Converter={x:Static dialogs:InvoiceEditDialog.AmountDisplayConverter}}" Width="100" IsReadOnly="True"/>
             </DataGrid.Columns>
         </DataGrid>
 

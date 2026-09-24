@@ -4,9 +4,13 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Media;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
@@ -35,6 +39,22 @@ namespace BIS.ERP.Views.Dialogs
         private bool _isRestoringNormalWindowState;
         private const string DefaultSalesLineAccount = "61100000";
         private const string DefaultPurchaseLineAccount = "16100000";
+        private const int AmountFractionDigits = 2;
+        private static readonly char[] DecimalSeparators = { ',', '.' };
+        private static readonly NumberFormatInfo AmountNumberFormat = CreateAmountNumberFormat();
+
+        /// <summary>
+        /// Конвертер редактируемой ячейки суммы: разряды — пробелом, дробная часть — запятой.
+        /// Дробные значения сохраняются как введены (без принудительных «,00»), чтобы их можно было набирать.
+        /// </summary>
+        public static readonly IValueConverter AmountFieldConverter =
+            new AmountTextConverter(AmountNumberFormat, forceDecimals: false);
+
+        /// <summary>
+        /// Конвертер вычисляемых колонок строк (НДС, НСП, итог): та же разбивка разрядов, но всегда 2 знака.
+        /// </summary>
+        public static readonly IValueConverter AmountDisplayConverter =
+            new AmountTextConverter(AmountNumberFormat, forceDecimals: true);
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -47,8 +67,15 @@ namespace BIS.ERP.Views.Dialogs
                     return;
                 _isInvoiceEditingEnabled = value;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInvoiceEditingEnabled)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsAmountInputReadOnly)));
             }
         }
+
+        /// <summary>
+        /// Режим только для чтения для поля суммы строки: обычный DataGrid.IsReadOnly
+        /// не срабатывает для TextBox внутри DataGridTemplateColumn.
+        /// </summary>
+        public bool IsAmountInputReadOnly => !_isInvoiceEditingEnabled;
 
         public ObservableCollection<ReferenceOption> AccountItems { get; } = new();
         public ObservableCollection<ReferenceOption> VatTaxItems { get; } = new();
@@ -1121,6 +1148,221 @@ namespace BIS.ERP.Views.Dialogs
             if (string.IsNullOrWhiteSpace(name))
                 return code;
             return $"{code} - {name}";
+        }
+
+        private static NumberFormatInfo CreateAmountNumberFormat()
+        {
+            var format = (NumberFormatInfo)CultureInfo.InvariantCulture.NumberFormat.Clone();
+            format.NumberGroupSeparator = " ";   // разбивка разрядов — пробелом
+            format.NumberGroupSizes = new[] { 3 };
+            format.NumberDecimalSeparator = ","; // дробная часть — запятой
+            format.NumberDecimalDigits = AmountFractionDigits;
+            format.NegativeSign = "-";
+            return format;
+        }
+
+        private static bool IsDecimalSeparator(char value) => Array.IndexOf(DecimalSeparators, value) >= 0;
+
+        /// <summary>
+        /// Разбор суммы из текста: пробелы (в т.ч. неразрывные) — разделители разрядов и игнорируются,
+        /// «,» и «.» равнозначны как разделитель дробной части.
+        /// </summary>
+        private static bool TryParseAmount(string? text, out decimal amount)
+        {
+            amount = 0m;
+            if (string.IsNullOrWhiteSpace(text))
+                return true;
+
+            var builder = new StringBuilder(text.Length);
+            var hasSeparator = false;
+            foreach (var symbol in text)
+            {
+                if (char.IsDigit(symbol))
+                {
+                    builder.Append(symbol);
+                    continue;
+                }
+
+                if (char.IsWhiteSpace(symbol))
+                    continue;
+
+                if (IsDecimalSeparator(symbol))
+                {
+                    if (hasSeparator)
+                        return false;
+                    hasSeparator = true;
+                    builder.Append('.');
+                    continue;
+                }
+
+                return false;
+            }
+
+            var normalized = builder.ToString().TrimEnd('.');
+            if (normalized.Length == 0)
+                return true; // введён только разделитель — считаем пустым значением
+
+            return decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out amount);
+        }
+
+        private sealed class AmountTextConverter : IValueConverter
+        {
+            private readonly NumberFormatInfo _format;
+            private readonly string _pattern;
+
+            public AmountTextConverter(NumberFormatInfo format, bool forceDecimals)
+            {
+                _format = format;
+                _pattern = forceDecimals ? $"N{AmountFractionDigits}" : "#,##0.##";
+            }
+
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                var amount = value switch
+                {
+                    decimal decimalValue => decimalValue,
+                    double doubleValue => (decimal)doubleValue,
+                    int intValue => intValue,
+                    _ => 0m
+                };
+
+                return amount.ToString(_pattern, _format);
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return TryParseAmount(value?.ToString(), out var amount) ? amount : Binding.DoNothing;
+            }
+        }
+
+        private void OnAmountPreviewTextInput(
+         object sender,
+         TextCompositionEventArgs e)
+            {
+                if (sender is not TextBox box)
+                    return;
+
+                e.Handled = !CanAcceptAmountInput(
+                    box.Text ?? string.Empty,
+                    e.Text);
+        }
+
+        private void OnAmountGotFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox box)
+                return;
+
+            // WPF не поддерживает DataObject.Pasting как событие в XAML.
+            // Подписка выполняется в коде, когда TextBox уже находится
+            // в дереве визуальных элементов.
+            DataObject.RemovePastingHandler(box, OnAmountPasting);
+            DataObject.AddPastingHandler(box, OnAmountPasting);
+
+            box.SelectAll();
+        }
+
+        private void OnAmountLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox box)
+                return;
+
+            DataObject.RemovePastingHandler(box, OnAmountPasting);
+
+            var binding = box.GetBindingExpression(TextBox.TextProperty);
+            if (binding == null)
+                return;
+
+            // Разбираем введённое значение только после завершения ввода.
+            // Это позволяет свободно набрать, например, «1234,56».
+            binding.UpdateSource();
+
+            if (binding.Status == BindingStatus.Active)
+                binding.UpdateTarget();
+        }
+
+        private void OnAmountPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            var pastedText = e.DataObject.GetDataPresent(DataFormats.Text)
+             ? e.DataObject.GetData(DataFormats.Text) as string
+             : null;
+
+            if (!CanAcceptAmountPaste(pastedText))
+            {
+                e.CancelCommand();
+                return;
+            }
+
+            // Вставляем только текст, без дополнительных форматов буфера.
+            e.DataObject = new DataObject(DataFormats.Text, pastedText);
+        }
+
+        /// <summary>Разрешены только цифры и один разделитель дробной части (не более 2 знаков после него).</summary>
+        private static bool CanAcceptAmountInput(string currentText, string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return false;
+
+            var separatorIndex = currentText.IndexOfAny(DecimalSeparators);
+            var hasSeparator = separatorIndex >= 0;
+            var fractionDigits = hasSeparator ? currentText.Length - separatorIndex - 1 : 0;
+
+            foreach (var symbol in input)
+            {
+                if (char.IsDigit(symbol))
+                {
+                    if (hasSeparator)
+                    {
+                        if (fractionDigits >= AmountFractionDigits)
+                            return false;
+                        fractionDigits++;
+                    }
+
+                    continue;
+                }
+
+                if (IsDecimalSeparator(symbol))
+                {
+                    if (hasSeparator)
+                        return false;
+                    hasSeparator = true;
+                    fractionDigits = 0;
+                    continue;
+                }
+
+                return false; // буквы, пробелы, знаки — запрещены
+            }
+
+            return true;
+        }
+
+        private static bool CanAcceptAmountPaste(string? pastedText)
+        {
+            if (string.IsNullOrWhiteSpace(pastedText))
+                return false;
+
+            var digits = 0;
+            var separators = 0;
+            foreach (var symbol in pastedText)
+            {
+                if (char.IsDigit(symbol))
+                {
+                    digits++;
+                    continue;
+                }
+
+                if (char.IsWhiteSpace(symbol))
+                    continue; // пробелы как разделители разрядов при вставке «1 234,56»
+
+                if (IsDecimalSeparator(symbol))
+                {
+                    separators++;
+                    continue;
+                }
+
+                return false;
+            }
+
+            return digits > 0 && separators <= 1 && TryParseAmount(pastedText, out _);
         }
 
         private void FocusAmountCell(EditableInvoiceLine line)
