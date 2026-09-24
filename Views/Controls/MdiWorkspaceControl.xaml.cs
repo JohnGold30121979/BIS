@@ -96,6 +96,20 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
         return OpenDocument(actualKey, title, host, activate);
     }
 
+    public bool ActivateDocumentByKey(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        var document = Documents.FirstOrDefault(item =>
+            string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (document == null)
+            return false;
+
+        SelectedDocument = document;
+        return true;
+    }
+
     public void CloseDocumentByKey(string key)
     {
         if (string.IsNullOrWhiteSpace(key))

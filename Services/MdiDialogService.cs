@@ -12,6 +12,8 @@ public static class MdiDialogService
 {
     private static readonly Dictionary<object, HostedDialogSession> HostedDialogs = new();
 
+    private static readonly Dictionary<object, HostedControlSession> HostedControlSessions = new();
+
     public static bool TryShowInWorkspace(
         Window? owner,
         Window dialog,
@@ -79,11 +81,14 @@ public static class MdiDialogService
             ? $"{dialog.GetType().FullName}:{actualTitle}:{Guid.NewGuid():N}"
             : key;
 
+        var openerDocumentKey = workspace.SelectedDocument?.Key;
         var completionSource = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new HostedDialogSession(
             actualKey,
             completionSource,
-            () => workspace.CloseDocumentByKey(actualKey));
+            () => workspace.CloseDocumentByKey(actualKey),
+            workspace,
+            openerDocumentKey);
 
         HostedDialogs[dialog] = session;
         workspace.OpenWindow(
@@ -221,6 +226,8 @@ public static class MdiDialogService
         if (closeDocument)
             session.CloseDocument();
 
+        session.RestoreOpenerFocus();
+
         return true;
     }
 
@@ -298,11 +305,15 @@ public static class MdiDialogService
         public HostedDialogSession(
             string key,
             TaskCompletionSource<bool?> completionSource,
-            Action closeDocument)
+            Action closeDocument,
+            MdiWorkspaceControl? workspace = null,
+            string? openerDocumentKey = null)
         {
             Key = key;
             CompletionSource = completionSource;
             CloseDocument = closeDocument;
+            Workspace = workspace;
+            OpenerDocumentKey = openerDocumentKey;
         }
 
         public string Key { get; }
@@ -311,6 +322,38 @@ public static class MdiDialogService
 
         public Action CloseDocument { get; }
 
+        public MdiWorkspaceControl? Workspace { get; }
+
+        public string? OpenerDocumentKey { get; }
+
         public bool IsCompleted { get; set; }
+
+        public void RestoreOpenerFocus()
+        {
+            try
+            {
+                if (Workspace == null || string.IsNullOrWhiteSpace(OpenerDocumentKey))
+                    return;
+                if (string.Equals(OpenerDocumentKey, Key, StringComparison.OrdinalIgnoreCase))
+                    return;
+                Workspace.ActivateDocumentByKey(OpenerDocumentKey);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private sealed class HostedControlSession
+    {
+        public HostedControlSession(MdiWorkspaceControl workspace, string? openerDocumentKey)
+        {
+            Workspace = workspace;
+            OpenerDocumentKey = openerDocumentKey;
+        }
+
+        public MdiWorkspaceControl Workspace { get; }
+
+        public string? OpenerDocumentKey { get; }
     }
 }
