@@ -103,6 +103,8 @@ namespace BIS.ERP.Views.Dialogs
                 : $"Новый документ: {document.Name}";
             LinesGrid.ItemsSource = _lines;
             StateChanged += OnWindowStateChanged;
+            InputManager.Current.PreProcessInput += OnInvoiceDialogPreProcessInput;
+            Closed += OnDialogClosed;
             Loaded += async (_, _) => await InitializeAsync();
         }
 
@@ -754,6 +756,44 @@ namespace BIS.ERP.Views.Dialogs
             if (_isReadOnlyMode)
                 return;
 
+            AddNewInvoiceLine();
+        }
+
+        /// <summary>
+        /// Перехватывает клавиши до стандартной цепочки WPF-событий.
+        /// DataGrid и TextBox активной ячейки могут обработать Enter или «+» раньше PreviewKeyDown.
+        /// Событие подключено к InputManager, но срабатывает только при фокусе в LinesGrid.
+        /// </summary>
+        private void OnInvoiceDialogPreProcessInput(object sender, PreProcessInputEventArgs e)
+        {
+            if (_isReadOnlyMode ||
+                !LinesGrid.IsEnabled ||
+                e.StagingItem.Input is not KeyEventArgs keyArgs ||
+                keyArgs.Key is not (Key.Add or Key.OemPlus or Key.Enter) ||
+                !IsKeyboardFocusInLinesGrid())
+            {
+                return;
+            }
+
+            keyArgs.Handled = true;
+            LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+            AddNewInvoiceLine();
+        }
+
+        private bool IsKeyboardFocusInLinesGrid()
+        {
+            return IsLoaded &&
+                   LinesGrid.IsVisible &&
+                   LinesGrid.IsKeyboardFocusWithin;
+        }
+
+        private void OnDialogClosed(object? sender, EventArgs e)
+        {
+            InputManager.Current.PreProcessInput -= OnInvoiceDialogPreProcessInput;
+        }
+
+        private void AddNewInvoiceLine()
+        {
             var previous = _lines.LastOrDefault();
             var accountCode = ResolveLineAccountCode(previous?.AccountCode);
             var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, "НДС12");

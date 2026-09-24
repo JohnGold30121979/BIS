@@ -9,7 +9,7 @@
         ResizeMode="CanResize"
         WindowState="Normal" 
         SizeToContent="Manual"
-        UseLayoutRounding="True" 
+        UseLayoutRounding="True"
         SnapsToDevicePixels="True">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -143,6 +143,7 @@
                   ScrollViewer.HorizontalScrollBarVisibility="Auto"
                   ScrollViewer.VerticalScrollBarVisibility="Auto"
                   SelectionMode="Single"
+                  Focusable="True"
                   SelectionChanged="OnLineSelectionChanged"
                   GridLinesVisibility="None">
             <DataGrid.Resources>
@@ -163,7 +164,7 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBox Text="{Binding AccountDisplayName}" IsReadOnly="True" Height="24"/>
+                                <TextBox Text="{Binding AccountDisplayName}" IsReadOnly="False" Height="24"/>
                                 <Button Grid.Column="1" Content="?" Width="28" Height="24" Margin="4,0,0,0"
                                         Tag="{Binding}" Click="OnSelectLineAccountClick"
                                         Visibility="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
