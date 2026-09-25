@@ -18,6 +18,12 @@ namespace BIS.ERP.Services
             _invoiceService = new InvoiceService(context);
         }
 
+        /// <summary>
+        /// Дата начала действия исторических ставок каталога «Налоги».
+        /// Указывается явно, чтобы новые ставки можно было вводить с нужной даты.
+        /// </summary>
+        private static readonly DateTime LegacyTaxValidFrom = new(2024, 1, 1);
+
         public async Task EnsureAsync()
         {
             await _invoiceService.EnsureSchemaAsync();
@@ -186,21 +192,21 @@ namespace BIS.ERP.Services
                     taxes.TableName,
                     new[]
                     {
-                        new CatalogSeedRow("НДС12", "НДС 12%", Rate: 12m, EsfVatCode: "10", SortOrder: 1, IsDefaultVat: true,
+                        new CatalogSeedRow("НДС12", "НДС 12%", Rate: 12m, EsfVatCode: "10", SortOrder: 1, IsDefaultVat: true, TaxKind: "VAT", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             VatPayableAccount: "34300000", VatRecoverableAccount: "15400000"),
-                        new CatalogSeedRow("НДС0", "НДС 0%", Rate: 0m, EsfVatCode: "10", SortOrder: 2,
+                        new CatalogSeedRow("НДС0", "НДС 0%", Rate: 0m, EsfVatCode: "10", SortOrder: 2, TaxKind: "VAT", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             VatPayableAccount: "34300000", VatRecoverableAccount: "15400000"),
-                        new CatalogSeedRow("WITHOUT_TAX", "Без НДС / освобождено", Rate: 0m, EsfVatCode: "90", EsfSalesTaxCode: "50", SortOrder: 3, IsDefaultSalesTax: true,
+                        new CatalogSeedRow("WITHOUT_TAX", "Без НДС / освобождено", Rate: 0m, EsfVatCode: "90", EsfSalesTaxCode: "50", SortOrder: 3, IsDefaultSalesTax: true, TaxKind: "BOTH", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             VatPayableAccount: "34300000", VatRecoverableAccount: "15400000", SalesTaxAccount: "34004000"),
-                        new CatalogSeedRow("SALES_TAX", "Налог с продаж (базовый режим)", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 4,
+                        new CatalogSeedRow("SALES_TAX", "Налог с продаж (базовый режим)", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 4, TaxKind: "SALES", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             SalesTaxAccount: "34004000"),
-                        new CatalogSeedRow("SALES_SERVICE", "Налог с продаж: услуги (неторг. деятельность)", Rate: 2.5m, EsfSalesTaxCode: "70", SortOrder: 5,
+                        new CatalogSeedRow("SALES_SERVICE", "Налог с продаж: услуги (неторг. деятельность)", Rate: 2.5m, EsfSalesTaxCode: "70", SortOrder: 5, TaxKind: "SALES", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             SalesTaxAccount: "34004000"),
-                        new CatalogSeedRow("SALES_TRADE", "Налог с продаж: торговая деятельность", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 6,
+                        new CatalogSeedRow("SALES_TRADE", "Налог с продаж: торговая деятельность", Rate: 1.5m, EsfSalesTaxCode: "50", SortOrder: 6, TaxKind: "SALES", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             SalesTaxAccount: "34004000"),
-                        new CatalogSeedRow("SALES_EXEMPT", "Налог с продаж: необлагаемая деятельность", Rate: 0m, EsfSalesTaxCode: "50", SortOrder: 7,
+                        new CatalogSeedRow("SALES_EXEMPT", "Налог с продаж: необлагаемая деятельность", Rate: 0m, EsfSalesTaxCode: "50", SortOrder: 7, TaxKind: "SALES", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             SalesTaxAccount: "34004000"),
-                        new CatalogSeedRow("SALES_RETAIL_2009", "Налог с продаж: розничная продажа до 2009", Rate: 4m, EsfSalesTaxCode: "50", SortOrder: 8,
+                        new CatalogSeedRow("SALES_RETAIL_2009", "Налог с продаж: розничная продажа до 2009", Rate: 4m, EsfSalesTaxCode: "50", SortOrder: 8, TaxKind: "SALES", ValidFrom: LegacyTaxValidFrom, IsSystem: true,
                             SalesTaxAccount: "34004000")
                     },
                     defaultCodesByColumn: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -208,6 +214,10 @@ namespace BIS.ERP.Services
                         ["is_default_vat"] = "НДС12",
                         ["is_default_sales_tax"] = "WITHOUT_TAX"
                     });
+
+                // Однократное заполнение вида налога и периода действия для записей,
+                // созданных до появления этих колонок. Заполненные значения не перезаписываются.
+                await EnsureTaxCatalogClassificationAsync(taxes.TableName);
             }
 
             if (catalogs.TryGetValue("Виды оплаты", out var paymentKinds))
@@ -268,6 +278,63 @@ namespace BIS.ERP.Services
                         ["is_default"] = "1"
                     });
             }
+        }
+
+        /// <summary>
+        /// Однократно проставляет вид налога (tax_kind), дату начала действия и признак
+        /// служебной записи для записей каталога «Налоги», созданных ранее.
+        /// Уже заполненные значения не перезаписываются.
+        /// </summary>
+        private async Task EnsureTaxCatalogClassificationAsync(string tableName)
+        {
+            var existingColumns = await GetTableColumnsAsync(tableName);
+            if (!existingColumns.Contains("tax_kind"))
+                return;
+
+            var assignments = new List<string>
+            {
+                @"""tax_kind"" = COALESCE(NULLIF(TRIM(t.""tax_kind""), ''), s.""tax_kind"")"
+            };
+
+            if (existingColumns.Contains("valid_from"))
+                assignments.Add(@"""valid_from"" = COALESCE(t.""valid_from"", s.""valid_from"")");
+
+            if (existingColumns.Contains("is_system"))
+                assignments.Add(@"""is_system"" = COALESCE(t.""is_system"", s.""is_system"")");
+
+            if (existingColumns.Contains("UpdatedAt"))
+                assignments.Add(@"""UpdatedAt"" = NOW()");
+
+            var missingCondition = new List<string>
+            {
+                @"t.""tax_kind"" IS NULL",
+                @"TRIM(t.""tax_kind"") = ''"
+            };
+
+            if (existingColumns.Contains("valid_from"))
+                missingCondition.Add(@"t.""valid_from"" IS NULL");
+
+            if (existingColumns.Contains("is_system"))
+                missingCondition.Add(@"t.""is_system"" IS NULL");
+
+            var classificationSql = $@"
+                UPDATE ""{tableName}"" AS t
+                SET {string.Join(", ", assignments)}
+                FROM (
+                    VALUES
+                        ('НДС12', 'VAT', DATE '2024-01-01', true),
+                        ('НДС0', 'VAT', DATE '2024-01-01', true),
+                        ('WITHOUT_TAX', 'BOTH', DATE '2024-01-01', true),
+                        ('SALES_TAX', 'SALES', DATE '2024-01-01', true),
+                        ('SALES_SERVICE', 'SALES', DATE '2024-01-01', true),
+                        ('SALES_TRADE', 'SALES', DATE '2024-01-01', true),
+                        ('SALES_EXEMPT', 'SALES', DATE '2024-01-01', true),
+                        ('SALES_RETAIL_2009', 'SALES', DATE '2008-01-01', true)
+                ) AS s(""code"", ""tax_kind"", ""valid_from"", ""is_system"")
+                WHERE t.""code"" = s.""code""
+                  AND ({string.Join(" OR ", missingCondition)});";
+
+            await _context.Database.ExecuteSqlRawAsync(classificationSql);
         }
 
         private async Task EnsureEsfXmlTagRowsAsync(string tableName)
@@ -511,6 +578,20 @@ namespace BIS.ERP.Services
                     ["UpdatedAt"] = DateTime.UtcNow
                 };
 
+                // Вид налога и период действия добавляем в набор значений,
+                // только когда они заданы в строке сида.
+                if (!string.IsNullOrWhiteSpace(row.TaxKind))
+                    values["tax_kind"] = row.TaxKind;
+
+                if (row.ValidFrom.HasValue)
+                    values["valid_from"] = row.ValidFrom.Value;
+
+                if (row.ValidTo.HasValue)
+                    values["valid_to"] = row.ValidTo.Value;
+
+                if (row.IsSystem.HasValue)
+                    values["is_system"] = row.IsSystem.Value;
+
                 if (existingColumns.Contains("CreatedAt"))
                     values["CreatedAt"] = DateTime.UtcNow;
 
@@ -617,12 +698,25 @@ namespace BIS.ERP.Services
             var codeLiteral = ToSqlLiteral(codeEntry.Value);
             var columnSql = string.Join(", ", filtered.Select(item => $@"""{item.Key}"""));
             var valueSql = string.Join(", ", filtered.Select(item => ToSqlLiteral(item.Value)));
+            // Ставка, вид налога, период действия и признак служебной записи задаются сидом
+            // только при первичной вставке. Значения, изменённые пользователем в справочнике,
+            // повторным запуском сида не затираются.
+            var seedOnlyColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "CreatedAt",
+                "is_default",
+                "is_default_vat",
+                "is_default_sales_tax",
+                "rate",
+                "tax_kind",
+                "valid_from",
+                "valid_to",
+                "is_system"
+            };
+
             var updateAssignments = filtered
                 .Where(item => !item.Key.Equals("code", StringComparison.OrdinalIgnoreCase) &&
-                               !item.Key.Equals("CreatedAt", StringComparison.OrdinalIgnoreCase) &&
-                               !item.Key.Equals("is_default", StringComparison.OrdinalIgnoreCase) &&
-                               !item.Key.Equals("is_default_vat", StringComparison.OrdinalIgnoreCase) &&
-                               !item.Key.Equals("is_default_sales_tax", StringComparison.OrdinalIgnoreCase))
+                               !seedOnlyColumns.Contains(item.Key))
                 .Select(item => $@"""{item.Key}"" = {ToSqlLiteral(item.Value)}")
                 .ToList();
 
@@ -796,7 +890,11 @@ namespace BIS.ERP.Services
             bool IsDefault = false,
             bool IsDefaultVat = false,
             bool IsDefaultSalesTax = false,
-            bool IsActive = true);
+            bool IsActive = true,
+            string? TaxKind = null,
+            DateTime? ValidFrom = null,
+            DateTime? ValidTo = null,
+            bool? IsSystem = null);
 
         private sealed record EsfXmlTagSeedRow(
             string Key,

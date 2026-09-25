@@ -30,6 +30,8 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<string, ReferenceOption> _salesTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
         private string _selectedHeaderAccountCode = string.Empty;
         private AccountAnalyticsRegistry _accountAnalytics = new();
+        private TaxService? _taxService;
+        private bool _isInitialized;
         private bool _isRecalculating;
         private bool _isPosted;
         private bool _synchronizingHeaderTaxSelection;
@@ -103,6 +105,7 @@ namespace BIS.ERP.Views.Dialogs
                 : $"Новый документ: {document.Name}";
             LinesGrid.ItemsSource = _lines;
             StateChanged += OnWindowStateChanged;
+            DatePicker.SelectedDateChanged += OnDocumentDateChanged;
             InputManager.Current.PreProcessInput += OnInvoiceDialogPreProcessInput;
             Closed += OnDialogClosed;
             Loaded += async (_, _) => await InitializeAsync();
@@ -227,7 +230,10 @@ namespace BIS.ERP.Views.Dialogs
                 ReferenceComboBoxSearchHelper.Attach(DeliveryKindCombo, await LoadReferenceOptionsAsync(catalogs, "Виды поставки"));
                 ReferenceComboBoxSearchHelper.Attach(SupplyKindCombo, await LoadReferenceOptionsAsync(catalogs, "Типы поставки"));
                 ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, await LoadCurrencyOptionsAsync(catalogs));
-                await LoadTaxItemsAsync(catalogs);
+                // Налоги берутся из каталога «Налоги» через TaxService: вид налога (tax_kind)
+                // и дата действия задаются справочником, а не строковыми константами в коде.
+                _taxService = new TaxService(_metadataService);
+                await LoadTaxItemsAsync();
 
                 if (_editId.HasValue)
                 {
@@ -242,6 +248,11 @@ namespace BIS.ERP.Views.Dialogs
                     _isPosted = invoice.IsPosted;
                     NumberBox.Text = invoice.DocNumber;
                     DatePicker.SelectedDate = invoice.DocDate;
+
+                    // Ставки действуют в ограниченном периоде, поэтому список налогов
+                    // перечитывается на дату счёта-фактуры, а не на текущую дату.
+                    await LoadTaxItemsAsync();
+                    await EnsureTaxCodesAreAvailableAsync(invoice.Lines, invoice.DocDate);
                     EsfNumberBox.Text = invoice.EsfNumber;
                     TaxBlankNumberBox.Text = invoice.TaxBlankNumber;
                     ModuleCodeBox.Text = string.IsNullOrWhiteSpace(invoice.ModuleCode)
@@ -300,13 +311,14 @@ namespace BIS.ERP.Views.Dialogs
                     ModuleCodeBox.Text = assignedModuleName;
                     SelectDefaultReference(PaymentKindCombo, PaymentKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "3");
                     SelectDefaultReference(DeliveryKindCombo, DeliveryKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "1");
-                    SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
-                    SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+                    SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, GetTaxFallbackCode(VatTaxItems));
+                    SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, GetTaxFallbackCode(SalesTaxItems));
                     SelectDefaultReference(SupplyKindCombo, SupplyKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "1");
                 }
 
                 RecalculateTotals();
                 UpdateCurrencyPanelVisibility();
+                _isInitialized = true;
                 if (_isReadOnlyMode)
                     DisableReadOnlyMode();
             }
@@ -443,31 +455,148 @@ namespace BIS.ERP.Views.Dialogs
                 .ToList();
         }
 
-        private async Task LoadTaxItemsAsync(IEnumerable<MetadataObject> catalogs)
+        /// <summary>
+        /// Загружает налоги из каталога «Налоги» на дату документа.
+        /// Вид налога определяется колонкой tax_kind, а не строковыми константами в коде.
+        /// </summary>
+        private async Task LoadTaxItemsAsync()
         {
             VatTaxItems.Clear();
             SalesTaxItems.Clear();
             _vatTaxesByCode.Clear();
             _salesTaxesByCode.Clear();
 
-            var taxes = await LoadReferenceOptionsAsync(catalogs, "Налоги");
-            foreach (var tax in taxes.Where(item =>
-                         item.Value.StartsWith("НДС", StringComparison.OrdinalIgnoreCase) ||
-                         item.DisplayName.Contains("НДС", StringComparison.OrdinalIgnoreCase) ||
-                         item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase)))
+            if (_taxService == null)
+                return;
+
+            var documentDate = DatePicker.SelectedDate ?? DateTime.Today;
+
+            foreach (var tax in await _taxService.GetTaxesAsync(TaxKind.Vat, documentDate))
             {
-                VatTaxItems.Add(tax);
-                _vatTaxesByCode[tax.Value] = tax;
+                var option = ToReferenceOption(tax);
+                VatTaxItems.Add(option);
+                _vatTaxesByCode[option.Value] = option;
             }
 
-            foreach (var tax in taxes.Where(item =>
-                         item.Value.Equals("SALES_TAX", StringComparison.OrdinalIgnoreCase) ||
-                         item.DisplayName.Contains("продаж", StringComparison.OrdinalIgnoreCase) ||
-                         item.Value.Equals("WITHOUT_TAX", StringComparison.OrdinalIgnoreCase)))
+            foreach (var tax in await _taxService.GetTaxesAsync(TaxKind.Sales, documentDate))
             {
-                SalesTaxItems.Add(tax);
-                _salesTaxesByCode[tax.Value] = tax;
+                var option = ToReferenceOption(tax);
+                SalesTaxItems.Add(option);
+                _salesTaxesByCode[option.Value] = option;
             }
+        }
+
+        /// <summary>
+        /// Добавляет в списки налоги, уже указанные в строках документа, даже если срок их
+        /// действия на дату документа истёк: иначе сохранённые значения были бы потеряны.
+        /// </summary>
+        private async Task EnsureTaxCodesAreAvailableAsync(
+            IEnumerable<InvoiceLineRow>? lines,
+            DateTime documentDate)
+        {
+            if (lines == null || _taxService == null)
+                return;
+
+            foreach (var line in lines)
+            {
+                await EnsureTaxCodeIsAvailableAsync(line.VatTaxCode, TaxKind.Vat, documentDate);
+                await EnsureTaxCodeIsAvailableAsync(line.SalesTaxCode, TaxKind.Sales, documentDate);
+            }
+        }
+
+        private async Task EnsureTaxCodeIsAvailableAsync(
+            string? code,
+            TaxKind kind,
+            DateTime documentDate)
+        {
+            if (string.IsNullOrWhiteSpace(code) || _taxService == null)
+                return;
+
+            var isVat = kind == TaxKind.Vat;
+            var items = isVat ? VatTaxItems : SalesTaxItems;
+            var map = isVat ? _vatTaxesByCode : _salesTaxesByCode;
+            var normalized = code.Trim();
+
+            if (map.ContainsKey(normalized))
+                return;
+
+            var tax = await _taxService.ResolveAsync(normalized, kind, documentDate);
+            if (tax == null)
+                return;
+
+            var option = ToReferenceOption(tax);
+            items.Add(option);
+            map[option.Value] = option;
+        }
+
+        /// <summary>
+        /// Перечитывает налоги при смене даты документа: ставки действуют в ограниченном периоде
+        /// (колонки valid_from / valid_to справочника «Налоги»).
+        /// </summary>
+        private async void OnDocumentDateChanged(object? sender, SelectionChangedEventArgs e)
+        {
+            if (_isReadOnlyMode || !_isInitialized || _taxService == null)
+                return;
+
+            var previousVatCode = GetSelectedReferenceValue(HeaderVatTaxCombo);
+            var previousSalesTaxCode = GetSelectedReferenceValue(HeaderSalesTaxCombo);
+
+            try
+            {
+                var documentDate = DatePicker.SelectedDate ?? DateTime.Today;
+
+                await LoadTaxItemsAsync();
+                await EnsureTaxCodesAreAvailableAsync(_lines, documentDate);
+
+                RestoreOrSelectTaxDefault(HeaderVatTaxCombo, VatTaxItems, previousVatCode, item => item.IsDefaultVat);
+                RestoreOrSelectTaxDefault(HeaderSalesTaxCombo, SalesTaxItems, previousSalesTaxCode, item => item.IsDefaultSalesTax);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка перечитывания налогов на дату документа: {ex.Message}");
+            }
+        }
+
+        private static ReferenceOption ToReferenceOption(TaxOption tax)
+        {
+            return new ReferenceOption(
+                tax.Code,
+                BuildReferenceDisplayName(TaxService.CatalogName, tax.Name, tax.Rate),
+                tax.Rate,
+                tax.SortOrder,
+                false,
+                tax.IsDefaultVat,
+                tax.IsDefaultSalesTax,
+                tax.Code);
+        }
+
+        /// <summary>
+        /// Сохраняет прежний выбор налога, если он ещё доступен, иначе выбирает налог по умолчанию.
+        /// </summary>
+        private static void RestoreOrSelectTaxDefault(
+            ComboBox comboBox,
+            IEnumerable<ReferenceOption> options,
+            string? previousValue,
+            Func<ReferenceOption, bool> isDefaultSelector)
+        {
+            var items = options.ToList();
+
+            if (!string.IsNullOrWhiteSpace(previousValue) &&
+                items.Any(item => item.Value.Equals(previousValue, StringComparison.OrdinalIgnoreCase)))
+            {
+                SelectStoredComboValue(comboBox, previousValue);
+                return;
+            }
+
+            SelectDefaultReference(comboBox, items, isDefaultSelector, GetTaxFallbackCode(items));
+        }
+
+        /// <summary>
+        /// Код налога для случая, когда в справочнике не задан флаг «По умолчанию».
+        /// </summary>
+        private static string GetTaxFallbackCode(IReadOnlyList<ReferenceOption> options)
+        {
+            return options.FirstOrDefault()?.Value ?? string.Empty;
         }
 
         private void AddLine(EditableInvoiceLine line)
@@ -618,20 +747,20 @@ namespace BIS.ERP.Views.Dialogs
                 if (selectedLine != null)
                 {
                     if (string.IsNullOrWhiteSpace(selectedLine.VatTaxCode))
-                        SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
+                        SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, GetTaxFallbackCode(VatTaxItems));
                     else
                         SelectStoredComboValue(HeaderVatTaxCombo, selectedLine.VatTaxCode);
 
                     if (string.IsNullOrWhiteSpace(selectedLine.SalesTaxCode))
-                        SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+                        SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, GetTaxFallbackCode(SalesTaxItems));
                     else
                         SelectStoredComboValue(HeaderSalesTaxCombo, selectedLine.SalesTaxCode);
 
                     return;
                 }
 
-                SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, "НДС12");
-                SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+                SelectDefaultReference(HeaderVatTaxCombo, VatTaxItems, item => item.IsDefaultVat, GetTaxFallbackCode(VatTaxItems));
+                SelectDefaultReference(HeaderSalesTaxCombo, SalesTaxItems, item => item.IsDefaultSalesTax, GetTaxFallbackCode(SalesTaxItems));
             }
             finally
             {
@@ -796,8 +925,8 @@ namespace BIS.ERP.Views.Dialogs
         {
             var previous = _lines.LastOrDefault();
             var accountCode = ResolveLineAccountCode(previous?.AccountCode);
-            var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, "НДС12");
-            var defaultSalesTax = GetDefaultReferenceOption(SalesTaxItems, item => item.IsDefaultSalesTax, "WITHOUT_TAX");
+            var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, GetTaxFallbackCode(VatTaxItems));
+            var defaultSalesTax = GetDefaultReferenceOption(SalesTaxItems, item => item.IsDefaultSalesTax, GetTaxFallbackCode(SalesTaxItems));
             var selectedHeaderVat = GetSelectedReferenceOption(HeaderVatTaxCombo);
             var selectedHeaderSalesTax = GetSelectedReferenceOption(HeaderSalesTaxCombo);
             var line = new EditableInvoiceLine

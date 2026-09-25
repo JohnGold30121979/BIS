@@ -75,6 +75,13 @@ namespace BIS.ERP.Views
         private bool IsChartOfAccountsCatalog =>
             string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Справочник «Налоги»: ставки, коды ЭСФ и счета проводок по НДС и налогу с продаж.
+        /// </summary>
+        private bool IsTaxCatalog =>
+            string.Equals(_catalog.Name, "Налоги", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_taxes", StringComparison.OrdinalIgnoreCase);
+
         private bool IsPaymentClassificationCatalog =>
             string.Equals(_catalog.Name, "Классификация платежей", StringComparison.OrdinalIgnoreCase);
 
@@ -109,7 +116,18 @@ namespace BIS.ERP.Views
         /// справочников — иначе они занимают место и дублируют информацию карточки.
         /// </summary>
         private bool HideServiceDateColumnsInMainGrid =>
-            IsFixedAssetsCatalog || IsOrganizationsCatalog || IsBankAccountsCatalog;
+            IsFixedAssetsCatalog || IsOrganizationsCatalog || IsBankAccountsCatalog || IsTaxCatalog;
+
+        /// <summary>
+        /// Служебные поля справочника «Налоги» не показываются в реестре:
+        /// код налога (он виден и правится в форме записи) и признак служебной записи.
+        /// Сами данные сохраняются: по коду налога строятся проводки и сопоставления кодов ЭСФ,
+        /// признак is_system заполняется сидом и используется для отличия служебных записей.
+        /// </summary>
+        private bool IsHiddenTaxServiceField(MetadataField field) =>
+            IsTaxCatalog &&
+            (string.Equals(field.DbColumnName, "code", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(field.DbColumnName, "is_system", StringComparison.OrdinalIgnoreCase));
 
         private MetadataObject? _bankAccountsCatalog;
         private Dictionary<string, Dictionary<string, string>>? _bankAccountsReferenceMaps;
@@ -774,6 +792,9 @@ namespace BIS.ERP.Views
 
                 foreach (var field in visibleFields)
                 {
+                    if (IsHiddenTaxServiceField(field))
+                        continue;
+
                     DataGrid.Columns.Add(CreateDataGridColumn(field));
                 }
 

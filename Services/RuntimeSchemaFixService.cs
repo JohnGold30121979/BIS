@@ -132,6 +132,10 @@ namespace BIS.ERP.Services
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS vat_payable_account varchar(50);
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS vat_recoverable_account varchar(50);
                         ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS sales_tax_account varchar(50);
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS tax_kind varchar(20);
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS valid_from timestamp;
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS valid_to timestamp;
+                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_system boolean;
                         ALTER TABLE catalog_taxes ALTER COLUMN code TYPE varchar(80);
                     END IF;
 

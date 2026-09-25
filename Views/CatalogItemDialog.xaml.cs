@@ -607,11 +607,53 @@ namespace BIS.ERP.Views
             comboBox.SelectedItem = choices.FirstOrDefault(choice => choice.Matches(existingValue)) ?? choices[0];
             return comboBox;
         }
+
+        /// <summary>
+        /// Вид налога в справочнике «Налоги» выбирается из списка, а не вводится текстом:
+        /// от него зависит, в каком списке формы счёта-фактуры появится налог.
+        /// </summary>
+        private Control? CreateTaxKindChoiceControl(MetadataField field, Dictionary<string, object> existingData)
+        {
+            if (!IsTaxCatalog() ||
+                !string.Equals(field.DbColumnName, "tax_kind", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var choices = new[]
+            {
+                new ChoiceItem("BOTH", "НДС и налог с продаж", "BOTH", "ОБА", "ВСЕ", "НДС/НСП"),
+                new ChoiceItem("VAT", "НДС", "VAT", "НДС"),
+                new ChoiceItem("SALES", "Налог с продаж", "SALES", "НСП", "продаж")
+            };
+
+            var comboBox = new ComboBox
+            {
+                Height = 35,
+                MinWidth = 200,
+                Tag = field,
+                ItemsSource = choices,
+                ToolTip = "Определяет, в каком списке формы счёта-фактуры появится налог."
+            };
+
+            var existingValue = GetExistingValue(field, existingData)?.ToString();
+            comboBox.SelectedItem = choices.FirstOrDefault(choice => choice.Matches(existingValue)) ?? choices[0];
+            return comboBox;
+        }
+
+        private bool IsTaxCatalog() =>
+            string.Equals(_catalog.Name, "Налоги", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_taxes", StringComparison.OrdinalIgnoreCase);
+
         private Control CreateRegularControl(MetadataField field, Dictionary<string, object> existingData)
         {
             var employeeChoiceControl = CreateEmployeeChoiceControl(field, existingData);
             if (employeeChoiceControl != null)
                 return employeeChoiceControl;
+
+            var taxKindChoiceControl = CreateTaxKindChoiceControl(field, existingData);
+            if (taxKindChoiceControl != null)
+                return taxKindChoiceControl;
 
             var existingValue = GetExistingValue(field, existingData);
 
@@ -678,6 +720,16 @@ namespace BIS.ERP.Views
                 return;
 
             textBox.Text = await GenerateNextCatalogCodeAsync(field);
+
+            // Для налогов код участвует в учётной логике: он попадает в проводки и
+            // сопоставления ЭСФ, поэтому предложенное значение остаётся редактируемым
+            // (например, НДС20 вместо автоматического числового кода).
+            if (IsTaxCatalog())
+            {
+                textBox.ToolTip = "Предложенный код можно изменить вручную, например НДС20.";
+                return;
+            }
+
             textBox.IsReadOnly = true;
             textBox.ToolTip = "Код формируется автоматически при добавлении записи.";
             textBox.SetResourceReference(Control.BackgroundProperty, "AppReadOnlyBackgroundBrush");
@@ -1345,6 +1397,14 @@ namespace BIS.ERP.Views
             {
                 if (allowedColumns != null &&
                     (string.IsNullOrWhiteSpace(field.DbColumnName) || !allowedColumns.Contains(field.DbColumnName)))
+                {
+                    continue;
+                }
+
+                // Служебный признак налогов («Служебная запись») заполняется системой
+                // при первичном наполнении справочника, в форме он не показывается.
+                if (IsTaxCatalog() &&
+                    string.Equals(field.DbColumnName, "is_system", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

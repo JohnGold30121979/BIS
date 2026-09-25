@@ -2847,6 +2847,47 @@ public partial class MetadataService
             IsRequired = false,
             Order = 12,
             MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Вид налога",
+            DbColumnName = "tax_kind",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 13,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Действует с",
+            DbColumnName = "valid_from",
+            FieldType = "DateTime",
+            IsRequired = false,
+            Order = 14,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Действует по",
+            DbColumnName = "valid_to",
+            FieldType = "DateTime",
+            IsRequired = false,
+            Order = 15,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Служебная запись",
+            DbColumnName = "is_system",
+            FieldType = "Bool",
+            IsRequired = false,
+            Order = 16,
+            MetadataObjectId = metadataObjectId
         }
     };
     }

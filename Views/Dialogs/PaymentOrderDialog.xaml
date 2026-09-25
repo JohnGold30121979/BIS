@@ -93,7 +93,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="OurAccountBox" Grid.Column="0" Height="26" IsReadOnly="True" Background="LightGray"/>
+                <TextBox x:Name="OurAccountBox" Grid.Column="0" Height="26" IsReadOnly="False" Background="LightGray"/>
                 <Button Grid.Column="1" Content="?" Width="30" Height="26" Margin="4,0,0,0" Click="SelectOurAccount_Click"/>
             </Grid>
 
@@ -101,11 +101,14 @@
             <TextBlock Grid.Row="8" Grid.Column="0" Text="Кредит:" VerticalAlignment="Center"/>
             <Grid Grid.Row="8" Grid.Column="1" Margin="0,0,0,4">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="75*"/>
+                    <ColumnDefinition Width="38*"/>
+                    <ColumnDefinition Width="363*"/>
+                    <ColumnDefinition Width="90*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="26" IsReadOnly="True" Background="LightGray"/>
-                <Button Grid.Column="1" Content="?" Width="30" Height="26" Margin="4,0,0,0" Click="SelectCorrAccount_Click"/>
+                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="26" IsReadOnly="False" Background="LightGray" Grid.ColumnSpan="4"/>
+                <Button Grid.Column="4" Content="?" Width="30" Height="26" Margin="4,0,0,0" Click="SelectCorrAccount_Click"/>
             </Grid>
 
             <!-- Сумма (строка 9) -->
