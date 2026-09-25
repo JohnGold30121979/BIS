@@ -1188,6 +1188,7 @@ namespace BIS.ERP.Services
 
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
+            ValidateChartOfAccountsCode(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
@@ -1267,6 +1268,7 @@ namespace BIS.ERP.Services
 
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
+            ValidateChartOfAccountsCode(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);
@@ -1326,6 +1328,33 @@ namespace BIS.ERP.Services
             finally
             {
                 _contextAccess.Release();
+            }
+        }
+
+        private void ValidateChartOfAccountsCode(
+            MetadataObject metadata,
+            Dictionary<string, object> data)
+        {
+            if (!string.Equals(metadata.Name, "План счетов", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var codeField = metadata.Fields.FirstOrDefault(field =>
+                string.Equals(field.Name, "Код", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(field.DbColumnName, "code", StringComparison.OrdinalIgnoreCase));
+            if (codeField == null ||
+                !TryGetFieldValue(data, codeField, out var value) ||
+                value == null ||
+                value == DBNull.Value)
+            {
+                return;
+            }
+
+            var code = value.ToString()?.Trim() ?? string.Empty;
+            if (code.Length == 0 ||
+                code.Length > 8 ||
+                code.Any(character => character is < '0' or > '9'))
+            {
+                throw new InvalidOperationException("Код счета должен содержать от 1 до 8 цифр.");
             }
         }
 

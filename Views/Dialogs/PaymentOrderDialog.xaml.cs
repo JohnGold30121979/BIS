@@ -313,18 +313,74 @@ namespace BIS.ERP.Views
         {
             await SelectPlanAccountAsync((accountId, displayName) =>
             {
-                _selectedOurAccountId = accountId;
-                OurAccountBox.Text = displayName;
+                OurAccountBox.Text = displayName;   // сначала текст
+                _selectedOurAccountId = accountId;  // потом ID
                 UpdateAccountControlledFieldsVisibility();
             });
         }
+
+        //------------------------------------------------------------------------
+        // --- Ограничение ввода: только цифры, до 8 знаков ---
+
+        private void OnAccountCodePreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            // Разрешаем только цифры
+            e.Handled = !IsAllDigits(e.Text);
+        }
+
+        private void OnAccountCodePreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            // Пробел не приходит через PreviewTextInput — отсекаем отдельно
+            if (e.Key == Key.Space)
+                e.Handled = true;
+        }
+
+        private void OnAccountCodePasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+            {
+                e.CancelCommand();
+                return;
+            }
+
+            var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+            if (!IsAllDigits(text))
+                e.CancelCommand();
+        }
+
+        private static bool IsAllDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var c in text)
+            {
+                if (!char.IsDigit(c))
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Ручной ввод сбрасывает ранее выбранный счёт из диалога,
+        /// чтобы при сохранении не записался устаревший GUID.
+        /// </summary>
+        private void OnAccountCodeTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (sender == OurAccountBox)
+                _selectedOurAccountId = Guid.Empty;
+            else if (sender == CorrAccountBox)
+                _selectedCorrAccountId = Guid.Empty;
+        }
+        //------------------------------------------------------------------------
 
         private async void SelectCorrAccount_Click(object sender, RoutedEventArgs e)
         {
             await SelectPlanAccountAsync((accountId, displayName) =>
             {
-                _selectedCorrAccountId = accountId;
                 CorrAccountBox.Text = displayName;
+                _selectedCorrAccountId = accountId;
                 UpdateAccountControlledFieldsVisibility();
             });
         }
@@ -462,23 +518,29 @@ namespace BIS.ERP.Views
                 // Определяем тип платежа
                 string orderType = ((ComboBoxItem)TypeCombo.SelectedItem)?.Content?.ToString() ?? "Исходящее";
                 bool isOutgoing = orderType.Contains("Исходящее");
-
-                // Формируем правильный document_type
                 string documentType = isOutgoing ? "Исходящее платежное поручение" : "Входящее платежное поручение";
 
-                if (_selectedOurAccountId == Guid.Empty)
+                // === ЗДЕСЬ ВСТАВЛЯЕМ НОВЫЕ ПРОВЕРКИ ===
+                // --- Дебет ---
+                if (!await TryResolveAccountAsync(OurAccountBox, isOur: true))
                 {
-                    MessageBox.Show("Укажите счет дебета для формирования проводки.", "Проверка",
-                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(
+                        "Укажите счёт дебета. Введите до 8 цифр или выберите через кнопку «?».",
+                        "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    OurAccountBox.Focus();
                     return;
                 }
 
-                if (_selectedCorrAccountId == Guid.Empty)
+                // --- Кредит ---
+                if (!await TryResolveAccountAsync(CorrAccountBox, isOur: false))
                 {
-                    MessageBox.Show("Укажите счет кредита для формирования проводки.", "Проверка",
-                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(
+                        "Укажите счёт кредита. Введите до 8 цифр или выберите через кнопку «?».",
+                        "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    CorrAccountBox.Focus();
                     return;
                 }
+                // === КОНЕЦ ВСТАВКИ ===
 
                 if (!TryReadDecimal(AmountBox.Text, out var amount) || amount <= 0)
                 {
@@ -492,7 +554,7 @@ namespace BIS.ERP.Views
                 {
                     ["Номер"] = documentNumber,
                     ["Дата"] = DatePicker.SelectedDate ?? DateTime.Today,
-                    ["Тип"] = documentType,  
+                    ["Тип"] = documentType,
                     ["Сумма"] = amount,
                     ["Назначение платежа"] = PurposeBox.Text,
                     ["Примечание"] = DescriptionBox.Text,
@@ -529,6 +591,7 @@ namespace BIS.ERP.Views
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
                 SetFieldValueIfExists(itemData, "Кредит",
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
+
                 if (_editId.HasValue)
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
                 else
@@ -545,6 +608,66 @@ namespace BIS.ERP.Views
             {
                 this.Cursor = null;
             }
+        }
+
+
+        /// <summary>
+        /// Пытается получить ID счёта:
+        /// 1) если уже выбран через диалог (_selected* != Guid.Empty) — берём его;
+        /// 2) иначе ищем в плане счетов по коду из TextBox;
+        /// 3) если не найдено — предупреждаем и возвращаем false.
+        /// </summary>
+        private async Task<bool> TryResolveAccountAsync(TextBox textBox, bool isOur)
+        {
+            var currentId = isOur ? _selectedOurAccountId : _selectedCorrAccountId;
+            if (currentId != Guid.Empty)
+                return true;
+
+            var raw = textBox.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+
+            // Пользователь мог вставить "1210 - Касса" из буфера — но у нас MaxLength=8 и PreviewTextInput
+            // не пропустит не-цифры, так что сюда попадут только цифры. На всякий случай отрежем всё, кроме цифр.
+            var code = new string(raw.Where(char.IsDigit).ToArray());
+            if (string.IsNullOrWhiteSpace(code) || code.Length > 8)
+                return false;
+
+            // Ищем счёт в плане счетов по коду
+            var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                _document.Id, _document.ObjectType);
+            var match = accountsData.FirstOrDefault(row =>
+                row.TryGetValue("Код", out var codeValue) &&
+                string.Equals(codeValue?.ToString()?.Trim(), code, StringComparison.Ordinal));
+
+            if (match == null || !Guid.TryParse(match["Id"]?.ToString(), out var accountId))
+            {
+                MessageBox.Show(
+                    $"Счёт с кодом «{code}» не найден в плане счетов для этого модуля.",
+                    "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                textBox.Focus();
+                textBox.SelectAll();
+                return false;
+            }
+
+            var account = _accountAnalytics.FindAccount(match["Id"]);
+            var name = match.TryGetValue("Наименование", out var nameValue)
+                ? nameValue?.ToString()
+                : string.Empty;
+
+            if (isOur)
+            {
+                _selectedOurAccountId = accountId;
+                OurAccountBox.Text = account?.Code ?? code;  // нормализуем до кода
+            }
+            else
+            {
+                _selectedCorrAccountId = accountId;
+                CorrAccountBox.Text = account?.Code ?? code;
+            }
+
+            UpdateAccountControlledFieldsVisibility();
+            return true;
         }
 
         private void OnShowDescriptionChanged(object sender, RoutedEventArgs e)

@@ -9,7 +9,7 @@ namespace BIS.ERP.Models
         public Guid Id { get; set; } = Guid.NewGuid();
 
         [Required]
-        [MaxLength(20)]
+        [MaxLength(8)]
         public string Code { get; set; } = string.Empty;
 
         [Required]

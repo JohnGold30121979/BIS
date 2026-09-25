@@ -39,6 +39,7 @@ namespace BIS.ERP.Views.Dialogs
         private bool _isInvoiceEditingEnabled = true;
         private bool _isApplyingCurrencyValues;
         private bool _isRestoringNormalWindowState;
+        private bool _isSynchronizingHeaderAccount;
         private const string DefaultSalesLineAccount = "61100000";
         private const string DefaultPurchaseLineAccount = "16100000";
         private const int AmountFractionDigits = 2;
@@ -855,6 +856,97 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
+        private void OnAccountCodePreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            e.Handled = !IsAsciiDigits(e.Text);
+        }
+
+        private void OnAccountCodePreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space)
+                e.Handled = true;
+        }
+
+        private void OnAccountCodePasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+            {
+                e.CancelCommand();
+                return;
+            }
+
+            var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+            if (!IsAsciiDigits(text))
+                e.CancelCommand();
+        }
+
+        private void OnAccountCodeTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isSynchronizingHeaderAccount)
+                return;
+
+            _selectedHeaderAccountCode = string.Empty;
+            UpdateCurrencyPanelVisibility();
+        }
+
+        private async Task<bool> TryResolveHeaderAccountAsync()
+        {
+            if (!string.IsNullOrWhiteSpace(_selectedHeaderAccountCode))
+                return true;
+
+            var code = AccountBox.Text?.Trim() ?? string.Empty;
+            if (code.Length == 0 ||
+                code.Length > 8 ||
+                code.Any(character => character is < '0' or > '9'))
+            {
+                MessageBox.Show(
+                    "Счет расчетов должен содержать от 1 до 8 цифр.",
+                    "Проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                AccountBox.Focus();
+                AccountBox.SelectAll();
+                return false;
+            }
+
+            var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                _document.Id,
+                _document.ObjectType);
+            var match = accountsData.FirstOrDefault(row =>
+                row.TryGetValue("Код", out var codeValue) &&
+                string.Equals(codeValue?.ToString()?.Trim(), code, StringComparison.Ordinal));
+
+            var accountCode = match?.GetValueOrDefault("Код")?.ToString()?.Trim();
+            if (string.IsNullOrWhiteSpace(accountCode))
+            {
+                MessageBox.Show(
+                    $"Счёт с кодом «{code}» не найден в плане счетов для этого модуля.",
+                    "Проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                AccountBox.Focus();
+                AccountBox.SelectAll();
+                return false;
+            }
+
+            SetHeaderAccount(accountCode);
+            return true;
+        }
+
+        private static bool IsAsciiDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
+        }
+
         private async void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
         {
             if (_isReadOnlyMode || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
@@ -1153,6 +1245,9 @@ namespace BIS.ERP.Views.Dialogs
                     MessageBox.Show("Добавьте хотя бы одну строку.", "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
+
+                if (!await TryResolveHeaderAccountAsync())
+                    return;
 
                 if (CurrencyPanel.Visibility == Visibility.Visible)
                 {
@@ -1593,8 +1688,20 @@ namespace BIS.ERP.Views.Dialogs
 
         private void SetHeaderAccount(string accountCode)
         {
-            _selectedHeaderAccountCode = accountCode?.Trim() ?? string.Empty;
-            AccountBox.Text = GetAccountDisplayName(_selectedHeaderAccountCode);
+            var normalizedCode = accountCode?.Trim() ?? string.Empty;
+            _isSynchronizingHeaderAccount = true;
+            try
+            {
+                AccountBox.Text = _isReadOnlyMode
+                    ? GetAccountDisplayName(normalizedCode)
+                    : normalizedCode;
+            }
+            finally
+            {
+                _isSynchronizingHeaderAccount = false;
+            }
+
+            _selectedHeaderAccountCode = normalizedCode;
             EnsureLineAccountsDoNotMatchHeader();
             UpdateCurrencyPanelVisibility();
         }

@@ -68,7 +68,13 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBox x:Name="AccountBox" Height="28" IsReadOnly="False"/>
+                    <TextBox x:Name="AccountBox" Height="28" IsReadOnly="False"
+                             MaxLength="8"
+                             PreviewTextInput="OnAccountCodePreviewTextInput"
+                             PreviewKeyDown="OnAccountCodePreviewKeyDown"
+                             DataObject.Pasting="OnAccountCodePasting"
+                             TextChanged="OnAccountCodeTextChanged"
+                             ToolTip="Только цифры, до 8 знаков"/>
                     <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="?" Width="34" Height="28" Margin="4,0,0,0"
                             Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
                             Click="OnSelectAccountClick" FontWeight="Bold" FontFamily="Calibri"/>

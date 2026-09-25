@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 
@@ -690,6 +691,9 @@ namespace BIS.ERP.Views
                 default: // String
                     var textBox = new TextBox { Height = 35, Padding = new Thickness(10) };
 
+                    if (IsChartOfAccountsCatalog() && IsCatalogCodeField(field))
+                        ConfigureChartOfAccountsCodeInput(textBox);
+
                     // ФИО в самом справочнике сотрудников вводится вручную; в остальных местах поле может быть автозаполняемым.
                     if (!IsEmployeesCatalog() &&
                         !IsOrganizationsCatalog() &&
@@ -738,6 +742,46 @@ namespace BIS.ERP.Views
         private bool IsChartOfAccountsCatalog()
         {
             return string.Equals(_catalog.Name, "План счетов", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ConfigureChartOfAccountsCodeInput(TextBox textBox)
+        {
+            textBox.MaxLength = 8;
+            textBox.ToolTip = "Только цифры, до 8 знаков";
+            textBox.PreviewTextInput += (_, args) =>
+                args.Handled = !IsAsciiDigits(args.Text);
+            textBox.PreviewKeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Space)
+                    args.Handled = true;
+            };
+
+            DataObject.AddPastingHandler(textBox, (_, args) =>
+            {
+                if (!args.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+                {
+                    args.CancelCommand();
+                    return;
+                }
+
+                var text = args.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+                if (!IsAsciiDigits(text))
+                    args.CancelCommand();
+            });
+        }
+
+        private static bool IsAsciiDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
         }
 
         private void ApplyCatalogFieldState(MetadataField field, Control inputControl)
@@ -978,6 +1022,9 @@ namespace BIS.ERP.Views
                 if (!ValidateOrganizationCountry())
                     return;
 
+                if (!ValidateChartOfAccountsCode())
+                    return;
+
                 if (!ValidateChartOfAccountsCatalogLinks())
                     return;
 
@@ -1149,6 +1196,34 @@ namespace BIS.ERP.Views
                         return tb.Text;
                     return null;
             }
+        }
+
+        private bool ValidateChartOfAccountsCode()
+        {
+            if (!IsChartOfAccountsCatalog())
+                return true;
+
+            var code = GetItemText("Код", "code");
+            if (code.Length == 0 ||
+                code.Length > 8 ||
+                code.Any(character => character is < '0' or > '9'))
+            {
+                MessageBox.Show(
+                    "Код счета должен содержать от 1 до 8 цифр.",
+                    "План счетов",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+
+                if (_controls.TryGetValue("Код", out var control) && control is TextBox codeBox)
+                {
+                    codeBox.Focus();
+                    codeBox.SelectAll();
+                }
+
+                return false;
+            }
+
+            return true;
         }
 
         private bool ValidateChartOfAccountsCatalogLinks()

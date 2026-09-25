@@ -93,7 +93,14 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="OurAccountBox" Grid.Column="0" Height="26" IsReadOnly="False" Background="LightGray"/>
+                <TextBox x:Name="OurAccountBox" Grid.Column="0" Height="26"
+                         IsReadOnly="False" Background="White"
+                         MaxLength="8"
+                         PreviewTextInput="OnAccountCodePreviewTextInput"
+                         PreviewKeyDown="OnAccountCodePreviewKeyDown"
+                         DataObject.Pasting="OnAccountCodePasting"
+                         TextChanged="OnAccountCodeTextChanged"
+                         ToolTip="Только цифры, до 8 знаков"/>
                 <Button Grid.Column="1" Content="?" Width="30" Height="26" Margin="4,0,0,0" Click="SelectOurAccount_Click"/>
             </Grid>
 
@@ -107,7 +114,14 @@
                     <ColumnDefinition Width="90*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="26" IsReadOnly="False" Background="LightGray" Grid.ColumnSpan="4"/>
+                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Grid.ColumnSpan="4" Height="26"
+                         IsReadOnly="False" Background="White"
+                         MaxLength="8"
+                         PreviewTextInput="OnAccountCodePreviewTextInput"
+                         PreviewKeyDown="OnAccountCodePreviewKeyDown"
+                         DataObject.Pasting="OnAccountCodePasting"
+                         TextChanged="OnAccountCodeTextChanged"
+                         ToolTip="Только цифры, до 8 знаков"/>
                 <Button Grid.Column="4" Content="?" Width="30" Height="26" Margin="4,0,0,0" Click="SelectCorrAccount_Click"/>
             </Grid>
 

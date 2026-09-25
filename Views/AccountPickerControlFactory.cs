@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace BIS.ERP.Views
@@ -16,15 +17,18 @@ namespace BIS.ERP.Views
             object? currentValue,
             Window owner,
             Action? selectionChanged = null,
-            string? moduleCodeOrName = null)
+            string? moduleCodeOrName = null,
+            bool allowManualInput = false)
         {
             var selectedAccount = accountAnalytics.FindAccount(currentValue);
             var textBox = new TextBox
             {
                 Height = 30,
-                IsReadOnly = true,
-                Background = Brushes.LightGray,
-                Text = selectedAccount?.DisplayName ?? currentValue?.ToString() ?? string.Empty
+                IsReadOnly = !allowManualInput,
+                Background = allowManualInput ? Brushes.White : Brushes.LightGray,
+                MaxLength = allowManualInput ? 8 : 0,
+                ToolTip = allowManualInput ? "Только цифры, до 8 знаков" : null,
+                Text = GetAccountText(selectedAccount, currentValue, allowManualInput)
             };
 
             var button = new Button
@@ -50,6 +54,9 @@ namespace BIS.ERP.Views
                 MinWidth = 200
             };
 
+            if (allowManualInput)
+                AttachManualInputHandlers(textBox, picker, selectionChanged);
+
             button.Click += async (_, _) =>
             {
                 var selection = new AccountSelectionView(
@@ -62,8 +69,8 @@ namespace BIS.ERP.Views
                 if (selected == null)
                     return;
 
+                textBox.Text = GetAccountText(selected, null, allowManualInput);
                 picker.Tag = selected;
-                textBox.Text = selected.DisplayName;
                 selectionChanged?.Invoke();
             };
 
@@ -75,22 +82,92 @@ namespace BIS.ERP.Views
             return control is UserControl { Tag: AccountReferenceItem account } ? account : null;
         }
 
+        public static string GetAccountCode(Control control)
+        {
+            return control is UserControl picker
+                ? FindDescendant<TextBox>(picker)?.Text.Trim() ?? string.Empty
+                : string.Empty;
+        }
+
         public static void SetSelectedAccount(Control control, AccountReferenceItem? account)
         {
             if (control is not UserControl picker)
                 return;
 
-            picker.Tag = account;
-
             var textBox = FindDescendant<TextBox>(picker);
             if (textBox != null)
-                textBox.Text = account?.DisplayName ?? string.Empty;
+                textBox.Text = account == null
+                    ? string.Empty
+                    : textBox.IsReadOnly
+                        ? account.DisplayName
+                        : account.Code;
+
+            picker.Tag = account;
         }
 
         public static object GetSelectedAccountValue(MetadataField field, Control control)
         {
             var account = GetSelectedAccount(control);
             return account == null ? string.Empty : AccountAnalyticsRules.GetAccountValueForField(field, account);
+        }
+
+        private static string GetAccountText(
+            AccountReferenceItem? account,
+            object? fallbackValue,
+            bool allowManualInput)
+        {
+            if (account == null)
+                return fallbackValue?.ToString() ?? string.Empty;
+
+            return allowManualInput ? account.Code : account.DisplayName;
+        }
+
+        private static void AttachManualInputHandlers(
+            TextBox textBox,
+            UserControl picker,
+            Action? selectionChanged)
+        {
+            textBox.PreviewTextInput += (_, args) =>
+                args.Handled = !IsAsciiDigits(args.Text);
+
+            textBox.PreviewKeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Space)
+                    args.Handled = true;
+            };
+
+            DataObject.AddPastingHandler(textBox, (_, args) =>
+            {
+                if (!args.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+                {
+                    args.CancelCommand();
+                    return;
+                }
+
+                var text = args.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+                if (!IsAsciiDigits(text))
+                    args.CancelCommand();
+            });
+
+            textBox.TextChanged += (_, _) =>
+            {
+                picker.Tag = null;
+                selectionChanged?.Invoke();
+            };
+        }
+
+        private static bool IsAsciiDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
         }
 
         private static List<Dictionary<string, object>> BuildAccountRows(IEnumerable<AccountReferenceItem> accounts)

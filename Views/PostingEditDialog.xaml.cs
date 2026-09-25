@@ -383,7 +383,60 @@ namespace BIS.ERP.Views
                 currentValue,
                 this,
                 UpdateAnalyticControlsVisibility,
-                _assignedModuleName);
+                _assignedModuleName,
+                allowManualInput: fieldName is "Дебет" or "Кредит");
+        }
+
+        private async Task<bool> TryResolveManualAccountAsync(string fieldName, Control control)
+        {
+            if (GetSelectedAccountFromControl(control) != null)
+                return true;
+
+            var code = AccountPickerControlFactory.GetAccountCode(control);
+            var accountKind = fieldName == "Дебет" ? "дебета" : "кредита";
+            if (code.Length == 0 ||
+                code.Length > 8 ||
+                code.Any(character => character is < '0' or > '9'))
+            {
+                MessageBox.Show(
+                    $"Счёт {accountKind} должен содержать от 1 до 8 цифр.",
+                    "Проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                _document.Id,
+                _document.ObjectType);
+            var match = accountsData.FirstOrDefault(row =>
+                row.TryGetValue("Код", out var codeValue) &&
+                string.Equals(codeValue?.ToString()?.Trim(), code, StringComparison.Ordinal));
+
+            if (match == null || !Guid.TryParse(match["Id"]?.ToString(), out var accountId))
+            {
+                MessageBox.Show(
+                    $"Счёт с кодом «{code}» не найден в плане счетов для этого модуля.",
+                    "Проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            var account = _accountAnalytics.FindAccount(accountId);
+            if (account == null)
+            {
+                MessageBox.Show(
+                    $"Счёт с кодом «{code}» найден в плане счетов, но не загружен для выбора.",
+                    "Проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return false;
+            }
+
+            AccountPickerControlFactory.SetSelectedAccount(control, account);
+            UpdateAnalyticControlsVisibility();
+            return true;
         }
 
         private void UpdateAnalyticControlsVisibility()
@@ -489,6 +542,12 @@ namespace BIS.ERP.Views
 
                     if (!_fieldControls.TryGetValue(field.Name, out var control))
                         continue;
+
+                    if ((field.Name == "Дебет" || field.Name == "Кредит") &&
+                        !await TryResolveManualAccountAsync(field.Name, control))
+                    {
+                        return;
+                    }
 
                     object? value = null;
 
@@ -660,6 +719,10 @@ namespace BIS.ERP.Views
                 "Тип документа" => 2,
                 "Дата" => 3,
                 "Касса" => 4,
+                "Дебет" => 5,
+                "Кредит" => 6,
+                "Сумма в сом" => 7,
+                "Сумма" => 7,
                 _ => 100 + field.Order
             };
         }

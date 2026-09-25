@@ -122,10 +122,18 @@ namespace BIS.ERP.Services
         private static ChartOfAccount MapAccount(IReadOnlyDictionary<string, object?> values)
         {
             var parentCode = GetString(values, "SSCHET");
+            var code = GetString(values, "SCHET").Trim();
+            if (code.Length == 0 ||
+                code.Length > 8 ||
+                code.Any(character => character is < '0' or > '9'))
+            {
+                throw new InvalidDataException(
+                    $"Код счета «{code}» в DBF-файле должен содержать от 1 до 8 цифр.");
+            }
 
             return new ChartOfAccount
             {
-                Code = GetString(values, "SCHET"),
+                Code = code,
                 Name = NormalizeText(GetString(values, "NAIM")),
                 Description = NormalizeText(GetString(values, "NAIM_A")),
                 AccountType = MapAccountType(GetInt(values, "PRSCH")),
