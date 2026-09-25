@@ -122,6 +122,15 @@ namespace BIS.ERP.Views
 
         private string GetFieldLabel(MetadataField field)
         {
+            if (IsOrganizationsCatalog())
+            {
+                return field.Name switch
+                {
+                    "Регистрационный номер" => "Районная налоговая инспекция",
+                    _ => field.Name
+                };
+            }
+
             if (!IsEmployeesCatalog())
                 return field.Name;
 

@@ -737,6 +737,7 @@ namespace BIS.ERP.Services
                     await EnsureTaxCatalogStructureAsync();
                     await EnsurePaymentKindCatalogStructureAsync();
                     await EnsureChartOfAccountsCatalogStructureAsync();
+                    await EnsureOrganizationGroupsCatalogAsync();
                     await EnsureOrganizationsCatalogStructureAsync();
                     await EnsureEmployeesCatalogStructureAsync();
                     await EnsureCashDesksCatalogStructureAsync();
@@ -1073,6 +1074,8 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Государства"))
                     await CreateCountriesCatalog(config);
+
+                await EnsureOrganizationGroupsCatalogAsync(config);
 
                 if (!existingCatalogs.Contains("Организации"))
                     await CreateOrganizationsCatalog(config);

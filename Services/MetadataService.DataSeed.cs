@@ -537,8 +537,12 @@ namespace BIS.ERP.Services
                     '',
                     '',
                     '',
-                    '',
-                    'OWN',
+                    (
+                        SELECT g.""Id""::text
+                        FROM ""catalog_groups"" g
+                        WHERE g.""code"" = 'OTHER'
+                        LIMIT 1
+                    ),
                     'Первичная организация. Заполните реквизиты предприятия для печатных форм.',
                     true,
                     NOW(),
@@ -679,7 +683,40 @@ namespace BIS.ERP.Services
         }
 
         #region Начальные данные для новых справочников
-        
+
+        // Начальные данные для справочника "Группы"
+        private async Task AddOrganizationGroupsDataToTable(MetadataObject catalog)
+        {
+            var groups = new[]
+            {
+                new { code = "REPUBLIC_BUDGET", name = "Республиканский бюджет", description = "", is_active = true },
+                new { code = "LOCAL_BUDGET", name = "Местный бюджет", description = "", is_active = true },
+                new { code = "HOUSING_MANAGEMENT", name = "Жилкомбинаты", description = "", is_active = true },
+                new { code = "OTHER", name = "Прочие", description = "", is_active = true }
+            };
+
+            foreach (var group in groups)
+            {
+                try
+                {
+                    await InsertCatalogSeedRowIfMissingAsync(catalog.TableName, group.code, new Dictionary<string, object?>
+                    {
+                        ["Id"] = Guid.NewGuid(),
+                        ["code"] = group.code,
+                        ["name"] = group.name,
+                        ["description"] = group.description,
+                        ["is_active"] = group.is_active,
+                        ["CreatedAt"] = DateTime.UtcNow,
+                        ["UpdatedAt"] = DateTime.UtcNow
+                    });
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения группы {group.code}: {ex.Message}");
+                }
+            }
+        }
+
         // Начальные данные для справочника "Налоги"
         private async Task AddTaxDataToTable(MetadataObject catalog)
         {
@@ -1099,6 +1136,23 @@ namespace BIS.ERP.Services
         private static string EscapeSql(string value)
         {
             return (value ?? string.Empty).Replace("'", "''");
+        }
+
+        private async Task InsertCatalogSeedRowIfMissingAsync(
+            string tableName,
+            string code,
+            IReadOnlyDictionary<string, object?> values)
+        {
+            var columnSql = string.Join(", ", values.Keys.Select(item => $@"""{item}"""));
+            var valueSql = string.Join(", ", values.Values.Select(ToSqlLiteral));
+            await _context.Database.ExecuteSqlRawAsync($@"
+                INSERT INTO ""{tableName}"" ({columnSql})
+                SELECT {valueSql}
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM ""{tableName}""
+                    WHERE ""code"" = {ToSqlLiteral(code)}
+                );");
         }
 
         private async Task UpsertCatalogSeedRowAsync(

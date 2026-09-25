@@ -838,14 +838,67 @@ namespace BIS.ERP.Services
             }
         }
 
+        // Справочник групп организаций
+        private async Task CreateOrganizationGroupsCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalogId = Guid.NewGuid();
+                var catalog = new MetadataObject
+                {
+                    Id = catalogId,
+                    Name = "Группы",
+                    TableName = "catalog_groups",
+                    ObjectType = "Catalog",
+                    Description = "Справочник групп организаций",
+                    Icon = "🗂️",
+                    Order = 2,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetStandardCatalogFields(catalogId)
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddOrganizationGroupsDataToTable(catalog);
+                System.Diagnostics.Debug.WriteLine("Справочник 'Группы' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Группы': {ex.Message}");
+            }
+        }
+
+        private async Task EnsureOrganizationGroupsCatalogAsync(MetadataConfiguration? config = null)
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(m => m.Fields)
+                .FirstOrDefaultAsync(m => m.ObjectType == "Catalog" && m.Name == "Группы");
+
+            if (catalog == null)
+            {
+                config ??= await _context.MetadataConfigurations.FirstOrDefaultAsync();
+                if (config == null)
+                    return;
+
+                await CreateOrganizationGroupsCatalog(config);
+                return;
+            }
+
+            await EnsureCatalogStructureAsync("Группы", GetStandardCatalogFields);
+            await AddOrganizationGroupsDataToTable(catalog);
+        }
+
         // Организации (исправленный, без лишних данных)
         private async Task CreateOrganizationsCatalog(MetadataConfiguration config)
         {
             try
             {
+                var catalogId = Guid.NewGuid();
                 var catalog = new MetadataObject
                 {
-                    Id = Guid.NewGuid(),
+                    Id = catalogId,
                     Name = "Организации",
                     TableName = "catalog_organizations",
                     ObjectType = "Catalog",
@@ -854,7 +907,7 @@ namespace BIS.ERP.Services
                     Order = 1,
                     IsSystem = true,
                     MetadataConfigId = config.Id,
-                    Fields = GetOrganizationFields(Guid.NewGuid())
+                    Fields = GetOrganizationFields(catalogId)
                 };
                 await _context.MetadataObjects.AddAsync(catalog);
                 await _context.SaveChangesAsync();
@@ -888,10 +941,16 @@ namespace BIS.ERP.Services
 
                 if (existingField != null)
                 {
-                    existingField.IsRequired = field.IsRequired;
+                    existingField.Name = field.Name;
+                    existingField.FieldType = field.FieldType;
                     existingField.ReferenceCatalog = field.ReferenceCatalog;
                     existingField.DisplayPattern = field.DisplayPattern;
                     existingField.DisplayFields = field.DisplayFields;
+                    existingField.IsRequired = field.IsRequired;
+                    existingField.IsUnique = field.IsUnique;
+                    existingField.Length = field.Length;
+                    existingField.Precision = field.Precision;
+                    existingField.Scale = field.Scale;
                     existingField.Order = field.Order;
                     continue;
                 }
@@ -910,7 +969,58 @@ namespace BIS.ERP.Services
             await RemoveLegacyOrganizationBankFieldsAsync(catalog);
 
             await _context.SaveChangesAsync();
+            await EnsureOrganizationGroupReferenceColumnAsync(catalog);
             await EnsurePrimaryOrganizationDataAsync(catalog);
+        }
+
+        private async Task EnsureOrganizationGroupReferenceColumnAsync(MetadataObject catalog)
+        {
+            try
+            {
+                var groupsCatalog = await _context.MetadataObjects.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Группы");
+                if (groupsCatalog == null || string.IsNullOrWhiteSpace(groupsCatalog.TableName))
+                    return;
+
+                var tableName = QuoteIdentifier(catalog.TableName);
+                var groupsTableName = QuoteIdentifier(groupsCatalog.TableName);
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    ALTER TABLE {tableName}
+                    ADD COLUMN IF NOT EXISTS ""group_code"" text;
+                    ALTER TABLE {tableName}
+                    ALTER COLUMN ""group_code"" TYPE text;");
+
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE {tableName} AS organization
+                    SET ""group_code"" = COALESCE(
+                            (
+                                SELECT group_row.""Id""::text
+                                FROM {groupsTableName} AS group_row
+                                WHERE group_row.""code"" = organization.""group_code""
+                                   OR group_row.""name"" = organization.""group_code""
+                                LIMIT 1
+                            ),
+                            (
+                                SELECT group_row.""Id""::text
+                                FROM {groupsTableName} AS group_row
+                                WHERE group_row.""code"" = 'OTHER'
+                                LIMIT 1
+                            )
+                        ),
+                        ""UpdatedAt"" = NOW()
+                    WHERE organization.""group_code"" IS NOT NULL
+                      AND BTRIM(organization.""group_code"") <> ''
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM {groupsTableName} AS existing_group
+                            WHERE existing_group.""Id""::text = organization.""group_code""
+                      );");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка обновления поля группы организации: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -958,7 +1068,7 @@ namespace BIS.ERP.Services
                 SELECT ""Id""::text
                 FROM {tableName}
                 ORDER BY COALESCE(""is_primary"", false) DESC,
-                         CASE WHEN COALESCE(""group_code"", '') = 'OWN' THEN 0 ELSE 1 END,
+                         ""code"",
                          ""CreatedAt""
                 LIMIT 1";
 
