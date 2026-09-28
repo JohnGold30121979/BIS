@@ -182,16 +182,23 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=N2}" Width="130"/>
+                            <!-- Числовые колонки («Сумма», «Сумма в валюте», «Курс») биндятся через
+                                 Converters.DecimalInputConverter: он показывает значение в формате
+                                 культуры ru-RU, но принимает и точку, и запятую как десятичный
+                                 разделитель. Цифровая клавиатура может выдать точку («999.99»),
+                                 из-за которой обычный биндинг давал ошибку валидации ячейки. -->
+                            <DataGridTextColumn Header="Сумма"
+                                                Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}"
+                                                Width="130"/>
                             <DataGridComboBoxColumn x:Name="AdvanceCurrencyColumn" Header="Валюта" Width="150"
                                                     DisplayMemberPath="DisplayName" SelectedValuePath="Id"
                                                     SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                     Visibility="Collapsed"/>
                             <DataGridTextColumn x:Name="AdvanceAmountCurrencyColumn" Header="Сумма в валюте"
-                                                Binding="{Binding AmountCurrency, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=0.##}"
+                                                Binding="{Binding AmountCurrency, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}"
                                                 Width="130" Visibility="Collapsed"/>
                             <DataGridTextColumn x:Name="AdvanceExchangeRateColumn" Header="Курс"
-                                                Binding="{Binding ExchangeRate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, StringFormat=0.####}"
+                                                Binding="{Binding ExchangeRate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}"
                                                 Width="100" Visibility="Collapsed"/>
                         </DataGrid.Columns>
                     </DataGrid>

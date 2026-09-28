@@ -1,7 +1,8 @@
 ﻿<Application x:Class="BIS.ERP.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:services="clr-namespace:BIS.ERP.Services">
+             xmlns:services="clr-namespace:BIS.ERP.Services"
+             xmlns:converters="clr-namespace:BIS.ERP.Converters">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -9,6 +10,8 @@
                 <ResourceDictionary Source="/Themes/Default.xaml"/>
             </ResourceDictionary.MergedDictionaries>
             <services:LocalizedValueConverter x:Key="LocalizedValueConverter"/>
+            <!-- Ввод дробных чисел в ячейках: принимает и точку, и запятую (см. DecimalInputConverter). -->
+            <converters:DecimalInputConverter x:Key="DecimalInputConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

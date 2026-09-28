@@ -1476,11 +1476,8 @@ namespace BIS.ERP.Views
 
         private static decimal ReadDecimal(string? text)
         {
-            if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out var currentValue))
-                return currentValue;
-
-            return decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var invariantValue)
-                ? invariantValue
+            return NumericInputHelper.TryParseDecimal(text, CultureInfo.CurrentCulture, out var value)
+                ? value
                 : 0m;
         }
 
