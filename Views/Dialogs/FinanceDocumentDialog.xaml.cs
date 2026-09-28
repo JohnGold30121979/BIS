@@ -939,7 +939,7 @@ namespace BIS.ERP.Views
         {
             var total = _advanceExpenseLines.Sum(row => row.Amount);
             if (AdvanceExpenseTotalText != null)
-                AdvanceExpenseTotalText.Text = $"Итого: {FormatDecimal(total)}";
+                AdvanceExpenseTotalText.Text = $"Итого: {BIS.ERP.Converters.DecimalInputConverter.Format(total, "0.##")}";
             if (_documentKind == FinanceDocumentKind.AdvanceReport && AmountBox != null)
                 AmountBox.Text = FormatDecimal(total);
             if (_documentKind == FinanceDocumentKind.AdvanceReport && _isInitialized)

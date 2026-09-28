@@ -71,7 +71,7 @@
                         </StackPanel>
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding TotalAmount, StringFormat=N2}" Width="120">
+                <DataGridTextColumn Binding="{Binding TotalAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120">
                     <DataGridTextColumn.Header>
                         <StackPanel>
                             <TextBlock Text="Сумма"/>
@@ -117,12 +117,12 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="150"/>
                 <DataGridTextColumn x:Name="LineUnitColumn" Header="ЕдИз" Binding="{Binding UnitName}" Width="80" Visibility="Collapsed"/>
-                <DataGridTextColumn x:Name="LineQuantityColumn" Header="Кол-во" Binding="{Binding Quantity, StringFormat=N3}" Width="90" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="LineQuantityColumn" Header="Кол-во" Binding="{Binding Quantity, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N3}" Width="90" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="LineAccountColumn" Header="Счет" Binding="{Binding AccountName}" Width="220"/>
-                <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, StringFormat=N2}" Width="110"/>
-                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, StringFormat=N2}" Width="90"/>
-                <DataGridTextColumn x:Name="LineSalesTaxColumn" Header="Налог с прод" Binding="{Binding SalesTaxAmount, StringFormat=N2}" Width="100"/>
-                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, StringFormat=N2}" Width="100"/>
+                <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="110"/>
+                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="90"/>
+                <DataGridTextColumn x:Name="LineSalesTaxColumn" Header="Налог с прод" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
             </DataGrid.Columns>
         </DataGrid>
 

@@ -11,6 +11,7 @@ using System.Windows.Media;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
+using BIS.ERP.Behaviors;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 
@@ -40,6 +41,7 @@ namespace BIS.ERP.Views
         public CatalogDataView(MetadataObject catalog, MetadataService metadataService)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(FindName("OrganizationDetailsGrid") as DataGrid); // доп. поля организации — суммы с разрядами через пробел
             _catalog = catalog;
             _metadataService = metadataService;
             _referenceCache = new Dictionary<string, Dictionary<string, string>>();

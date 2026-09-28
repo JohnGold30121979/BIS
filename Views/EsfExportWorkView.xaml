@@ -57,7 +57,7 @@
                 <DataGridTextColumn Header="Дата" Binding="{Binding DocDate, StringFormat=dd/MM/yyyy}" IsReadOnly="True" Width="105"/>
                 <DataGridTextColumn Header="Модуль" Binding="{Binding ModuleCode}" IsReadOnly="True" Width="110"/>
                 <DataGridTextColumn Header="Документ" Binding="{Binding DocNumber}" IsReadOnly="True" Width="130"/>
-                <DataGridTextColumn Header="Сумма" Binding="{Binding TotalAmount, StringFormat=N2}" IsReadOnly="True" Width="120"/>
+                <DataGridTextColumn Header="Сумма" Binding="{Binding TotalAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" IsReadOnly="True" Width="120"/>
                 <DataGridTextColumn Header="Статус ЭСФ" Binding="{Binding TaxStatusDisplay}" IsReadOnly="True" Width="130"/>
                 <DataGridTextColumn Header="Номер ЭСФ" Binding="{Binding EsfNumber}" IsReadOnly="True" Width="160"/>
                 <DataGridTextColumn Header="Организация" Binding="{Binding OrganizationName}" IsReadOnly="True" Width="*" MinWidth="230"/>

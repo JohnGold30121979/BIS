@@ -26,7 +26,7 @@
                 <DataGridTextColumn Header="Номер" Binding="{Binding [Номер документа]}" Width="120"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
-                <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма в сом]}" Width="120"/>
+                <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма в сом], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding [Примечание]}" Width="200"/>
             </DataGrid.Columns>
         </DataGrid>

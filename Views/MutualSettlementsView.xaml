@@ -54,13 +54,13 @@
                 <DataGridTextColumn Header="Вид расчета" Binding="{Binding account_pair_name}" Width="220"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding debit_account}" Width="95"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding credit_account}" Width="95"/>
-                <DataGridTextColumn Header="Сальдо нач. Дт" Binding="{Binding opening_debit, StringFormat=N2}" Width="115"/>
-                <DataGridTextColumn Header="Сальдо нач. Кт" Binding="{Binding opening_credit, StringFormat=N2}" Width="115"/>
-                <DataGridTextColumn Header="Оборот Дт" Binding="{Binding debit_total, StringFormat=N2}" Width="105"/>
-                <DataGridTextColumn Header="Оборот Кт" Binding="{Binding credit_total, StringFormat=N2}" Width="105"/>
-                <DataGridTextColumn Header="Сальдо кон. Дт" Binding="{Binding closing_debit, StringFormat=N2}" Width="115"/>
-                <DataGridTextColumn Header="Сальдо кон. Кт" Binding="{Binding closing_credit, StringFormat=N2}" Width="115"/>
-                <DataGridTextColumn Header="Сальдо" Binding="{Binding balance, StringFormat=N2}" Width="105"/>
+                <DataGridTextColumn Header="Сальдо нач. Дт" Binding="{Binding opening_debit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="115"/>
+                <DataGridTextColumn Header="Сальдо нач. Кт" Binding="{Binding opening_credit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="115"/>
+                <DataGridTextColumn Header="Оборот Дт" Binding="{Binding debit_total, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="105"/>
+                <DataGridTextColumn Header="Оборот Кт" Binding="{Binding credit_total, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="105"/>
+                <DataGridTextColumn Header="Сальдо кон. Дт" Binding="{Binding closing_debit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="115"/>
+                <DataGridTextColumn Header="Сальдо кон. Кт" Binding="{Binding closing_credit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="115"/>
+                <DataGridTextColumn Header="Сальдо" Binding="{Binding balance, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="105"/>
             </DataGrid.Columns>
         </DataGrid>
     </Grid>

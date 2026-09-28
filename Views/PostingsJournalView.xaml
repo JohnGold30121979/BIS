@@ -168,7 +168,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding Amount, StringFormat=N2}" Width="130">
+                <DataGridTextColumn Binding="{Binding Amount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="130">
                     <DataGridTextColumn.Header>
                         <StackPanel>
                             <TextBlock Text="Сумма в сомах"/>
@@ -181,7 +181,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding AmountCurrency, StringFormat=N2}" Width="130">
+                <DataGridTextColumn Binding="{Binding AmountCurrency, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="130">
                     <DataGridTextColumn.Header>
                         <StackPanel>
                             <TextBlock Text="Сумма в валюте"/>

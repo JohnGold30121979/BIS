@@ -56,8 +56,8 @@
                             <DataGridTextColumn Header="Дата остатка" Binding="{Binding BalanceDate, StringFormat=dd/MM/yyyy}" Width="120"/>
                             <DataGridTextColumn Header="Счет" Binding="{Binding AccountCode}" IsReadOnly="True" Width="120"/>
                             <DataGridTextColumn Header="Наименование" Binding="{Binding AccountName}" IsReadOnly="True" Width="*"/>
-                            <DataGridTextColumn Header="Дебет" Binding="{Binding Debit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
-                            <DataGridTextColumn Header="Кредит" Binding="{Binding Credit, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                            <DataGridTextColumn Header="Дебет" Binding="{Binding Debit, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="130"/>
+                            <DataGridTextColumn Header="Кредит" Binding="{Binding Credit, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="130"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
@@ -104,7 +104,7 @@
                             <DataGridTextColumn Header="Порядок" Binding="{Binding SortOrder}" Width="80"/>
                             <DataGridTextColumn Header="Знак" Binding="{Binding Sign}" Width="60"/>
                             <DataGridTextColumn Header="Формула" Binding="{Binding Formula}" Width="180"/>
-                            <DataGridTextColumn Header="Фикс. сумма" Binding="{Binding FixedAmount}" Width="100"/>
+                            <DataGridTextColumn Header="Фикс. сумма" Binding="{Binding FixedAmount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                             <DataGridCheckBoxColumn Header="Итог" Binding="{Binding IsTotal}" Width="60"/>
                             <DataGridTextColumn Header="Счета (через запятую)" Binding="{Binding AccountCodes}" Width="240"/>
                         </DataGrid.Columns>
@@ -158,4 +158,3 @@
         <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,8,0,0" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
     </Grid>
 </UserControl>
-

@@ -1,3 +1,4 @@
+using BIS.ERP.Behaviors;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.Win32;
@@ -21,6 +22,7 @@ namespace BIS.ERP.Views
         public ReportPreviewWindow(DataTable data, Report report, ReportService reportService)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(PreviewGrid); // колонки предпросмотра отчёта — суммы с разрядами через пробел
             _data = data;
             _report = report;
             _reportService = reportService;

@@ -62,8 +62,8 @@
                 <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="120"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
-                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом]}" Width="120"/>
-                <DataGridTextColumn x:Name="AmountCurrencyColumn" Header="Сумма в валюте" Binding="{Binding [Сумма в валюте]}" Width="120" Visibility="Collapsed"/>
+                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
+                <DataGridTextColumn x:Name="AmountCurrencyColumn" Header="Сумма в валюте" Binding="{Binding [Сумма в валюте], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="CurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="110" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="OrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="180" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="EmployeeColumn" Header="Сотрудник" Binding="{Binding [Сотрудник]}" Width="180" Visibility="Collapsed"/>
@@ -94,8 +94,8 @@
                     <DataGridTextColumn Header="Модуль" Binding="{Binding [Модуль]}" Width="100"/>
                     <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="95"/>
                     <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="95"/>
-                    <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма]}" Width="100"/>
-                    <DataGridTextColumn x:Name="DetailAmountCurrencyColumn" Header="Сумма вал." Binding="{Binding [Сумма вал.]}" Width="100" Visibility="Collapsed"/>
+                    <DataGridTextColumn Header="Сумма" Binding="{Binding [Сумма], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                    <DataGridTextColumn x:Name="DetailAmountCurrencyColumn" Header="Сумма вал." Binding="{Binding [Сумма вал.], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100" Visibility="Collapsed"/>
                     <DataGridTextColumn x:Name="DetailCurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="85" Visibility="Collapsed"/>
                     <DataGridTextColumn x:Name="DetailOrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="180" Visibility="Collapsed"/>
                     <DataGridTextColumn x:Name="DetailEmployeeColumn" Header="Сотрудник" Binding="{Binding [Сотрудник]}" Width="160" Visibility="Collapsed"/>

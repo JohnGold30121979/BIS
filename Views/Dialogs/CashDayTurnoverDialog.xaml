@@ -36,12 +36,12 @@
                   HorizontalScrollBarVisibility="Auto">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="День" Binding="{Binding Date, StringFormat=dd/MM/yyyy}" Width="120"/>
-                <DataGridTextColumn Header="ДН" Binding="{Binding OpeningDebit, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="КН" Binding="{Binding OpeningCredit, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="Дт оборот" Binding="{Binding DebitTurnover, StringFormat=N2}" Width="130"/>
-                <DataGridTextColumn Header="Кт оборот" Binding="{Binding CreditTurnover, StringFormat=N2}" Width="130"/>
-                <DataGridTextColumn Header="ДК" Binding="{Binding ClosingDebit, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="КК" Binding="{Binding ClosingCredit, StringFormat=N2}" Width="120"/>
+                <DataGridTextColumn Header="ДН" Binding="{Binding OpeningDebit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
+                <DataGridTextColumn Header="КН" Binding="{Binding OpeningCredit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
+                <DataGridTextColumn Header="Дт оборот" Binding="{Binding DebitTurnover, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="130"/>
+                <DataGridTextColumn Header="Кт оборот" Binding="{Binding CreditTurnover, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="130"/>
+                <DataGridTextColumn Header="ДК" Binding="{Binding ClosingDebit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
+                <DataGridTextColumn Header="КК" Binding="{Binding ClosingCredit, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
             </DataGrid.Columns>
         </DataGrid>
 

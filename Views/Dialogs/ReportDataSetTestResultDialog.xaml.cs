@@ -1,3 +1,4 @@
+using BIS.ERP.Behaviors;
 using System.Data;
 using System.Windows;
 
@@ -8,6 +9,7 @@ namespace BIS.ERP.Views.Dialogs
         public ReportDataSetTestResultDialog(string dataSetName, DataTable table, int limit)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(ResultGrid); // результаты запроса — суммы с разрядами через пробел
 
             TitleText.Text = string.IsNullOrWhiteSpace(dataSetName)
                 ? "Результат выполнения запроса"

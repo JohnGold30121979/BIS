@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using BIS.ERP.Behaviors;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -20,6 +21,7 @@ namespace BIS.ERP.Views
         public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(DataGrid); // динамические колонки — суммы с разрядами через пробел
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
         }

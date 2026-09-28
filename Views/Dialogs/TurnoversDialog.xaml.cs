@@ -1,3 +1,4 @@
+using BIS.ERP.Behaviors;
 using System;
 using System.Data;
 using System.Windows;
@@ -13,6 +14,7 @@ namespace BIS.ERP.Views.Dialogs
         public TurnoversDialog(string accountCode, string accountName, DateTime startDate, DateTime endDate, PostingService service)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(TurnoversGrid); // обороты по счету — суммы с разрядами через пробел
             TitleText.Text = $"Обороты по счету {accountCode} - {accountName} за {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}";
             Loaded += async (_, _) =>
             {

@@ -1,3 +1,4 @@
+using BIS.ERP.Behaviors;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.Win32;
@@ -21,6 +22,7 @@ namespace BIS.ERP.Views
         public DynamicDocumentsView(DocumentService documentService)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(DataGrid); // динамические колонки — суммы с разрядами через пробел
             _documentService = documentService;
             Loaded += OnLoaded;
         }

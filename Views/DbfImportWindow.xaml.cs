@@ -1,3 +1,4 @@
+using BIS.ERP.Behaviors;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ namespace BIS.ERP.Views
         public DbfImportWindow()
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(DataGrid); // импортированные данные — суммы с разрядами через пробел
             _parser = new DbfParserService();
         }
 

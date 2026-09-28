@@ -1,3 +1,4 @@
+using BIS.ERP.Behaviors;
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
@@ -42,6 +43,7 @@ namespace BIS.ERP.Views
         public AccountingReportsView(AppDbContext context)
         {
             InitializeComponent();
+            AmountColumnsBehavior.Attach(ReportGrid); // авто-генерируемые колонки отчётов — суммы с разрядами через пробел
             _context = context;
             _balanceService = new BalanceService(context);
             _organizationBalanceService = new OrganizationBalanceService(context);

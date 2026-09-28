@@ -93,8 +93,8 @@
                 <DataGridTextColumn Header="Модуль" Binding="{Binding ModuleName}" Width="120"/>
                 <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccount}" Width="105"/>
                 <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccount}" Width="105"/>
-                <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, StringFormat=N2}" Width="110"/>
-                <DataGridTextColumn Header="Сумма вал." Binding="{Binding AmountCurrency, StringFormat=N2}" Width="110"/>
+                <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="110"/>
+                <DataGridTextColumn Header="Сумма вал." Binding="{Binding AmountCurrency, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="110"/>
                 <DataGridTextColumn Header="Примечание" Binding="{Binding Note}" Width="*" MinWidth="150"/>
             </DataGrid.Columns>
         </DataGrid>

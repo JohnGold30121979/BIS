@@ -156,7 +156,7 @@
                         <DataGridTextColumn Header="Тип" Binding="{Binding Mark}" Width="1.2*" MinWidth="80"/>
                         <DataGridTextColumn Header="Дебет" Binding="{Binding Debit}" Width="1.8*" MinWidth="110"/>
                         <DataGridTextColumn Header="Кредит" Binding="{Binding Credit}" Width="1.8*" MinWidth="110"/>
-                        <DataGridTextColumn Header="Сумма" Binding="{Binding Amount}" Width="1.2*" MinWidth="80"/>
+                        <DataGridTextColumn Header="Сумма" Binding="{Binding Amount, Converter={StaticResource DecimalInputConverter}}" Width="1.2*" MinWidth="80"/>
                         <DataGridTextColumn Header="Основание" Binding="{Binding Note}" Width="4.0*" MinWidth="180"/>
                     </DataGrid.Columns>
                 </DataGrid>

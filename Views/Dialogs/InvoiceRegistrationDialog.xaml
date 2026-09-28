@@ -70,10 +70,10 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Наименование" Binding="{Binding Name}" Width="*" MinWidth="260"/>
                 <DataGridTextColumn Header="ЕдИз" Binding="{Binding UnitName}" Width="80"/>
-                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, StringFormat=N3}" Width="90"/>
-                <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, StringFormat=N2}" Width="120"/>
-                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, StringFormat=N2}" Width="100"/>
-                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, StringFormat=N2}" Width="110"/>
+                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N3}" Width="90"/>
+                <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
+                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="110"/>
             </DataGrid.Columns>
         </DataGrid>
 
