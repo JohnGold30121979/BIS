@@ -144,6 +144,13 @@ namespace BIS.ERP.Views
         private const double OrganizationListMinHeight = 120;
         private bool _organizationPanelHeightInitialized;
 
+        // Последняя фактическая высота панели организации (пиксели). Нужна, чтобы
+        // вернуть панель к прежнему размеру после того, как её скрыли (перезагрузка
+        // списка, поиск, добавление записи): иначе строка панели остаётся схлопнутой
+        // в 0 и блоки реквизитов/расчётных счетов больше не показываются до
+        // переоткрытия окна справочника.
+        private double _organizationPanelHeight;
+
         private Border? OrganizationDetailsPanelControl => FindName("OrganizationDetailsPanel") as Border;
 
         private DataGrid? OrganizationDetailsGridControl => FindName("OrganizationDetailsGrid") as DataGrid;
@@ -236,32 +243,70 @@ namespace BIS.ERP.Views
 
             // Строки 3 (сплиттер) и 4 (панель организации) корневой сетки:
             // при показе панель получает высоту, при скрытии — строки схлопываются
-            if (RootLayout.RowDefinitions.Count > 4)
+            if (RootLayout.RowDefinitions.Count <= 4)
+                return;
+
+            var panelRow = RootLayout.RowDefinitions[4];
+
+            RootLayout.RowDefinitions[3].Height = new GridLength(isVisible ? 6 : 0);
+
+            if (!isVisible)
             {
-                var panelRow = RootLayout.RowDefinitions[4];
+                // Запоминаем высоту панели (её задаёт пользователь сплиттером),
+                // чтобы вернуть её при следующем показе.
+                RememberOrganizationPanelHeight(panelRow);
 
-                RootLayout.RowDefinitions[3].Height = new GridLength(isVisible ? 6 : 0);
-
-                if (!isVisible)
-                {
-                    panelRow.Height = new GridLength(0);
-                }
-                else if (!_organizationPanelHeightInitialized)
-                {
-                    // Первый показ — стартовая высота панели, ограниченная окном.
-                    _organizationPanelHeightInitialized = true;
-
-                    var panelHeight = Math.Min(
-                        OrganizationPanelDefaultHeight,
-                        GetOrganizationPanelAvailableHeight());
-
-                    panelRow.Height = new GridLength(
-                        Math.Max(OrganizationPanelMinHeight, panelHeight),
-                        GridUnitType.Pixel);
-                }
-                // При последующих показах высоту панели НЕ перезаписываем:
-                // её задаёт пользователь сплиттером (строка 3 корневой сетки).
+                panelRow.Height = new GridLength(0);
+                return;
             }
+
+            // Панель показывается. Если высота уже была задана и строка не
+            // схлопнута — оставляем размер, выставленный пользователем.
+            if (_organizationPanelHeightInitialized && HasOrganizationPanelHeight(panelRow))
+                return;
+
+            // Иначе (первый показ после добавления/перезагрузки/поиска, когда
+            // строка была схлопнута в 0) — восстанавливаем сохранённую
+            // или стартовую высоту панели.
+            _organizationPanelHeightInitialized = true;
+
+            var panelHeight = _organizationPanelHeight > 0
+                ? _organizationPanelHeight
+                : Math.Min(OrganizationPanelDefaultHeight, GetOrganizationPanelAvailableHeight());
+
+            panelRow.Height = new GridLength(
+                Math.Max(OrganizationPanelMinHeight, panelHeight),
+                GridUnitType.Pixel);
+        }
+
+        /// <summary>
+        /// true, если у строки панели организации уже есть положительная высота в пикселях.
+        /// </summary>
+        private static bool HasOrganizationPanelHeight(RowDefinition panelRow)
+        {
+            var height = panelRow.Height;
+            return height.IsAbsolute &&
+                   height.Value > 0 &&
+                   !double.IsNaN(height.Value) &&
+                   !double.IsInfinity(height.Value);
+        }
+
+        /// <summary>
+        /// Запоминает текущую высоту панели организации. Нужно, потому что при
+        /// скрытии панели строка схлопывается в 0, и без сохранённого значения
+        /// панель нельзя вернуть в прежний размер.
+        /// </summary>
+        private void RememberOrganizationPanelHeight(RowDefinition panelRow)
+        {
+            var actual = panelRow.ActualHeight;
+            if (actual > 0 && !double.IsNaN(actual) && !double.IsInfinity(actual))
+            {
+                _organizationPanelHeight = actual;
+                return;
+            }
+
+            if (HasOrganizationPanelHeight(panelRow))
+                _organizationPanelHeight = panelRow.Height.Value;
         }
 
         /// <summary>
@@ -692,6 +737,11 @@ namespace BIS.ERP.Views
         {
             try
             {
+                // Пока таблица ещё не перезагружена, запоминаем выбранную организацию:
+                // после перепривязки ItemsSource выделение сбрасывается, и панель
+                // реквизитов с блоком «Расчётные счета организации» пропадала.
+                var previousOrganizationId = GetSelectedOrganizationId();
+
                 StatusText.Text = "Загрузка данных...";
                 ProgressText.Text = "⏳ Загрузка...";
 
@@ -828,6 +878,11 @@ namespace BIS.ERP.Views
                 EditButton.IsEnabled = false;
                 DeleteButton.IsEnabled = false;
                 ApplySearchFilter();
+
+                // Возвращаем выделение прежней организации: иначе после
+                // добавления/изменения/удаления записи или обновления панель
+                // реквизитов и блок «Расчётные счета организации» оставались скрытыми.
+                RestoreOrganizationSelection(previousOrganizationId);
             }
             catch (Exception ex)
             {
@@ -1291,6 +1346,60 @@ namespace BIS.ERP.Views
 
             UpdateOrganizationListHeader(selectedRow);
             _ = RefreshOrganizationAccountsAsync(selectedRow);
+        }
+
+        /// <summary>
+        /// Id организации, выбранной в основном списке (Guid.Empty — ничего не выбрано).
+        /// Используется, чтобы вернуть выделение после перезагрузки данных.
+        /// </summary>
+        private Guid GetSelectedOrganizationId()
+        {
+            if (!IsOrganizationsCatalog || DataGrid.SelectedItem is not DataRowView selectedRow)
+                return Guid.Empty;
+
+            if (!selectedRow.Row.Table.Columns.Contains("Id"))
+                return Guid.Empty;
+
+            return TryReadGuid(selectedRow["Id"], out var id) ? id : Guid.Empty;
+        }
+
+        /// <summary>
+        /// Возвращает выделение прежней организации после LoadData(). Без этого
+        /// после добавления (изменения/удаления) записи грид остаётся без выбранной
+        /// строки, панель реквизитов и блок «Расчётные счета организации» скрываются,
+        /// и их приходилось «возвращать» закрытием и повторным открытием окна.
+        /// </summary>
+        private void RestoreOrganizationSelection(Guid organizationId)
+        {
+            if (organizationId == Guid.Empty || _dataTable == null || !IsOrganizationsCatalog)
+                return;
+
+            DataRowView? match = null;
+
+            // Ищем в актуальном (уже отфильтрованном поиском) представлении, чтобы
+            // не выставить выделение на скрытую фильтром строку.
+            foreach (DataRowView candidate in _dataTable.DefaultView)
+            {
+                if (!candidate.Row.Table.Columns.Contains("Id"))
+                    continue;
+
+                if (TryReadGuid(candidate["Id"], out var id) && id == organizationId)
+                {
+                    match = candidate;
+                    break;
+                }
+            }
+
+            if (match == null)
+                return;
+
+            DataGrid.SelectedItem = match;
+            DataGrid.ScrollIntoView(match);
+
+            // SelectionChanged выставляет кнопки, но подстрахуемся на случай, если
+            // выделение уже стояло на этой строке и событие не сгенерировалось.
+            EditButton.IsEnabled = true;
+            DeleteButton.IsEnabled = true;
         }
 
         private DataGrid? OrganizationAccountsGridControl => FindName("OrganizationAccountsGrid") as DataGrid;
