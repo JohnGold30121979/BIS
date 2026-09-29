@@ -96,12 +96,7 @@ namespace BIS.ERP.Views
 
                 foreach (var key in displayKeys)
                 {
-                    var column = new DataGridTextColumn
-                    {
-                        Header = key,
-                        Binding = CreateValueBinding(key)
-                    };
-                    ItemsGrid.Columns.Add(column);
+                    ItemsGrid.Columns.Add(CreateColumn(key));
                 }
 
                 // Если нет колонок, добавляем колонку "Id"
@@ -127,6 +122,8 @@ namespace BIS.ERP.Views
                     ItemsGrid.Columns.Add(new DataGridTextColumn
                     {
                         Header = key,
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+                        MinWidth = 180,
                         Binding = CreateValueBinding(key)
                     });
                 }
@@ -358,6 +355,21 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
         private void OnCancelClick(object sender, RoutedEventArgs e)
         {
             MdiDialogService.CloseWithResult(this, false);
+        }
+
+        /// <summary>
+        /// Колонка растягивается на всю доступную ширину окна, чтобы длинные
+        /// наименования и реквизиты справочника были видны без горизонтальной прокрутки.
+        /// </summary>
+        private static DataGridTextColumn CreateColumn(string key)
+        {
+            return new DataGridTextColumn
+            {
+                Header = key,
+                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
+                MinWidth = 160,
+                Binding = CreateValueBinding(key)
+            };
         }
 
         private static Binding CreateValueBinding(string key)

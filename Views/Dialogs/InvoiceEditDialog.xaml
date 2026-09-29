@@ -54,7 +54,31 @@
 
             <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,10,8">
                 <TextBlock Text="Организация" FontWeight="Bold"/>
-                <ComboBox x:Name="OrganizationCombo" Height="28" DisplayMemberPath="DisplayName"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="OrganizationBox" Height="28"
+                             MaxLength="300"
+                             PreviewTextInput="OnOrganizationNumberPreviewTextInput"
+                             PreviewKeyDown="OnOrganizationNumberPreviewKeyDown"
+                             DataObject.Pasting="OnOrganizationNumberPasting"
+                             TextChanged="OnOrganizationNumberTextChanged"
+                             GotFocus="OnOrganizationNumberGotFocus"
+                             ToolTip="Введите код или № организации из списка «?» (до 8 цифр)"/>
+                    <Button x:Name="OrganizationPickerButton" Grid.Column="1" Content="?" Width="34" Height="28" Margin="4,0,0,0"
+                            Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Click="OnSelectOrganizationClick" FontWeight="Bold" FontFamily="Calibri"/>
+                    <Button x:Name="OrganizationAddButton" Grid.Column="2" Content="+" Width="34" Height="28" Margin="4,0,0,0"
+                            Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Click="OnAddOrganizationClick" FontWeight="Bold" FontFamily="Calibri"/>
+                    <Button x:Name="OrganizationEditButton" Grid.Column="3" Content="Изм." Width="46" Height="28" Margin="4,0,0,0"
+                            Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Click="OnEditOrganizationClick" FontWeight="Bold" FontFamily="Calibri"/>
+                </Grid>
             </StackPanel>
             <StackPanel Grid.Row="1" Grid.Column="1" Margin="10,0,0,8">
                 <TextBlock Text="Номер ЭСФ" FontWeight="Bold"/>

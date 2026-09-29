@@ -29,6 +29,14 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<string, ReferenceOption> _vatTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ReferenceOption> _salesTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
         private string _selectedHeaderAccountCode = string.Empty;
+        // Организации загружаются один раз при открытии диалога и нумеруются по порядку.
+        // Пользователь вводит код (№) вручную либо выбирает запись через «?».
+        private readonly List<OrganizationItem> _organizations = new();
+        private Guid _selectedOrganizationId = Guid.Empty;
+        private MetadataObject? _organizationsCatalog;
+        // Пока поле «Организация» заполняется программно (загрузка записи, выбор через «?»),
+        // обработчик TextChanged не должен сбрасывать сделанный выбор.
+        private bool _isApplyingOrganization;
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private TaxService? _taxService;
         private bool _isInitialized;
@@ -200,23 +208,7 @@ namespace BIS.ERP.Views.Dialogs
                 var assignedModuleName = await ResolveAssignedModuleNameAsync();
                 var organizationsCatalog = catalogs.FirstOrDefault(item => item.Name == "Организации");
                 if (organizationsCatalog != null)
-                {
-                    var organizations = await _metadataService.GetCatalogDataAsync(organizationsCatalog.Id);
-                    var organizationItems = organizations
-                        .Where(item => item.ContainsKey("Id") && Guid.TryParse(item["Id"]?.ToString(), out _))
-                        .Select(CreateOrganizationItem)
-                        .OrderBy(item => item.DisplayName)
-                        .ToList();
-                    ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, organizationItems);
-                    ReferencePickerControlFactory.AttachEditor(
-                        OrganizationCombo,
-                        _metadataService,
-                        organizationsCatalog,
-                        this,
-                        items => { },
-                        "Код организации",
-                        "Наименование");
-                }
+                    await LoadOrganizationsAsync(organizationsCatalog);
 
                 var accountsCatalog = catalogs.FirstOrDefault(item => item.Name.StartsWith("План счетов"));
                 if (accountsCatalog != null)
@@ -269,17 +261,7 @@ namespace BIS.ERP.Views.Dialogs
                     ExchangeRateBox.Text = invoice.ExchangeRate > 0 ? invoice.ExchangeRate.ToString("0.####", CultureInfo.CurrentCulture) : string.Empty;
                     AmountCurrencyBox.Text = invoice.AmountCurrency > 0 ? invoice.AmountCurrency.ToString("N2", CultureInfo.CurrentCulture) : string.Empty;
 
-                    if (invoice.OrganizationId.HasValue)
-                    {
-                        foreach (var item in OrganizationCombo.Items)
-                        {
-                            if (GetOrganizationItemId(item) == invoice.OrganizationId.Value)
-                            {
-                                OrganizationCombo.SelectedItem = item;
-                                break;
-                            }
-                        }
-                    }
+                    SelectOrganizationById(invoice.OrganizationId);
 
                     foreach (var line in invoice.Lines)
                     {
@@ -362,7 +344,10 @@ namespace BIS.ERP.Views.Dialogs
             TaxBlankNumberBox.IsReadOnly = true;
             ModuleCodeBox.IsReadOnly = true;
             BasisBox.IsReadOnly = true;
-            OrganizationCombo.IsEnabled = false;
+            OrganizationBox.IsReadOnly = true;
+            OrganizationPickerButton.IsEnabled = false;
+            OrganizationAddButton.IsEnabled = false;
+            OrganizationEditButton.IsEnabled = false;
             PaymentKindCombo.IsEnabled = false;
             DeliveryKindCombo.IsEnabled = false;
             HeaderVatTaxCombo.IsEnabled = false;
@@ -1249,6 +1234,9 @@ namespace BIS.ERP.Views.Dialogs
                 if (!await TryResolveHeaderAccountAsync())
                     return;
 
+                if (!ValidateOrganizationInput())
+                    return;
+
                 if (CurrencyPanel.Visibility == Visibility.Visible)
                 {
                     if (CurrencyCombo.SelectedItem is not ReferenceOption)
@@ -1281,7 +1269,7 @@ namespace BIS.ERP.Views.Dialogs
             if (applyHeaderTaxes)
                 ApplySelectedHeaderTaxesToLines();
 
-            var organizationId = GetOrganizationItemId(OrganizationCombo.SelectedItem);
+            var organizationId = _selectedOrganizationId == Guid.Empty ? (Guid?)null : _selectedOrganizationId;
             Guid? currencyId = null;
             if (CurrencyPanel.Visibility == Visibility.Visible &&
                 CurrencyCombo.SelectedItem is ReferenceOption selectedCurrency &&
@@ -1349,15 +1337,360 @@ namespace BIS.ERP.Views.Dialogs
                    ?? string.Empty;
         }
 
-        private static Guid? GetOrganizationItemId(object? item)
+        //------------------------------------------------------------------------
+        // --- Организация: ручной ввод кода (№) либо выбор через «?» ---
+
+        /// <summary>
+        /// Читает справочник «Организации» и присваивает записям порядковые номера:
+        /// именно этот номер (или код организации) пользователь вводит вручную.
+        /// </summary>
+        private async Task LoadOrganizationsAsync(MetadataObject organizationsCatalog)
         {
-            return item switch
-            {
-                OrganizationItem organization => organization.Id,
-                ReferenceItem reference => reference.Id == Guid.Empty ? null : reference.Id,
-                _ => null
-            };
+            _organizationsCatalog = organizationsCatalog;
+            await ReloadOrganizationsAsync();
         }
+
+        /// <summary>
+        /// Перечитывает справочник «Организации» и заново проставляет порядковые номера:
+        /// после правки записи наименование меняется, а значит меняется и её номер.
+        /// </summary>
+        private async Task ReloadOrganizationsAsync()
+        {
+            if (_organizationsCatalog == null)
+                return;
+
+            var organizations = await _metadataService.GetCatalogDataAsync(_organizationsCatalog.Id);
+
+            _organizations.Clear();
+            _organizations.AddRange(organizations
+                .Where(item => item.ContainsKey("Id") && Guid.TryParse(item["Id"]?.ToString(), out _))
+                .Select(CreateOrganizationItem)
+                .OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase));
+
+            for (var index = 0; index < _organizations.Count; index++)
+                _organizations[index].Number = index + 1;
+        }
+
+        private async void OnSelectOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            if (_organizations.Count == 0)
+            {
+                MessageBox.Show(
+                    "Справочник «Организации» пуст. Добавьте записи в справочнике.",
+                    "Организация", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var rows = _organizations
+                .Select(item => new Dictionary<string, object>
+                {
+                    ["Код"] = item.Code,
+                    ["Наименование"] = item.Name,
+                    ["Полное наименование"] = item.FullName,
+                    ["ИНН"] = item.Inn,
+                    ["Id"] = item.Id
+                })
+                .ToList();
+
+            var selection = new ReferenceSelectionDialog(rows, "Код", "Наименование")
+            {
+                Width = 1100,
+                MinWidth = 800,
+                Height = 520
+            };
+            // Как и в остальных формах: окно выбора позволяет добавить или изменить
+            // запись справочника, не закрывая его.
+            if (_organizationsCatalog != null)
+                selection.ConfigureCatalogEditing(_organizationsCatalog, _metadataService);
+
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, selection, "Выбор организации") != true ||
+                selection.SelectedItem == null ||
+                !selection.SelectedItem.TryGetValue("Id", out var idValue) ||
+                !Guid.TryParse(idValue?.ToString(), out var organizationId))
+            {
+                // Записи могли добавить/изменить прямо в окне выбора — обновляем список.
+                await ReloadOrganizationsAsync();
+                return;
+            }
+
+            await ReloadOrganizationsAsync();
+            ApplyOrganizationSelection(_organizations.FirstOrDefault(item => item.Id == organizationId));
+        }
+
+        /// <summary>
+        /// Добавляет новую организацию в справочник и сразу выбирает её.
+        /// </summary>
+        private async void OnAddOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            if (_organizationsCatalog == null)
+            {
+                MessageBox.Show(
+                    "Справочник «Организации» не найден.",
+                    "Организация", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                var dialog = new CatalogItemDialog(_organizationsCatalog, _metadataService);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
+                    return;
+
+                Cursor = Cursors.Wait;
+                var createdId = await _metadataService.CreateDynamicRecordAsync(
+                    _organizationsCatalog.Id,
+                    dialog.ItemData);
+
+                await ReloadOrganizationsAsync();
+                ApplyOrganizationSelection(_organizations.FirstOrDefault(item => item.Id == createdId));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Arrow;
+            }
+        }
+
+        /// <summary>
+        /// Изменяет выбранную запись справочника «Организации» через форму записи.
+        /// </summary>
+        private async void OnEditOrganizationClick(object sender, RoutedEventArgs e)
+        {
+            if (_organizationsCatalog == null)
+            {
+                MessageBox.Show(
+                    "Справочник «Организации» не найден.",
+                    "Организация", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (_selectedOrganizationId == Guid.Empty)
+            {
+                MessageBox.Show(
+                    "Сначала выберите или введите организацию.",
+                    "Организация", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                Cursor = Cursors.Wait;
+                var rows = await _metadataService.GetCatalogDataAsync(_organizationsCatalog.Id);
+                var row = rows.FirstOrDefault(item =>
+                    item.TryGetValue("Id", out var idValue) &&
+                    Guid.TryParse(idValue?.ToString(), out var id) &&
+                    id == _selectedOrganizationId);
+
+                if (row == null)
+                {
+                    MessageBox.Show(
+                        "Выбранная запись справочника не найдена.",
+                        _organizationsCatalog.Name,
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new CatalogItemDialog(_organizationsCatalog, _metadataService, row);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) != true)
+                    return;
+
+                await _metadataService.UpdateDynamicRecordAsync(
+                    _organizationsCatalog.Id,
+                    _selectedOrganizationId,
+                    dialog.ItemData);
+
+                await ReloadOrganizationsAsync();
+                ApplyOrganizationSelection(_organizations.FirstOrDefault(item => item.Id == _selectedOrganizationId));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Arrow;
+            }
+        }
+
+        /// <summary>
+        /// Приводит введённое значение к записи справочника: сначала точное совпадение
+        /// с кодом организации, затем — порядковый номер из списка «?».
+        /// </summary>
+        private bool TryParseOrganizationInput(out OrganizationItem? organization)
+        {
+            organization = null;
+            var text = OrganizationBox?.Text?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+                return false;
+
+            // Поле уже содержит «Код - Наименование» (его подставляет сам диалог),
+            // поэтому сравниваем и с полным отображаемым значением.
+            organization = _organizations.FirstOrDefault(item =>
+                string.Equals(item.DisplayName, text, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrWhiteSpace(item.Code) &&
+                 string.Equals(item.Code.Trim(), text, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(item.Name) &&
+                 string.Equals(item.Name.Trim(), text, StringComparison.OrdinalIgnoreCase)));
+
+            if (organization != null)
+                return true;
+
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+                organization = _organizations.FirstOrDefault(item => item.Number == number);
+
+            return organization != null;
+        }
+
+        /// <summary>
+        /// Подставляет в поле отображаемое значение организации без повторного
+        /// срабатывания TextChanged.
+        /// </summary>
+        private void ApplyOrganizationText(OrganizationItem? organization)
+        {
+            _isApplyingOrganization = true;
+            try
+            {
+                OrganizationBox.Text = organization == null
+                    ? string.Empty
+                    : organization.DisplayName;
+                OrganizationBox.ToolTip = BuildOrganizationToolTip(organization);
+            }
+            finally
+            {
+                _isApplyingOrganization = false;
+            }
+        }
+
+        /// <summary>
+        /// Проверяет введённый код (№) перед сохранением. Пустое поле допустимо —
+        /// тогда организация не задаётся (как и раньше при незаполненном списке).
+        /// </summary>
+        private bool ValidateOrganizationInput()
+        {
+            if (_selectedOrganizationId != Guid.Empty)
+                return true;
+
+            var text = OrganizationBox?.Text?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+                return true;
+
+            MessageBox.Show(
+                $"Организация «{text}» не найдена в справочнике. Нажмите «?» и уточните код (№) записи.",
+                "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+            OrganizationBox?.Focus();
+            OrganizationBox?.SelectAll();
+            return false;
+        }
+        /// <summary>Заполняет поле и состояние выбранной организацией.</summary>
+        private void ApplyOrganizationSelection(OrganizationItem? organization)
+        {
+            if (organization == null)
+                return;
+
+            _selectedOrganizationId = organization.Id;
+            ApplyOrganizationText(organization);
+        }
+
+        /// <summary>Показывает в поле организацию, сохранённую в документе.</summary>
+        private void SelectOrganizationById(Guid? organizationId)
+        {
+            _selectedOrganizationId = organizationId ?? Guid.Empty;
+            ApplyOrganizationText(_organizations.FirstOrDefault(item => item.Id == _selectedOrganizationId));
+        }
+
+        private static string BuildOrganizationToolTip(OrganizationItem? organization)
+        {
+            const string hint = "Введите код или № организации из списка «?» (до 8 цифр)";
+            if (organization == null)
+                return hint;
+
+            var name = !string.IsNullOrWhiteSpace(organization.Name)
+                ? organization.Name
+                : organization.DisplayName;
+            return string.IsNullOrWhiteSpace(organization.FullName)
+                ? $"№{organization.Number}: {name}"
+                : $"№{organization.Number}: {organization.FullName}";
+        }
+
+        private void OnOrganizationNumberGotFocus(object sender, RoutedEventArgs e)
+        {
+            // В поле уже подставлено «Код - Наименование»: выделяем его целиком,
+            // чтобы новый ввод кода заменял прежнее значение целиком.
+            if (sender is TextBox box && box.Text.Length > 0)
+                box.SelectAll();
+        }
+
+        private void OnOrganizationNumberPreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            e.Handled = !IsOrganizationNumberDigits(e.Text);
+        }
+
+        private void OnOrganizationNumberPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            // Пробел не приходит через PreviewTextInput — отсекаем отдельно.
+            if (e.Key == Key.Space)
+                e.Handled = true;
+        }
+
+        private void OnOrganizationNumberPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+            {
+                e.CancelCommand();
+                return;
+            }
+
+            var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+            if (!IsOrganizationNumberDigits(text))
+                e.CancelCommand();
+        }
+
+        /// <summary>
+        /// Ручной ввод сразу приводит код (№) к записи справочника и подставляет
+        /// в поле «Код - Наименование» — так видно, какая именно организация выбрана.
+        /// </summary>
+        private void OnOrganizationNumberTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isApplyingOrganization)
+                return;
+
+            if (TryParseOrganizationInput(out var organization) && organization != null)
+            {
+                _selectedOrganizationId = organization.Id;
+                if (OrganizationBox != null)
+                {
+                    OrganizationBox.ToolTip = BuildOrganizationToolTip(organization);
+                    if (!string.Equals(OrganizationBox.Text, organization.DisplayName, StringComparison.Ordinal))
+                        ApplyOrganizationText(organization);
+                }
+
+                return;
+            }
+
+            _selectedOrganizationId = Guid.Empty;
+            if (OrganizationBox != null)
+                OrganizationBox.ToolTip = "Введите код или № организации из списка «?» (до 8 цифр)";
+        }
+
+        private static bool IsOrganizationNumberDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
+        }
+        //------------------------------------------------------------------------
+
         private static string GetRowValue(Dictionary<string, object> row, params string[] keys)
         {
             foreach (var key in keys)
@@ -1655,12 +1988,19 @@ namespace BIS.ERP.Views.Dialogs
 
         private static OrganizationItem CreateOrganizationItem(Dictionary<string, object> row)
         {
+            var code = GetRowValue(row, "Код", "code", "Код организации", "organization_code");
+            var name = GetRowValue(row, "Наименование", "name");
+            if (string.IsNullOrWhiteSpace(name))
+                name = ReferenceDisplayHelper.BuildDisplayValue(row, new MetadataField());
+
             var item = new OrganizationItem
             {
                 Id = Guid.Parse(row["Id"].ToString()!),
-                DisplayName = BuildCodeName(
-                    GetRowValue(row, "Код", "code", "Код организации", "organization_code"),
-                    ReferenceDisplayHelper.BuildDisplayValue(row, new MetadataField()))
+                Code = code,
+                Name = name,
+                FullName = GetRowValue(row, "Полное наименование", "full_name"),
+                Inn = GetRowValue(row, "ИНН", "inn"),
+                DisplayName = BuildCodeName(code, name)
             };
 
             foreach (var value in row.Values)
@@ -1806,6 +2146,21 @@ namespace BIS.ERP.Views.Dialogs
         private sealed class OrganizationItem : ReferenceItem
         {
             public new HashSet<string> LookupKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+            /// <summary>Порядковый номер записи в списке «?» (нумерация с 1).</summary>
+            public int Number { get; set; }
+
+            /// <summary>Код организации из справочника (может быть пустым).</summary>
+            public string Code { get; set; } = string.Empty;
+
+            /// <summary>Наименование организации без кода.</summary>
+            public string Name { get; set; } = string.Empty;
+
+            /// <summary>Полное наименование организации.</summary>
+            public string FullName { get; set; } = string.Empty;
+
+            /// <summary>ИНН организации.</summary>
+            public string Inn { get; set; } = string.Empty;
         }
 
         private sealed class EditableInvoiceLine : InvoiceLineRow, INotifyPropertyChanged
