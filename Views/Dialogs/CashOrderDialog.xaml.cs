@@ -3,7 +3,9 @@ using BIS.ERP.Services;
 using System;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -24,6 +26,9 @@ namespace BIS.ERP.Views
         private readonly bool _isReadOnly;
         private Guid _selectedCorrAccountId;
         private string _selectedCorrAccountCode = string.Empty;
+        // Пока диалог заполняет поле «Корр. счет» программно (загрузка записи, выбор
+        // через «?»), обработчик TextChanged не должен сбрасывать выбранный счет.
+        private bool _isApplyingCorrAccount;
         private Guid _selectedCashDeskId;
         private string _selectedCashDeskCode = string.Empty;
         private AccountAnalyticsRegistry _accountAnalytics = new();
@@ -565,14 +570,27 @@ namespace BIS.ERP.Views
                     var accountCode = selection.SelectedAccount.ContainsKey("Код") ? selection.SelectedAccount["Код"].ToString() : "";
                     var accountName = selection.SelectedAccount.ContainsKey("Наименование") ? selection.SelectedAccount["Наименование"].ToString() : "";
 
-                    CorrAccountBox.Text = $"{accountCode} - {accountName}";
-
-                    if (selection.SelectedAccount.ContainsKey("Id"))
+                    // Поле редактируемое (MaxLength=8, только цифры), поэтому показываем код счета.
+                    // Наименование остается доступным во всплывающей подсказке.
+                    _isApplyingCorrAccount = true;
+                    try
                     {
-                        _selectedCorrAccountId = Guid.Parse(selection.SelectedAccount["Id"].ToString());
-                    }
+                        CorrAccountBox.Text = accountCode ?? string.Empty;
+                        CorrAccountBox.ToolTip = string.IsNullOrWhiteSpace(accountName)
+                            ? "Только цифры, до 8 знаков"
+                            : $"{accountCode} - {accountName}";
 
-                    _selectedCorrAccountCode = accountCode;
+                        if (selection.SelectedAccount.ContainsKey("Id"))
+                        {
+                            _selectedCorrAccountId = Guid.Parse(selection.SelectedAccount["Id"].ToString());
+                        }
+
+                        _selectedCorrAccountCode = accountCode ?? string.Empty;
+                    }
+                    finally
+                    {
+                        _isApplyingCorrAccount = false;
+                    }
 
                     UpdateAccountControlledFieldsVisibility();
                     RefreshPostingPreview();
@@ -613,12 +631,15 @@ namespace BIS.ERP.Views
 
                 NumberBox.Text = documentNumber;
 
-                var amount = decimal.TryParse(AmountBox.Text, out var parsedAmount) ? parsedAmount : 0;
+                var amount = NumericInputHelper.TryParseDecimal(AmountBox.Text, CultureInfo.CurrentCulture, out var parsedAmount)
+                    ? parsedAmount
+                    : 0m;
                 if (amount <= 0)
                 {
                     MessageBox.Show("Сумма кассового ордера должна быть больше нуля.", "Проверка",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     AmountBox.Focus();
+                    AmountBox.SelectAll();
                     return;
                 }
 
@@ -699,13 +720,17 @@ namespace BIS.ERP.Views
                     }
                 }
 
-                // Получаем корреспондирующий счет
+                // Получаем корреспондирующий счет. Код мог быть введен вручную —
+                // тогда приводим его к счету плана счетов этого модуля.
+                if (!await TryResolveCorrAccountAsync())
+                    return;
+
                 string corrAccountId = _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId.ToString() : string.Empty;
                 string corrAccountCode = _selectedCorrAccountCode;
 
                 if (string.IsNullOrEmpty(corrAccountCode))
                 {
-                    MessageBox.Show("Выберите корреспондирующий счет (кнопка '?').", "Ошибка",
+                    MessageBox.Show("Укажите корреспондирующий счет: введите до 8 цифр или выберите через кнопку «?».", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
@@ -986,15 +1011,153 @@ namespace BIS.ERP.Views
             }
         }
 
+        //------------------------------------------------------------------------
+        // --- «Корр. счет»: ручной ввод кода (только цифры, до 8 знаков) и «?» ---
+
+        private void OnCorrAccountPreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            e.Handled = !IsAccountCodeDigits(e.Text);
+        }
+
+        private void OnCorrAccountPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            // Пробел не приходит через PreviewTextInput — отсекаем отдельно.
+            if (e.Key == Key.Space)
+                e.Handled = true;
+        }
+
+        private void OnCorrAccountPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+            {
+                e.CancelCommand();
+                return;
+            }
+
+            var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+            if (!IsAccountCodeDigits(text))
+                e.CancelCommand();
+        }
+
+        /// <summary>
+        /// Ручной ввод сбрасывает ранее выбранный счет из диалога, чтобы при сохранении
+        /// не записался устаревший идентификатор. Код при этом берется из поля.
+        /// </summary>
+        private void OnCorrAccountTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isApplyingCorrAccount)
+                return;
+
+            _selectedCorrAccountId = Guid.Empty;
+            _selectedCorrAccountCode = CorrAccountBox?.Text?.Trim() ?? string.Empty;
+            if (CorrAccountBox != null)
+                CorrAccountBox.ToolTip = "Только цифры, до 8 знаков";
+
+            UpdateAccountControlledFieldsVisibility();
+            RefreshPostingPreview();
+        }
+
+        /// <summary>
+        /// Приводит код, введённый в поле вручную, к счету плана счетов этого модуля.
+        /// Возвращает false (с сообщением пользователю), если код не найден.
+        /// </summary>
+        private async Task<bool> TryResolveCorrAccountAsync()
+        {
+            if (_selectedCorrAccountId != Guid.Empty)
+                return true;
+
+            var code = ExtractAccountCodeDigits(CorrAccountBox?.Text);
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                MessageBox.Show(
+                    "Укажите корреспондирующий счет. Введите до 8 цифр или выберите через кнопку «?».",
+                    "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CorrAccountBox?.Focus();
+                return false;
+            }
+
+            var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                _document.Id,
+                _document.ObjectType);
+
+            var match = accountsData?.FirstOrDefault(row =>
+                row.TryGetValue("Код", out var codeValue) &&
+                string.Equals(codeValue?.ToString()?.Trim(), code, StringComparison.Ordinal));
+
+            if (match == null || !Guid.TryParse(match["Id"]?.ToString(), out var accountId))
+            {
+                MessageBox.Show(
+                    $"Счет с кодом «{code}» не найден в плане счетов для этого модуля.",
+                    "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                CorrAccountBox?.Focus();
+                CorrAccountBox?.SelectAll();
+                return false;
+            }
+
+            var account = _accountAnalytics.FindAccount(match["Id"]);
+            ApplyCorrAccount(accountId, account?.Code ?? code, account);
+
+            UpdateAccountControlledFieldsVisibility();
+            RefreshPostingPreview();
+            return true;
+        }
+
+        /// <summary>Заполняет поле и состояние счета, не затрагивая ручной ввод пользователя.</summary>
+        private void ApplyCorrAccount(Guid accountId, string accountCode, AccountReferenceItem? account)
+        {
+            _isApplyingCorrAccount = true;
+            try
+            {
+                CorrAccountBox.Text = accountCode;
+                CorrAccountBox.ToolTip = account == null || string.IsNullOrWhiteSpace(account.DisplayName)
+                    ? "Только цифры, до 8 знаков"
+                    : account.DisplayName;
+                _selectedCorrAccountId = accountId;
+                _selectedCorrAccountCode = accountCode;
+            }
+            finally
+            {
+                _isApplyingCorrAccount = false;
+            }
+        }
+
+        private static bool IsAccountCodeDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static string ExtractAccountCodeDigits(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+
+            var builder = new StringBuilder(text.Length);
+            foreach (var character in text)
+            {
+                if (character is >= '0' and <= '9')
+                    builder.Append(character);
+            }
+
+            return builder.ToString();
+        }
+        //------------------------------------------------------------------------
+
         private bool ApplySelectedCorrAccount(object? accountValue)
         {
             var account = _accountAnalytics.FindAccount(accountValue);
             if (account == null)
                 return false;
 
-            _selectedCorrAccountId = account.Id;
-            _selectedCorrAccountCode = account.Code;
-            CorrAccountBox.Text = account.DisplayName;
+            ApplyCorrAccount(account.Id, account.Code, account);
             return true;
         }
 
@@ -1016,8 +1179,16 @@ namespace BIS.ERP.Views
 
             if (!string.IsNullOrWhiteSpace(inferredAccountCode))
             {
-                _selectedCorrAccountCode = inferredAccountCode;
-                CorrAccountBox.Text = inferredAccountCode;
+                _isApplyingCorrAccount = true;
+                try
+                {
+                    _selectedCorrAccountCode = inferredAccountCode;
+                    CorrAccountBox.Text = inferredAccountCode;
+                }
+                finally
+                {
+                    _isApplyingCorrAccount = false;
+                }
             }
         }
 
@@ -1494,7 +1665,9 @@ namespace BIS.ERP.Views
                 : (corrAccountCode, cashDeskCode);
 
         private decimal TryReadAmount()
-            => decimal.TryParse(AmountBox?.Text, out var parsedAmount) ? parsedAmount : 0m;
+            => NumericInputHelper.TryParseDecimal(AmountBox?.Text, CultureInfo.CurrentCulture, out var parsedAmount)
+                ? parsedAmount
+                : 0m;
 
         private void OnPostingPreviewChanged(object sender, EventArgs e)
         {

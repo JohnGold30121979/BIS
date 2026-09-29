@@ -78,7 +78,14 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="30" IsReadOnly="True" Background="LightGray"/>
+                <TextBox x:Name="CorrAccountBox" Grid.Column="0" Height="30"
+                         IsReadOnly="False" Background="White"
+                         MaxLength="8"
+                         PreviewTextInput="OnCorrAccountPreviewTextInput"
+                         PreviewKeyDown="OnCorrAccountPreviewKeyDown"
+                         DataObject.Pasting="OnCorrAccountPasting"
+                         TextChanged="OnCorrAccountTextChanged"
+                         ToolTip="Только цифры, до 8 знаков"/>
                 <Button Grid.Column="1" Content="?" Width="34" Height="30" Margin="5,0,0,0" Click="SelectAccount_Click"/>
             </Grid>
 
