@@ -48,8 +48,6 @@ namespace BIS.ERP.Views.Dialogs
         private bool _isApplyingCurrencyValues;
         private bool _isRestoringNormalWindowState;
         private bool _isSynchronizingHeaderAccount;
-        private const string DefaultSalesLineAccount = "61100000";
-        private const string DefaultPurchaseLineAccount = "16100000";
         private const int AmountFractionDigits = 2;
         private static readonly char[] DecimalSeparators = { ',', '.' };
         private static readonly NumberFormatInfo AmountNumberFormat = CreateAmountNumberFormat();
@@ -115,7 +113,6 @@ namespace BIS.ERP.Views.Dialogs
             LinesGrid.ItemsSource = _lines;
             StateChanged += OnWindowStateChanged;
             DatePicker.SelectedDateChanged += OnDocumentDateChanged;
-            InputManager.Current.PreProcessInput += OnInvoiceDialogPreProcessInput;
             Closed += OnDialogClosed;
             Loaded += async (_, _) => await InitializeAsync();
         }
@@ -356,6 +353,8 @@ namespace BIS.ERP.Views.Dialogs
             CurrencyCombo.IsEnabled = false;
             ExchangeRateBox.IsReadOnly = true;
             HeaderAccountButton.IsEnabled = false;
+            HeaderAccountAddButton.IsEnabled = false;
+            HeaderAccountEditButton.IsEnabled = false;
             LinesGrid.IsReadOnly = true;
             AddLineButton.IsEnabled = false;
             DeleteLineButton.IsEnabled = false;
@@ -644,16 +643,13 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
+        /// <summary>
+        /// Счёт строки не подставляется автоматически: его выбирает пользователь
+        /// кнопкой «?» в строке либо вводит вручную.
+        /// </summary>
         private string GetDefaultLineAccountCode()
         {
-            var preferred = InvoiceDocumentTypes.IsSales(_document.Name)
-                ? DefaultSalesLineAccount
-                : DefaultPurchaseLineAccount;
-            return !IsSameAccount(preferred, _selectedHeaderAccountCode) &&
-                   AccountItems.Any(item => item.Value.Equals(preferred, StringComparison.OrdinalIgnoreCase))
-                ? preferred
-                : AccountItems.FirstOrDefault(item => !IsSameAccount(item.Value, _selectedHeaderAccountCode))?.Value
-                  ?? preferred;
+            return string.Empty;
         }
 
         private static string ResolveTaxCode(string storedCode, decimal rate, IEnumerable<ReferenceOption> options)
@@ -841,6 +837,141 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
+        /// <summary>
+        /// Добавляет новый счёт в справочник «План счетов» и подставляет его
+        /// в поле «Счет расчетов».
+        /// </summary>
+        private async void OnAddAccountClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var catalog = await TryGetChartOfAccountsCatalogAsync();
+                if (catalog == null)
+                    return;
+
+                var dialog = new CatalogItemDialog(catalog, _metadataService);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        this, dialog, $"Добавление: {catalog.Name}") != true)
+                {
+                    return;
+                }
+
+                Cursor = Cursors.Wait;
+                var createdId = await _metadataService.CreateDynamicRecordAsync(catalog.Id, dialog.ItemData);
+                await ReloadAccountsAsync();
+
+                SetHeaderAccount(FindAccountCodeById(createdId));
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка добавления счёта: {ex.Message}", "План счетов",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Arrow;
+            }
+        }
+
+        /// <summary>
+        /// Изменяет счёт, указанный в поле «Счет расчетов», через форму записи.
+        /// </summary>
+        private async void OnEditAccountClick(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_selectedHeaderAccountCode))
+            {
+                MessageBox.Show(
+                    "Сначала выберите или введите счёт расчётов.",
+                    "Проверка", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                var catalog = await TryGetChartOfAccountsCatalogAsync();
+                if (catalog == null)
+                    return;
+
+                var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                var row = rows.FirstOrDefault(item =>
+                    item.TryGetValue("Id", out var idValue) &&
+                    Guid.TryParse(idValue?.ToString(), out var id) &&
+                    id == FindAccountIdByCode(_selectedHeaderAccountCode));
+                if (row == null)
+                {
+                    MessageBox.Show("Выбранный счёт не найден в справочнике.", catalog.Name,
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new CatalogItemDialog(catalog, _metadataService, row);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        this, dialog, $"Редактирование: {catalog.Name}") != true)
+                {
+                    return;
+                }
+
+                Cursor = Cursors.Wait;
+                await _metadataService.UpdateDynamicRecordAsync(catalog.Id, FindAccountIdByCode(_selectedHeaderAccountCode), dialog.ItemData);
+                await ReloadAccountsAsync();
+                SetHeaderAccount(_selectedHeaderAccountCode);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка изменения счёта: {ex.Message}", "План счетов",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = Cursors.Arrow;
+            }
+        }
+
+        private async Task<MetadataObject?> TryGetChartOfAccountsCatalogAsync()
+        {
+            var catalogs = await _metadataService.GetCatalogsAsync();
+            var catalog = catalogs.FirstOrDefault(item =>
+                item.ObjectType == "Catalog" &&
+                item.Name.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase));
+
+            if (catalog == null)
+            {
+                MessageBox.Show("Справочник «План счетов» не найден.", "План счетов",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
+            return catalog;
+        }
+
+        private async Task ReloadAccountsAsync()
+        {
+            _accounts = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                _document.Id,
+                _document.ObjectType);
+            FillAccountItems(_accounts);
+        }
+
+        private Guid FindAccountIdByCode(string accountCode)
+        {
+            var match = _accounts.FirstOrDefault(row =>
+                string.Equals(GetRowValue(row, "Код", "code"), accountCode?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            return match != null && Guid.TryParse(match.GetValueOrDefault("Id")?.ToString(), out var id)
+                ? id
+                : Guid.Empty;
+        }
+
+        private string FindAccountCodeById(Guid accountId)
+        {
+            if (accountId == Guid.Empty)
+                return string.Empty;
+
+            var match = _accounts.FirstOrDefault(row =>
+                Guid.TryParse(row.GetValueOrDefault("Id")?.ToString(), out var id) && id == accountId);
+
+            return match == null ? string.Empty : GetRowValue(match, "Код", "code");
+        }
+
         private void OnAccountCodePreviewTextInput(object sender, TextCompositionEventArgs e)
         {
             e.Handled = !IsAsciiDigits(e.Text);
@@ -932,9 +1063,90 @@ namespace BIS.ERP.Views.Dialogs
             return true;
         }
 
-        private async void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Поле «Счет дохода»: только цифры, как и в «Счете расчетов».
+        /// </summary>
+        private void OnLineAccountPreviewTextInput(object sender, TextCompositionEventArgs e)
         {
-            if (_isReadOnlyMode || sender is not Button { Tag: EditableInvoiceLine line } || _accounts.Count == 0)
+            e.Handled = !IsAsciiDigits(e.Text);
+        }
+
+        private void OnLineAccountPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space)
+                e.Handled = true;
+        }
+
+        private void OnLineAccountPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+            {
+                e.CancelCommand();
+                return;
+            }
+
+            var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+            if (!IsAsciiDigits(text))
+                e.CancelCommand();
+        }
+
+        /// <summary>
+        /// После ввода кода вручную подставляет наименование счёта и проверяет,
+        /// что такой счёт есть в плане счетов этого модуля.
+        /// </summary>
+        private void OnLineAccountLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox { DataContext: EditableInvoiceLine line })
+                return;
+
+            var code = line.AccountCode?.Trim() ?? string.Empty;
+            if (code.Length == 0)
+            {
+                line.AccountDisplayName = string.Empty;
+                return;
+            }
+
+            if (IsSameAccount(code, _selectedHeaderAccountCode))
+            {
+                MessageBox.Show(
+                    $"{GetLineAccountLabel()} не должен совпадать со счетом расчетов. Укажите другой счёт.",
+                    "Проверка счетов",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                line.AccountCode = string.Empty;
+                line.AccountDisplayName = string.Empty;
+                return;
+            }
+
+            var account = _accounts.FirstOrDefault(row =>
+                string.Equals(GetRowValue(row, "Код", "code"), code, StringComparison.OrdinalIgnoreCase));
+            if (account == null)
+            {
+                MessageBox.Show(
+                    $"Счёт с кодом «{code}» не найден в плане счетов для этого модуля.",
+                    "Проверка",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                line.AccountCode = string.Empty;
+                line.AccountDisplayName = string.Empty;
+                return;
+            }
+
+            line.AccountDisplayName = GetAccountDisplayName(code);
+            UpdateCurrencyPanelVisibility();
+        }
+
+        private void OnSelectLineAccountClick(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: EditableInvoiceLine line })
+                return;
+
+            SelectLineAccountAsync(line);
+        }
+
+        private async void SelectLineAccountAsync(EditableInvoiceLine line)
+        {
+            if (_isReadOnlyMode || _accounts.Count == 0)
                 return;
 
             var selection = new AccountSelectionView(_accounts);
@@ -944,13 +1156,14 @@ namespace BIS.ERP.Views.Dialogs
                 var accountCode = selection.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty;
                 if (IsSameAccount(accountCode, _selectedHeaderAccountCode))
                 {
-                    accountCode = GetDefaultLineAccountCode();
                     MessageBox.Show(
-                        $"{GetLineAccountLabel()} не должен совпадать со счетом расчетов. Подставлен счет по умолчанию.",
+                        $"{GetLineAccountLabel()} не должен совпадать со счетом расчетов. Выберите другой счёт.",
                         "Проверка счетов",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
+                    return;
                 }
+
                 line.AccountCode = accountCode;
                 line.AccountDisplayName = GetAccountDisplayName(accountCode);
                 UpdateCurrencyPanelVisibility();
@@ -966,42 +1179,304 @@ namespace BIS.ERP.Views.Dialogs
         }
 
         /// <summary>
-        /// Перехватывает клавиши до стандартной цепочки WPF-событий.
-        /// DataGrid и TextBox активной ячейки могут обработать Enter или «+» раньше PreviewKeyDown.
-        /// Событие подключено к InputManager, но срабатывает только при фокусе в LinesGrid.
+        /// Клавиши в гриде строк счёт-фактуры:
+        /// Enter — переход к следующей ячейке (колонке) строки,
+        /// «+» (в т.ч. правый плюс клавиатуры) — новая строка.
+        /// PreviewKeyDown срабатывает и когда фокус в TextBox активной ячейки,
+        /// поэтому ввод работает одинаково в любой колонке.
         /// </summary>
-        private void OnInvoiceDialogPreProcessInput(object sender, PreProcessInputEventArgs e)
+        private void OnLinesGridPreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (_isReadOnlyMode ||
-                !LinesGrid.IsEnabled ||
-                e.StagingItem.Input is not KeyEventArgs keyArgs ||
-                keyArgs.Key is not (Key.Add or Key.OemPlus or Key.Enter) ||
-                !IsKeyboardFocusInLinesGrid())
+            if (_isReadOnlyMode || !LinesGrid.IsEnabled)
+                return;
+
+            if (e.Key is Key.Add or Key.OemPlus)
             {
+                e.Handled = true;
+                LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                AddNewInvoiceLine();
                 return;
             }
 
-            keyArgs.Handled = true;
+            if (e.Key != Key.Enter)
+                return;
+
+            e.Handled = true;
             LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
-            AddNewInvoiceLine();
+            MoveToNextLineCell();
         }
 
-        private bool IsKeyboardFocusInLinesGrid()
+        /// <summary>
+        /// Переводит фокус на следующую редактируемую ячейку строки, а с последней —
+        /// на первую ячейку следующей строки. Вычисляемые колонки (НДС, НСП, итог)
+        /// пропускаются: в них нет поля ввода.
+        /// </summary>
+        private void MoveToNextLineCell()
         {
-            return IsLoaded &&
-                   LinesGrid.IsVisible &&
-                   LinesGrid.IsKeyboardFocusWithin;
+            var rowIndex = LinesGrid.Items.IndexOf(LinesGrid.CurrentItem ?? LinesGrid.SelectedItem);
+            if (rowIndex < 0)
+                return;
+
+            var columnIndex = LinesGrid.CurrentCell.Column?.DisplayIndex ?? 0;
+            for (var step = columnIndex + 1; step < LinesGrid.Columns.Count; step++)
+            {
+                if (!IsEditableColumn(step))
+                    continue;
+
+                FocusLineCell(LinesGrid.Items[rowIndex], step);
+                return;
+            }
+
+            for (var nextRow = rowIndex + 1; nextRow < LinesGrid.Items.Count; nextRow++)
+            {
+                var firstEditable = Enumerable.Range(0, LinesGrid.Columns.Count)
+                    .FirstOrDefault(IsEditableColumn, -1);
+                if (firstEditable < 0)
+                    return;
+
+                FocusLineCell(LinesGrid.Items[nextRow], firstEditable);
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Колонка доступна для ввода: не помечена как «только чтение» и не является
+        /// вычисляемой (НДС, НСП, итог).
+        /// </summary>
+        private bool IsEditableColumn(int displayColumnIndex)
+        {
+            var column = LinesGrid.Columns
+                .FirstOrDefault(current => current.DisplayIndex == displayColumnIndex);
+
+            return column is { IsReadOnly: false, Visibility: Visibility.Visible };
+        }
+
+        /// <summary>
+        /// Ставит фокус ячейки, а затем — фокус ввода (редактор) внутри неё.
+        /// Одного BeginEdit недостаточно: клавиатурный фокус остаётся на DataGrid.
+        /// </summary>
+        private void FocusLineCell(object item, int displayColumnIndex, bool defer = false)
+        {
+            var column = LinesGrid.Columns
+                .FirstOrDefault(current => current.DisplayIndex == displayColumnIndex);
+            if (item == null || column == null)
+                return;
+
+            void Apply()
+            {
+                LinesGrid.SelectedItem = item;
+                LinesGrid.CurrentCell = new DataGridCellInfo(item, column);
+                LinesGrid.ScrollIntoView(item, column);
+                LinesGrid.BeginEdit();
+            }
+
+            // Для новой строки ждём окончания текущей операции ввода,
+            // для перехода по Enter переключаем ячейку сразу.
+            if (defer)
+                Dispatcher.BeginInvoke(new Action(Apply), System.Windows.Threading.DispatcherPriority.Background);
+            else
+                Apply();
+
+            RequestEditorFocus(item, column);
+        }
+
+        /// <summary>
+        /// Запрашивает фокус редактора ячейки. Контейнер ячейки и сам редактор
+        /// создаются асинхронно, а DataGrid перехватывает фокус обратно при входе
+        /// в режим правки, поэтому делаем несколько попыток с проверкой результата.
+        /// </summary>
+        private void RequestEditorFocus(object item, DataGridColumn column, int attempt = 0)
+        {
+            if (attempt > 12)
+                return;
+
+            Dispatcher.BeginInvoke(
+                new Action(() => TryFocusEditor(item, column, attempt)),
+                System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        private void TryFocusEditor(object item, DataGridColumn column, int attempt)
+        {
+            if (LinesGrid.ItemContainerGenerator.ContainerFromItem(item) is not DataGridRow row)
+            {
+                RequestEditorFocus(item, column, attempt + 1);
+                return;
+            }
+
+            var cell = FindCell(row, column);
+            if (cell == null)
+            {
+                RequestEditorFocus(item, column, attempt + 1);
+                return;
+            }
+
+            // Редактор может появиться позже (DataGrid откладывает вход в режим
+            // правки), поэтому вешаемся на загрузку ячейки и ставим фокус сразу,
+            // как только TextBox появится в её дереве.
+            if (attempt < 4)
+            {
+                cell.Loaded += OnFocusedCellLoaded;
+            }
+
+            if (!FocusFirstEditableElement(cell))
+            {
+                LinesGrid.BeginEdit();
+                RequestEditorFocus(item, column, attempt + 1);
+                return;
+            }
+
+            if (!IsKeyboardFocusInCell(cell))
+                RequestEditorFocus(item, column, attempt + 1);
+        }
+
+        /// <summary>
+        /// TextBox создан — передаём ему клавиатурный фокус.
+        /// </summary>
+        private void OnFocusedCellLoaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is DataGridCell cell)
+            {
+                cell.Loaded -= OnFocusedCellLoaded;
+                FocusFirstEditableElement(cell);
+            }
+        }
+
+        private static bool IsKeyboardFocusInCell(DataGridCell cell)
+        {
+            if (cell.IsKeyboardFocusWithin)
+                return true;
+
+            return Keyboard.FocusedElement is DependencyObject focused &&
+                   (ReferenceEquals(focused, cell) || IsVisualDescendant(cell, focused));
+        }
+
+        private static bool IsVisualDescendant(DependencyObject parent, DependencyObject candidate)
+        {
+            if (parent is not Visual visual)
+                return false;
+
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(visual); index++)
+            {
+                var child = VisualTreeHelper.GetChild(visual, index);
+                if (ReferenceEquals(child, candidate) || IsVisualDescendant(child, candidate))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// DataGridRow.Cells и DataGridCellsPanel закрыты, поэтому контейнер ячейки
+        /// берётся через ItemContainerGenerator панели ячеек по порядковому номеру
+        /// среди видимых колонок.
+        /// </summary>
+        /// <summary>
+        /// Контейнер ячейки ищется обходом визуального дерева строки: ячейки в нём
+        /// расположены слева направо в порядке видимых колонок.
+        /// </summary>
+        private DataGridCell? FindCell(DataGridRow row, DataGridColumn column)
+        {
+            var targetIndex = GetVisibleColumnIndex(column);
+            if (targetIndex < 0)
+                return null;
+
+            return FindCells(row)
+                .ElementAtOrDefault(targetIndex);
+        }
+
+        private int GetVisibleColumnIndex(DataGridColumn column)
+        {
+            var visibleIndex = 0;
+            foreach (var current in LinesGrid.Columns)
+            {
+                if (current.Visibility != Visibility.Visible)
+                    continue;
+
+                if (ReferenceEquals(current, column))
+                    return visibleIndex;
+
+                visibleIndex++;
+            }
+
+            return -1;
+        }
+
+        /// <summary>Все контейнеры ячеек строки в порядке следования колонок.</summary>
+        private static IEnumerable<DataGridCell> FindCells(DependencyObject parent)
+        {
+            if (parent is not Visual visual)
+                yield break;
+
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(visual); index++)
+            {
+                var child = VisualTreeHelper.GetChild(visual, index);
+                if (child is DataGridCell cell)
+                    yield return cell;
+
+                foreach (var nested in FindCells(child))
+                    yield return nested;
+            }
+        }
+
+        /// <summary>
+        /// Ставит клавиатурный фокус на первый редактируемый элемент ячейки
+        /// (обычно это вложенный TextBox) и выделяет его содержимое.
+        /// </summary>
+        private static bool FocusFirstEditableElement(DependencyObject parent)
+        {
+            if (parent is not Visual visual)
+                return false;
+
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(visual); index++)
+            {
+                var child = VisualTreeHelper.GetChild(visual, index);
+                if (child is TextBox textBox && !textBox.IsReadOnly && textBox.IsEnabled)
+                {
+                    textBox.Focus();
+                    Keyboard.Focus(textBox);
+                    textBox.SelectAll();
+                    return true;
+                }
+
+                if (FocusFirstEditableElement(child))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Вход в грид сразу ставит курсор в колонку «Наименование».
+        /// </summary>
+        private void OnLinesGridGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            if (_isReadOnlyMode || !LinesGrid.IsEnabled || LinesGrid.Items.Count == 0)
+                return;
+
+            // Реагируем только на вход фокуса в сам грид/строку, а не на переключение
+            // фокуса между TextBox соседних ячеек.
+            if (e.OriginalSource is not DataGrid && e.OriginalSource is not DataGridRow)
+                return;
+
+            var current = LinesGrid.CurrentCell;
+            var columnIndex = current.Column?.DisplayIndex ?? -1;
+            var rowIndex = current.Item == null ? -1 : LinesGrid.Items.IndexOf(current.Item);
+            if (columnIndex == 0 && rowIndex >= 0)
+                return;
+
+            var row = current.Item as object ?? LinesGrid.Items[rowIndex >= 0 ? rowIndex : 0];
+            FocusLineCell(row, 0);
         }
 
         private void OnDialogClosed(object? sender, EventArgs e)
         {
-            InputManager.Current.PreProcessInput -= OnInvoiceDialogPreProcessInput;
         }
 
         private void AddNewInvoiceLine()
         {
             var previous = _lines.LastOrDefault();
-            var accountCode = ResolveLineAccountCode(previous?.AccountCode);
+            // Счёт строки не наследуется и не подставляется: его выбирает пользователь.
+            var accountCode = string.Empty;
             var defaultVat = GetDefaultReferenceOption(VatTaxItems, item => item.IsDefaultVat, GetTaxFallbackCode(VatTaxItems));
             var defaultSalesTax = GetDefaultReferenceOption(SalesTaxItems, item => item.IsDefaultSalesTax, GetTaxFallbackCode(SalesTaxItems));
             var selectedHeaderVat = GetSelectedReferenceOption(HeaderVatTaxCombo);
@@ -1231,6 +1706,16 @@ namespace BIS.ERP.Views.Dialogs
                     return;
                 }
 
+                LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                if (!TryFocusFirstEmptyAmount(out var emptyAmountLine))
+                {
+                    MessageBox.Show(
+                        $"В строке {emptyAmountLine?.LineNumber ?? 0} не указана сумма «Без налогов». " +
+                        "Пустое поле означает 0 и не допускает сохранения.",
+                        "Проверка", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
                 if (!await TryResolveHeaderAccountAsync())
                     return;
 
@@ -1262,6 +1747,24 @@ namespace BIS.ERP.Views.Dialogs
             {
                 MessageBox.Show(ex.Message, "Ошибка сохранения", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        /// <summary>
+        /// Пустая сумма «Без налогов» равна нулю: такую строку сохранить нельзя.
+        /// Курсор ставится в её колонку суммы.
+        /// </summary>
+        private bool TryFocusFirstEmptyAmount(out EditableInvoiceLine? emptyLine)
+        {
+            emptyLine = _lines.FirstOrDefault(line => line.AmountWithoutTax == 0m);
+            if (emptyLine == null)
+                return true;
+
+            var amountColumn = LinesGrid.Columns.FirstOrDefault(column =>
+                column.Header?.ToString() == "Без налогов");
+            if (amountColumn != null)
+                FocusLineCell(emptyLine, amountColumn.DisplayIndex);
+
+            return false;
         }
 
         private InvoiceDocument BuildDocumentFromForm(bool applyHeaderTaxes = true)
@@ -1823,6 +2326,10 @@ namespace BIS.ERP.Views.Dialogs
                     _ => 0m
                 };
 
+                // Ноль показываем пустым полем: значит, значение ещё не введено.
+                if (amount == 0m)
+                    return string.Empty;
+
                 return amount.ToString(_pattern, _format);
             }
 
@@ -1964,13 +2471,8 @@ namespace BIS.ERP.Views.Dialogs
 
         private void FocusAmountCell(EditableInvoiceLine line)
         {
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                LinesGrid.SelectedItem = line;
-                LinesGrid.CurrentCell = new DataGridCellInfo(line, LinesGrid.Columns[2]);
-                LinesGrid.ScrollIntoView(line, LinesGrid.Columns[2]);
-                LinesGrid.BeginEdit();
-            }), System.Windows.Threading.DispatcherPriority.Background);
+            // Новая строка начинается с колонки «Наименование».
+            FocusLineCell(line, 0, defer: true);
         }
 
         private static string BuildReferenceDisplayName(string catalogName, string name, decimal rate)
@@ -2109,20 +2611,21 @@ namespace BIS.ERP.Views.Dialogs
         private string ResolveLineAccountCode(string? accountCode)
         {
             var normalized = accountCode?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(normalized) || IsSameAccount(normalized, _selectedHeaderAccountCode))
-                return GetDefaultLineAccountCode();
+            if (IsSameAccount(normalized, _selectedHeaderAccountCode))
+                return string.Empty;
             return normalized;
         }
 
         private void EnsureLineAccountsDoNotMatchHeader()
         {
             foreach (var line in _lines.Where(line =>
-                         string.IsNullOrWhiteSpace(line.AccountCode) ||
+                         !string.IsNullOrWhiteSpace(line.AccountCode) &&
                          IsSameAccount(line.AccountCode, _selectedHeaderAccountCode)))
             {
-                var accountCode = GetDefaultLineAccountCode();
-                line.AccountCode = accountCode;
-                line.AccountDisplayName = GetAccountDisplayName(accountCode);
+                // Счёт строки не подставляем автоматически — очищаем,
+                // чтобы пользователь выбрал его явно.
+                line.AccountCode = string.Empty;
+                line.AccountDisplayName = string.Empty;
             }
         }
 

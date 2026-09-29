@@ -91,6 +91,8 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="AccountBox" Height="28" IsReadOnly="False"
                              MaxLength="8"
@@ -102,6 +104,12 @@
                     <Button x:Name="HeaderAccountButton" Grid.Column="1" Content="?" Width="34" Height="28" Margin="4,0,0,0"
                             Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
                             Click="OnSelectAccountClick" FontWeight="Bold" FontFamily="Calibri"/>
+                    <Button x:Name="HeaderAccountAddButton" Grid.Column="2" Content="+" Width="34" Height="28" Margin="4,0,0,0"
+                            Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Click="OnAddAccountClick" FontWeight="Bold" FontFamily="Calibri"/>
+                    <Button x:Name="HeaderAccountEditButton" Grid.Column="3" Content="Изм." Width="46" Height="28" Margin="4,0,0,0"
+                            Visibility="{Binding IsInvoiceEditingEnabled, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Click="OnEditAccountClick" FontWeight="Bold" FontFamily="Calibri"/>
                 </Grid>
             </StackPanel>
             <StackPanel Grid.Row="2" Grid.Column="1" Margin="10,0,0,8">
@@ -175,6 +183,8 @@
                   SelectionMode="Single"
                   Focusable="True"
                   SelectionChanged="OnLineSelectionChanged"
+                  GotKeyboardFocus="OnLinesGridGotKeyboardFocus"
+                  PreviewKeyDown="OnLinesGridPreviewKeyDown"
                   GridLinesVisibility="None">
             <DataGrid.Resources>
                 <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#E0E0E0"/>
@@ -194,7 +204,14 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBox Text="{Binding AccountDisplayName}" IsReadOnly="False" Height="24"/>
+                                <TextBox x:Name="LineAccountBox" Height="24"
+                                         MaxLength="8"
+                                         ToolTip="Введите код счёта вручную или нажмите «?» для выбора из плана счетов"
+                                         PreviewTextInput="OnLineAccountPreviewTextInput"
+                                         PreviewKeyDown="OnLineAccountPreviewKeyDown"
+                                         DataObject.Pasting="OnLineAccountPasting"
+                                         LostFocus="OnLineAccountLostFocus"
+                                         Text="{Binding AccountCode, UpdateSourceTrigger=PropertyChanged}"/>
                                 <Button Grid.Column="1" Content="?" Width="28" Height="24" Margin="4,0,0,0"
                                         Tag="{Binding}" Click="OnSelectLineAccountClick"
                                         Visibility="{Binding DataContext.IsInvoiceEditingEnabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisibilityConverter}}"
