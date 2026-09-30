@@ -224,7 +224,7 @@
                 </Style>
             </DataGrid.Resources>
             <DataGrid.Columns>
-                <DataGridTemplateColumn Header="Выбор" Width="70" IsReadOnly="False">
+                <DataGridTemplateColumn Header="Выбор" Width="70" IsReadOnly="False" CanUserSort="False">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <CheckBox IsChecked="{Binding IsSelectedForBatchPost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"

@@ -157,7 +157,7 @@
                                  DD/MM/YYYY из Behaviors.DatePickerInputMaskBehavior (класс-обработчик
                                  DatePicker.Loaded, инициализация в App.xaml.cs) применяется к нему
                                  автоматически: автослэши, только цифры, watermark «DD/MM/YYYY». -->
-                            <DataGridTemplateColumn x:Name="AdvanceExpenseDateColumn" Header="Дата" Width="130">
+                            <DataGridTemplateColumn x:Name="AdvanceExpenseDateColumn" Header="Дата" Width="130" CanUserSort="False">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding LineDate, StringFormat=dd.MM.yyyy}"
@@ -175,7 +175,7 @@
                                                 Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
                                                 Width="200" MinWidth="200"/>
                             <DataGridTextColumn Header="Счет расхода" Binding="{Binding ExpenseAccountDisplay}" Width="280" IsReadOnly="True"/>
-                            <DataGridTemplateColumn Header="" Width="38">
+                            <DataGridTemplateColumn Header="" Width="38" CanUserSort="False">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <Button Content="?" Width="30" Height="24" Tag="{Binding}" Click="SelectExpenseAccount_Click"/>

@@ -196,7 +196,7 @@
             </DataGrid.Resources>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Наименование" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="145" MinWidth="145"/>
-                <DataGridTemplateColumn x:Name="LineAccountColumn" Header="Счет операции" Width="230" MinWidth="190">
+                <DataGridTemplateColumn x:Name="LineAccountColumn" Header="Счет операции" Width="230" MinWidth="190" CanUserSort="False">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
@@ -220,7 +220,7 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="Без налогов" Width="105">
+                <DataGridTemplateColumn Header="Без налогов" Width="105" CanUserSort="False">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <TextBox Height="24"

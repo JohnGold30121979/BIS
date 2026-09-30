@@ -194,16 +194,78 @@
             <Setter.Value>
                 <ControlTemplate TargetType="DataGridColumnHeader">
                     <Grid>
-                        <Border Background="{TemplateBinding Background}"
+                        <Border x:Name="HeaderSurface"
+                                Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
                                 Padding="{TemplateBinding Padding}"
                                 SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                              RecognizesAccessKey="True"
-                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
-                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="ToolTip" Value="Нажмите для сортировки по возрастанию"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource TemplatedParent}}" Value="Ascending">
+                                            <Setter Property="ToolTip" Value="Сортировка по возрастанию. Нажмите для смены направления"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding SortDirection, RelativeSource={RelativeSource TemplatedParent}}" Value="Descending">
+                                            <Setter Property="ToolTip" Value="Сортировка по убыванию. Нажмите, чтобы сбросить сортировку"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Column.CanUserSort, RelativeSource={RelativeSource TemplatedParent}}" Value="False">
+                                            <Setter Property="Cursor" Value="Arrow"/>
+                                            <Setter Property="ToolTip" Value="{x:Null}"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding CanUserSortColumns, RelativeSource={RelativeSource AncestorType=DataGrid}}" Value="False">
+                                            <Setter Property="Cursor" Value="Arrow"/>
+                                            <Setter Property="ToolTip" Value="{x:Null}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <DockPanel>
+                                <StackPanel x:Name="SortIndicator"
+                                            DockPanel.Dock="Right"
+                                            Orientation="Horizontal"
+                                            Margin="6,0,0,0"
+                                            VerticalAlignment="Center"
+                                            IsHitTestVisible="False">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Column.CanUserSort, RelativeSource={RelativeSource TemplatedParent}}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding CanUserSortColumns, RelativeSource={RelativeSource AncestorType=DataGrid}}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <StackPanel x:Name="SortGlyphIdle"
+                                                Orientation="Vertical"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Opacity="0.45">
+                                        <Path Data="M0,5 L3.5,0 L7,5 Z"
+                                              Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"/>
+                                        <Path Data="M0,5 L3.5,10 L7,5 Z"
+                                              Fill="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}"/>
+                                    </StackPanel>
+                                    <Path x:Name="SortGlyphAscending"
+                                          Data="M0,10 L3.5,0 L7,10 Z"
+                                          Visibility="Collapsed"
+                                          Fill="{DynamicResource AppAccentBrush}"/>
+                                    <Path x:Name="SortGlyphDescending"
+                                          Data="M0,0 L3.5,10 L7,0 Z"
+                                          Visibility="Collapsed"
+                                          Fill="{DynamicResource AppAccentBrush}"/>
+                                </StackPanel>
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                  RecognizesAccessKey="True"
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            </DockPanel>
                         </Border>
                         <primitives:Thumb x:Name="PART_LeftHeaderGripper"
                                           Width="8"
@@ -228,6 +290,16 @@
                             </primitives:Thumb.Template>
                         </primitives:Thumb>
                     </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="SortDirection" Value="Ascending">
+                            <Setter TargetName="SortGlyphIdle" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="SortGlyphAscending" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="SortDirection" Value="Descending">
+                            <Setter TargetName="SortGlyphIdle" Property="Visibility" Value="Collapsed"/>
+                            <Setter TargetName="SortGlyphDescending" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
