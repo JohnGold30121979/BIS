@@ -120,11 +120,7 @@ namespace BIS.ERP.Views
 
                 StatusTextBlock.Text = $"Импорт завершен! Документ №{document.Number} с {document.TotalRows} строками.";
 
-                MessageBox.Show($"✅ Импорт завершен!\n\n" +
-                               $"📄 Документ: {document.Number}\n" +
-                               $"📊 Строк: {document.TotalRows}",
-                    "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
-
+                // Закрываем окно импорта: результат уже виден в статусе, модальное подтверждение только отвлекает.
                 DialogResult = true;
                 Close();
             }

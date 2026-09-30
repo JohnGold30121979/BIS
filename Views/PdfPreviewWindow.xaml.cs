@@ -87,8 +87,7 @@ namespace BIS.ERP.Views
                 try
                 {
                     File.WriteAllBytes(saveDialog.FileName, _pdfData);
-                    MessageBox.Show($"PDF сохранён:\n{saveDialog.FileName}", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    PreviewStatusText.Text = $"PDF сохранён:\n{saveDialog.FileName}";
                 }
                 catch (Exception ex)
                 {

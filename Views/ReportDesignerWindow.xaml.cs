@@ -918,8 +918,7 @@ namespace BIS.ERP.Views
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var reportService = new ReportService(context);
                 _currentReport = await reportService.SaveReportAsync(_currentReport);
-                MessageBox.Show($"Отчет \"{_currentReport.Name}\" сохранен!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                // Отчёт сохранён и окно закрывается: модальное подтверждение только отвлекает.
 
                 DialogResult = true;
                 Close();
@@ -1097,11 +1096,7 @@ namespace BIS.ERP.Views
 
                     StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей источника: {AvailableDataFields.Count}";
 
-                    MessageBox.Show($"FRX-макет успешно загружен!\n\n" +
-                                   $"Файл: {Path.GetFileName(openDialog.FileName)}\n" +
-                                   $"Размер: {templateJson.Length} символов\n" +
-                                   $"Доступно полей выбранного источника: {AvailableDataFields.Count}",
-                                   "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Макет уже загружен в конструктор: модальное подтверждение только отвлекает.
                 }
                 else
                 {

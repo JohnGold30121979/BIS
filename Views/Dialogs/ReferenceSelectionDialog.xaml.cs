@@ -325,7 +325,10 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
                 {
                     var target = _filteredItems.FirstOrDefault(row => GetRecordId(row) == selectRecordId);
                     if (target != null)
+                    {
                         ItemsGrid.SelectedItem = target;
+                        ItemsGrid.ScrollIntoView(target);
+                    }
                 }
             });
         }

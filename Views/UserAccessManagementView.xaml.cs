@@ -158,7 +158,7 @@ namespace BIS.ERP.Views
                 if (dialog.ShowDialog() != true)
                     return;
 
-                await _accessService.CreateUserAsync(
+                var createdUser = await _accessService.CreateUserAsync(
                     _currentUser,
                     dialog.UserLogin,
                     dialog.Password,
@@ -168,6 +168,11 @@ namespace BIS.ERP.Views
                     dialog.IsUserActive,
                     dialog.IsSystemUser);
                 await LoadUsersAsync();
+                // LoadUsersAsync выделяет первую строку — переводим выделение
+                // на только что созданного пользователя.
+                UsersGrid.SelectRow(UsersGrid.Items
+                    .OfType<UserAccessRow>()
+                    .FirstOrDefault(row => row.User.Id == createdUser.Id));
                 StatusText.Text = "Пользователь добавлен.";
             }
             catch (Exception ex)

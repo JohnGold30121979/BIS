@@ -244,7 +244,11 @@ namespace BIS.ERP.Views
                     Window.GetWindow(this),
                     dialog,
                     _documentMetadata.Name) == true)
+            {
                 await LoadDataAsync();
+                // Остаёмся на только что созданном счёте-фактуре.
+                InvoicesGrid.SelectRowById(dialog.SavedRecordId, row => (row as InvoiceListRow)?.Id);
+            }
         }
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
@@ -281,7 +285,11 @@ namespace BIS.ERP.Views
                 isReadOnly ? $"Просмотр: {_documentMetadata.Name}" : $"Редактирование: {_documentMetadata.Name}");
 
             if (result == true && !isReadOnly)
+            {
                 await LoadDataAsync();
+                // После редактирования выделяем сохранённый счёт-фактуру.
+                InvoicesGrid.SelectRowById(dialog.SavedRecordId, row => (row as InvoiceListRow)?.Id);
+            }
         }
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)

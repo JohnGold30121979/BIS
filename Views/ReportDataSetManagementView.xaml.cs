@@ -170,7 +170,8 @@ namespace BIS.ERP.Views
                     await _service.SyncMetadataSourceAsync(saved);
 
                 await LoadAsync();
-                DataSetsGrid.SelectedItem = _dataSets.FirstOrDefault(item => item.Id == saved.Id);
+                // Остаёмся на только что сохранённом наборе данных.
+                DataSetsGrid.SelectRow(_dataSets.FirstOrDefault(item => item.Id == saved.Id));
                 SetStatus("Набор данных сохранен, поля и источник отчета обновлены.");
             }
             catch (Exception ex)

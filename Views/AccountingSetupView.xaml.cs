@@ -65,12 +65,15 @@ namespace BIS.ERP.Views
             var selection = new AccountSelectionView(accounts);
             if (await MdiDialogService.ShowControlInWorkspaceForResultAsync(owner, "Выбор счета", selection) != true)
                 return;
-            _openings.Add(new OpeningBalanceEditorRow
+            var newOpening = new OpeningBalanceEditorRow
             {
                 AccountCode = selection.SelectedAccount.GetValueOrDefault("Код")?.ToString() ?? string.Empty,
                 AccountName = selection.SelectedAccount.GetValueOrDefault("Наименование")?.ToString() ?? string.Empty,
                 BalanceDate = new DateTime(DateTime.Today.Year, 1, 1)
-            });
+            };
+            _openings.Add(newOpening);
+            // Остаёмся на только что добавленной строке.
+            OpeningGrid.SelectRow(newOpening);
         }
 
         private async void OnDeleteOpeningClick(object sender, RoutedEventArgs e)
@@ -145,11 +148,17 @@ namespace BIS.ERP.Views
                 });
         }
 
-        private void OnAddLineClick(object sender, RoutedEventArgs e) => _reportLines.Add(new ReportLineEditorRow
+        private void OnAddLineClick(object sender, RoutedEventArgs e)
         {
-            SortOrder = _reportLines.Count == 0 ? 10 : _reportLines.Max(line => line.SortOrder) + 10,
-            Sign = 1
-        });
+            var newLine = new ReportLineEditorRow
+            {
+                SortOrder = _reportLines.Count == 0 ? 10 : _reportLines.Max(line => line.SortOrder) + 10,
+                Sign = 1
+            };
+            _reportLines.Add(newLine);
+            // Остаёмся на только что добавленной строке.
+            ReportLinesGrid.SelectRow(newLine);
+        }
 
         private async void OnDeleteLineClick(object sender, RoutedEventArgs e)
         {

@@ -470,8 +470,9 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        // Добавление записи в справочник
-        public async Task AddCatalogItemAsync(Guid catalogId, Dictionary<string, object> itemData)
+        // Добавление записи в справочник. Возвращает Id созданной записи,
+        // чтобы вызывающий раздел мог выделить её в списке после закрытия диалога.
+        public async Task<Guid> AddCatalogItemAsync(Guid catalogId, Dictionary<string, object> itemData)
         {
             var catalog = await _context.MetadataObjects
                 .Include(c => c.Fields)
@@ -522,6 +523,8 @@ namespace BIS.ERP.Services
             await _context.Database.CloseConnectionAsync();
 
             await EnsureSingleCatalogDefaultsAsync(catalog, itemData, (Guid)parameters["@Id"]);
+
+            return (Guid)parameters["@Id"];
         }
 
         public async Task SaveCatalogAsync(MetadataObject catalog)

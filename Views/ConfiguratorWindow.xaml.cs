@@ -1068,8 +1068,10 @@ namespace BIS.ERP.Views
                     await _metadataService.CreateDynamicTableAsync(newObject);
                     await LoadMetadata();
 
-                    MessageBox.Show($"Справочник '{dialog.ObjectName}' успешно создан!",
-                        "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Выделяем в дереве только что созданный справочник.
+                    SelectMetadataObjectTreeItem("Catalog", dialog.ObjectName);
+
+                    // Дерево уже показывает новый справочник: модальное подтверждение только отвлекает.
                 }
                 catch (Exception ex)
                 {
@@ -1114,6 +1116,9 @@ namespace BIS.ERP.Views
                     await _metadataService.CreateDynamicTableAsync(newObject);
                     await LoadMetadata();
 
+                    // Выделяем в дереве только что созданный документ.
+                    SelectMetadataObjectTreeItem("Document", dialog.ObjectName);
+
                     // ОТКРЫВАЕМ РЕДАКТОР ДЛЯ СОЗДАННОГО ОБЪЕКТА
                     var editorView = new DynamicObjectsConfigView(_metadataService);
                     // Нужно передать выбранный объект в редактор
@@ -1123,8 +1128,7 @@ namespace BIS.ERP.Views
                     var tabItem = new TabItem { Header = newObject.Name, Content = editorView };
                     // Добавляем в TabControl (если есть) или открываем окно
 
-                    MessageBox.Show($"Документ '{dialog.ObjectName}' успешно создан! Теперь добавьте поля.",
-                        "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Редактор нового документа уже открыт во вкладке: модальное подтверждение только отвлекает.
                 }
                 catch (Exception ex)
                 {
@@ -1989,6 +1993,39 @@ namespace BIS.ERP.Views
             return null;
         }
 
+        /// <summary>
+        /// Выделяет в дереве метаданных узел только что созданного справочника
+        /// или документа и прокручивает дерево к этому узлу.
+        /// </summary>
+        private void SelectMetadataObjectTreeItem(string objectType, string name)
+        {
+            var item = FindMetadataObjectTreeItem(MetadataTree, objectType, name);
+            if (item == null)
+                return;
+
+            item.IsSelected = true;
+            item.BringIntoView();
+        }
+
+        private static TreeViewItem? FindMetadataObjectTreeItem(ItemsControl parent, string objectType, string name)
+        {
+            foreach (var item in parent.Items.OfType<TreeViewItem>())
+            {
+                if (item.Tag is MetadataObject metadataObject &&
+                    string.Equals(metadataObject.ObjectType, objectType, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(metadataObject.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return item;
+                }
+
+                var nested = FindMetadataObjectTreeItem(item, objectType, name);
+                if (nested != null)
+                    return nested;
+            }
+
+            return null;
+        }
+
         private async Task ToggleReportAvailabilityAndShowListAsync(Report report)
         {
             await new PrintFormService(_context).SetAvailabilityAsync(report.Id, !report.IsActive);
@@ -2025,8 +2062,7 @@ namespace BIS.ERP.Views
                     report.Id,
                     new { report.Code, report.SourceFormat, report.ReportType });
                 await RefreshReportsTreeAndListAsync();
-                MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                // Список отчётов уже обновлён: модальное подтверждение только отвлекает.
             }
             catch (Exception ex)
             {
@@ -2663,7 +2699,7 @@ namespace BIS.ERP.Views
                     await _metadataService.UpdateMetadataObjectAsync(obj);
                     await LoadMetadata();
 
-                    MessageBox.Show("Сохранено!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Объект уже сохранён и дерево обновлено: модальное подтверждение только отвлекает.
                 }
                 catch (Exception ex)
                 {
@@ -2850,8 +2886,7 @@ namespace BIS.ERP.Views
                 EditorDescription.Text = "";
                 _selectedReport = null;
                 DeleteReportMenuItem.IsEnabled = false;
-                MessageBox.Show($"Отчет \"{report.Name}\" удален.", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                // Панель уже показывает удаление отчёта: модальное подтверждение только отвлекает.
             }
             catch (Exception ex)
             {
@@ -3231,7 +3266,7 @@ namespace BIS.ERP.Views
                     await _metadataService.DeleteMetadataObjectAsync(obj.Id);
                     await LoadMetadata();
 
-                    MessageBox.Show("Объект удален!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Объект исчез из дерева: модальное подтверждение только отвлекает.
                 }
                 catch (Exception ex)
                 {

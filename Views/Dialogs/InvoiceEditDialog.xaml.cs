@@ -24,6 +24,12 @@ namespace BIS.ERP.Views.Dialogs
         private readonly InvoiceService _invoiceService;
         private readonly Guid? _editId;
         private readonly bool _isReadOnlyMode;
+
+        /// <summary>
+        /// Идентификатор сохранённой записи. Заполняется после успешного сохранения,
+        /// чтобы вызывающий раздел выделил этот счёт-фактуру в списке.
+        /// </summary>
+        public Guid? SavedRecordId { get; private set; }
         private readonly ObservableCollection<EditableInvoiceLine> _lines = new();
         private List<Dictionary<string, object>> _accounts = new();
         private readonly Dictionary<string, ReferenceOption> _vatTaxesByCode = new(StringComparer.OrdinalIgnoreCase);
@@ -1739,7 +1745,7 @@ namespace BIS.ERP.Views.Dialogs
 
                 var document = BuildDocumentFromForm();
                 InvoiceService.RecalculateTotals(document);
-                await _invoiceService.SaveInvoiceAsync(document, _editId);
+                SavedRecordId = await _invoiceService.SaveInvoiceAsync(document, _editId);
                 BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
             }

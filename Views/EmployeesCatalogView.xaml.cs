@@ -78,10 +78,12 @@ namespace BIS.ERP.Views
                     dialog,
                     "Добавление сотрудника") == true)
             {
-                await _employeeService.AddEmployeeAsync(dialog.Employee);
+                var savedEmployee = await _employeeService.AddEmployeeAsync(dialog.Employee);
                 await LoadEmployees();
-                MessageBox.Show("Сотрудник добавлен!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                // Остаёмся на только что созданном сотруднике.
+                EmployeesGrid.SelectRowById(savedEmployee.Id, row => (row as Employee)?.Id);
+                // Успех сообщаем в строке состояния, чтобы не отбирать фокус у таблицы.
+                StatusText.Text = "✅ Сотрудник добавлен";
             }
         }
 
@@ -98,10 +100,11 @@ namespace BIS.ERP.Views
                     dialog,
                     "Редактирование сотрудника") == true)
             {
-                await _employeeService.UpdateEmployeeAsync(dialog.Employee);
+                var updatedEmployee = await _employeeService.UpdateEmployeeAsync(dialog.Employee);
                 await LoadEmployees();
-                MessageBox.Show("Данные обновлены!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                // Возвращаем выделение на отредактированного сотрудника.
+                EmployeesGrid.SelectRowById(updatedEmployee.Id, row => (row as Employee)?.Id);
+                StatusText.Text = "✅ Данные сотрудника обновлены";
             }
         }
 
@@ -115,8 +118,7 @@ namespace BIS.ERP.Views
             {
                 await _employeeService.DeleteEmployeeAsync(selected.Id);
                 await LoadEmployees();
-                MessageBox.Show("Сотрудник удален!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = "✅ Сотрудник удалён";
             }
         }
 
@@ -132,8 +134,7 @@ namespace BIS.ERP.Views
             {
                 await _employeeService.TerminateEmployeeAsync(selected.Id, dialog.TerminationDate, dialog.Reason);
                 await LoadEmployees();
-                MessageBox.Show("Сотрудник уволен!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = "✅ Сотрудник уволен";
             }
         }
 
@@ -149,8 +150,7 @@ namespace BIS.ERP.Views
             {
                 var json = await _employeeService.ExportEmployeesToJsonAsync();
                 await System.IO.File.WriteAllTextAsync(dlg.FileName, json);
-                MessageBox.Show($"Экспортировано {_employees.Count} сотрудников!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = $"✅ Экспортировано сотрудников: {_employees.Count} → {dlg.FileName}";
             }
         }
 
@@ -162,8 +162,7 @@ namespace BIS.ERP.Views
                 var json = await System.IO.File.ReadAllTextAsync(dlg.FileName);
                 var count = await _employeeService.ImportEmployeesFromJsonAsync(json);
                 await LoadEmployees();
-                MessageBox.Show($"Импортировано {count} сотрудников!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = $"✅ Импортировано сотрудников: {count}";
             }
         }
 

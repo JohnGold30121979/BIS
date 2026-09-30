@@ -1058,12 +1058,15 @@ namespace BIS.ERP.Views
                         title) == true)
                 {
                     await LoadData();
-                    MessageBox.Show("Документ успешно добавлен!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Остаёмся на только что созданном кассовом ордере.
+                    DataGrid.SelectRowById(dialog.SavedRecordId, row => (row as CashOrderRow)?.Id);
+                    // Успех сообщаем в строке состояния, чтобы не отбирать фокус у таблицы.
+                    StatusText.Text = "✅ Документ добавлен";
                 }
             }
             catch (Exception ex)
             {
+                StatusText.Text = "❌ Ошибка добавления документа";
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -1095,12 +1098,15 @@ namespace BIS.ERP.Views
                         "Редактирование кассового ордера") == true)
                 {
                     await LoadData();
-                    MessageBox.Show("Документ успешно обновлен!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Возвращаем выделение на отредактированный кассовый ордер.
+                    DataGrid.SelectRowById(dialog.SavedRecordId, row => (row as CashOrderRow)?.Id);
+                    // Успех сообщаем в строке состояния, чтобы не отбирать фокус у таблицы.
+                    StatusText.Text = "✅ Документ обновлён";
                 }
             }
             catch (Exception ex)
             {
+                StatusText.Text = "❌ Ошибка редактирования документа";
                 MessageBox.Show($"Ошибка редактирования: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -1127,11 +1133,11 @@ namespace BIS.ERP.Views
             {
                 await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, selectedRow.Id);
                 await LoadData();
-                MessageBox.Show("Документ успешно удален!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = "✅ Документ удалён";
             }
             catch (Exception ex)
             {
+                StatusText.Text = "❌ Ошибка удаления документа";
                 MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
@@ -1167,17 +1173,13 @@ namespace BIS.ERP.Views
                     await _metadataService.PostDocumentAsync(_documentMetadata.Id, selectedRow.Id);
 
                 await LoadData();
-                MessageBox.Show(selectedRow.IsPosted ? "Проведение документа отменено." : "Документ успешно проведён!", "Успех",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = selectedRow.IsPosted ? "✅ Проведение отменено" : "✅ Документ проведён";
             }
             catch (Exception ex)
             {
+                StatusText.Text = "❌ Ошибка изменения проведения";
                 MessageBox.Show($"Ошибка изменения проведения: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                StatusText.Text = "✅ Готово";
             }
         }
 
@@ -1245,43 +1247,38 @@ namespace BIS.ERP.Views
 
             var postedCount = 0;
             var errors = new List<string>();
-            try
+            foreach (var row in selectedRows)
             {
-                foreach (var row in selectedRows)
-                {
-                    if (!await EnsureCashDayAllowsDocumentAsync(row, caption))
-                        return;
-
-                    try
-                    {
-                        StatusText.Text = $"Проведение документа № {row.DocNumber}...";
-                        await _metadataService.PostDocumentAsync(_documentMetadata.Id, row.Id);
-                        postedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"№ {row.DocNumber}: {ex.Message}");
-                        SystemLogService.Error($"Ошибка массового проведения кассового документа № {row.DocNumber}.", "CashOrderWorkView.OnBatchPostClick", ex);
-                    }
-                }
-
-                await LoadData();
-
-                if (errors.Count > 0)
-                {
-                    var details = string.Join(Environment.NewLine, errors.Take(5));
-                    if (errors.Count > 5)
-                        details += Environment.NewLine + $"... и еще ошибок: {errors.Count - 5}";
-                    MessageBox.Show($"Проведено документов: {postedCount}. Ошибок: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (!await EnsureCashDayAllowsDocumentAsync(row, caption))
                     return;
-                }
 
-                MessageBox.Show($"Проведено документов: {postedCount}.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                try
+                {
+                    StatusText.Text = $"Проведение документа № {row.DocNumber}...";
+                    await _metadataService.PostDocumentAsync(_documentMetadata.Id, row.Id);
+                    postedCount++;
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"№ {row.DocNumber}: {ex.Message}");
+                    SystemLogService.Error($"Ошибка массового проведения кассового документа № {row.DocNumber}.", "CashOrderWorkView.OnBatchPostClick", ex);
+                }
             }
-            finally
+
+            await LoadData();
+
+            if (errors.Count > 0)
             {
-                StatusText.Text = "✅ Готово";
+                var details = string.Join(Environment.NewLine, errors.Take(5));
+                if (errors.Count > 5)
+                    details += Environment.NewLine + $"... и еще ошибок: {errors.Count - 5}";
+                StatusText.Text = $"⚠️ Проведено документов: {postedCount}. Ошибок: {errors.Count}";
+                MessageBox.Show($"Проведено документов: {postedCount}. Ошибок: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
             }
+
+            // Итог массового проведения показываем в строке состояния, без модального окна.
+            StatusText.Text = $"✅ Проведено документов: {postedCount}";
         }
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
@@ -1631,8 +1628,8 @@ namespace BIS.ERP.Views
                     turnoverSummary.ClosingCredit);
 
                 await LoadData();
-                StatusText.Text = $"Кассовый период закрыт датой {closeDate:dd/MM/yyyy}";
-                MessageBox.Show("Кассовый день закрыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                // Итог виден в строке состояния и в самом списке, модальное подтверждение не нужно.
+                StatusText.Text = $"✅ Кассовый период закрыт датой {closeDate:dd/MM/yyyy}";
             }
             catch (Exception ex)
             {
@@ -1662,8 +1659,8 @@ namespace BIS.ERP.Views
                 }
 
                 await LoadData();
-                StatusText.Text = $"Кассовый день {cashDate:dd/MM/yyyy} открыт";
-                MessageBox.Show("Кассовый день открыт.", caption, MessageBoxButton.OK, MessageBoxImage.Information);
+                // Состояние дня видно в списке и в строке состояния, модальное подтверждение не нужно.
+                StatusText.Text = $"✅ Кассовый день {cashDate:dd/MM/yyyy} открыт";
             }
             catch (Exception ex)
             {

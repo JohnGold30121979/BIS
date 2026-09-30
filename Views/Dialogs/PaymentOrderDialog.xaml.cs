@@ -16,6 +16,12 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
+
+        /// <summary>
+        /// Идентификатор сохранённого платёжного поручения. Заполняется после успешного
+        /// сохранения, чтобы вызывающий раздел выделил документ в списке.
+        /// </summary>
+        public Guid? SavedRecordId { get; private set; }
         private Guid _selectedOurAccountId;
         private Guid _selectedCorrAccountId;
         private Guid _selectedPaymentClassificationId;
@@ -593,9 +599,14 @@ namespace BIS.ERP.Views
                     _selectedCorrAccountId != Guid.Empty ? _selectedCorrAccountId : string.Empty);
 
                 if (_editId.HasValue)
+                {
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
+                    SavedRecordId = _editId.Value;
+                }
                 else
-                    await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
+                {
+                    SavedRecordId = await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
+                }
 
                 BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();

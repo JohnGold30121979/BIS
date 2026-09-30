@@ -214,7 +214,11 @@ namespace BIS.ERP.Views
                     Window.GetWindow(this),
                     dialog,
                     _documentMetadata.Name) == true)
+            {
                 await LoadDataAsync();
+                // Остаёмся на только что созданном документе.
+                DataGrid.SelectRowById(dialog.SavedRecordId, row => (row as FinanceDocumentRow)?.Id);
+            }
         }
 
         private async void OnEditClick(object sender, RoutedEventArgs e) => await EditSelectedAsync();
@@ -235,7 +239,11 @@ namespace BIS.ERP.Views
                     Window.GetWindow(this),
                     dialog,
                     $"Редактирование: {_documentMetadata.Name}") == true)
+            {
                 await LoadDataAsync();
+                // Возвращаем выделение на отредактированный документ.
+                DataGrid.SelectRowById(dialog.SavedRecordId, row => (row as FinanceDocumentRow)?.Id);
+            }
         }
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)

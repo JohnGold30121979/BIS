@@ -475,7 +475,10 @@ namespace BIS.ERP.Views
                         "Добавление проводки") == true)
                 {
                     await LoadData();
-                    MessageBox.Show("Проводка добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Остаёмся на только что созданной проводке.
+                    DataGrid.SelectRowById(dialog.SavedRecordId, DataGridSelectionHelper.GetIdFromDataRow);
+                    // Успех сообщаем в строке состояния, чтобы не отбирать фокус у таблицы.
+                    StatusText.Text = "✅ Проводка добавлена";
                 }
             }
             else if (_documentMetadata.Name == "Учет движения ОС")
@@ -494,9 +497,11 @@ namespace BIS.ERP.Views
                         dialog,
                         $"Добавление: {_documentMetadata.Name}") == true)
                 {
-                    await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
+                    var createdId = await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
-                    MessageBox.Show("Запись добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Остаёмся на только что созданной записи.
+                    DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Запись добавлена";
                 }
             }
             else
@@ -508,9 +513,11 @@ namespace BIS.ERP.Views
                         dialog,
                         $"Добавление: {_documentMetadata.Name}") == true)
                 {
-                    await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
+                    var createdId = await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
-                    MessageBox.Show("Запись добавлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Остаёмся на только что созданной записи.
+                    DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Запись добавлена";
                 }
             }
             UpdateButtonsState();
@@ -538,7 +545,9 @@ namespace BIS.ERP.Views
                         "Редактирование проводки") == true)
                 {
                     await LoadData();
-                    MessageBox.Show("Проводка обновлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Возвращаем выделение на отредактированную проводку.
+                    DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Проводка обновлена";
                 }
             }
             else
@@ -552,7 +561,9 @@ namespace BIS.ERP.Views
                 {
                     await _metadataService.UpdateDynamicRecordAsync(_documentMetadata.Id, id, dialog.ItemData);
                     await LoadData();
-                    MessageBox.Show("Запись обновлена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Возвращаем выделение на отредактированную запись.
+                    DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Запись обновлена";
                 }
             }
             UpdateButtonsState();
@@ -579,15 +590,15 @@ namespace BIS.ERP.Views
                     StatusText.Text = "🗑️ Удаление...";
                     await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, id);
                     await LoadData();
-                    MessageBox.Show("Запись удалена!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    StatusText.Text = "✅ Запись удалена";
                 }
                 catch (Exception ex)
                 {
+                    StatusText.Text = "❌ Ошибка удаления";
                     MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
-                    StatusText.Text = "✅ Готово";
                     UpdateButtonsState();
                 }
             }
@@ -614,17 +625,16 @@ namespace BIS.ERP.Views
                     StatusText.Text = "🔄 Проведение...";
                     await _metadataService.PostDocumentAsync(_documentMetadata.Id, id);
                     await LoadData();
-                    MessageBox.Show("Документ проведён!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    StatusText.Text = "✅ Документ проведён";
                 }
                 catch (Exception ex)
                 {
+                    StatusText.Text = "❌ Ошибка проведения";
                     MessageBox.Show($"Ошибка проведения: {ex.Message}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
-                    StatusText.Text = "✅ Готово";
                     UpdateButtonsState();
                 }
             }

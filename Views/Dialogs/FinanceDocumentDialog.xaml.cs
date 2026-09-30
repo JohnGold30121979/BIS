@@ -21,6 +21,12 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
+
+        /// <summary>
+        /// Идентификатор сохранённого документа. Заполняется после успешного сохранения,
+        /// чтобы вызывающий раздел выделил этот документ в списке.
+        /// </summary>
+        public Guid? SavedRecordId { get; private set; }
         private readonly FinanceDocumentKind _documentKind;
 
         private AccountAnalyticsRegistry _accountAnalytics = new();
@@ -585,6 +591,8 @@ namespace BIS.ERP.Views
                 {
                     savedId = await _metadataService.CreateDynamicRecordAsync(_document.Id, data);
                 }
+
+                SavedRecordId = savedId;
 
                 if (_documentKind == FinanceDocumentKind.AdvanceReport)
                     await _metadataService.PostDocumentAsync(_document.Id, savedId);

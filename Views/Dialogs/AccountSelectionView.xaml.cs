@@ -69,8 +69,9 @@ namespace BIS.ERP.Views
                         Window.GetWindow(this), dialog, $"Добавление: {catalog.Name}") != true)
                     return;
 
-                await metadata.CreateDynamicRecordAsync(catalog.Id, dialog.ItemData);
-                await ReloadAccountsFromCatalogAsync(metadata, catalog);
+                var newAccountId = await metadata.CreateDynamicRecordAsync(catalog.Id, dialog.ItemData);
+                // После добавления выделяем именно новый счёт.
+                await ReloadAccountsFromCatalogAsync(metadata, catalog, newAccountId.ToString());
             }
             catch (Exception ex)
             {
@@ -135,7 +136,8 @@ namespace BIS.ERP.Views
                     return;
 
                 await metadata.UpdateDynamicRecordAsync(catalog.Id, recordId.Value, dialog.ItemData);
-                await ReloadAccountsFromCatalogAsync(metadata, catalog);
+                // После изменения выделяем отредактированный счёт.
+                await ReloadAccountsFromCatalogAsync(metadata, catalog, recordId.Value.ToString());
             }
             catch (Exception ex)
             {
@@ -175,7 +177,10 @@ namespace BIS.ERP.Views
 
         // Перезагрузка из БД: список счетов всегда соответствует справочнику
         // «План счетов», как и в самом разделе «План счетов».
-        private async Task ReloadAccountsFromCatalogAsync(MetadataService metadata, MetadataObject catalog)
+        private async Task ReloadAccountsFromCatalogAsync(
+            MetadataService metadata,
+            MetadataObject catalog,
+            string? selectId = null)
         {
             var rows = await metadata.GetCatalogDataAsync(catalog.Id) ?? new List<Dictionary<string, object>>();
 
@@ -183,8 +188,10 @@ namespace BIS.ERP.Views
             _accounts = rows;
             AccountsView.SetData(_accounts);
 
-            if (!string.IsNullOrEmpty(previousId))
-                AccountsView.SelectRowById(previousId);
+            // Приоритет — только что созданная/изменённая запись, иначе прежнее выделение.
+            var targetId = !string.IsNullOrEmpty(selectId) ? selectId : previousId;
+            if (!string.IsNullOrEmpty(targetId))
+                AccountsView.SelectRowById(targetId);
         }
 
         private Dictionary<string, object>? FindAccountById(string? id)

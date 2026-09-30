@@ -276,8 +276,8 @@ namespace BIS.ERP.Views
                     var html = _reportService.ExportToHtml(_data, _report);
                     File.WriteAllText(saveDialog.FileName, html);
 
-                    MessageBox.Show($"Отчет сохранен: {saveDialog.FileName}", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Файл уже сохранён по выбранному пути: модальное подтверждение только отвлекает.
+                    StatusText.Text = $"Отчет сохранен: {saveDialog.FileName}";
                 }
                 catch (Exception ex)
                 {
@@ -304,8 +304,8 @@ namespace BIS.ERP.Views
                     var data = _reportService.ExportToPdf(_data, _report);
                     File.WriteAllBytes(saveDialog.FileName, data);
 
-                    MessageBox.Show($"PDF сохранен: {saveDialog.FileName}", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Файл уже сохранён по выбранному пути: модальное подтверждение только отвлекает.
+                    StatusText.Text = $"PDF сохранен: {saveDialog.FileName}";
                 }
                 catch (Exception ex)
                 {

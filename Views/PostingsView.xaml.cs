@@ -297,6 +297,8 @@ namespace BIS.ERP.Views
                     "Добавление проводки") == true)
             {
                 await LoadData();
+                // Остаёмся на только что созданной проводке.
+                PostingsGrid.SelectRowById(dialog.SavedRecordId, DataGridSelectionHelper.GetIdFromDictionary);
             }
         }
 
@@ -333,6 +335,8 @@ namespace BIS.ERP.Views
                         "Редактирование проводки") == true)
                 {
                     await LoadData();
+                    // Возвращаем выделение на отредактированную проводку.
+                    PostingsGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDictionary);
                 }
             }
         }

@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,6 +13,7 @@ namespace BIS.ERP.Views
     public partial class InfoBasesView : UserControl
     {
         private readonly InfoBaseManager _manager;
+        private List<InfoBase> _infoBases = new();
 
         public InfoBasesView()
         {
@@ -26,6 +29,7 @@ namespace BIS.ERP.Views
             try
             {
                 var bases = await _manager.GetInfoBasesAsync();
+                _infoBases = bases;
 
                 if (bases.Count == 0)
                 {
@@ -63,8 +67,9 @@ namespace BIS.ERP.Views
                 try
                 {
                     await LoadInfoBasesAsync();
-                    MessageBox.Show("Информационная база успешно создана!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Прокручиваем список к карточке только что созданной базы.
+                    // Модальное подтверждение не показываем: результат виден в списке и не отвлекает от работы.
+                    BringInfoBaseIntoView(dialog.InfoBaseName);
                 }
                 catch (Exception ex)
                 {
@@ -76,6 +81,26 @@ namespace BIS.ERP.Views
                     LoadingProgress.Visibility = Visibility.Collapsed;
                 }
             }
+        }
+
+        /// <summary>
+        /// Прокручивает список к карточке только что созданной информационной базы,
+        /// чтобы результат создания был сразу виден пользователю.
+        /// </summary>
+        private void BringInfoBaseIntoView(string? infoBaseName)
+        {
+            if (string.IsNullOrWhiteSpace(infoBaseName))
+                return;
+
+            var target = _infoBases.FirstOrDefault(infoBase =>
+                string.Equals(infoBase.Name, infoBaseName, StringComparison.OrdinalIgnoreCase));
+
+            if (target == null)
+                return;
+
+            InfoBasesList.UpdateLayout();
+            if (InfoBasesList.ItemContainerGenerator.ContainerFromItem(target) is FrameworkElement container)
+                container.BringIntoView();
         }
 
         private async void OnSelectClick(object sender, RoutedEventArgs e)
@@ -122,11 +147,7 @@ namespace BIS.ERP.Views
             if (dialog.ShowDialog() == true)
             {
                 await LoadInfoBasesAsync();
-                MessageBox.Show(
-                    $"Настройка модулей для базы «{infoBase.Name}» сохранена.",
-                    "Модули",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                // Состояние модулей видно в карточке базы: модальное подтверждение только отвлекает.
             }
         }
 
@@ -148,8 +169,7 @@ namespace BIS.ERP.Views
                     {
                         await _manager.DeleteInfoBaseAsync(infoBase.Id);
                         await LoadInfoBasesAsync();
-                        MessageBox.Show("База удалена", "Успех",
-                            MessageBoxButton.OK, MessageBoxImage.Information);
+                        // Удалённая база исчезает из списка: модальное подтверждение не нужно.
                     }
                     catch (Exception ex)
                     {

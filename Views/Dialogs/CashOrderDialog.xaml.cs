@@ -23,6 +23,12 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
+
+        /// <summary>
+        /// Идентификатор сохранённого кассового ордера. Заполняется после успешного
+        /// сохранения, чтобы вызывающий раздел выделил документ в списке.
+        /// </summary>
+        public Guid? SavedRecordId { get; private set; }
         private readonly bool _isReadOnly;
         private Guid _selectedCorrAccountId;
         private string _selectedCorrAccountCode = string.Empty;
@@ -812,9 +818,14 @@ namespace BIS.ERP.Views
 
                 //  Сохраняем документ.
                 if (_editId.HasValue)
+                {
                     await _metadataService.UpdateDynamicRecordAsync(_document.Id, _editId.Value, itemData);
+                    SavedRecordId = _editId.Value;
+                }
                 else
-                    await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
+                {
+                    SavedRecordId = await _metadataService.CreateDynamicRecordAsync(_document.Id, itemData);
+                }
 
                 // Если документ был проведен — пересоздаем проводки с новыми данными:
                 // журналы и отчеты строятся по doc_postings и без этого остались бы старыми.

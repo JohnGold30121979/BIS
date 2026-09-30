@@ -4,8 +4,14 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
     <AssemblyName>BIS.ERP.TESTS.Core</AssemblyName>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SDK с UseWPF не подключает System.IO глобально, а сценарии активно работают с файлами. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\BIS.ERP.csproj" />

@@ -555,7 +555,11 @@ namespace BIS.ERP.Views
                     Window.GetWindow(this),
                     dialog,
                     "Платежное поручение") == true)
+            {
                 await LoadData();
+                // Остаёмся на только что созданном документе.
+                DataGrid.SelectRowById(dialog.SavedRecordId, row => (row as PaymentOrderRow)?.Id);
+            }
         }
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
@@ -571,7 +575,11 @@ namespace BIS.ERP.Views
                     Window.GetWindow(this),
                     dialog,
                     "Редактирование платежного поручения") == true)
+            {
                 await LoadData();
+                // Возвращаем выделение на отредактированный документ.
+                DataGrid.SelectRowById(dialog.SavedRecordId, row => (row as PaymentOrderRow)?.Id);
+            }
         }
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
@@ -605,7 +613,7 @@ namespace BIS.ERP.Views
                     StatusText.Text = "🔄 Отмена проведения...";
                     await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, selected.Id);
                     await LoadData();
-                    MessageBox.Show("Проведение отменено.", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                    StatusText.Text = "✅ Проведение отменено";
                 }
                 catch (Exception ex)
                 {
@@ -633,7 +641,7 @@ namespace BIS.ERP.Views
                 StatusText.Text = "🔄 Проведение...";
                 await _metadataService.PostDocumentAsync(_documentMetadata.Id, selected.Id);
                 await LoadData();
-                MessageBox.Show("Документ проведён!", "Успех", MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = "✅ Документ проведён";
             }
             catch (Exception ex)
             {

@@ -426,12 +426,8 @@ namespace BIS.ERP.Views
                 var skipped = results.Sum(item => item.Skipped);
 
                 await LoadData();
-                StatusText.Text = $"Загружено курсов НБКР: {imported}; пропущено валют: {skipped}";
-                MessageBox.Show(
-                    $"Загрузка курсов НБКР завершена.\nЗагружено строк: {imported}\nПропущено валют: {skipped}",
-                    "Курсы валют",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                // Результат сообщаем в строке состояния: модальное окно здесь только отвлекает и забирает фокус.
+                StatusText.Text = $"✅ Загружено курсов НБКР: {imported}; пропущено валют: {skipped}";
             }
             catch (Exception ex)
             {
@@ -1574,8 +1570,11 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "💾 Сохранение...";
                 ProgressText.Text = "⏳ Сохранение...";
-                await _metadataService.AddCatalogItemAsync(accountsCatalog.Id, dialog.ItemData);
+                var newAccountId = await _metadataService.AddCatalogItemAsync(accountsCatalog.Id, dialog.ItemData);
                 await RefreshOrganizationAccountsAsync(_currentOrganizationId);
+                // Остаёмся на только что добавленном расчётном счёте.
+                if (OrganizationAccountsGridControl is { } organizationAccountsGrid)
+                    organizationAccountsGrid.SelectRowById(newAccountId, DataGridSelectionHelper.GetIdFromDataRow);
             }
             catch (Exception ex)
             {
@@ -1620,6 +1619,9 @@ namespace BIS.ERP.Views
                 ProgressText.Text = "⏳ Обновление...";
                 await _metadataService.UpdateDynamicRecordAsync(accountsCatalog.Id, accountId, dialog.ItemData);
                 await RefreshOrganizationAccountsAsync(_currentOrganizationId);
+                // Возвращаем выделение на отредактированный расчётный счёт.
+                if (OrganizationAccountsGridControl is { } organizationAccountsGrid)
+                    organizationAccountsGrid.SelectRowById(accountId, DataGridSelectionHelper.GetIdFromDataRow);
             }
             catch (Exception ex)
             {
@@ -2496,20 +2498,22 @@ namespace BIS.ERP.Views
                     {
                         StatusText.Text = "💾 Сохранение...";
                         ProgressText.Text = "⏳ Сохранение...";
-                        await _metadataService.CreateDynamicRecordAsync(_catalog.Id, fixedAssetDialog.ItemData);
+                        var createdId = await _metadataService.CreateDynamicRecordAsync(_catalog.Id, fixedAssetDialog.ItemData);
                         await LoadData();
-                        MessageBox.Show("Запись успешно добавлена!", "Успех",
-                            MessageBoxButton.OK, MessageBoxImage.Information);
+                        // Остаёмся на только что созданном основном средстве.
+                        DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
+                        // Успех сообщаем в строке состояния, чтобы не отбирать фокус у таблицы.
+                        StatusText.Text = "✅ Запись добавлена";
                     }
                     catch (Exception ex)
                     {
+                        StatusText.Text = "❌ Ошибка сохранения";
                         MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
                             MessageBoxButton.OK, MessageBoxImage.Error);
                     }
                     finally
                     {
                         ProgressText.Text = "";
-                        StatusText.Text = "✅ Готово";
                     }
                 }
 
@@ -2528,20 +2532,22 @@ namespace BIS.ERP.Views
                 {
                     StatusText.Text = "💾 Сохранение...";
                     ProgressText.Text = "⏳ Сохранение...";
-                    await _metadataService.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
+                    var createdId = await _metadataService.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
                     await LoadData();
-                    MessageBox.Show("Запись успешно добавлена!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Остаёмся на только что созданной записи справочника.
+                    DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
+                    // Успех сообщаем в строке состояния, чтобы не отбирать фокус у таблицы.
+                    StatusText.Text = "✅ Запись добавлена";
                 }
                 catch (Exception ex)
                 {
+                    StatusText.Text = "❌ Ошибка сохранения";
                     MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
                     ProgressText.Text = "";
-                    StatusText.Text = "✅ Готово";
                 }
             }
         }
@@ -2578,18 +2584,19 @@ namespace BIS.ERP.Views
                         ProgressText.Text = "⏳ Обновление...";
                         await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, fixedAssetDialog.ItemData);
                         await LoadData();
-                        MessageBox.Show("Запись успешно обновлена!", "Успех",
-                            MessageBoxButton.OK, MessageBoxImage.Information);
+                        // Возвращаем выделение на отредактированное основное средство.
+                        DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
+                        StatusText.Text = "✅ Запись обновлена";
                     }
                     catch (Exception ex)
                     {
+                        StatusText.Text = "❌ Ошибка обновления";
                         MessageBox.Show($"Ошибка обновления: {ex.Message}", "Ошибка",
                             MessageBoxButton.OK, MessageBoxImage.Error);
                     }
                     finally
                     {
                         ProgressText.Text = "";
-                        StatusText.Text = "✅ Готово";
                     }
                 }
 
@@ -2610,18 +2617,19 @@ namespace BIS.ERP.Views
                     ProgressText.Text = "⏳ Обновление...";
                     await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, dialog.ItemData);
                     await LoadData();
-                    MessageBox.Show("Запись успешно обновлена!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    // Возвращаем выделение на отредактированную запись.
+                    DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Запись обновлена";
                 }
                 catch (Exception ex)
                 {
+                    StatusText.Text = "❌ Ошибка обновления";
                     MessageBox.Show($"Ошибка обновления: {ex.Message}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
                     ProgressText.Text = "";
-                    StatusText.Text = "✅ Готово";
                 }
             }
         }
@@ -2647,18 +2655,17 @@ namespace BIS.ERP.Views
                     ProgressText.Text = "⏳ Удаление...";
                     await _metadataService.DeleteDynamicRecordAsync(_catalog.Id, id);
                     await LoadData();
-                    MessageBox.Show("Запись успешно удалена!", "Успех",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    StatusText.Text = "✅ Запись удалена";
                 }
                 catch (Exception ex)
                 {
+                    StatusText.Text = "❌ Ошибка удаления";
                     MessageBox.Show($"Ошибка удаления: {ex.Message}", "Ошибка",
                         MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 finally
                 {
                     ProgressText.Text = "";
-                    StatusText.Text = "✅ Готово";
                 }
             }
         }
