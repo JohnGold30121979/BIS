@@ -19,6 +19,7 @@ namespace BIS.ERP.Views
         private ObservableCollection<Dictionary<string, object>> _postings;
         private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
         private AccountAnalyticsRegistry _accountAnalytics = new();
+        private string _periodStatusSuffix = string.Empty;
 
         public PostingsView(MetadataObject document, MetadataService metadataService)
         {
@@ -75,10 +76,10 @@ namespace BIS.ERP.Views
                 UpdateAnalyticColumns(data, _accountAnalytics);
                 UpdateSelectedPostingDetails();
 
-                var periodText = periodFrom.HasValue || periodTo.HasValue
+                _periodStatusSuffix = periodFrom.HasValue || periodTo.HasValue
                     ? $", период: {(periodFrom?.ToString("dd/MM/yyyy") ?? "…")}—{(periodTo?.ToString("dd/MM/yyyy") ?? "…")}"
                     : ", весь период";
-                StatusText.Text = $"📊 Загружено проводок: {_postings.Count}{periodText}";
+                ApplyColumnFilters();
             }
             catch (Exception ex)
             {
@@ -86,6 +87,60 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private void ApplyColumnFilters()
+        {
+            if (NumberFilterBox == null || _postings == null)
+                return;
+
+            IEnumerable<Dictionary<string, object>> query = _postings;
+            query = ApplyColumnFilter(query, NumberFilterBox.Text, row => GetRowString(row, "Номер документа", "doc_number"));
+            query = ApplyColumnFilter(query, DateFilterBox.Text, row => FormatFilterDate(GetRowDate(row, "Дата", "posting_date")));
+            query = ApplyColumnFilter(query, DebitFilterBox.Text, row => GetRowString(row, "Дебет", "debit_account"));
+            query = ApplyColumnFilter(query, CreditFilterBox.Text, row => GetRowString(row, "Кредит", "credit_account"));
+            query = ApplyColumnFilter(query, AmountFilterBox.Text, row => FormatAmount(GetRowDecimal(row, "Сумма в сом", "amount_kgs")));
+
+            var filteredRows = query.ToList();
+            PostingsGrid.ItemsSource = filteredRows;
+            StatusText.Text = $"📊 Показано проводок: {filteredRows.Count} из {_postings.Count}{_periodStatusSuffix}";
+        }
+
+        private void OnColumnFilterChanged(object sender, TextChangedEventArgs e) => ApplyColumnFilters();
+
+        private static IEnumerable<Dictionary<string, object>> ApplyColumnFilter(
+            IEnumerable<Dictionary<string, object>> query,
+            string filter,
+            Func<Dictionary<string, object>, string?> valueSelector)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return query;
+
+            var filterText = filter.Trim();
+            return query.Where(row => MatchesOrderedColumnFilter(valueSelector(row), filterText));
+        }
+
+        private static bool MatchesOrderedColumnFilter(string? value, string filterText)
+        {
+            var valueText = (value ?? string.Empty).Trim();
+            if (valueText.Length == 0)
+                return false;
+
+            var normalizedFilter = filterText.Trim();
+            var filterDigits = ExtractDigits(normalizedFilter);
+            if (filterDigits.Length > 0)
+                return ExtractDigits(valueText).StartsWith(filterDigits, StringComparison.Ordinal);
+
+            return valueText.StartsWith(normalizedFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static string FormatAmount(decimal amount) => amount.ToString("N2");
+
+        private static string FormatFilterDate(DateTime? date) => date?.ToString("dd/MM/yyyy") ?? string.Empty;
 
         private void UpdateAnalyticColumns(
             List<Dictionary<string, object>> rawRows,

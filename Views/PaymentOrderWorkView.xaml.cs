@@ -195,7 +195,7 @@ namespace BIS.ERP.Views
                 await LoadOurSettlementAccountsFallbackAsync(catalogsDict, referenceCache);
 
                 _rows = data.Select(row => BuildRow(row, referenceCache, _accountAnalytics)).ToList();
-                DataGrid.ItemsSource = _rows;
+                ApplyColumnFilters();
                 UpdateAnalyticColumns(data, _accountAnalytics);
                 StatusText.Text = $"📊 Загружено записей: {_rows.Count}";
                 UpdateButtonsState();
@@ -211,6 +211,56 @@ namespace BIS.ERP.Views
                 _isLoading = false;
             }
         }
+
+        private void ApplyColumnFilters()
+        {
+            IEnumerable<PaymentOrderRow> query = _rows;
+            query = ApplyColumnFilter(query, NumberFilterBox.Text, row => row.DocNumber);
+            query = ApplyColumnFilter(query, DateFilterBox.Text, row => row.DocDate.ToString("dd/MM/yyyy"));
+            query = ApplyColumnFilter(query, AmountFilterBox.Text, row => FormatAmount(row.Amount));
+            query = ApplyColumnFilter(query, DebitFilterBox.Text, row => row.OurAccountName);
+            query = ApplyColumnFilter(query, CreditFilterBox.Text, row => row.CorrespondentAccountName);
+
+            var filteredRows = query.ToList();
+            DataGrid.ItemsSource = filteredRows;
+            StatusText.Text = $"📊 Показано записей: {filteredRows.Count} из {_rows.Count}";
+            UpdateButtonsState();
+        }
+
+        private void OnColumnFilterChanged(object sender, TextChangedEventArgs e) => ApplyColumnFilters();
+
+        private static IEnumerable<PaymentOrderRow> ApplyColumnFilter(
+            IEnumerable<PaymentOrderRow> query,
+            string filter,
+            Func<PaymentOrderRow, string?> valueSelector)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return query;
+
+            var filterText = filter.Trim();
+            return query.Where(row => MatchesOrderedColumnFilter(valueSelector(row), filterText));
+        }
+
+        private static bool MatchesOrderedColumnFilter(string? value, string filterText)
+        {
+            var valueText = (value ?? string.Empty).Trim();
+            if (valueText.Length == 0)
+                return false;
+
+            var normalizedFilter = filterText.Trim();
+            var filterDigits = ExtractDigits(normalizedFilter);
+            if (filterDigits.Length > 0)
+                return ExtractDigits(valueText).StartsWith(filterDigits, StringComparison.Ordinal);
+
+            return valueText.StartsWith(normalizedFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static string FormatAmount(decimal amount) => amount.ToString("N2");
 
         private async Task<Dictionary<string, Dictionary<Guid, string>>> LoadReferenceCacheAsync(
             Dictionary<string, MetadataObject> catalogsDict)

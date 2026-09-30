@@ -56,13 +56,57 @@
           IsReadOnly="True" SelectionChanged="PostingsGrid_SelectionChanged"
           MouseDoubleClick="PostingsGrid_MouseDoubleClick"
           AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1">
+            <DataGrid.Resources>
+                <Style x:Key="ColumnFilterTextBoxStyle" TargetType="TextBox">
+                    <Setter Property="MinWidth" Value="68"/>
+                    <Setter Property="Height" Value="22"/>
+                    <Setter Property="Margin" Value="0,4,0,0"/>
+                    <Setter Property="Padding" Value="3,1"/>
+                    <Setter Property="FontSize" Value="11"/>
+                </Style>
+            </DataGrid.Resources>
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Дата" Binding="{Binding [Дата], StringFormat={}{0:dd/MM/yyyy}}" Width="100"/>
-                <DataGridTextColumn Header="Номер документа" Binding="{Binding [Номер документа]}" Width="120"/>
+                <DataGridTextColumn Binding="{Binding [Дата], StringFormat={}{0:dd/MM/yyyy}}" Width="100">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Дата"/>
+                            <TextBox x:Name="DateFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding [Номер документа]}" Width="120">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Номер документа"/>
+                            <TextBox x:Name="NumberFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="120"/>
-                <DataGridTextColumn Header="Дебет" Binding="{Binding [Дебет]}" Width="100"/>
-                <DataGridTextColumn Header="Кредит" Binding="{Binding [Кредит]}" Width="100"/>
-                <DataGridTextColumn Header="Сумма в сом" Binding="{Binding [Сумма в сом], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120"/>
+                <DataGridTextColumn Binding="{Binding [Дебет]}" Width="100">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Дебет"/>
+                            <TextBox x:Name="DebitFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding [Кредит]}" Width="100">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Кредит"/>
+                            <TextBox x:Name="CreditFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding [Сумма в сом], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Сумма в сом"/>
+                            <TextBox x:Name="AmountFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
                 <DataGridTextColumn x:Name="AmountCurrencyColumn" Header="Сумма в валюте" Binding="{Binding [Сумма в валюте], Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="CurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="110" Visibility="Collapsed"/>
                 <DataGridTextColumn x:Name="OrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="180" Visibility="Collapsed"/>

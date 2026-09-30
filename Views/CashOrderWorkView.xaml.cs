@@ -32,6 +32,7 @@ namespace BIS.ERP.Views
         private readonly MetadataService _metadataService;
         private List<CashOrderRow> _allRows = new();
         private List<CashDeskItem> _cashDeskFilterItems = new();
+        private List<CashOrderRow>? _periodFilteredRows;
         private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private string _moduleName = string.Empty;
@@ -302,8 +303,11 @@ namespace BIS.ERP.Views
             if (CashDeskFilterCombo.SelectedItem is CashDeskItem selectedCashDesk && selectedCashDesk.Id != Guid.Empty)
                 rows = rows.Where(row => RowMatchesCashDesk(row, selectedCashDesk));
 
-            var filteredRows = rows.ToList();
-            await ApplyCashDayStatusAsync(filteredRows, startDate, endDate);
+            var periodFilteredRows = rows.ToList();
+            await ApplyCashDayStatusAsync(periodFilteredRows, startDate, endDate);
+            _periodFilteredRows = periodFilteredRows;
+
+            var filteredRows = BuildColumnFilteredRows();
             DataGrid.ItemsSource = filteredRows;
             DataGrid.Items.Refresh();
             StatusText.Text = $"Показано записей: {filteredRows.Count} из {_allRows.Count}";
@@ -311,6 +315,68 @@ namespace BIS.ERP.Views
             UpdateSelectedPostingDetails();
             await UpdateCashTurnoverSummaryAsync(startDate, endDate);
         }
+
+        private void OnColumnFilterChanged(object sender, TextChangedEventArgs e) => ApplyColumnFilters();
+
+        private void ApplyColumnFilters()
+        {
+            if (_periodFilteredRows == null)
+                return;
+
+            var filteredRows = BuildColumnFilteredRows();
+            DataGrid.ItemsSource = filteredRows;
+            DataGrid.Items.Refresh();
+            StatusText.Text = $"Показано записей: {filteredRows.Count} из {_allRows.Count}";
+            UpdateButtonsState();
+            UpdateSelectedPostingDetails();
+        }
+
+        private List<CashOrderRow> BuildColumnFilteredRows()
+        {
+            if (_periodFilteredRows == null)
+                return new List<CashOrderRow>();
+
+            IEnumerable<CashOrderRow> rows = _periodFilteredRows;
+            rows = ApplyColumnFilter(rows, NumberFilterBox.Text, row => row.DocNumber);
+            rows = ApplyColumnFilter(rows, DateFilterBox.Text, row => row.DocDate.ToString("dd/MM/yyyy"));
+            rows = ApplyColumnFilter(rows, AmountFilterBox.Text, row => FormatAmount(row.Amount));
+            rows = ApplyColumnFilter(rows, DebitFilterBox.Text, row => row.DebitAccount);
+            rows = ApplyColumnFilter(rows, CreditFilterBox.Text, row => row.CreditAccount);
+            return rows.ToList();
+        }
+
+        private static IEnumerable<CashOrderRow> ApplyColumnFilter(
+            IEnumerable<CashOrderRow> query,
+            string filter,
+            Func<CashOrderRow, string?> valueSelector)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return query;
+
+            var filterText = filter.Trim();
+            return query.Where(row => MatchesOrderedColumnFilter(valueSelector(row), filterText));
+        }
+
+        private static bool MatchesOrderedColumnFilter(string? value, string filterText)
+        {
+            var valueText = (value ?? string.Empty).Trim();
+            if (valueText.Length == 0)
+                return false;
+
+            var normalizedFilter = filterText.Trim();
+            var filterDigits = ExtractDigits(normalizedFilter);
+            if (filterDigits.Length > 0)
+                return ExtractDigits(valueText).StartsWith(filterDigits, StringComparison.Ordinal);
+
+            return valueText.StartsWith(normalizedFilter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ExtractDigits(string value)
+        {
+            return new string((value ?? string.Empty).Where(char.IsDigit).ToArray());
+        }
+
+        private static string FormatAmount(decimal amount) => amount.ToString("N2");
 
         private static bool RowMatchesCashDesk(CashOrderRow row, CashDeskItem cashDesk)
         {
