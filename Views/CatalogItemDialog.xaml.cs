@@ -1521,7 +1521,7 @@ namespace BIS.ERP.Views
                     "name",
                     "account_type",
                     "description",
-                    "level",
+                    //"level",
                     "is_active",
                     "closing_module_code",
                     "analytic_group",

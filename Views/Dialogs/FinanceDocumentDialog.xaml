@@ -142,16 +142,15 @@
                     <DataGrid x:Name="AdvanceExpenseGrid" Grid.Row="0" AutoGenerateColumns="False" CanUserAddRows="False"
                               HeadersVisibility="Column" Height="230" Margin="0,0,0,8"
                               Language="ru-RU"
+                              RowHeight="26"
+                              SelectionMode="Single"
+                              Focusable="True"
                               ScrollViewer.HorizontalScrollBarVisibility="Auto"
                               CellEditEnding="AdvanceExpenseGrid_CellEditEnding"
                               CurrentCellChanged="AdvanceExpenseGrid_CurrentCellChanged"
-                              SelectionChanged="AdvanceExpenseGrid_SelectionChanged">
+                              GotKeyboardFocus="AdvanceExpenseGrid_GotKeyboardFocus"
+                              PreviewKeyDown="AdvanceExpenseGrid_PreviewKeyDown">
                         <DataGrid.Columns>
-                            <!-- Ширины видимых колонок: фиксированные
-                                 44 + 130 + 280 + 38 + 130 = 622 px, остаток отдан
-                                 колонке «Детали проводки» (Width="*", MinWidth="200").
-                                 В рабочем режиме (MDI-вкладка) содержимое растягивается
-                                 на всю область, поэтому таблица всегда шире этого минимума. -->
                             <DataGridTextColumn Header="№" Binding="{Binding RowNumber}" Width="44" IsReadOnly="True"/>
                             <!-- Дата редактируется через DatePicker: глобальная маска ввода
                                  DD/MM/YYYY из Behaviors.DatePickerInputMaskBehavior (класс-обработчик
@@ -173,12 +172,52 @@
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Детали проводки"
                                                 Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
-                                                Width="200" MinWidth="200"/>
-                            <DataGridTextColumn Header="Счет расхода" Binding="{Binding ExpenseAccountDisplay}" Width="280" IsReadOnly="True"/>
-                            <DataGridTemplateColumn Header="" Width="38" CanUserSort="False">
+                                                Width="*" MinWidth="200"/>
+                            <!-- Счет расхода набирается пользователем: в поле вводятся только
+                                 цифры кода, наименование подставляется из плана счетов, а
+                                 несоответствие подсвечивается прямо при наборе (см.
+                                 OnExpenseAccountTextChanged / OnExpenseAccountLostFocus).
+                                 Кнопка «?» рядом оставляет выбор из плана счетов. -->
+                            <DataGridTemplateColumn x:Name="AdvanceExpenseAccountColumn" Header="Счет расхода"
+                                                   Width="300" MinWidth="240" CanUserSort="False">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <Button Content="?" Width="30" Height="24" Tag="{Binding}" Click="SelectExpenseAccount_Click"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="ExpenseAccountBox" Grid.Column="0" Width="86" Height="24"
+                                                     Margin="2,0,6,0" MaxLength="8" Padding="2,0"
+                                                     VerticalContentAlignment="Center"
+                                                     ToolTip="Введите код счёта вручную или нажмите «?» для выбора из плана счетов"
+                                                     PreviewTextInput="OnExpenseAccountPreviewTextInput"
+                                                     PreviewKeyDown="OnExpenseAccountPreviewKeyDown"
+                                                     DataObject.Pasting="OnExpenseAccountPasting"
+                                                     TextChanged="OnExpenseAccountTextChanged"
+                                                     LostFocus="OnExpenseAccountLostFocus"
+                                                     Text="{Binding ExpenseAccountCode, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                       Margin="0,0,6,0" ToolTip="{Binding ExpenseAccountHint}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Text" Value="{Binding ExpenseAccountTitle}"/>
+                                                        <Setter Property="Foreground" Value="#1F3448"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding ExpenseAccountHasHint}" Value="True">
+                                                                <Setter Property="Text" Value="{Binding ExpenseAccountHint}"/>
+                                                                <Setter Property="Foreground" Value="#E74C3C"/>
+                                                                <Setter Property="FontStyle" Value="Italic"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <Button Grid.Column="2" Content="?" Width="30" Height="24"
+                                                    Tag="{Binding}" Click="SelectExpenseAccount_Click"
+                                                    ToolTip="Выбрать счет из плана счетов"/>
+                                        </Grid>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
@@ -187,13 +226,12 @@
                                  культуры ru-RU, но принимает и точку, и запятую как десятичный
                                  разделитель. Цифровая клавиатура может выдать точку («999.99»),
                                  из-за которой обычный биндинг давал ошибку валидации ячейки. -->
-                            <DataGridTextColumn Header="Сумма"
+                            <DataGridTextColumn x:Name="AdvanceAmountColumn" Header="Сумма"
                                                 Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}"
                                                 Width="130"/>
                             <DataGridComboBoxColumn x:Name="AdvanceCurrencyColumn" Header="Валюта" Width="150"
                                                     DisplayMemberPath="DisplayName" SelectedValuePath="Id"
-                                                    SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                    Visibility="Collapsed"/>
+                                                    SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                             <DataGridTextColumn x:Name="AdvanceAmountCurrencyColumn" Header="Сумма в валюте"
                                                 Binding="{Binding AmountCurrency, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}"
                                                 Width="130" Visibility="Collapsed"/>

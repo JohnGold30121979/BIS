@@ -20,8 +20,16 @@ namespace BIS.ERP.Views
         private readonly FinanceDocumentKind _documentKind;
         private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
         private List<FinanceDocumentRow> _allRows = new();
+        private List<Dictionary<string, object>> _advancePaymentPairs = new();
         private AccountAnalyticsRegistry _accountRegistry = new();
         private bool _isLoading;
+
+        /// <summary>
+        /// Прежнее название модуля авансовых платежей. Проводки, созданные до
+        /// переименования, лежат в базе с этим типом документа, поэтому при поиске
+        /// проводок учитываются оба названия.
+        /// </summary>
+        private static readonly string[] LegacyAdvanceReportDocumentNames = { "Авансовый отчет" };
 
         public FinanceDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
@@ -53,6 +61,9 @@ namespace BIS.ERP.Views
                 var rows = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
                 var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(_documentMetadata, _metadataService);
                 _accountRegistry = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _advancePaymentPairs = _documentKind == FinanceDocumentKind.AdvanceReport
+                    ? await _metadataService.GetAdvancePaymentPairsAsync()
+                    : new List<Dictionary<string, object>>();
 
                 _allRows = rows.Select(row => BuildRow(row, referenceMaps, _accountRegistry)).ToList();
                 ApplyColumnFilters();
@@ -128,16 +139,24 @@ namespace BIS.ERP.Views
             IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps,
             AccountAnalyticsRegistry accountRegistry)
         {
+            var documentDate = ReadDate(row, "Дата", "doc_date") ?? DateTime.Today;
+            var expenseLinesJson = ReadString(row, "Строки затрат", "expense_lines");
+            var lineDates = ReadExpenseLineDates(expenseLinesJson);
+
             return new FinanceDocumentRow
             {
                 Id = ReadGuid(row, "Id"),
                 DocumentNumber = ReadString(row, "Номер", "doc_number"),
-                DocumentDate = ReadDate(row, "Дата", "doc_date") ?? DateTime.Today,
+                DocumentDate = documentDate,
+                // Даты проводок берутся из строк затрат: дата проводки может отличаться
+                // от даты документа, и поиск строго по дате документа терял проводки.
+                PostingDateFrom = lineDates.Count > 0 ? lineDates.Min().AddDays(-1) : documentDate,
+                PostingDateTo = lineDates.Count > 0 ? lineDates.Max().AddDays(1) : documentDate,
                 EmployeeName = ResolveReference(row, referenceMaps, "Сотрудник", "employee_id"),
                 RepresentativeName = ResolveReference(row, referenceMaps, "Представитель", "representative_id"),
                 CounterpartyName = ResolveReference(row, referenceMaps, "Поставщик", "counterparty_id", "Организация", "organization_id"),
                 AdvancePaymentName = _documentKind == FinanceDocumentKind.AdvanceReport
-                    ? ResolveAdvancePaymentDisplay(row, referenceMaps)
+                    ? ResolveAdvancePaymentDisplay(row, expenseLinesJson)
                     : ResolveReference(row, referenceMaps, "Вид авансового расчета", "advance_payment_id"),
                 PeriodDisplay = BuildPeriodDisplay(row),
                 DebitAccountDisplay = ResolveAccount(row, accountRegistry, "Счет дебета", "debit_account"),
@@ -150,6 +169,40 @@ namespace BIS.ERP.Views
                 IsPosted = ReadBool(row, "Проведен", "Проведён", "is_posted"),
                 CreatedAt = ReadDate(row, "CreatedAt") ?? DateTime.Today
             };
+        }
+
+        /// <summary>Даты строк затрат из сохранённого JSON документа.</summary>
+        private static List<DateTime> ReadExpenseLineDates(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+                return new List<DateTime>();
+
+            var dates = new List<DateTime>();
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    return dates;
+
+                foreach (var item in document.RootElement.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    if (item.TryGetProperty("LineDate", out var dateElement) &&
+                        dateElement.ValueKind == JsonValueKind.String &&
+                        dateElement.TryGetDateTime(out var lineDate))
+                    {
+                        dates.Add(lineDate.Date);
+                    }
+                }
+            }
+            catch
+            {
+                return dates;
+            }
+
+            return dates;
         }
 
         private void ConfigureColumns()
@@ -342,10 +395,12 @@ namespace BIS.ERP.Views
             try
             {
                 var selectedId = selected.Id;
-                var postings = await _metadataService.GetPostingsByDocumentAsync(
+                var postings = await _metadataService.GetPostingsByDocumentRangeAsync(
                     _documentMetadata.Name,
                     selected.DocumentNumber,
-                    selected.DocumentDate);
+                    selected.PostingDateFrom,
+                    selected.PostingDateTo,
+                    LegacyAdvanceReportDocumentNames);
 
                 if (DataGrid?.SelectedItem is not FinanceDocumentRow current || current.Id != selectedId)
                     return;
@@ -430,18 +485,44 @@ namespace BIS.ERP.Views
         }
         private async void OnRefreshClick(object sender, RoutedEventArgs e) => await LoadDataAsync();
 
-        private static string ResolveAdvancePaymentDisplay(
+        /// <summary>
+        /// Колонка «Пары счетов» показывает сами счета пары («Дт 602 / Кт 303»).
+        /// Раньше здесь выводилось наименование вида расчёта («3 - Расчеты с
+        /// подотчетными лицами»), хотя колонка подписана как пары счетов.
+        /// </summary>
+        private string ResolveAdvancePaymentDisplay(
             IReadOnlyDictionary<string, object> row,
-            IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps)
+            string expenseLinesJson)
         {
-            var fromLines = ResolveAdvancePaymentFromExpenseLines(ReadString(row, "Строки затрат", "expense_lines"));
+            var fromLines = ResolveAdvancePairAccountsFromExpenseLines(expenseLinesJson);
             if (!string.IsNullOrWhiteSpace(fromLines))
                 return fromLines;
 
-            return ResolveReference(row, referenceMaps, "Вид авансового расчета", "advance_payment_id");
+            var fromPair = ResolveAdvancePairAccountsFromPairCatalog(row);
+            if (!string.IsNullOrWhiteSpace(fromPair))
+                return fromPair;
+
+            return FormatAdvancePairAccounts(
+                ReadString(row, "Счет дебета", "debit_account"),
+                ReadString(row, "Счет кредита", "credit_account"));
         }
 
-        private static string ResolveAdvancePaymentFromExpenseLines(string json)
+        private string ResolveAdvancePairAccountsFromPairCatalog(IReadOnlyDictionary<string, object> row)
+        {
+            if (!TryGetGuid(ReadString(row, "Вид авансового расчета", "advance_payment_id"), out var pairId))
+                return string.Empty;
+
+            var pair = _advancePaymentPairs.FirstOrDefault(item =>
+                TryGetGuid(item.GetValueOrDefault("Id")?.ToString(), out var id) && id == pairId);
+            if (pair == null)
+                return string.Empty;
+
+            return FormatAdvancePairAccounts(
+                ReadString(pair, "debit_account", "Дебет"),
+                ReadString(pair, "credit_account", "Кредит"));
+        }
+
+        private static string ResolveAdvancePairAccountsFromExpenseLines(string json)
         {
             if (string.IsNullOrWhiteSpace(json))
                 return string.Empty;
@@ -458,11 +539,14 @@ namespace BIS.ERP.Views
                     if (item.ValueKind != JsonValueKind.Object)
                         continue;
 
-                    var code = item.TryGetProperty("PairCode", out var codeElement) ? codeElement.GetString() ?? string.Empty : string.Empty;
-                    var name = item.TryGetProperty("PairName", out var nameElement) ? nameElement.GetString() ?? string.Empty : string.Empty;
-                    var display = FormatAdvancePairDisplay(code, name);
-                    if (string.IsNullOrWhiteSpace(display) || values.Any(value => string.Equals(value, display, StringComparison.CurrentCultureIgnoreCase)))
+                    var debit = item.TryGetProperty("DebitAccount", out var debitElement) ? debitElement.GetString() ?? string.Empty : string.Empty;
+                    var credit = item.TryGetProperty("CreditAccount", out var creditElement) ? creditElement.GetString() ?? string.Empty : string.Empty;
+                    var display = FormatAdvancePairAccounts(debit, credit);
+                    if (string.IsNullOrWhiteSpace(display) ||
+                        values.Any(value => string.Equals(value, display, StringComparison.CurrentCultureIgnoreCase)))
+                    {
                         continue;
+                    }
 
                     values.Add(display);
                 }
@@ -475,18 +559,16 @@ namespace BIS.ERP.Views
             }
         }
 
-        private static string FormatAdvancePairDisplay(string code, string name)
+        /// <summary>Пара счетов одной строки: «Дт 602 / Кт 303».</summary>
+        private static string FormatAdvancePairAccounts(string? debitAccount, string? creditAccount)
         {
-            code = code.Trim();
-            name = name.Trim();
-            if (string.IsNullOrWhiteSpace(code))
-                return name;
-            if (string.IsNullOrWhiteSpace(name))
-                return code;
-            if (name.StartsWith(code + " -", StringComparison.CurrentCultureIgnoreCase))
-                return name;
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(debitAccount))
+                parts.Add($"Дт {debitAccount.Trim()}");
+            if (!string.IsNullOrWhiteSpace(creditAccount))
+                parts.Add($"Кт {creditAccount.Trim()}");
 
-            return $"{code} - {name}";
+            return string.Join(" / ", parts);
         }
         private static string ResolveReference(
             IReadOnlyDictionary<string, object> row,
@@ -561,6 +643,11 @@ namespace BIS.ERP.Views
             return row.TryGetValue(key, out var value) && Guid.TryParse(value?.ToString(), out var id)
                 ? id
                 : Guid.Empty;
+        }
+
+        private static bool TryGetGuid(string? value, out Guid id)
+        {
+            return Guid.TryParse(value, out id);
         }
 
         private static string ReadString(IReadOnlyDictionary<string, object> row, params string[] keys)
@@ -640,6 +727,13 @@ namespace BIS.ERP.Views
         public Guid Id { get; set; }
         public string DocumentNumber { get; set; } = string.Empty;
         public DateTime DocumentDate { get; set; }
+
+        /// <summary>Начало интервала поиска проводок документа.</summary>
+        public DateTime PostingDateFrom { get; set; }
+
+        /// <summary>Конец интервала поиска проводок документа.</summary>
+        public DateTime PostingDateTo { get; set; }
+
         public string EmployeeName { get; set; } = string.Empty;
         public string RepresentativeName { get; set; } = string.Empty;
         public string CounterpartyName { get; set; } = string.Empty;

@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -44,8 +45,10 @@ namespace BIS.ERP.Views
         private bool _isLoading;
         private bool _isInitialized;
         private bool _isApplyingCurrencyRate;
+        private bool _isApplyingExpenseAccount;
         private bool _isCalculatingPayroll;
         private bool _isUpdatingAdvanceBalances;
+        private bool _suppressAdvanceExpenseDateFocus;
 
         public FinanceDocumentDialog(MetadataObject document, MetadataService metadataService)
         {
@@ -711,7 +714,7 @@ namespace BIS.ERP.Views
                     {
                         foreach (var line in loaded)
                         {
-                            _advanceExpenseLines.Add(new AdvanceExpenseLineRow
+                            var row = new AdvanceExpenseLineRow
                             {
                                 LineDate = line.LineDate ?? DatePicker.SelectedDate,
                                 PairId = line.PairId,
@@ -722,7 +725,10 @@ namespace BIS.ERP.Views
                                 AmountCurrency = line.AmountCurrency,
                                 ExchangeRate = line.ExchangeRate,
                                 Description = line.Description
-                            });
+                            };
+                            ApplyLoadedExpenseAccount(row);
+                            AttachAdvanceExpenseLine(row);
+                            _advanceExpenseLines.Add(row);
                         }
                     }
                 }
@@ -751,7 +757,7 @@ namespace BIS.ERP.Views
             if (pairId == Guid.Empty && IsEmptyAccountValue(expenseAccountValue) && amount <= 0)
                 return;
 
-            _advanceExpenseLines.Add(new AdvanceExpenseLineRow
+            var row = new AdvanceExpenseLineRow
             {
                 LineDate = DatePicker.SelectedDate,
                 PairId = pairId,
@@ -762,7 +768,25 @@ namespace BIS.ERP.Views
                 AmountCurrency = GetDecimal(record, "Сумма в валюте", "amount_currency"),
                 ExchangeRate = GetDecimal(record, "Курс", "exchange_rate"),
                 Description = GetString(record, "Примечание", "description")
-            });
+            };
+            ApplyLoadedExpenseAccount(row);
+            AttachAdvanceExpenseLine(row);
+            _advanceExpenseLines.Add(row);
+        }
+
+        /// <summary>
+        /// Восстанавливает код и наименование счёта расхода загруженной строки,
+        /// чтобы поле ввода счёта не оказалось пустым при редактировании документа.
+        /// </summary>
+        private void ApplyLoadedExpenseAccount(AdvanceExpenseLineRow row)
+        {
+            var account = _accountAnalytics.FindAccount(row.ExpenseAccountValue);
+            var code = account?.Code ?? FormatAccountCode(row.ExpenseAccountDisplay);
+            row.ExpenseAccountCode = code;
+            row.ExpenseAccountTitle = StripAccountCode(
+                account?.DisplayName ?? row.ExpenseAccountDisplay,
+                code);
+            row.ExpenseAccountHint = string.Empty;
         }
 
         private List<AdvanceExpenseLineRecord> BuildAdvanceExpenseLineRecords()
@@ -786,7 +810,7 @@ namespace BIS.ERP.Views
                 if (row.PairId == Guid.Empty)
                     throw new InvalidOperationException($"Выберите пару счетов в шапке документа.");
                 if (IsEmptyAccountValue(row.ExpenseAccountValue))
-                    throw new InvalidOperationException($"В строке {rowNumber} выберите счет расхода.");
+                    throw new InvalidOperationException($"В строке {rowNumber} введите или выберите счет расхода.");
 
                 var amount = row.Amount;
                 if (amount <= 0 && row.AmountCurrency > 0 && row.ExchangeRate > 0)
@@ -820,7 +844,9 @@ namespace BIS.ERP.Views
                     DebitAccount = GetString(pair, "debit_account", "Дебет"),
                     CreditAccount = creditAccount,
                     ExpenseAccount = GetAccountValueForSave(row.ExpenseAccountValue).ToString() ?? string.Empty,
-                    ExpenseAccountName = row.ExpenseAccountDisplay,
+                    ExpenseAccountName = string.IsNullOrWhiteSpace(row.ExpenseAccountTitle)
+                        ? row.ExpenseAccountDisplay
+                        : row.ExpenseAccountTitle,
                     CurrencyId = row.CurrencyId,
                     CurrencyName = ResolveCurrencyDisplay(row.CurrencyId),
                     AmountCurrency = row.AmountCurrency,
@@ -871,6 +897,11 @@ namespace BIS.ERP.Views
 
         private void AddAdvanceExpenseLine_Click(object sender, RoutedEventArgs e)
         {
+            AddAdvanceExpenseLine();
+        }
+
+        private void AddAdvanceExpenseLine()
+        {
             TryCommitAdvanceExpenseGridEdit();
             var row = CreateAdvanceExpenseLineRow();
             _advanceExpenseLines.Add(row);
@@ -899,16 +930,190 @@ namespace BIS.ERP.Views
             TryCommitAdvanceExpenseGridEdit();
 
             await SelectPlanAccountAsync((id, displayName) =>
+                ApplyExpenseAccount(row, _accountAnalytics.FindAccount(id), id, displayName));
+        }
+
+        /// <summary>
+        /// Поле «Счет расхода» в строке затрат принимает только цифры кода счёта,
+        /// пробел и вставку любых символов блокирует. Валидация — как в счёт-фактуре.
+        /// </summary>
+        private void OnExpenseAccountPreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            e.Handled = !IsAsciiDigits(e.Text);
+        }
+
+        private void OnExpenseAccountPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Space)
+                e.Handled = true;
+        }
+
+        private void OnExpenseAccountPasting(object sender, DataObjectPastingEventArgs e)
+        {
+            if (!e.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
             {
-                row.ExpenseAccountValue = id;
-                row.ExpenseAccountDisplay = displayName;
-            });
+                e.CancelCommand();
+                return;
+            }
+
+            var text = e.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+            if (!IsAsciiDigits(text))
+                e.CancelCommand();
+        }
+
+        /// <summary>
+        /// Проверка кода счёта прямо во время набора: как только набранный код
+        /// совпал со счётом плана счетов, в ячейку подставляется наименование,
+        /// а если таких счетов нет — подсказка сообщает об этом до ухода из ячейки.
+        /// </summary>
+        private void OnExpenseAccountTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isApplyingExpenseAccount)
+                return;
+
+            if (sender is not TextBox { DataContext: AdvanceExpenseLineRow row } textBox)
+                return;
+
+            ApplyTypedExpenseAccountCode(row, textBox, showMessage: false);
+        }
+
+        /// <summary>
+        /// Уход из ячейки с кодом счёта: не найденный счёт подсвечивается сообщением
+        /// и очищается, чтобы строка не сохранилась с несуществующим счётом.
+        /// </summary>
+        private void OnExpenseAccountLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (_isApplyingExpenseAccount)
+                return;
+
+            if (sender is not TextBox { DataContext: AdvanceExpenseLineRow row } textBox)
+                return;
+
+            ApplyTypedExpenseAccountCode(row, textBox, showMessage: true);
+        }
+
+        private void ApplyTypedExpenseAccountCode(AdvanceExpenseLineRow row, TextBox? textBox, bool showMessage)
+        {
+            var code = (textBox?.Text ?? string.Empty).Trim();
+            if (code.Length == 0)
+            {
+                ClearExpenseAccount(row);
+                return;
+            }
+
+            var account = FindAccountByCode(code);
+            if (account != null)
+            {
+                ApplyExpenseAccount(row, account, account.Id, account.DisplayName);
+                return;
+            }
+
+            row.ExpenseAccountHint = FindAccountsByCodePrefix(code) == 0
+                ? $"Счёт с кодом «{code}» не найден в плане счетов."
+                : $"Нет счетов, начинающихся с «{code}». Проверьте код.";
+            if (!showMessage)
+                return;
+
+            MessageBox.Show(row.ExpenseAccountHint, "Проверка",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            _isApplyingExpenseAccount = true;
+            try
+            {
+                row.ExpenseAccountCode = string.Empty;
+                if (textBox != null)
+                {
+                    textBox.Text = string.Empty;
+                    textBox.Focus();
+                    textBox.SelectAll();
+                }
+            }
+            finally
+            {
+                _isApplyingExpenseAccount = false;
+            }
+
+            ClearExpenseAccount(row);
+        }
+
+        /// <summary>
+        /// Заполняет все поля счёта расхода строки. Код и наименование расходятся
+        /// при ручном наборе, поэтому заполняются независимо друг от друга.
+        /// </summary>
+        private void ApplyExpenseAccount(
+            AdvanceExpenseLineRow row,
+            AccountReferenceItem? account,
+            object? accountValue,
+            string? displayName)
+        {
+            var code = account?.Code ?? FormatAccountCode(displayName ?? string.Empty);
+            var title = StripAccountCode(account?.DisplayName ?? displayName, code);
+            var display = !string.IsNullOrWhiteSpace(displayName)
+                ? displayName!
+                : account?.DisplayName ?? code;
+            var accountChanged = !Equals(row.ExpenseAccountValue, accountValue);
+
+            row.ExpenseAccountValue = accountValue;
+            row.ExpenseAccountDisplay = display;
+            row.ExpenseAccountCode = code;
+            row.ExpenseAccountTitle = title;
+            row.ExpenseAccountHint = string.Empty;
+
+            // Показ колонок пересчитываем только при реальной смене счёта: во время
+            // набора это лишний проход по строкам и лишняя перерисовка таблицы.
+            if (accountChanged)
+                UpdateAdvanceAccountDependentVisibility();
+        }
+
+        private static void ClearExpenseAccount(AdvanceExpenseLineRow row)
+        {
+            row.ExpenseAccountValue = null;
+            row.ExpenseAccountDisplay = string.Empty;
+            row.ExpenseAccountTitle = string.Empty;
+            row.ExpenseAccountHint = string.Empty;
+        }
+
+        private AccountReferenceItem? FindAccountByCode(string code)
+        {
+            return _accountAnalytics.Accounts.FirstOrDefault(account =>
+                string.Equals(account.Code, code, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private int FindAccountsByCodePrefix(string code)
+        {
+            return _accountAnalytics.Accounts.Count(account =>
+                account.Code.StartsWith(code, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string StripAccountCode(string? displayName, string code)
+        {
+            var text = (displayName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(code) || text.Length <= code.Length)
+                return text;
+
+            return text.StartsWith(code, StringComparison.OrdinalIgnoreCase)
+                ? text[code.Length..].TrimStart(' ', '-')
+                : text;
+        }
+
+        private static bool IsAsciiDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
         }
 
         private void AdvanceExpenseGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
         {
             var row = e.Row?.Item as AdvanceExpenseLineRow;
-            var isAmountColumn = string.Equals(e.Column.Header?.ToString(), "Сумма", StringComparison.OrdinalIgnoreCase);
+            var isAmountColumn = ReferenceEquals(e.Column, AdvanceAmountColumn);
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (isAmountColumn)
@@ -922,19 +1127,346 @@ namespace BIS.ERP.Views
             RecalculateAdvanceExpenseTotal();
         }
 
-        private void AdvanceExpenseGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        /// <summary>
+        /// Получение фокуса таблицей «Строки затрат»: курсор ставится в колонку «Дата»
+        /// первой строки, дальше ввод идёт клавишей Enter по колонкам.
+        /// </summary>
+        private void AdvanceExpenseGrid_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
         {
-            if (AdvanceExpenseGrid.SelectedItem is AdvanceExpenseLineRow row)
-                FocusAdvanceExpenseDateCell(row);
+            if (AdvanceExpenseGrid.Items.Count == 0)
+                return;
+
+            // Реагируем только на вход фокуса в сам грид или его строку, а не на
+            // переключение фокуса между редакторами соседних ячеек.
+            if (e.OriginalSource is not DataGrid && e.OriginalSource is not DataGridRow)
+                return;
+
+            var current = AdvanceExpenseGrid.CurrentCell;
+            var rowIndex = current.Item == null ? -1 : AdvanceExpenseGrid.Items.IndexOf(current.Item);
+            if (rowIndex == 0 && current.Column == AdvanceExpenseDateColumn)
+                return;
+
+            var row = current.Item as object ?? AdvanceExpenseGrid.Items[rowIndex >= 0 ? rowIndex : 0];
+            FocusAdvanceExpenseCell(row, 0);
+        }
+
+        /// <summary>
+        /// Клавиши в таблице «Строки затрат» — как в счёт-фактуре:
+        /// Enter переводит на следующую редактируемую ячейку (с последней — на первую
+        /// ячейку следующей строки), «+» (в т.ч. правый плюс клавиатуры) добавляет строку.
+        /// PreviewKeyDown срабатывает и когда фокус в редакторе активной ячейки,
+        /// поэтому ввод работает одинаково в любой колонке.
+        /// </summary>
+        private void AdvanceExpenseGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (Keyboard.Modifiers != ModifierKeys.None)
+                return;
+
+            if (e.Key is Key.Add or Key.OemPlus)
+            {
+                e.Handled = true;
+                AddAdvanceExpenseLine();
+                return;
+            }
+
+            if (e.Key != Key.Enter)
+                return;
+
+            // Открытые списки (календарь даты, выпадающий список валюты) обрабатывают
+            // Enter сами — иначе невозможно будет выбрать значение.
+            if (IsOpenDropDownInGrid())
+                return;
+
+            e.Handled = true;
+            TryCommitAdvanceExpenseGridEdit();
+            MoveToNextAdvanceExpenseCell();
+        }
+
+        private bool IsOpenDropDownInGrid()
+        {
+            if (Keyboard.FocusedElement is not DependencyObject focused)
+                return false;
+
+            return FindAncestorOrSelf<DatePicker>(focused) is { IsDropDownOpen: true } ||
+                   FindAncestorOrSelf<ComboBox>(focused) is { IsDropDownOpen: true };
+        }
+
+        /// <summary>
+        /// Переводит фокус на следующую редактируемую ячейку строки, а с последней —
+        /// на первую ячейку следующей строки.
+        /// </summary>
+        private void MoveToNextAdvanceExpenseCell()
+        {
+            var currentItem = AdvanceExpenseGrid.CurrentItem ?? AdvanceExpenseGrid.SelectedItem;
+            var rowIndex = AdvanceExpenseGrid.Items.IndexOf(currentItem);
+            if (rowIndex < 0)
+                return;
+
+            var columnIndex = AdvanceExpenseGrid.CurrentCell.Column?.DisplayIndex ?? 0;
+            for (var step = columnIndex + 1; step < AdvanceExpenseGrid.Columns.Count; step++)
+            {
+                if (!IsEditableAdvanceExpenseColumn(step))
+                    continue;
+
+                FocusAdvanceExpenseCell(AdvanceExpenseGrid.Items[rowIndex], step);
+                return;
+            }
+
+            for (var nextRow = rowIndex + 1; nextRow < AdvanceExpenseGrid.Items.Count; nextRow++)
+            {
+                var firstEditable = Enumerable.Range(0, AdvanceExpenseGrid.Columns.Count)
+                    .FirstOrDefault(IsEditableAdvanceExpenseColumn, -1);
+                if (firstEditable < 0)
+                    return;
+
+                FocusAdvanceExpenseCell(AdvanceExpenseGrid.Items[nextRow], firstEditable);
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Колонка доступна для ввода: видима и не помечена как «только чтение».
+        /// </summary>
+        private bool IsEditableAdvanceExpenseColumn(int displayColumnIndex)
+        {
+            var column = AdvanceExpenseGrid.Columns
+                .FirstOrDefault(current => current.DisplayIndex == displayColumnIndex);
+
+            return column is { IsReadOnly: false, Visibility: Visibility.Visible };
+        }
+
+        /// <summary>
+        /// Ставит фокус ячейки, а затем — фокус ввода (редактор) внутри неё.
+        /// Одного BeginEdit недостаточно: клавиатурный фокус остаётся на DataGrid.
+        /// </summary>
+        private void FocusAdvanceExpenseCell(object? item, int displayColumnIndex, bool defer = false)
+        {
+            if (item == null)
+                return;
+
+            var column = AdvanceExpenseGrid.Columns
+                .FirstOrDefault(current => current.DisplayIndex == displayColumnIndex);
+            if (column == null)
+                return;
+
+            void Apply()
+            {
+                _suppressAdvanceExpenseDateFocus = true;
+                try
+                {
+                    AdvanceExpenseGrid.SelectedItem = item;
+                    AdvanceExpenseGrid.CurrentCell = new DataGridCellInfo(item, column);
+                    AdvanceExpenseGrid.ScrollIntoView(item, column);
+                    AdvanceExpenseGrid.BeginEdit();
+                }
+                finally
+                {
+                    _suppressAdvanceExpenseDateFocus = false;
+                }
+            }
+
+            // Для новой строки ждём окончания текущей операции ввода,
+            // при переходе по Enter переключаем ячейку сразу.
+            if (defer)
+                Dispatcher.BeginInvoke(new Action(Apply), System.Windows.Threading.DispatcherPriority.Background);
+            else
+                Apply();
+
+            RequestAdvanceExpenseEditorFocus(item, column);
+        }
+
+        /// <summary>
+        /// Запрашивает фокус редактора ячейки. Контейнер ячейки и сам редактор
+        /// создаются асинхронно, а DataGrid перехватывает фокус обратно при входе
+        /// в режим правки, поэтому делаем несколько попыток с проверкой результата.
+        /// </summary>
+        private void RequestAdvanceExpenseEditorFocus(object item, DataGridColumn column, int attempt = 0)
+        {
+            if (attempt > 12)
+                return;
+
+            Dispatcher.BeginInvoke(
+                new Action(() => TryFocusAdvanceExpenseEditor(item, column, attempt)),
+                System.Windows.Threading.DispatcherPriority.Background);
+        }
+
+        private void TryFocusAdvanceExpenseEditor(object item, DataGridColumn column, int attempt)
+        {
+            if (AdvanceExpenseGrid.ItemContainerGenerator.ContainerFromItem(item) is not DataGridRow row)
+            {
+                RequestAdvanceExpenseEditorFocus(item, column, attempt + 1);
+                return;
+            }
+
+            var cell = FindAdvanceExpenseCell(row, column);
+            if (cell == null)
+            {
+                RequestAdvanceExpenseEditorFocus(item, column, attempt + 1);
+                return;
+            }
+
+            // Редактор может появиться позже (DataGrid откладывает вход в режим
+            // правки), поэтому вешаемся на загрузку ячейки и ставим фокус сразу,
+            // как только поле ввода появится в её дереве.
+            if (attempt < 4)
+                cell.Loaded += OnFocusedAdvanceExpenseCellLoaded;
+
+            if (!FocusFirstAdvanceExpenseInput(cell))
+            {
+                AdvanceExpenseGrid.BeginEdit();
+                RequestAdvanceExpenseEditorFocus(item, column, attempt + 1);
+                return;
+            }
+
+            if (!IsKeyboardFocusInAdvanceExpenseCell(cell))
+                RequestAdvanceExpenseEditorFocus(item, column, attempt + 1);
+        }
+
+        /// <summary>Поле ввода создано — передаём ему клавиатурный фокус.</summary>
+        private void OnFocusedAdvanceExpenseCellLoaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is DataGridCell cell)
+            {
+                cell.Loaded -= OnFocusedAdvanceExpenseCellLoaded;
+                FocusFirstAdvanceExpenseInput(cell);
+            }
+        }
+
+        /// <summary>
+        /// Ставит клавиатурный фокус на первый редактируемый элемент ячейки:
+        /// поле ввода счёта или суммы, выпадающий список валюты, календарь даты.
+        /// </summary>
+        private static bool FocusFirstAdvanceExpenseInput(DependencyObject parent)
+        {
+            if (parent is not Visual visual)
+                return false;
+
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(visual); index++)
+            {
+                var child = VisualTreeHelper.GetChild(visual, index);
+
+                switch (child)
+                {
+                    case TextBox { IsReadOnly: false, IsEnabled: true } textBox:
+                        textBox.Focus();
+                        Keyboard.Focus(textBox);
+                        textBox.SelectAll();
+                        return true;
+                    case ComboBox { IsEnabled: true } comboBox:
+                        comboBox.Focus();
+                        Keyboard.Focus(comboBox);
+                        return true;
+                    case DatePicker { IsEnabled: true } datePicker:
+                        datePicker.Focus();
+                        Keyboard.Focus(datePicker);
+                        return true;
+                }
+
+                if (FocusFirstAdvanceExpenseInput(child))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsKeyboardFocusInAdvanceExpenseCell(DataGridCell cell)
+        {
+            if (cell.IsKeyboardFocusWithin)
+                return true;
+
+            return Keyboard.FocusedElement is DependencyObject focused &&
+                   (ReferenceEquals(focused, cell) || IsAdvanceExpenseVisualDescendant(cell, focused));
+        }
+
+        private static bool IsAdvanceExpenseVisualDescendant(DependencyObject parent, DependencyObject candidate)
+        {
+            if (parent is not Visual visual)
+                return false;
+
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(visual); index++)
+            {
+                var child = VisualTreeHelper.GetChild(visual, index);
+                if (ReferenceEquals(child, candidate) || IsAdvanceExpenseVisualDescendant(child, candidate))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Контейнер ячейки ищется обходом визуального дерева строки: ячейки в нём
+        /// расположены слева направо в порядке видимых колонок.
+        /// </summary>
+        private DataGridCell? FindAdvanceExpenseCell(DataGridRow row, DataGridColumn column)
+        {
+            var targetIndex = GetAdvanceExpenseVisibleColumnIndex(column);
+            return targetIndex < 0 ? null : FindAdvanceExpenseCells(row).ElementAtOrDefault(targetIndex);
+        }
+
+        private int GetAdvanceExpenseVisibleColumnIndex(DataGridColumn column)
+        {
+            var visibleIndex = 0;
+            foreach (var current in AdvanceExpenseGrid.Columns)
+            {
+                if (current.Visibility != Visibility.Visible)
+                    continue;
+
+                if (ReferenceEquals(current, column))
+                    return visibleIndex;
+
+                visibleIndex++;
+            }
+
+            return -1;
+        }
+
+        /// <summary>Все контейнеры ячеек строки в порядке следования колонок.</summary>
+        private static IEnumerable<DataGridCell> FindAdvanceExpenseCells(DependencyObject parent)
+        {
+            if (parent is not Visual visual)
+                yield break;
+
+            for (var index = 0; index < VisualTreeHelper.GetChildrenCount(visual); index++)
+            {
+                var child = VisualTreeHelper.GetChild(visual, index);
+                if (child is DataGridCell cell)
+                    yield return cell;
+
+                foreach (var nested in FindAdvanceExpenseCells(child))
+                    yield return nested;
+            }
+        }
+
+        private static T? FindAncestorOrSelf<T>(DependencyObject? element)
+            where T : DependencyObject
+        {
+            var current = element;
+            while (current != null)
+            {
+                if (current is T target)
+                    return target;
+
+                current = GetAdvanceExpenseParent(current);
+            }
+
+            return null;
+        }
+
+        private static DependencyObject? GetAdvanceExpenseParent(DependencyObject element)
+        {
+            return element switch
+            {
+                Visual or System.Windows.Media.Media3D.Visual3D => VisualTreeHelper.GetParent(element),
+                FrameworkContentElement contentElement => contentElement.Parent,
+                _ => null
+            };
         }
 
         private void FocusAdvanceExpenseDateCell(AdvanceExpenseLineRow row)
         {
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                AdvanceExpenseGrid.CurrentCell = new DataGridCellInfo(row, AdvanceExpenseDateColumn);
-                AdvanceExpenseGrid.BeginEdit();
-            }));
+            var columnIndex = AdvanceExpenseGrid.Columns
+                .FirstOrDefault(column => column == AdvanceExpenseDateColumn)?.DisplayIndex ?? 0;
+            FocusAdvanceExpenseCell(row, columnIndex, defer: true);
         }
 
         private void RefreshAdvanceExpenseLineNumbers()
@@ -1013,11 +1545,13 @@ namespace BIS.ERP.Views
 
         private AdvanceExpenseLineRow CreateAdvanceExpenseLineRow()
         {
-            return new AdvanceExpenseLineRow
+            var row = new AdvanceExpenseLineRow
             {
                 LineDate = DatePicker?.SelectedDate,
                 PairId = GetSelectedReferenceId(AdvancePaymentCombo)
             };
+            AttachAdvanceExpenseLine(row);
+            return row;
         }
 
         private void SelectAdvancePairFromLines()
@@ -1058,7 +1592,10 @@ namespace BIS.ERP.Views
             var showCurrency = ShouldShowAdvanceCurrency(pairRows, settings);
 
             OrganizationPanel.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
-            AdvanceCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            // Колонка «Валюта» доступна всегда: без неё невозможно указать валюту
+            // строки затрат. Колонки «Сумма в валюте» и «Курс» появляются, когда
+            // валюта уже указана в строке либо этого требует пара счетов/аналитика счетов.
+            AdvanceCurrencyColumn.Visibility = Visibility.Visible;
             AdvanceAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             AdvanceExchangeRateColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             CurrencyPanel.Visibility = Visibility.Collapsed;
@@ -1100,6 +1637,105 @@ namespace BIS.ERP.Views
                        "Справочник валют",
                        showWhenNoAccountSelected: false,
                        showUnmappedFields: false);
+        }
+
+        /// <summary>
+        /// Реакция строки затрат на изменение валюты и валютных сумм:
+        /// при выборе валюты подтягивается курс на дату строки, а введённые
+        /// «Сумма в валюте» и «Курс» пересчитывают сумму строки.
+        /// </summary>
+        private async void OnAdvanceExpenseLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not AdvanceExpenseLineRow row)
+                return;
+
+            switch (e.PropertyName)
+            {
+                case nameof(AdvanceExpenseLineRow.CurrencyId):
+                    await ApplyLineExchangeRateAsync(row);
+                    // Показ колонок «Сумма в валюте»/«Курс» откладываем: колонки нельзя
+                    // менять, пока активна ячейка редактирования валюты.
+                    Dispatcher.BeginInvoke(new Action(UpdateAdvanceAccountDependentVisibility));
+                    RecalculateAdvanceExpenseTotal();
+                    break;
+                case nameof(AdvanceExpenseLineRow.AmountCurrency):
+                case nameof(AdvanceExpenseLineRow.ExchangeRate):
+                    RecalculateAdvanceExpenseLineCurrency(row);
+                    RecalculateAdvanceExpenseTotal();
+                    break;
+            }
+        }
+
+        private void AttachAdvanceExpenseLine(AdvanceExpenseLineRow row)
+        {
+            row.PropertyChanged -= OnAdvanceExpenseLinePropertyChanged;
+            row.PropertyChanged += OnAdvanceExpenseLinePropertyChanged;
+        }
+
+        /// <summary>
+        /// Подтягивает курс выбранной валюты на дату строки.
+        /// Для базовой валюты курс равен единице.
+        /// </summary>
+        private async Task ApplyLineExchangeRateAsync(AdvanceExpenseLineRow row)
+        {
+            if (row.CurrencyId == Guid.Empty)
+            {
+                if (row.AmountCurrency == 0 && row.ExchangeRate == 0)
+                    return;
+
+                row.ExchangeRate = 0;
+                row.AmountCurrency = 0;
+                return;
+            }
+
+            var currency = _currencies.FirstOrDefault(item => item.Id == row.CurrencyId);
+            var rateDate = LineDateOrDocumentDate(row).Date;
+            var rate = IsBaseCurrency(currency)
+                ? new CurrencyRateLookupResult(1m, rateDate, "Базовая валюта")
+                : await _metadataService.GetCurrencyRateForDateAsync(row.CurrencyId, rateDate);
+            if (rate == null)
+                return;
+
+            row.ExchangeRate = rate.Rate;
+            RecalculateAdvanceExpenseLineCurrency(row);
+        }
+
+        private DateTime LineDateOrDocumentDate(AdvanceExpenseLineRow row)
+        {
+            return row.LineDate ?? DatePicker.SelectedDate ?? DateTime.Today;
+        }
+
+        private static bool IsBaseCurrency(ReferenceItem? currency)
+        {
+            if (currency == null)
+                return false;
+
+            return currency.LookupKeys.Contains("KGS") ||
+                   currency.LookupKeys.Contains("417") ||
+                   currency.DisplayName.Contains("KGS", StringComparison.OrdinalIgnoreCase) ||
+                   currency.DisplayName.Contains("сом", StringComparison.OrdinalIgnoreCase) ||
+                   currency.DisplayName.Contains("КГС", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Пересчёт валютных величин строки. «Сумма в валюте» — исходное значение:
+        /// если оно введено, сумма в национальной валюте считается по курсу;
+        /// иначе, если введена сумма, курс применяется в обратную сторону.
+        /// Ручной ввод суммы не перезаписывается, пока валютная сумма не задана.
+        /// </summary>
+        private static void RecalculateAdvanceExpenseLineCurrency(AdvanceExpenseLineRow row)
+        {
+            if (row.CurrencyId == Guid.Empty || row.ExchangeRate <= 0)
+                return;
+
+            if (row.AmountCurrency > 0)
+            {
+                row.Amount = Math.Round(row.AmountCurrency * row.ExchangeRate, 2, MidpointRounding.AwayFromZero);
+                return;
+            }
+
+            if (row.Amount > 0)
+                row.AmountCurrency = Math.Round(row.Amount / row.ExchangeRate, 2, MidpointRounding.AwayFromZero);
         }
 
         private string ResolveCurrencyDisplay(Guid currencyId)
@@ -1261,7 +1897,10 @@ namespace BIS.ERP.Views
 
         private void SetCurrencyValues(Dictionary<string, object> data)
         {
-            if (CurrencyPanel.Visibility != Visibility.Visible && CurrencyCombo.SelectedItem is null)
+            // Валюта шапки используется только когда панель валюты действительно
+            // показана. У авансовых платежей валюта задаётся в каждой строке
+            // затрат, и запись в поля шапки из скрытой панели затирала бы их.
+            if (CurrencyPanel.Visibility != Visibility.Visible)
                 return;
 
             SetFieldValueIfExists(data, "Валюта", GetSelectedReferenceId(CurrencyCombo));
@@ -1508,7 +2147,10 @@ namespace BIS.ERP.Views
         private DateTime? _lineDate;
         private Guid _pairId;
         private object? _expenseAccountValue;
+        private string _expenseAccountCode = string.Empty;
         private string _expenseAccountDisplay = string.Empty;
+        private string _expenseAccountTitle = string.Empty;
+        private string _expenseAccountHint = string.Empty;
         private decimal _amount;
         private Guid _currencyId;
         private decimal _amountCurrency;
@@ -1577,6 +2219,52 @@ namespace BIS.ERP.Views
                 OnPropertyChanged(nameof(ExpenseAccountDisplay));
             }
         }
+
+        /// <summary>Код счёта расхода: вводится пользователем вручную.</summary>
+        public string ExpenseAccountCode
+        {
+            get => _expenseAccountCode;
+            set
+            {
+                var normalized = value ?? string.Empty;
+                if (_expenseAccountCode == normalized)
+                    return;
+                _expenseAccountCode = normalized;
+                OnPropertyChanged(nameof(ExpenseAccountCode));
+            }
+        }
+
+        /// <summary>Наименование счёта расхода без кода — показывается рядом с полем ввода.</summary>
+        public string ExpenseAccountTitle
+        {
+            get => _expenseAccountTitle;
+            set
+            {
+                var normalized = value ?? string.Empty;
+                if (_expenseAccountTitle == normalized)
+                    return;
+                _expenseAccountTitle = normalized;
+                OnPropertyChanged(nameof(ExpenseAccountTitle));
+            }
+        }
+
+        /// <summary>Подсказка по проверке набранного кода счёта (показывается во всплывающей подсказке).</summary>
+        public string ExpenseAccountHint
+        {
+            get => _expenseAccountHint;
+            set
+            {
+                var normalized = value ?? string.Empty;
+                if (_expenseAccountHint == normalized)
+                    return;
+                _expenseAccountHint = normalized;
+                OnPropertyChanged(nameof(ExpenseAccountHint));
+                OnPropertyChanged(nameof(ExpenseAccountHasHint));
+            }
+        }
+
+        /// <summary>Набранный код счёта не совпал со счётом плана счетов.</summary>
+        public bool ExpenseAccountHasHint => !string.IsNullOrWhiteSpace(_expenseAccountHint);
 
         public decimal Amount
         {

@@ -1128,9 +1128,6 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Подразделения"))
                     await CreateDivisionCatalog(config);
 
-                //if (!existingCatalogs.Contains("Участки (новые)"))
-                //    await CreatePlotCatalog(config);
-
                 if (!existingCatalogs.Contains("Виды поставки"))
                     await CreateSupplyKindCatalog(config);
                 await EnsureSupplyKindCatalogStructureAsync();
@@ -2752,6 +2749,21 @@ namespace BIS.ERP.Services
             DateTime? documentDate = null)
         {
             return new PostingService(_context).GetPostingsByDocumentAsync(documentType, documentNumber, documentDate);
+        }
+
+        public Task<List<PostingViewModel>> GetPostingsByDocumentRangeAsync(
+            string documentType,
+            string documentNumber,
+            DateTime startDate,
+            DateTime endDate,
+            IReadOnlyCollection<string>? documentTypeAliases = null)
+        {
+            return new PostingService(_context).GetPostingsByDocumentRangeAsync(
+                documentType,
+                documentNumber,
+                startDate,
+                endDate,
+                documentTypeAliases);
         }
 
         private async Task ProcessDocumentByPostingRulesAsync(

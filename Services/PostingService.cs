@@ -229,6 +229,49 @@ namespace BIS.ERP.Services
                 .ToList();
         }
 
+        /// <summary>
+        /// Проводки документа в произвольном интервале дат.
+        /// Нужна там, где дата проводки не обязана совпадать с датой документа:
+        /// у авансовых платежей дата берётся из каждой строки затрат, поэтому поиск
+        /// строго по дате документа часть проводок не находит.
+        /// Параметр documentTypeAliases учитывает прежние названия модуля,
+        /// под которыми проводки уже записаны в базе.
+        /// </summary>
+        public async Task<List<PostingViewModel>> GetPostingsByDocumentRangeAsync(
+            string documentType,
+            string documentNumber,
+            DateTime startDate,
+            DateTime endDate,
+            IReadOnlyCollection<string>? documentTypeAliases = null)
+        {
+            var normalizedNumber = MetadataService.NormalizeLegacyDocumentNumber(documentNumber);
+            if (string.IsNullOrWhiteSpace(normalizedNumber))
+                return new List<PostingViewModel>();
+
+            var acceptedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { documentType };
+            if (documentTypeAliases != null)
+            {
+                foreach (var alias in documentTypeAliases)
+                {
+                    if (!string.IsNullOrWhiteSpace(alias))
+                        acceptedTypes.Add(alias);
+                }
+            }
+
+            if (endDate.Date < startDate.Date)
+                (startDate, endDate) = (endDate, startDate);
+
+            var postings = await GetAllPostingsAsync(startDate.Date, endDate.Date);
+            return postings
+                .Where(posting =>
+                    acceptedTypes.Contains(posting.DocumentType ?? string.Empty) &&
+                    string.Equals(posting.DocumentNumber, normalizedNumber, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(posting => posting.Date)
+                .ThenBy(posting => posting.DebitAccount)
+                .ThenBy(posting => posting.CreditAccount)
+                .ToList();
+        }
+
         private static string ResolveCashCorrespondent(string documentType, string? debitAccount, string? creditAccount)
         {
             if (documentType.Equals("Приходный кассовый ордер", StringComparison.OrdinalIgnoreCase))
