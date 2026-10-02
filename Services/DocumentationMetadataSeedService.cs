@@ -349,9 +349,15 @@ namespace BIS.ERP.Services
 
             await RenameMetadataObjectAsync("Авансовый отчет", "Авансовые платежи");
 
-            foreach (var name in new[] { "Авансовые платежи", "Расчет курсовой разницы" })
-                await EnsureObjectAsync(name, $"doc_fin_{Slug(name)}", "Document",
-                    $"Документ финансового учета: {name}", "💰", FinanceDocumentFields(name));
+            // Явные, читаемые имена таблиц (классический подход, как у счет-фактур:
+            // doc_sales_invoice / doc_purchase_invoice), вместо прежних doc_fin_<hash>.
+            await EnsureObjectAsync("Авансовые платежи", AdvancePaymentService.DefaultHeaderTableName, "Document",
+                "Документ финансового учета: Авансовые платежи", "💰", FinanceDocumentFields("Авансовые платежи"));
+            await EnsureObjectAsync("Расчет курсовой разницы", "doc_exchange_rate_diff", "Document",
+                "Документ финансового учета: Расчет курсовой разницы", "💰", FinanceDocumentFields("Расчет курсовой разницы"));
+
+            // Миграция существующих баз: переименование doc_fin_<hash> -> понятные имена.
+            await EnsureFinanceDocumentTableNamesAsync();
 
             foreach (var name in new[]
             {
@@ -360,6 +366,92 @@ namespace BIS.ERP.Services
             })
                 await EnsureObjectAsync(name, $"doc_inventory_{Slug(name)}", "Document",
                     $"Документ учета материальных ценностей: {name}", "📦", InventoryDocumentFields());
+        }
+/// <summary>
+        /// Миграция имён таблиц финансовых документов на существующих базах:
+        /// doc_fin_&lt;hash&gt; -> doc_advance_payment / doc_exchange_rate_diff.
+        /// Также создаёт таблицу строк авансов и переносит JSON-поле expense_lines
+        /// в классическую таблицу строк, затем удаляет колонку.
+        /// </summary>
+        private async Task EnsureFinanceDocumentTableNamesAsync()
+        {
+            await RenameDocumentTableAsync("Авансовые платежи", AdvancePaymentService.DefaultHeaderTableName);
+            await RenameDocumentTableAsync("Расчет курсовой разницы", "doc_exchange_rate_diff");
+
+            // Гарантия физических таблиц шапок: в старых базах TableName в метаданных
+            // мог быть обновлён без создания самой таблицы (EnsureObjectAsync для
+            // существующего объекта метаданных таблицу не создаёт). Вызываем до
+            // EnsureSchemaAsync, чтобы FK строк мог сослаться на шапку.
+            await EnsureDocumentTableAsync("Авансовые платежи");
+            await EnsureDocumentTableAsync("Расчет курсовой разницы");
+
+            var advanceDocument = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Авансовые платежи");
+            if (advanceDocument == null || string.IsNullOrWhiteSpace(advanceDocument.TableName))
+                return;
+
+            var service = new AdvancePaymentService(_context);
+            service.Configure(advanceDocument.TableName);
+            await service.EnsureSchemaAsync();
+
+            // Удаляем метаданные-поле expense_lines, чтобы MetadataService не
+            // пересоздавал колонку (EnsureLargeDynamicTextColumnsAsync).
+            var legacyExpenseLinesFields = await _context.MetadataFields
+                .Where(field => field.MetadataObjectId == advanceDocument.Id &&
+                                field.DbColumnName == "expense_lines")
+                .ToListAsync();
+            if (legacyExpenseLinesFields.Count > 0)
+            {
+                _context.MetadataFields.RemoveRange(legacyExpenseLinesFields);
+                await _context.SaveChangesAsync();
+            }
+
+            // Перенос старых данных из JSON-поля в таблицу строк + удаление колонки.
+            await service.MigrateLegacyExpenseLinesAsync();
+        }
+
+        private async Task RenameDocumentTableAsync(string documentName, string targetTableName)
+        {
+            var document = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == documentName);
+            if (document == null || string.IsNullOrWhiteSpace(document.TableName))
+                return;
+
+            if (string.Equals(document.TableName, targetTableName, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var oldTable = document.TableName;
+
+            // Переименовываем физическую таблицу только если она существует и
+            // целевое имя ещё не занято.
+            await _context.Database.ExecuteSqlRawAsync($@"
+                DO $$
+                BEGIN
+                    IF to_regclass('public.{oldTable}') IS NOT NULL
+                       AND to_regclass('public.{targetTableName}') IS NULL
+                    THEN
+                        ALTER TABLE ""{oldTable}"" RENAME TO ""{targetTableName}"";
+                    END IF;
+                END $$;");
+
+            document.TableName = targetTableName;
+            await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Создаёт физическую таблицу документа, если её нет (иначе — идемпотентно
+        /// дополняет недостающие колонки). Нужно для старых баз, где в метаданных
+        /// уже указано целевое имя таблицы, но сама таблица физически не создавалась.
+        /// </summary>
+        private async Task EnsureDocumentTableAsync(string documentName)
+        {
+            var document = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == documentName);
+            if (document == null || string.IsNullOrWhiteSpace(document.TableName))
+                return;
+
+            await _metadataService.CreateDynamicTableAsync(document);
         }
 
         private async Task RemoveDeletedDocumentsAsync()
@@ -878,11 +970,11 @@ namespace BIS.ERP.Services
                 field.IsRequired = true;
 
             fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
-            var expenseLinesField = Field(Guid.Empty, "Строки затрат", "expense_lines", "String", 20);
-            expenseLinesField.Length = 4000;
-            fields.Add(expenseLinesField);
 
-            // Legacy fields remain for existing databases and old records, but the dialog now uses expense_lines.
+            // Строки затрат теперь хранятся в классической таблице строк
+            // (doc_advance_payment_lines), поэтому JSON-поле expense_lines удалено.
+
+            // Legacy fields remain for existing databases and old records.
             fields.Add(Field(Guid.Empty, "Вид авансового расчета", "advance_payment_id", "Reference", 21, false, "Пары счетов"));
             fields.Add(Field(Guid.Empty, "Дата начала отчета", "report_start_date", "DateTime", 22));
             fields.Add(Field(Guid.Empty, "Дата окончания отчета", "report_end_date", "DateTime", 23));
@@ -1139,7 +1231,6 @@ namespace BIS.ERP.Services
 
         private static string GetSqlType(MetadataField field) => field.FieldType switch
         {
-            "String" when field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase) => "text",
             "String" => $"varchar({(field.Length > 0 ? field.Length : 500)})",
             "Decimal" => "numeric(18,2)",
             "Int" => "integer",

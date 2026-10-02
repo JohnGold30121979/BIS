@@ -134,10 +134,16 @@ public static class MdiDialogService
 
         var actualKey = $"{content.GetType().FullName}:{Guid.NewGuid():N}";
         var completionSource = new TaskCompletionSource<bool?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Запоминаем вкладку, из которой открыт выбор. Без этого после закрытия
+        // вкладки выбора MDI остаётся на последней активной вкладке, а не
+        // возвращает пользователя к документу-отправителю.
+        var openerDocumentKey = workspace.SelectedDocument?.Key;
         var session = new HostedDialogSession(
             actualKey,
             completionSource,
-            () => workspace.CloseDocumentByKey(actualKey));
+            () => workspace.CloseDocumentByKey(actualKey),
+            workspace,
+            openerDocumentKey);
 
         // Регистрируем сам контрол: он закроет документ через CloseWithResult(this, ...)
         HostedDialogs[content] = session;

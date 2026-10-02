@@ -22,6 +22,16 @@ namespace BIS.ERP.Services
         private const string CashOrderPaymentDocumentType = "Расходный кассовый ордер";
         private const string CashOrderReceiptKind = "Receipt";
         private const string CashOrderPaymentKind = "Payment";
+        private const string AdvancePaymentsDocumentName = "Авансовые платежи";
+        private const string LegacyAdvancePaymentsDocumentName = "Авансовый отчет";
+        private const string AdvancePaymentsTableName = "doc_advance_payment";
+        /// <summary>
+        /// Отдельный ключ счетчика номеров авансовых платежей: их нумерация не
+        /// выводится из максимального номера уже загруженных документов (иначе
+        /// первый новый документ продолжал чужую сквозную нумерацию), а
+        /// начинается с 1.
+        /// </summary>
+        private const string AdvancePaymentsNumberingKey = "advance_payment_document";
         private const long MaxDocumentNumberUsedForCounter = 999_999_999;
         private readonly string _connectionString;
         private readonly System.Threading.SemaphoreSlim _contextAccess = new(1, 1);
@@ -1533,31 +1543,10 @@ namespace BIS.ERP.Services
 
         private async Task EnsureLargeDynamicTextColumnsAsync(MetadataObject metadata)
         {
-            if (!string.Equals(metadata.ObjectType, "Document", StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrWhiteSpace(metadata.TableName))
-                return;
-
-            var largeTextColumns = metadata.Fields
-                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName) &&
-                                field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase))
-                .Select(field => field.DbColumnName)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (largeTextColumns.Count == 0)
-                return;
-
-            var tableName = QuoteIdentifier(metadata.TableName);
-            foreach (var column in largeTextColumns)
-            {
-                var columnName = QuoteIdentifier(column);
-                await _context.Database.ExecuteSqlRawAsync($@"
-                    ALTER TABLE {tableName} ADD COLUMN IF NOT EXISTS {columnName} text;
-                    ALTER TABLE {tableName} ALTER COLUMN {columnName} TYPE text;");
-            }
-
-            foreach (var field in metadata.Fields.Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName) &&
-                                                          field.DbColumnName.Equals("expense_lines", StringComparison.OrdinalIgnoreCase)))
-                field.Length = Math.Max(field.Length, 4000);
+            // Раньше здесь расширялась колонка expense_lines (JSON-строки затрат).
+            // Теперь строки затрат хранятся в отдельной таблице, поэтому
+            // специальная обработка не требуется.
+            await Task.CompletedTask;
         }
         private async Task EnsureSingleCatalogDefaultsAsync(
             MetadataObject metadata,
@@ -4598,7 +4587,7 @@ namespace BIS.ERP.Services
 
             var documentTypeParameter2 = command.CreateParameter();
             documentTypeParameter2.ParameterName = "@documentType2";
-            documentTypeParameter2.Value = $"doc:{documentName}";
+            documentTypeParameter2.Value = ResolveLegacyNumberingRowKey(numberingKey, documentName);
             command.Parameters.Add(documentTypeParameter2);
 
             var connectionOpened = false;
@@ -4673,9 +4662,7 @@ namespace BIS.ERP.Services
 
             var documentTypeParameter2 = command.CreateParameter();
             documentTypeParameter2.ParameterName = "@documentType2";
-            documentTypeParameter2.Value = string.IsNullOrWhiteSpace(documentName)
-                ? $"__unused_{Guid.NewGuid():N}"
-                : $"doc:{documentName}";
+            documentTypeParameter2.Value = ResolveLegacyNumberingRowKey(numberingKey, documentName);
             command.Parameters.Add(documentTypeParameter2);
 
             var maxNumberParam = command.CreateParameter();
@@ -4724,8 +4711,8 @@ namespace BIS.ERP.Services
 
                 var documentTypeParameter2 = command.CreateParameter();
                 documentTypeParameter2.ParameterName = "@documentType2";
-                // Also try with doc: prefix for backward compatibility
-                documentTypeParameter2.Value = $"doc:{documentName}";
+                // Легаси-строка счетчика («doc:ИмяДокумента») для обратной совместимости
+                documentTypeParameter2.Value = ResolveLegacyNumberingRowKey(numberingKey, documentName);
                 command.Parameters.Add(documentTypeParameter2);
 
                 var connectionOpened = false;
@@ -4846,8 +4833,12 @@ namespace BIS.ERP.Services
         {
             await CreateDocumentNumberingTableAsync();
 
-            var suggestedNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
             var numberingKey = GetDocumentNumberingKey(document);
+            // У авансовых платежей собственный счетчик: нумерация не продолжает
+            // уже загруженные документы и всегда начинается с 1.
+            var suggestedNumber = IsAdvancePaymentsDocument(document)
+                ? 1
+                : await GetSuggestedNextDocumentNumberAsync(new[] { document });
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4893,7 +4884,12 @@ namespace BIS.ERP.Services
             if (document == null)
                 return;
 
-            var suggestedNumber = await GetSuggestedNextDocumentNumberAsync(new[] { document });
+            var numberingKey = GetDocumentNumberingKey(document);
+            // У авансовых платежей собственный счетчик: нумерация не продолжает
+            // уже загруженные документы и всегда начинается с 1.
+            var suggestedNumber = IsAdvancePaymentsDocument(document)
+                ? 1
+                : await GetSuggestedNextDocumentNumberAsync(new[] { document });
 
             const string insertSql = @"
                 INSERT INTO doc_numbering (document_type, current_number, prefix)
@@ -4902,7 +4898,7 @@ namespace BIS.ERP.Services
 
             await _context.Database.ExecuteSqlRawAsync(
                 insertSql,
-                new NpgsqlParameter("@documentType", documentName),
+                new NpgsqlParameter("@documentType", numberingKey),
                 new NpgsqlParameter("@currentNumber", suggestedNumber));
 
             // Только увеличиваем счетчик, никогда не уменьшаем!
@@ -4914,7 +4910,7 @@ namespace BIS.ERP.Services
 
             await _context.Database.ExecuteSqlRawAsync(
                 updateSql,
-                new NpgsqlParameter("@documentType", documentName),
+                new NpgsqlParameter("@documentType", numberingKey),
                 new NpgsqlParameter("@currentNumber", suggestedNumber));
         }
 
@@ -5189,7 +5185,41 @@ namespace BIS.ERP.Services
             if (IsCashOrderDocument(document))
                 return CashOrderPaymentDocumentType;
 
+            if (IsAdvancePaymentsDocument(document))
+                return AdvancePaymentsNumberingKey;
+
             return document.Name;
+        }
+
+        /// <summary>Документ «Авансовые платежи» (прежнее название — «Авансовый отчет»).</summary>
+        private static bool IsAdvancePaymentsDocument(MetadataObject document)
+        {
+            return document.ObjectType == "Document" &&
+                   (document.Name.Equals(AdvancePaymentsDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                    document.Name.Equals(LegacyAdvancePaymentsDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                    document.TableName.Equals(AdvancePaymentsTableName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsAdvancePaymentsDocumentName(string documentName)
+        {
+            return documentName.Equals(AdvancePaymentsDocumentName, StringComparison.OrdinalIgnoreCase) ||
+                   documentName.Equals(LegacyAdvancePaymentsDocumentName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Ключ легаси-строки счетчика («doc:ИмяДокумента»), участвующей в
+        /// запросах номера. У авансовых платежей счетчик отдельный, поэтому
+        /// легаси-строка не должна влиять на выдаваемый номер.
+        /// </summary>
+        private static string ResolveLegacyNumberingRowKey(string numberingKey, string? documentName)
+        {
+            if (numberingKey.Equals(AdvancePaymentsNumberingKey, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(documentName))
+            {
+                return $"__unused_{Guid.NewGuid():N}";
+            }
+
+            return $"doc:{documentName}";
         }
 
         private static string GetDocumentNumberingKey(Guid documentId)
@@ -5201,6 +5231,9 @@ namespace BIS.ERP.Services
         {
             if (IsCashOrderDocumentName(documentName))
                 return CashOrderPaymentDocumentType;
+
+            if (IsAdvancePaymentsDocumentName(documentName))
+                return AdvancePaymentsNumberingKey;
 
             return documentName;
         }

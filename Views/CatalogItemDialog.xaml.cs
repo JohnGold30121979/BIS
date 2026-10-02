@@ -47,7 +47,21 @@ namespace BIS.ERP.Views
                 ? $"Добавление в справочник: {catalog.Name}"
                 : $"Редактирование справочника: {catalog.Name}";
 
+            // Ширина полей равна ширине окна. Без этого ScrollViewer со скроллбаром
+            // отдаёт панели бесконечную ширину, поля уезжают за правый край окна и их
+            // ширину нельзя ни увидеть, ни изменить мышью. ViewportWidth уже вычтен
+            // из размера вертикальная полоса прокрутки.
+            FieldsScroll.SizeChanged += (_, _) => FitFieldsPanelToViewport();
+            FitFieldsPanelToViewport();
+
             Loaded += async (s, e) => await BuildFieldsAsync(existingData);
+        }
+
+        private void FitFieldsPanelToViewport()
+        {
+            var viewportWidth = FieldsScroll.ViewportWidth;
+            if (viewportWidth > 0 && FieldsPanel.MaxWidth != viewportWidth)
+                FieldsPanel.MaxWidth = viewportWidth;
         }
 
         private async System.Threading.Tasks.Task BuildFieldsAsync(Dictionary<string, object> existingData)
@@ -81,11 +95,15 @@ namespace BIS.ERP.Views
                     }
                     else if (ShouldUseAccountPicker(field))
                     {
-                        inputControl = AccountPickerControlFactory.Create(
-                            _accountAnalytics!,
-                            GetExistingValue(field, existingData),
-                            this,
-                            moduleCodeOrName: _assignedModuleName);
+inputControl = AccountPickerControlFactory.Create(
+                    _accountAnalytics!,
+                    GetExistingValue(field, existingData),
+                    this,
+                    moduleCodeOrName: _assignedModuleName,
+                    // В «Парах счетов» счёт дебета/кредита вводится вручную так же,
+                    // как в остальных документах: только цифры, до 8 знаков, плюс
+                    // выбор из плана счетов кнопкой «?».
+                    allowManualInput: IsAccountPairsCatalog());
                     }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
                     else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -461,6 +479,27 @@ namespace BIS.ERP.Views
             MetadataField field,
             Dictionary<string, object> existingData)
         {
+            // «Остаток брать из модуля» в справочнике «Пары счетов» — выбор модуля
+            // из списка, а не свободный текст: поле знает только «Финансы» либо
+            // несколько вариантов, введённых вручную.
+            if (IsAccountPairsCatalog() &&
+                string.Equals(field.DbColumnName, "module_code", StringComparison.OrdinalIgnoreCase))
+            {
+                var moduleOptions = await GetClosingModuleOptionsAsync();
+                var existingModule = GetExistingValue(field, existingData)?.ToString();
+                var moduleComboBox = new ComboBox
+                {
+                    Height = 35,
+                    MinWidth = 200,
+                    ItemsSource = moduleOptions
+                };
+                moduleComboBox.SelectedItem = moduleOptions
+                    .OfType<ChoiceItem>()
+                    .FirstOrDefault(option => option.Matches(NormalizeClosingModuleChoice(existingModule)))
+                    ?? moduleOptions.FirstOrDefault();
+                return moduleComboBox;
+            }
+
             if (_catalog.Name != "План счетов")
                 return null;
 
@@ -654,6 +693,12 @@ namespace BIS.ERP.Views
         private bool IsTaxCatalog() =>
             string.Equals(_catalog.Name, "Налоги", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, "catalog_taxes", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Справочник «Пары счетов» (прежнее название — «Авансовые платежи»).</summary>
+        private bool IsAccountPairsCatalog() =>
+            string.Equals(_catalog.Name, "Пары счетов", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, "catalog_advance_payments", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
 
         private Control CreateRegularControl(MetadataField field, Dictionary<string, object> existingData)
         {
@@ -1047,8 +1092,8 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Дефолты новой записи. Для справочника расчётных счетов сразу выбирается
-        /// валюта по умолчанию — базовая (киргизский сом): счёт не должен
+        /// Дефолты новой записи. Для расчётных счетов и счетов плана счетов сразу
+        /// выбирается валюта по умолчанию — базовая (киргизский сом): счёт не должен
         /// сохраняться без валюты.
         /// </summary>
         private async Task<Dictionary<string, object>> ApplyNewRecordDefaultsAsync(
@@ -1062,11 +1107,12 @@ namespace BIS.ERP.Views
                 ? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, object>(existingData, StringComparer.OrdinalIgnoreCase);
 
-            if (!IsBankAccountsCatalog())
+            var currencyColumn = GetDefaultCurrencyColumn();
+            if (currencyColumn == null)
                 return result;
 
             var currencyField = GetEditableFields().FirstOrDefault(field =>
-                string.Equals(field.DbColumnName, "currency_id", StringComparison.OrdinalIgnoreCase));
+                string.Equals(field.DbColumnName, currencyColumn, StringComparison.OrdinalIgnoreCase));
 
             if (currencyField == null || HasMeaningfulValue(result, currencyField))
                 return result;
@@ -1076,6 +1122,23 @@ namespace BIS.ERP.Views
                 result[currencyField.Name] = defaultCurrencyId;
 
             return result;
+        }
+
+        /// <summary>
+        /// Колонка валюты, заполняемая по умолчанию для новых записей:
+        /// у расчётного счёта — <c>currency_id</c>, у счёта плана счетов —
+        /// <c>account_currency_id</c> («Валюта счета»). Для остальных справочников
+        /// дефолт валюты не задаётся.
+        /// </summary>
+        private string? GetDefaultCurrencyColumn()
+        {
+            if (IsBankAccountsCatalog())
+                return "currency_id";
+
+            if (IsChartOfAccountsCatalog())
+                return "account_currency_id";
+
+            return null;
         }
 
         private bool IsBankAccountsCatalog() =>
@@ -1521,7 +1584,6 @@ namespace BIS.ERP.Views
                     "name",
                     "account_type",
                     "description",
-                    //"level",
                     "is_active",
                     "closing_module_code",
                     "analytic_group",
@@ -1539,8 +1601,7 @@ namespace BIS.ERP.Views
                 };
             }
 
-            if (string.Equals(_catalog.Name, "Пары счетов", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase))
+            if (IsAccountPairsCatalog())
             {
                 return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {

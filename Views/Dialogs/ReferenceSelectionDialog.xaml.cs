@@ -96,18 +96,17 @@ namespace BIS.ERP.Views
 
                 foreach (var key in displayKeys)
                 {
-                    ItemsGrid.Columns.Add(CreateColumn(key));
+                    ItemsGrid.Columns.Add(CreateColumn(
+                        key,
+                        key == _secondField,
+                        IsAccountColumn(key),
+                        IsLogicalColumn(_items, key)));
                 }
 
                 // Если нет колонок, добавляем колонку "Id"
                 if (ItemsGrid.Columns.Count == 0)
                 {
-                    var column = new DataGridTextColumn
-                    {
-                        Header = "Id",
-                        Binding = new Binding("[Id]")
-                    };
-                    ItemsGrid.Columns.Add(column);
+                    ItemsGrid.Columns.Add(CreateColumn("Id", isName: true, isAccount: false, isLogical: false));
                 }
             }
             else
@@ -119,22 +118,16 @@ namespace BIS.ERP.Views
                              .Where(key => !string.IsNullOrWhiteSpace(key))
                              .Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    ItemsGrid.Columns.Add(new DataGridTextColumn
-                    {
-                        Header = key,
-                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
-                        MinWidth = 180,
-                        Binding = CreateValueBinding(key)
-                    });
+                    ItemsGrid.Columns.Add(CreateColumn(
+                        key,
+                        key == _secondField,
+                        IsAccountColumn(key),
+                        IsLogicalColumn(_items, key)));
                 }
 
                 if (ItemsGrid.Columns.Count == 0)
                 {
-                    ItemsGrid.Columns.Add(new DataGridTextColumn
-                    {
-                        Header = "Id",
-                        Binding = new Binding("[Id]")
-                    });
+                    ItemsGrid.Columns.Add(CreateColumn("Id", isName: true, isAccount: false, isLogical: false));
                 }
             }
 
@@ -360,19 +353,105 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
             MdiDialogService.CloseWithResult(this, false);
         }
 
-        /// <summary>
-        /// Колонка растягивается на всю доступную ширину окна, чтобы длинные
-        /// наименования и реквизиты справочника были видны без горизонтальной прокрутки.
+/// <summary>
+        /// Ширина колонки. Логические признаки ужимаются до ширины «Да»/«Нет»,
+        /// «Вид расчета» и счета дебета/кредита забирают всю свободную ширину
+        /// окна, остальные поля получают умеренный размер по содержимому.
+        ///
+        /// Ширины подобраны по образцу рабочего справочника «Пары счетов»:
+        /// там логические признаки занимают 40–62 px, а «Вид расчета» 220 px.
+        /// Раньше все колонки имели ширину Auto по содержимому, из-за чего
+        /// заголовок «Формировать проводки авансовых платежей» растягивал
+        /// колонку на всю ширину, а сумма ширин не помещалась в окно —
+        /// колонки не менялись при растягивании окна мышью.
         /// </summary>
-        private static DataGridTextColumn CreateColumn(string key)
+        private static DataGridTextColumn CreateColumn(
+            string key,
+            bool isName,
+            bool isAccount,
+            bool isLogical)
         {
             return new DataGridTextColumn
             {
-                Header = key,
-                Width = new DataGridLength(1, DataGridLengthUnitType.Star),
-                MinWidth = 160,
+                Header = isLogical ? GetCompactHeader(key) : key,
+                Width = isName || isAccount
+                    ? new DataGridLength(isName ? 3 : 2, DataGridLengthUnitType.Star)
+                    : new DataGridLength(isLogical ? LogicalColumnWidth : GetFixedColumnWidth(key)),
+                MinWidth = isName ? 180 : isAccount ? 140 : isLogical ? 40 : 70,
+                CanUserSort = true,
+                CanUserResize = true,
+                CanUserReorder = true,
                 Binding = CreateValueBinding(key)
             };
+        }
+
+        /// <summary>
+        /// Ширина логической колонки. Заголовки сокращены до «Разн. расч.»,
+        /// «Анал. плат.», «Внт. рач.», поэтому 72 px хватает и на заголовок,
+        /// и на значение «Да»/«Нет».
+        /// </summary>
+        private const double LogicalColumnWidth = 72;
+
+        private static double GetFixedColumnWidth(string key)
+        {
+            return key switch
+            {
+                "Код" or "code" => 56,
+                "Остаток брать из модуля" => 78,
+                "Табельный номер" => 92,
+                _ => 110
+            };
+        }
+
+        /// <summary>
+        /// Короткие заголовки длинных логических полей — те же сокращения,
+        /// что и в справочнике, чтобы колонка «Да/Нет» не раздувалась
+        /// под длинный заголовок.
+        /// </summary>
+        private static string GetCompactHeader(string key) => key switch
+        {
+            "Участвует во взаиморасчетах" => "Разн. расч.",
+            "Формировать проводки авансовых платежей" => "Анал. плат.",
+            "Участвует во внутренних взаиморасчетах" => "Внт. рач.",
+            "Остаток брать из модуля" => "Модуль",
+            "Организации" => "Орг",
+            "Сотрудники" => "Сотр.",
+            "Валютный учет" or "Валютный учёт" => "Вал. учёт",
+            _ => key
+        };
+
+        private static bool IsAccountColumn(string key) =>
+            key is "Дебет" or "Кредит" or "Счет дебета" or "Счет кредита" or "Счёт дебета" or "Счёт кредита" or "Корр счет";
+
+        /// <summary>
+        /// Логическое поле — во всех строках только «Да»/«Нет». Такие колонки
+        /// не должны занимать ширину по длине заголовка.
+        /// </summary>
+        private static bool IsLogicalColumn(IEnumerable<Dictionary<string, object>> items, string key)
+        {
+            var hasValue = false;
+            foreach (var item in items)
+            {
+                if (!item.TryGetValue(key, out var value) || value is null || value == DBNull.Value)
+                    continue;
+
+                hasValue = true;
+                if (value is bool)
+                    continue;
+
+                if (value is string text)
+                {
+                    if (text.Equals("True", StringComparison.OrdinalIgnoreCase) ||
+                        text.Equals("False", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+
+                return false;
+            }
+
+            return hasValue;
         }
 
         private static Binding CreateValueBinding(string key)

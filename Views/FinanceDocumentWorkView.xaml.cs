@@ -65,7 +65,22 @@ namespace BIS.ERP.Views
                     ? await _metadataService.GetAdvancePaymentPairsAsync()
                     : new List<Dictionary<string, object>>();
 
-                _allRows = rows.Select(row => BuildRow(row, referenceMaps, _accountRegistry)).ToList();
+                // Строки затрат — из отдельной таблицы (классическая модель).
+                var documentIds = rows
+                    .Select(row => ReadGuid(row, "Id"))
+                    .Where(id => id != Guid.Empty)
+                    .ToList();
+                var linesByDocument = _documentKind == FinanceDocumentKind.AdvanceReport
+                    ? await _metadataService.GetAdvancePaymentLinesForDocumentsAsync(_documentMetadata.TableName, documentIds)
+                    : new Dictionary<Guid, List<AdvancePaymentLine>>();
+
+                _allRows = rows
+                    .Select(row => BuildRow(
+                        row,
+                        referenceMaps,
+                        _accountRegistry,
+                        linesByDocument.GetValueOrDefault(ReadGuid(row, "Id")) ?? new List<AdvancePaymentLine>()))
+                    .ToList();
                 ApplyColumnFilters();
                 StatusText.Text = $"Загружено записей: {rows.Count}";
                 UpdateButtonsState();
@@ -137,11 +152,14 @@ namespace BIS.ERP.Views
         private FinanceDocumentRow BuildRow(
             Dictionary<string, object> row,
             IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps,
-            AccountAnalyticsRegistry accountRegistry)
+            AccountAnalyticsRegistry accountRegistry,
+            IReadOnlyList<AdvancePaymentLine> expenseLines)
         {
             var documentDate = ReadDate(row, "Дата", "doc_date") ?? DateTime.Today;
-            var expenseLinesJson = ReadString(row, "Строки затрат", "expense_lines");
-            var lineDates = ReadExpenseLineDates(expenseLinesJson);
+            var lineDates = expenseLines
+                .Where(line => line.LineDate.HasValue)
+                .Select(line => line.LineDate!.Value.Date)
+                .ToList();
 
             return new FinanceDocumentRow
             {
@@ -156,8 +174,11 @@ namespace BIS.ERP.Views
                 RepresentativeName = ResolveReference(row, referenceMaps, "Представитель", "representative_id"),
                 CounterpartyName = ResolveReference(row, referenceMaps, "Поставщик", "counterparty_id", "Организация", "organization_id"),
                 AdvancePaymentName = _documentKind == FinanceDocumentKind.AdvanceReport
-                    ? ResolveAdvancePaymentDisplay(row, expenseLinesJson)
+                    ? ResolveAdvancePaymentDisplay(row, expenseLines)
                     : ResolveReference(row, referenceMaps, "Вид авансового расчета", "advance_payment_id"),
+                AdvancePairId = expenseLines.FirstOrDefault(line => line.PairId != Guid.Empty)?.PairId ??
+                                ResolveAdvancePairId(row),
+
                 PeriodDisplay = BuildPeriodDisplay(row),
                 DebitAccountDisplay = ResolveAccount(row, accountRegistry, "Счет дебета", "debit_account"),
                 CreditAccountDisplay = ResolveAccount(row, accountRegistry, "Счет кредита", "credit_account"),
@@ -169,40 +190,6 @@ namespace BIS.ERP.Views
                 IsPosted = ReadBool(row, "Проведен", "Проведён", "is_posted"),
                 CreatedAt = ReadDate(row, "CreatedAt") ?? DateTime.Today
             };
-        }
-
-        /// <summary>Даты строк затрат из сохранённого JSON документа.</summary>
-        private static List<DateTime> ReadExpenseLineDates(string json)
-        {
-            if (string.IsNullOrWhiteSpace(json))
-                return new List<DateTime>();
-
-            var dates = new List<DateTime>();
-            try
-            {
-                using var document = JsonDocument.Parse(json);
-                if (document.RootElement.ValueKind != JsonValueKind.Array)
-                    return dates;
-
-                foreach (var item in document.RootElement.EnumerateArray())
-                {
-                    if (item.ValueKind != JsonValueKind.Object)
-                        continue;
-
-                    if (item.TryGetProperty("LineDate", out var dateElement) &&
-                        dateElement.ValueKind == JsonValueKind.String &&
-                        dateElement.TryGetDateTime(out var lineDate))
-                    {
-                        dates.Add(lineDate.Date);
-                    }
-                }
-            }
-            catch
-            {
-                return dates;
-            }
-
-            return dates;
         }
 
         private void ConfigureColumns()
@@ -413,12 +400,17 @@ namespace BIS.ERP.Views
                 }
 
                 var showCurrency = postings.Any(posting => posting.AmountCurrency != 0m || !string.IsNullOrWhiteSpace(posting.Currency));
-                var showOrganization = postings.Any(posting => !string.IsNullOrWhiteSpace(posting.Organization));
-                var showEmployee = postings.Any(posting => !string.IsNullOrWhiteSpace(posting.Employee));
+                // «Сотрудник» и «Организация» показываются только когда в паре счетов
+                // документа стоят соответствующие пометки справочника «Пары счетов».
+                var pair = FindAdvancePaymentPair(selected.AdvancePairId);
+                var showOrganization = IsPairFlagEnabled(pair, "use_organizations", "Организации");
+                var showEmployee = IsPairFlagEnabled(pair, "use_personnel", "Сотрудники");
                 SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee);
 
-                foreach (var posting in postings)
-                    _postingDetails.Add(CreatePostingDetailRow(posting));
+                // Нумерация строк расходов своя для каждого документа и всегда с 1.
+                for (var index = 0; index < postings.Count; index++)
+                    _postingDetails.Add(CreatePostingDetailRow(postings[index], index + 1));
+
             }
             catch (Exception ex)
             {
@@ -427,10 +419,12 @@ namespace BIS.ERP.Views
             }
         }
 
-        private Dictionary<string, object> CreatePostingDetailRow(PostingViewModel posting)
+        private Dictionary<string, object> CreatePostingDetailRow(PostingViewModel posting, int expenseLineNumber)
         {
             var detail = PostingDetailRowFactory.Create();
+            SetPostingDetail(detail, "Расходы", expenseLineNumber.ToString(CultureInfo.InvariantCulture));
             SetPostingDetail(detail, "Документ", posting.DocumentNumber);
+
             SetPostingDetail(detail, "Тип документа", posting.DocumentType);
             SetPostingDetail(detail, "Дата", posting.Date.ToString("dd/MM/yyyy"));
             SetPostingDetail(detail, "Модуль", posting.ModuleName);
@@ -447,7 +441,24 @@ namespace BIS.ERP.Views
             return detail;
         }
 
+        /// <summary>Пара счетов документа из справочника «Пары счетов».</summary>
+        private Dictionary<string, object>? FindAdvancePaymentPair(Guid pairId)
+        {
+            if (pairId == Guid.Empty)
+                return null;
+
+            return _advancePaymentPairs.FirstOrDefault(item =>
+                TryGetGuid(item.GetValueOrDefault("Id")?.ToString(), out var id) && id == pairId);
+        }
+
+        /// <summary>Пометка пары счетов («Организации», «Сотрудники» и т.п.).</summary>
+        private static bool IsPairFlagEnabled(Dictionary<string, object>? pair, params string[] keys)
+        {
+            return pair != null && ReadBool(pair, keys);
+        }
+
         private void SetDetailColumnsVisibility(bool showCurrency, bool showOrganization, bool showEmployee)
+
         {
             DetailAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             DetailCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
@@ -492,9 +503,9 @@ namespace BIS.ERP.Views
         /// </summary>
         private string ResolveAdvancePaymentDisplay(
             IReadOnlyDictionary<string, object> row,
-            string expenseLinesJson)
+            IReadOnlyList<AdvancePaymentLine> expenseLines)
         {
-            var fromLines = ResolveAdvancePairAccountsFromExpenseLines(expenseLinesJson);
+            var fromLines = ResolveAdvancePairAccountsFromLines(expenseLines);
             if (!string.IsNullOrWhiteSpace(fromLines))
                 return fromLines;
 
@@ -505,6 +516,21 @@ namespace BIS.ERP.Views
             return FormatAdvancePairAccounts(
                 ReadString(row, "Счет дебета", "debit_account"),
                 ReadString(row, "Счет кредита", "credit_account"));
+        }
+
+        /// <summary>Пара счетов из шапки документа (заглушка, если строк затрат нет).</summary>
+        private static Guid ResolveAdvancePairId(IReadOnlyDictionary<string, object> row)
+        {
+            foreach (var key in new[] { "Вид авансового расчета", "advance_payment_id" })
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value &&
+                    Guid.TryParse(value.ToString(), out var id))
+                {
+                    return id;
+                }
+            }
+
+            return Guid.Empty;
         }
 
         private string ResolveAdvancePairAccountsFromPairCatalog(IReadOnlyDictionary<string, object> row)
@@ -522,41 +548,22 @@ namespace BIS.ERP.Views
                 ReadString(pair, "credit_account", "Кредит"));
         }
 
-        private static string ResolveAdvancePairAccountsFromExpenseLines(string json)
+        private static string ResolveAdvancePairAccountsFromLines(IReadOnlyList<AdvancePaymentLine> lines)
         {
-            if (string.IsNullOrWhiteSpace(json))
-                return string.Empty;
-
-            try
+            var values = new List<string>();
+            foreach (var line in lines)
             {
-                using var document = JsonDocument.Parse(json);
-                if (document.RootElement.ValueKind != JsonValueKind.Array)
-                    return string.Empty;
-
-                var values = new List<string>();
-                foreach (var item in document.RootElement.EnumerateArray())
+                var display = FormatAdvancePairAccounts(line.DebitAccount, line.CreditAccount);
+                if (string.IsNullOrWhiteSpace(display) ||
+                    values.Any(value => string.Equals(value, display, StringComparison.CurrentCultureIgnoreCase)))
                 {
-                    if (item.ValueKind != JsonValueKind.Object)
-                        continue;
-
-                    var debit = item.TryGetProperty("DebitAccount", out var debitElement) ? debitElement.GetString() ?? string.Empty : string.Empty;
-                    var credit = item.TryGetProperty("CreditAccount", out var creditElement) ? creditElement.GetString() ?? string.Empty : string.Empty;
-                    var display = FormatAdvancePairAccounts(debit, credit);
-                    if (string.IsNullOrWhiteSpace(display) ||
-                        values.Any(value => string.Equals(value, display, StringComparison.CurrentCultureIgnoreCase)))
-                    {
-                        continue;
-                    }
-
-                    values.Add(display);
+                    continue;
                 }
 
-                return string.Join("; ", values);
+                values.Add(display);
             }
-            catch
-            {
-                return string.Empty;
-            }
+
+            return string.Join("; ", values);
         }
 
         /// <summary>Пара счетов одной строки: «Дт 602 / Кт 303».</summary>
@@ -727,6 +734,9 @@ namespace BIS.ERP.Views
         public Guid Id { get; set; }
         public string DocumentNumber { get; set; } = string.Empty;
         public DateTime DocumentDate { get; set; }
+
+        /// <summary>Пара счетов документа (вид авансового расчёта).</summary>
+        public Guid AdvancePairId { get; set; }
 
         /// <summary>Начало интервала поиска проводок документа.</summary>
         public DateTime PostingDateFrom { get; set; }

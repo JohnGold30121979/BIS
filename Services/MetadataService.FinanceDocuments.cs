@@ -18,7 +18,7 @@ public partial class MetadataService
         var currencyId = GetStringValue(recordData, "currency_id", "Валюта");
         var organizationId = GetNullableGuid(recordData, "organization_id", "Организация");
         var employeeId = GetNullableGuid(recordData, "employee_id", "Сотрудник");
-        var linePostings = await ResolveAdvanceExpensePostingLinesAsync(recordData);
+        var linePostings = await ResolveAdvanceExpensePostingLinesAsync(document.TableName, recordId);
 
         if (linePostings.Count > 0)
         {
@@ -150,32 +150,20 @@ public partial class MetadataService
     }
 
     private async Task<List<AdvanceExpensePostingLine>> ResolveAdvanceExpensePostingLinesAsync(
-        Dictionary<string, object> recordData)
+        string headerTableName,
+        Guid recordId)
     {
-        var json = GetStringValue(recordData, "expense_lines", "Строки затрат");
-        if (string.IsNullOrWhiteSpace(json))
-            return new List<AdvanceExpensePostingLine>();
-
-        List<AdvanceExpenseLinePayload>? payload;
-        try
-        {
-            payload = JsonSerializer.Deserialize<List<AdvanceExpenseLinePayload>>(
-                json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        }
-        catch
-        {
-            return new List<AdvanceExpensePostingLine>();
-        }
-
-        if (payload == null || payload.Count == 0)
+        // Строки затрат читаются из классической таблицы строк (как у счет-фактур),
+        // а не из JSON-поля expense_lines.
+        var lines = await GetAdvancePaymentLinesAsync(headerTableName, recordId);
+        if (lines.Count == 0)
             return new List<AdvanceExpensePostingLine>();
 
         var advancePaymentRows = await GetAdvancePaymentPairsAsync();
         var result = new List<AdvanceExpensePostingLine>();
-        for (var index = 0; index < payload.Count; index++)
+        for (var index = 0; index < lines.Count; index++)
         {
-            var line = payload[index];
+            var line = lines[index];
             var lineAmount = line.Amount;
             if (lineAmount <= 0 && line.AmountCurrency > 0 && line.ExchangeRate > 0)
                 lineAmount = Math.Round(line.AmountCurrency * line.ExchangeRate, 2, MidpointRounding.AwayFromZero);
@@ -298,19 +286,4 @@ public partial class MetadataService
         decimal AmountCurrency,
         string? CurrencyId,
         decimal ExchangeRate);
-
-    private sealed class AdvanceExpenseLinePayload
-    {
-        public DateTime? LineDate { get; set; }
-        public Guid PairId { get; set; }
-        public string PairName { get; set; } = string.Empty;
-        public string DebitAccount { get; set; } = string.Empty;
-        public string CreditAccount { get; set; } = string.Empty;
-        public string ExpenseAccount { get; set; } = string.Empty;
-        public Guid CurrencyId { get; set; }
-        public decimal AmountCurrency { get; set; }
-        public decimal ExchangeRate { get; set; }
-        public decimal Amount { get; set; }
-        public string Description { get; set; } = string.Empty;
-    }
 }

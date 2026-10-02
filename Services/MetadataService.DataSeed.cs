@@ -1158,16 +1158,22 @@ namespace BIS.ERP.Services
         private async Task UpsertCatalogSeedRowAsync(
             string tableName,
             string code,
-            IReadOnlyDictionary<string, object?> values)
+            IReadOnlyDictionary<string, object?> values,
+            IReadOnlyCollection<string>? insertOnlyColumns = null)
         {
             var codeLiteral = ToSqlLiteral(code);
+            var insertOnly = insertOnlyColumns == null
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(insertOnlyColumns, StringComparer.OrdinalIgnoreCase);
+
             var updateAssignments = values
                 .Where(item => !item.Key.Equals("Id", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("code", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("CreatedAt", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("is_default", StringComparison.OrdinalIgnoreCase) &&
                                !item.Key.Equals("is_default_vat", StringComparison.OrdinalIgnoreCase) &&
-                               !item.Key.Equals("is_default_sales_tax", StringComparison.OrdinalIgnoreCase))
+                               !item.Key.Equals("is_default_sales_tax", StringComparison.OrdinalIgnoreCase) &&
+                               !insertOnly.Contains(item.Key))
                 .Select(item => $@"""{item.Key}"" = {ToSqlLiteral(item.Value)}")
                 .ToList();
 
@@ -1193,6 +1199,38 @@ namespace BIS.ERP.Services
                     WHERE ""code"" = {codeLiteral}
                 );");
         }
+
+        /// <summary>
+        /// Сид пары счетов не перезаписывает существующую строку: пара создаётся один
+        /// раз, дальше её правят вручную. Без этого включённый «Валютный учет»,
+        /// выбранный модуль и признаки участия возвращались к значениям сида при
+        /// каждой синхронизации метаданных.
+        /// </summary>
+        private async Task UpsertAccountPairsSeedRowAsync(
+            MetadataObject catalog,
+            string code,
+            Dictionary<string, object?> values)
+        {
+            await UpsertCatalogSeedRowAsync(catalog.TableName, code, values, AccountPairsUserEditableColumns);
+        }
+
+        /// <summary>Колонки пары счетов, заполняемые сидом только при вставке.</summary>
+        private static readonly IReadOnlyCollection<string> AccountPairsUserEditableColumns = new[]
+        {
+            "name",
+            "use_organizations",
+            "use_personnel",
+            "use_currency",
+            "module_code",
+            "debit_account",
+            "credit_account",
+            "use_settlements",
+            "generate_postings",
+            "use_internal_settlements",
+            "is_active",
+            "description",
+            "UpdatedAt"
+        };
 
         private static string ToSqlLiteral(object? value)
         {

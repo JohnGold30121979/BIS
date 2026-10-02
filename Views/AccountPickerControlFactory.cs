@@ -12,6 +12,21 @@ namespace BIS.ERP.Views
 {
     public static class AccountPickerControlFactory
     {
+        /// <summary>
+        /// Реестр счетов пикера. Нужен, чтобы по введённому вручную коду найти
+        /// счёт: при ручном вводе <see cref="Tag"/> сбрасывается, и без реестра
+        /// значение не доходило до сохранения.
+        /// </summary>
+        private static readonly DependencyProperty AccountRegistryProperty =
+            DependencyProperty.RegisterAttached(
+                "AccountRegistry",
+                typeof(AccountAnalyticsRegistry),
+                typeof(AccountPickerControlFactory),
+                new PropertyMetadata(null));
+
+        private static AccountAnalyticsRegistry? GetRegistry(DependencyObject element) =>
+            (AccountAnalyticsRegistry?)element.GetValue(AccountRegistryProperty);
+
         public static UserControl Create(
             AccountAnalyticsRegistry accountAnalytics,
             object? currentValue,
@@ -53,6 +68,7 @@ namespace BIS.ERP.Views
                 Tag = selectedAccount,
                 MinWidth = 200
             };
+            picker.SetValue(AccountRegistryProperty, accountAnalytics);
 
             if (allowManualInput)
                 AttachManualInputHandlers(textBox, picker, selectionChanged);
@@ -79,7 +95,20 @@ namespace BIS.ERP.Views
 
         public static AccountReferenceItem? GetSelectedAccount(Control control)
         {
-            return control is UserControl { Tag: AccountReferenceItem account } ? account : null;
+            if (control is not UserControl picker)
+                return null;
+
+            if (picker.Tag is AccountReferenceItem selected)
+                return selected;
+
+            // Ручной ввод кода: Tag сбрасывается обработчиком TextChanged, поэтому
+            // счёт ищем по набранному в поле значению.
+            var code = GetAccountCode(control);
+            if (string.IsNullOrWhiteSpace(code))
+                return null;
+
+            return GetRegistry(picker)?.Accounts.FirstOrDefault(account =>
+                string.Equals(account.Code, code.Trim(), StringComparison.OrdinalIgnoreCase));
         }
 
         public static string GetAccountCode(Control control)

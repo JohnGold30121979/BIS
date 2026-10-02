@@ -572,7 +572,7 @@ public partial class MetadataService
 
         foreach (var item in items)
         {
-            await UpsertCatalogSeedRowAsync(catalog.TableName, item.code, new Dictionary<string, object?>
+            await UpsertAccountPairsSeedRowAsync(catalog, item.code, new Dictionary<string, object?>
             {
                 ["Id"] = Guid.NewGuid(),
                 ["code"] = item.code,

@@ -28,16 +28,17 @@
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
             <Button x:Name="PostButton" Content="Провести" Width="105" Height="34" Margin="0,0,8,0"
                     Background="#8E44AD" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
-            <StackPanel x:Name="ReportPeriodPanel" Orientation="Horizontal" Margin="6,0,8,0" Visibility="Collapsed">
+            <StackPanel x:Name="ReportPeriodPanel" Orientation="Horizontal" Margin="6,0,10,0" Visibility="Collapsed">
                 <TextBlock Text="С:" VerticalAlignment="Center" Margin="0,0,4,0"/>
                 <DatePicker x:Name="ReportStartDatePicker" Width="120" Height="34" Margin="0,0,8,0"/>
                 <TextBlock Text="По:" VerticalAlignment="Center" Margin="0,0,4,0"/>
                 <DatePicker x:Name="ReportEndDatePicker" Width="120" Height="34" Margin="0,0,8,0"/>
-                <Button x:Name="ExportTurnoverExcelButton" Content="Оборотка Excel" Width="130" Height="34"
-                        Background="#16A085" Foreground="White" Click="OnExportTurnoverExcelClick"/>
+                <Button x:Name="RefreshButton" Content="Обновить" Width="130" Height="34"
+                        Background="#16A085" Foreground="White" Click="OnRefreshClick"/>
             </StackPanel>
-            <Button x:Name="RefreshButton" Content="Обновить" Width="105" Height="34"
-                    Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
+
+            <Button x:Name="ExportTurnoverExcelButton" Content="Оборотка Excel" Width="130" Height="34"
+                    Background="#16A085" Foreground="White" Click="OnExportTurnoverExcelClick"/>
         </StackPanel>
 
         <DataGrid x:Name="DataGrid" Grid.Row="2"
@@ -125,6 +126,9 @@
                       BorderThickness="1"
                       MouseDoubleClick="PostingDetailsGrid_MouseDoubleClick">
                 <DataGrid.Columns>
+                    <!-- Порядковый номер строки расходов: своя нумерация для каждого
+                         документа, всегда начинается с 1. -->
+                    <DataGridTextColumn Header="Расходы" Binding="{Binding [Расходы]}" Width="60"/>
                     <DataGridTextColumn Header="Документ" Binding="{Binding [Документ]}" Width="90"/>
                     <DataGridTextColumn Header="Тип документа" Binding="{Binding [Тип документа]}" Width="135"/>
                     <DataGridTextColumn Header="Дата" Binding="{Binding [Дата]}" Width="90"/>

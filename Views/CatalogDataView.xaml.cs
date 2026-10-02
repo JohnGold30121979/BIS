@@ -29,6 +29,7 @@ namespace BIS.ERP.Views
         private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
         private static readonly IValueConverter LinkFlagConverter = new BooleanPlusDisplayConverter();
         private static readonly IValueConverter ClosingModuleConverter = new ClosingModuleDisplayConverter();
+        private static readonly IValueConverter ModuleDisplayConverter = new AccountPairsModuleDisplayConverter();
         private static readonly IValueConverter PrintModeConverter = new ChartOfAccountsModeDisplayConverter("Признак печати");
         private static readonly IValueConverter BalanceModeConverter = new ChartOfAccountsModeDisplayConverter("Сохранять остатки");
 
@@ -1902,7 +1903,6 @@ namespace BIS.ERP.Views
                 "Наименование" => 165,
                 "Тип счета" => 86,
                 "Описание" => 130,
-                //"Уровень" => 42,
                 "Активен" => 52,
                 "Закрывает модуль" => 70,
                 "Группа аналитических статей" => 82,
@@ -1942,7 +1942,6 @@ namespace BIS.ERP.Views
                 "Наименование" => 118,
                 "Тип счета" => 72,
                 "Описание" => 92,
-                //"Уровень" => 36,
                 "Активен" => 44,
                 "Закрывает модуль" => 60,
                 "Группа аналитических статей" => 70,
@@ -2060,6 +2059,13 @@ namespace BIS.ERP.Views
             else if (IsChartOfAccountsCatalog && field.Name == "Сохранять остатки")
             {
                 binding.Converter = BalanceModeConverter;
+            }
+            else if (IsAdvancePaymentsCatalog &&
+                     string.Equals(field.DbColumnName, "module_code", StringComparison.OrdinalIgnoreCase))
+            {
+                // В баке модуль хранится кодом или наименованием (сид пишет «Финансы»),
+                // в таблице показываем наименование модуля.
+                binding.Converter = ModuleDisplayConverter;
             }
             else if (IsAdvancePaymentsCatalog && field.FieldType == "Bool" && field.Name != "Активен")
             {
@@ -2912,6 +2918,24 @@ namespace BIS.ERP.Views
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
                 return ChartOfAccountsSelectionMetadata.NormalizeModuleDisplayName(value?.ToString());
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                throw new NotSupportedException();
+            }
+        }
+
+        /// <summary>
+        /// Модуль пары счетов: в баке может лежать код («3», «finance») либо
+        /// наименование («Финансы»), в таблице показывается наименование.
+        /// </summary>
+        private sealed class AccountPairsModuleDisplayConverter : IValueConverter
+        {
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                var display = ChartOfAccountsSelectionMetadata.NormalizeModuleDisplayName(value?.ToString());
+                return string.IsNullOrWhiteSpace(display) ? value?.ToString() ?? string.Empty : display;
             }
 
             public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

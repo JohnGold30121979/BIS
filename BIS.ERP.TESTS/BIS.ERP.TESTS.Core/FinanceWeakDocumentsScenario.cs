@@ -313,6 +313,31 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
                 expectedColumns,
                 errors,
                 cancellationToken);
+
+            // Классическая модель авансов: строки затрат — в отдельной таблице
+            // (как doc_sales_invoice_lines), JSON-поле expense_lines не используется.
+            if (documentName == "Авансовые платежи" || documentName == "Авансовый отчет")
+            {
+                if (document.Fields.Any(field =>
+                        string.Equals(field.DbColumnName, "expense_lines", StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add($"{databaseName}: документ '{documentName}' всё ещё содержит JSON-поле expense_lines.");
+                }
+
+                if (!string.Equals(document.TableName, AdvancePaymentService.DefaultHeaderTableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"{databaseName}: документ '{documentName}' ожидает таблицу " +
+                               $"'{AdvancePaymentService.DefaultHeaderTableName}', а найдена '{document.TableName}'.");
+                }
+
+                await VerifyTableColumnsAsync(
+                    context,
+                    databaseName,
+                    document.TableName + "_lines",
+                    new[] { "advance_id", "line_number", "expense_account", "credit_account", "amount" },
+                    errors,
+                    cancellationToken);
+            }
         }
 
         var exchangeRateDifferenceCatalog = await context.MetadataObjects

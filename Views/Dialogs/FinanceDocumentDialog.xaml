@@ -151,6 +151,17 @@
                               GotKeyboardFocus="AdvanceExpenseGrid_GotKeyboardFocus"
                               PreviewKeyDown="AdvanceExpenseGrid_PreviewKeyDown">
                         <DataGrid.Columns>
+                            <!-- Ширины колонок заданы фиксированно: диалог целиком
+                                 обёрнут в ScrollViewer с отключённой горизонтальной
+                                 прокруткой (HorizontalScrollBarVisibility="Disabled"),
+                                 поэтому таблица измеряется с бесконечной шириной.
+                                 При Width="*" звёздная колонка получает бесконечный
+                                 размер — колонки «уезжают» друг на друга и их
+                                 невозможно двигать мышью. Фиксированные ширины
+                                 (44 + 130 + 240 + 300 + 130 = 844 px, валютные колонки
+                                 добавляются по мере их появления) дают корректную
+                                 раскладку; лишнее место занимает горизонтальная
+                                 прокрутка самой таблицы. -->
                             <DataGridTextColumn Header="№" Binding="{Binding RowNumber}" Width="44" IsReadOnly="True"/>
                             <!-- Дата редактируется через DatePicker: глобальная маска ввода
                                  DD/MM/YYYY из Behaviors.DatePickerInputMaskBehavior (класс-обработчик
@@ -159,7 +170,7 @@
                             <DataGridTemplateColumn x:Name="AdvanceExpenseDateColumn" Header="Дата" Width="130" CanUserSort="False">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding LineDate, StringFormat=dd.MM.yyyy}"
+                                        <TextBlock Text="{Binding LineDate, StringFormat=dd/MM/yyyy}"
                                                    VerticalAlignment="Center" Margin="4,0"/>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
@@ -172,7 +183,7 @@
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Детали проводки"
                                                 Binding="{Binding Description, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
-                                                Width="*" MinWidth="200"/>
+                                                Width="240" MinWidth="160"/>
                             <!-- Счет расхода набирается пользователем: в поле вводятся только
                                  цифры кода, наименование подставляется из плана счетов, а
                                  несоответствие подсвечивается прямо при наборе (см.
@@ -231,13 +242,34 @@
                                                 Width="130"/>
                             <DataGridComboBoxColumn x:Name="AdvanceCurrencyColumn" Header="Валюта" Width="150"
                                                     DisplayMemberPath="DisplayName" SelectedValuePath="Id"
-                                                    SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                    SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                    Visibility="Collapsed"/>
                             <DataGridTextColumn x:Name="AdvanceAmountCurrencyColumn" Header="Сумма в валюте"
                                                 Binding="{Binding AmountCurrency, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}"
                                                 Width="130" Visibility="Collapsed"/>
-                            <DataGridTextColumn x:Name="AdvanceExchangeRateColumn" Header="Курс"
-                                                Binding="{Binding ExchangeRate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}"
-                                                Width="100" Visibility="Collapsed"/>
+                            <!-- Курс вводится вручную либо запрашивается кнопкой «?» из
+                                 справочника курсов валют (см. RequestLineExchangeRate_Click). -->
+                            <DataGridTemplateColumn x:Name="AdvanceExchangeRateColumn" Header="Курс"
+                                                   Width="130" MinWidth="120" CanUserSort="False" Visibility="Collapsed">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Grid.Column="0" Height="24" Margin="2,0,4,0" Padding="2,0"
+                                                     TextAlignment="Right" VerticalContentAlignment="Center"
+                                                     ToolTip="{Binding ExchangeRateHint}"
+                                                     ToolTipService.InitialShowDelay="400"
+                                                     Text="{Binding ExchangeRate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}"/>
+                                            <Button Grid.Column="1" Content="?" Width="30" Height="24" Margin="0,0,2,0"
+                                                    Tag="{Binding}" Click="RequestLineExchangeRate_Click"
+                                                    ToolTip="Запросить курс из справочника курсов валют"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
 

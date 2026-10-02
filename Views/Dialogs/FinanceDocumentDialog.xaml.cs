@@ -37,6 +37,9 @@ namespace BIS.ERP.Views
         private List<ReferenceItem> _advancePayments = new();
         private List<Dictionary<string, object>> _advancePaymentRows = new();
         private readonly ObservableCollection<AdvanceExpenseLineRow> _advanceExpenseLines = new();
+
+        /// <summary>Строки затрат, подготовленные к записи в таблицу строк при сохранении.</summary>
+        private List<AdvancePaymentLine> _pendingAdvanceLines = new();
         private List<Dictionary<string, object>>? _accountSelectionData;
 
         private object? _debitAccountValue;
@@ -48,7 +51,6 @@ namespace BIS.ERP.Views
         private bool _isApplyingExpenseAccount;
         private bool _isCalculatingPayroll;
         private bool _isUpdatingAdvanceBalances;
-        private bool _suppressAdvanceExpenseDateFocus;
 
         public FinanceDocumentDialog(MetadataObject document, MetadataService metadataService)
         {
@@ -173,10 +175,11 @@ namespace BIS.ERP.Views
             _employees = await LoadReferenceItemsAsync(catalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
             _currencies = await LoadReferenceItemsAsync(catalogs, "Справочник валют", "Код", "Наименование");
             _advancePaymentRows = await _metadataService.GetAdvancePaymentPairsAsync();
-            var personnelAdvanceRows = _advancePaymentRows.Where(IsPersonnelAdvancePair).ToList();
-            if (personnelAdvanceRows.Count == 0)
-                personnelAdvanceRows = _advancePaymentRows;
-            _advancePayments = BuildAdvancePaymentReferenceItems(personnelAdvanceRows);
+            // В списке — все активные пары счетов. Раньше здесь оставлялись только
+            // пары с признаком сотрудников/«подотчет», из-за чего в «Пара счетов»
+            // попадала единственная «3 - Расчеты с подотчетными лицами» и выбрать
+            // другую пару было невозможно.
+            _advancePayments = BuildAdvancePaymentReferenceItems(_advancePaymentRows);
             AdvanceCurrencyColumn.ItemsSource = _currencies;
 
             ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
@@ -295,11 +298,7 @@ namespace BIS.ERP.Views
             {
                 selectedId ??= GetSelectedReferenceId(AdvancePaymentCombo);
                 _advancePaymentRows = await _metadataService.GetAdvancePaymentPairsAsync();
-                var personnelAdvanceRows = _advancePaymentRows.Where(IsPersonnelAdvancePair).ToList();
-                if (personnelAdvanceRows.Count == 0)
-                    personnelAdvanceRows = _advancePaymentRows;
-
-                _advancePayments = BuildAdvancePaymentReferenceItems(personnelAdvanceRows);
+                _advancePayments = BuildAdvancePaymentReferenceItems(_advancePaymentRows);
                 ReferenceComboBoxSearchHelper.Attach(AdvancePaymentCombo, _advancePayments);
 
                 if (selectedId.HasValue && selectedId.Value != Guid.Empty)
@@ -345,17 +344,17 @@ namespace BIS.ERP.Views
             AmountCurrencyBox.Text = FormatDecimal(GetDecimal(record, "Сумма в валюте", "amount_currency"));
             ExchangeRateBox.Text = FormatDecimal(GetDecimal(record, "Курс", "exchange_rate"));
 
-            LoadModeSpecificRecord(record);
+            await LoadModeSpecificRecordAsync(record, recordId);
         }
 
-        private void LoadModeSpecificRecord(Dictionary<string, object> record)
+        private async Task LoadModeSpecificRecordAsync(Dictionary<string, object> record, Guid recordId)
         {
             if (_documentKind == FinanceDocumentKind.AdvanceReport)
             {
                 SelectComboByRecordValue(FinanceEmployeeCombo, record, "Сотрудник", "employee_id");
                 SelectComboByRecordValue(AdvanceEmployeeCombo, record, "Сотрудник", "employee_id");
                 SelectComboByRecordValue(AdvancePaymentCombo, record, "Вид авансового расчета", "advance_payment_id");
-                LoadAdvanceExpenseLines(record);
+                await LoadAdvanceExpenseLinesAsync(record, recordId);
                 SelectAdvancePairFromLines();
                 ReportStartDatePicker.SelectedDate = GetDate(record, "Дата начала отчета", "report_start_date");
                 ReportEndDatePicker.SelectedDate = GetDate(record, "Дата окончания отчета", "report_end_date");
@@ -582,6 +581,7 @@ namespace BIS.ERP.Views
             try
             {
                 Cursor = Cursors.Wait;
+                _pendingAdvanceLines = new List<AdvancePaymentLine>();
                 var data = BuildRecordData();
 
                 Guid savedId;
@@ -598,7 +598,12 @@ namespace BIS.ERP.Views
                 SavedRecordId = savedId;
 
                 if (_documentKind == FinanceDocumentKind.AdvanceReport)
+                {
+                    // Строки затрат — в отдельную таблицу (классическая модель).
+                    await _metadataService.SaveAdvancePaymentLinesAsync(
+                        _document.TableName, savedId, _pendingAdvanceLines);
                     await _metadataService.PostDocumentAsync(_document.Id, savedId);
+                }
 
                 BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
@@ -613,6 +618,24 @@ namespace BIS.ERP.Views
                 Cursor = null;
             }
         }
+        private static AdvancePaymentLine ToAdvancePaymentLine(AdvanceExpenseLineRecord source) => new()
+        {
+            LineDate = source.LineDate,
+            PairId = source.PairId,
+            PairCode = source.PairCode,
+            PairName = source.PairName,
+            DebitAccount = source.DebitAccount,
+            CreditAccount = source.CreditAccount,
+            ExpenseAccount = source.ExpenseAccount,
+            ExpenseAccountName = source.ExpenseAccountName,
+            CurrencyId = source.CurrencyId,
+            CurrencyName = source.CurrencyName,
+            AmountCurrency = source.AmountCurrency,
+            ExchangeRate = source.ExchangeRate,
+            Amount = source.Amount,
+            Description = source.Description
+        };
+
         private Dictionary<string, object> BuildRecordData()
         {
             var documentNumber = MetadataService.NormalizeLegacyDocumentNumber(NumberBox.Text);
@@ -655,8 +678,10 @@ namespace BIS.ERP.Views
         private void ApplyAdvanceReportData(Dictionary<string, object> data)
         {
             var employeeId = GetSelectedReferenceId(FinanceEmployeeCombo);
-            if (employeeId == Guid.Empty)
+            // Сотрудник обязателен, только если его поле показано (пометка пары счетов).
+            if (employeeId == Guid.Empty && ShouldShowAdvanceEmployee())
                 throw new InvalidOperationException("Выберите сотрудника.");
+
 
             var lines = BuildAdvanceExpenseLineRecords();
             var total = lines.Sum(line => line.Amount);
@@ -673,8 +698,12 @@ namespace BIS.ERP.Views
 
             data["Сумма"] = total;
             AmountBox.Text = FormatDecimal(total);
-            SetFieldValueIfExists(data, "Сотрудник", employeeId);
-            SetFieldValueIfExists(data, "Строки затрат", JsonSerializer.Serialize(lines));
+            if (employeeId != Guid.Empty)
+                SetFieldValueIfExists(data, "Сотрудник", employeeId);
+
+            // Строки затрат сохраняются в отдельную таблицу (doc_advance_payment_lines)
+            // после записи шапки — в OnSaveClick, а не как JSON в шапку.
+            _pendingAdvanceLines = lines.Select(ToAdvancePaymentLine).ToList();
             SetFieldValueIfExists(data, "Принято к учету", total);
 
             var firstLine = lines[0];
@@ -692,56 +721,41 @@ namespace BIS.ERP.Views
         }
         private void ConfigureAdvanceExpenseGrid()
         {
+            // Строки не создаются заранее: новая строка появляется только по
+            // кнопке «Добавить строку» или по правому «+» в таблице.
             AdvanceExpenseGrid.ItemsSource = _advanceExpenseLines;
-            if (_advanceExpenseLines.Count == 0)
-                _advanceExpenseLines.Add(CreateAdvanceExpenseLineRow());
             RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
         }
 
-        private void LoadAdvanceExpenseLines(IReadOnlyDictionary<string, object> record)
+        private async Task LoadAdvanceExpenseLinesAsync(IReadOnlyDictionary<string, object> record, Guid recordId)
         {
             _advanceExpenseLines.Clear();
-            var json = GetString(record, "Строки затрат", "expense_lines");
-            if (!string.IsNullOrWhiteSpace(json))
+
+            // Строки затрат читаются из классической таблицы строк
+            // (doc_advance_payment_lines), а не из JSON-поля expense_lines.
+            var lines = await _metadataService.GetAdvancePaymentLinesAsync(_document.TableName, recordId);
+            foreach (var line in lines)
             {
-                try
+                var row = new AdvanceExpenseLineRow
                 {
-                    var loaded = JsonSerializer.Deserialize<List<AdvanceExpenseLineRecord>>(
-                        json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    if (loaded != null)
-                    {
-                        foreach (var line in loaded)
-                        {
-                            var row = new AdvanceExpenseLineRow
-                            {
-                                LineDate = line.LineDate ?? DatePicker.SelectedDate,
-                                PairId = line.PairId,
-                                ExpenseAccountValue = line.ExpenseAccount,
-                                ExpenseAccountDisplay = ResolveAccountDisplay(line.ExpenseAccount, line.ExpenseAccountName),
-                                Amount = line.Amount,
-                                CurrencyId = line.CurrencyId,
-                                AmountCurrency = line.AmountCurrency,
-                                ExchangeRate = line.ExchangeRate,
-                                Description = line.Description
-                            };
-                            ApplyLoadedExpenseAccount(row);
-                            AttachAdvanceExpenseLine(row);
-                            _advanceExpenseLines.Add(row);
-                        }
-                    }
-                }
-                catch
-                {
-                    _advanceExpenseLines.Clear();
-                }
+                    LineDate = line.LineDate ?? DatePicker.SelectedDate,
+                    PairId = line.PairId,
+                    ExpenseAccountValue = line.ExpenseAccount,
+                    ExpenseAccountDisplay = ResolveAccountDisplay(line.ExpenseAccount, line.ExpenseAccountName),
+                    Amount = line.Amount,
+                    CurrencyId = line.CurrencyId,
+                    AmountCurrency = line.AmountCurrency,
+                    ExchangeRate = line.ExchangeRate,
+                    Description = line.Description
+                };
+                ApplyLoadedExpenseAccount(row);
+                AttachAdvanceExpenseLine(row);
+                _advanceExpenseLines.Add(row);
             }
 
             if (_advanceExpenseLines.Count == 0)
                 AddLegacyAdvanceExpenseLine(record);
-            if (_advanceExpenseLines.Count == 0)
-                _advanceExpenseLines.Add(CreateAdvanceExpenseLineRow());
 
             RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
@@ -864,13 +878,6 @@ namespace BIS.ERP.Views
                 TryGetGuid(row.GetValueOrDefault("Id"), out var id) && id == pairId);
         }
 
-        private static bool IsPersonnelAdvancePair(IReadOnlyDictionary<string, object> row)
-        {
-            return ReadBool(row, "use_personnel", "Сотрудники") ||
-                   GetString(row, "name", "Вид расчета", "Наименование")
-                       .Contains("подотчет", StringComparison.OrdinalIgnoreCase);
-        }
-
         private static bool ReadBool(IReadOnlyDictionary<string, object> row, params string[] keys)
         {
             foreach (var key in keys)
@@ -916,8 +923,6 @@ namespace BIS.ERP.Views
         {
             if (AdvanceExpenseGrid.SelectedItem is AdvanceExpenseLineRow row)
                 _advanceExpenseLines.Remove(row);
-            if (_advanceExpenseLines.Count == 0)
-                _advanceExpenseLines.Add(CreateAdvanceExpenseLineRow());
             RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
         }
@@ -975,6 +980,22 @@ namespace BIS.ERP.Views
                 return;
 
             ApplyTypedExpenseAccountCode(row, textBox, showMessage: false);
+            KeepExpenseAccountFocus(textBox);
+        }
+
+        /// <summary>
+        /// Возвращает клавиатурный фокус в поле кода счёта, если он был потерян
+        /// при обновлении строки. Без этого Enter после набора уходил из таблицы
+        /// на первый элемент формы, потому что обработчик перехода по колонкам
+        /// живёт на самой таблице и без фокуса в ней не срабатывает.
+        /// </summary>
+        private static void KeepExpenseAccountFocus(TextBox textBox)
+        {
+            if (textBox.IsFocused || ReferenceEquals(Keyboard.FocusedElement, textBox))
+                return;
+
+            textBox.Focus();
+            Keyboard.Focus(textBox);
         }
 
         /// <summary>
@@ -1039,6 +1060,12 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Заполняет все поля счёта расхода строки. Код и наименование расходятся
         /// при ручном наборе, поэтому заполняются независимо друг от друга.
+        ///
+        /// Здесь намеренно не вызывается UpdateAdvanceAccountDependentVisibility():
+        /// видимость колонок зависит от пары счетов в шапке, а не от счёта строки,
+        /// и любое переключение Visible/Collapsed заставляет DataGrid перестроить
+        /// колонки вместе с находящимся в фокусе полем ввода — после этого Enter
+        /// уходил бы из таблицы на первый элемент формы.
         /// </summary>
         private void ApplyExpenseAccount(
             AdvanceExpenseLineRow row,
@@ -1051,18 +1078,12 @@ namespace BIS.ERP.Views
             var display = !string.IsNullOrWhiteSpace(displayName)
                 ? displayName!
                 : account?.DisplayName ?? code;
-            var accountChanged = !Equals(row.ExpenseAccountValue, accountValue);
 
             row.ExpenseAccountValue = accountValue;
             row.ExpenseAccountDisplay = display;
             row.ExpenseAccountCode = code;
             row.ExpenseAccountTitle = title;
             row.ExpenseAccountHint = string.Empty;
-
-            // Показ колонок пересчитываем только при реальной смене счёта: во время
-            // набора это лишний проход по строкам и лишняя перерисовка таблицы.
-            if (accountChanged)
-                UpdateAdvanceAccountDependentVisibility();
         }
 
         private static void ClearExpenseAccount(AdvanceExpenseLineRow row)
@@ -1212,16 +1233,15 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            for (var nextRow = rowIndex + 1; nextRow < AdvanceExpenseGrid.Items.Count; nextRow++)
-            {
-                var firstEditable = Enumerable.Range(0, AdvanceExpenseGrid.Columns.Count)
-                    .FirstOrDefault(IsEditableAdvanceExpenseColumn, -1);
-                if (firstEditable < 0)
-                    return;
-
-                FocusAdvanceExpenseCell(AdvanceExpenseGrid.Items[nextRow], firstEditable);
+            // С последней колонки переходим на первую редактируемую следующей строки.
+            var firstEditableColumn = Enumerable.Range(0, AdvanceExpenseGrid.Columns.Count)
+                .FirstOrDefault(IsEditableAdvanceExpenseColumn, -1);
+            if (firstEditableColumn < 0)
                 return;
-            }
+
+            var nextRowIndex = rowIndex + 1;
+            if (nextRowIndex < AdvanceExpenseGrid.Items.Count)
+                FocusAdvanceExpenseCell(AdvanceExpenseGrid.Items[nextRowIndex], firstEditableColumn);
         }
 
         /// <summary>
@@ -1251,18 +1271,10 @@ namespace BIS.ERP.Views
 
             void Apply()
             {
-                _suppressAdvanceExpenseDateFocus = true;
-                try
-                {
-                    AdvanceExpenseGrid.SelectedItem = item;
-                    AdvanceExpenseGrid.CurrentCell = new DataGridCellInfo(item, column);
-                    AdvanceExpenseGrid.ScrollIntoView(item, column);
-                    AdvanceExpenseGrid.BeginEdit();
-                }
-                finally
-                {
-                    _suppressAdvanceExpenseDateFocus = false;
-                }
+                AdvanceExpenseGrid.SelectedItem = item;
+                AdvanceExpenseGrid.CurrentCell = new DataGridCellInfo(item, column);
+                AdvanceExpenseGrid.ScrollIntoView(item, column);
+                AdvanceExpenseGrid.BeginEdit();
             }
 
             // Для новой строки ждём окончания текущей операции ввода,
@@ -1543,11 +1555,14 @@ namespace BIS.ERP.Views
                 DescriptionBox.Text = string.Empty;
         }
 
+        /// <summary>
+        /// Новая строка затрат создаётся пустой: дату пользователь вводит сам,
+        /// пара счетов и счёт расхода — по необходимости.
+        /// </summary>
         private AdvanceExpenseLineRow CreateAdvanceExpenseLineRow()
         {
             var row = new AdvanceExpenseLineRow
             {
-                LineDate = DatePicker?.SelectedDate,
                 PairId = GetSelectedReferenceId(AdvancePaymentCombo)
             };
             AttachAdvanceExpenseLine(row);
@@ -1580,22 +1595,18 @@ namespace BIS.ERP.Views
                 .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "credit_account", "Кредит"))))
                 .ToList();
 
-            var showOrganization = OrganizationCombo.SelectedItem != null ||
-                                   pairRows.Any(row => ReadBool(row, "use_organizations", "Организации")) ||
-                                   AccountAnalyticsRules.ShouldShowField(
-                                       "Организация",
-                                       settings,
-                                       _accountAnalytics.Definitions,
-                                       "Организации",
-                                       showWhenNoAccountSelected: false,
-                                       showUnmappedFields: false);
+            // «Сотрудник» и «Организация» видны только когда в выбранной паре счетов
+            // стоят соответствующие пометки справочника «Пары счетов».
+            var showEmployee = pairRows.Any(row => ReadBool(row, "use_personnel", "Сотрудники"));
+            var showOrganization = pairRows.Any(row => ReadBool(row, "use_organizations", "Организации"));
             var showCurrency = ShouldShowAdvanceCurrency(pairRows, settings);
 
+            // Валютные колонки показываются только для валютных операций:
+            // пара счетов с валютным учётом, валюта в строке либо аналитика счёта.
+            FinanceEmployeePanel.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
             OrganizationPanel.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
-            // Колонка «Валюта» доступна всегда: без неё невозможно указать валюту
-            // строки затрат. Колонки «Сумма в валюте» и «Курс» появляются, когда
-            // валюта уже указана в строке либо этого требует пара счетов/аналитика счетов.
-            AdvanceCurrencyColumn.Visibility = Visibility.Visible;
+
+            AdvanceCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             AdvanceAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             AdvanceExchangeRateColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             CurrencyPanel.Visibility = Visibility.Collapsed;
@@ -1622,6 +1633,11 @@ namespace BIS.ERP.Views
         private bool ShouldShowAdvanceOrganization()
         {
             return OrganizationPanel.Visibility == Visibility.Visible;
+        }
+
+        private bool ShouldShowAdvanceEmployee()
+        {
+            return FinanceEmployeePanel.Visibility == Visibility.Visible;
         }
 
         private bool ShouldShowAdvanceCurrency(
@@ -1673,10 +1689,12 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Подтягивает курс выбранной валюты на дату строки.
-        /// Для базовой валюты курс равен единице.
+        /// Подтягивает курс выбранной валюты на дату строки (дата документа,
+        /// если дата строки ещё не введена). Для базовой валюты курс равен единице.
+        /// При interactive=true курс запрашивается по кнопке «?»: если в справочнике
+        /// его нет, предлагается загрузить актуальные курсы НБКР.
         /// </summary>
-        private async Task ApplyLineExchangeRateAsync(AdvanceExpenseLineRow row)
+        private async Task ApplyLineExchangeRateAsync(AdvanceExpenseLineRow row, bool interactive = false)
         {
             if (row.CurrencyId == Guid.Empty)
             {
@@ -1685,19 +1703,107 @@ namespace BIS.ERP.Views
 
                 row.ExchangeRate = 0;
                 row.AmountCurrency = 0;
+                row.ExchangeRateSource = string.Empty;
                 return;
             }
 
             var currency = _currencies.FirstOrDefault(item => item.Id == row.CurrencyId);
             var rateDate = LineDateOrDocumentDate(row).Date;
-            var rate = IsBaseCurrency(currency)
-                ? new CurrencyRateLookupResult(1m, rateDate, "Базовая валюта")
-                : await _metadataService.GetCurrencyRateForDateAsync(row.CurrencyId, rateDate);
-            if (rate == null)
+
+            if (IsBaseCurrency(currency))
+            {
+                row.ExchangeRate = 1m;
+                row.ExchangeRateSource = "Базовая валюта";
+                RecalculateAdvanceExpenseLineCurrency(row);
                 return;
+            }
+
+            var rate = await _metadataService.GetCurrencyRateForDateAsync(row.CurrencyId, rateDate);
+            if (rate == null && interactive)
+                rate = await RequestNewLineExchangeRateAsync(row.CurrencyId, rateDate);
+
+            if (rate == null)
+            {
+                if (interactive)
+                {
+                    MessageBox.Show(
+                        $"Курс валюты на {rateDate:dd/MM/yyyy} не найден. Введите курс вручную.",
+                        "Курс валюты",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+
+                return;
+            }
 
             row.ExchangeRate = rate.Rate;
+            row.ExchangeRateSource = string.IsNullOrWhiteSpace(rate.Source)
+                ? rate.RateDate.ToString("dd/MM/yyyy")
+                : $"{rate.Source} на {rate.RateDate:dd/MM/yyyy}";
             RecalculateAdvanceExpenseLineCurrency(row);
+        }
+
+        /// <summary>Кнопка «?» в колонке «Курс»: запрос курса из справочника.</summary>
+        private async void RequestLineExchangeRate_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not AdvanceExpenseLineRow row)
+                return;
+
+            TryCommitAdvanceExpenseGridEdit();
+
+            if (row.CurrencyId == Guid.Empty)
+            {
+                MessageBox.Show("Сначала выберите валюту в строке затрат.", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            await ApplyLineExchangeRateAsync(row, interactive: true);
+            RecalculateAdvanceExpenseTotal();
+        }
+
+        /// <summary>
+        /// Предлагает загрузить актуальные курсы НБКР и повторно ищет курс
+        /// на запрошенную дату. Возвращает null, если курс так и не найден —
+        /// тогда пользователь вводит курс вручную.
+        /// </summary>
+        private async Task<CurrencyRateLookupResult?> RequestNewLineExchangeRateAsync(Guid currencyId, DateTime rateDate)
+        {
+            var answer = MessageBox.Show(
+                $"Курс на {rateDate:dd/MM/yyyy} не найден в справочнике курсов валют. Загрузить актуальные курсы НБКР?",
+                "Курс валюты",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes)
+                return null;
+
+            try
+            {
+                Cursor = Cursors.Wait;
+                var results = await _metadataService.ImportOfficialCurrencyRatesAsync(rateDate.AddDays(-7), rateDate);
+                var refreshed = await _metadataService.GetCurrencyRateForDateAsync(currencyId, rateDate);
+                if (refreshed != null)
+                    return refreshed;
+
+                MessageBox.Show(
+                    $"Курсы загружены (добавлено: {results.Sum(item => item.Imported)}, " +
+                    $"пропущено: {results.Sum(item => item.Skipped)}), но курс на {rateDate:dd/MM/yyyy} отсутствует. " +
+                    "Введите курс вручную.",
+                    "Курс валюты",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось загрузить курсы НБКР: {ex.Message}", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+            finally
+            {
+                Cursor = null;
+            }
         }
 
         private DateTime LineDateOrDocumentDate(AdvanceExpenseLineRow row)
@@ -2155,6 +2261,7 @@ namespace BIS.ERP.Views
         private Guid _currencyId;
         private decimal _amountCurrency;
         private decimal _exchangeRate;
+        private string _exchangeRateSource = string.Empty;
         private string _description = string.Empty;
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -2313,6 +2420,29 @@ namespace BIS.ERP.Views
                 OnPropertyChanged(nameof(ExchangeRate));
             }
         }
+
+        /// <summary>Источник курса («НБКР на 15/10/2026») — для подсказки в ячейке.</summary>
+        public string ExchangeRateSource
+        {
+            get => _exchangeRateSource;
+            set
+            {
+                var normalized = value ?? string.Empty;
+                if (_exchangeRateSource == normalized)
+                    return;
+                _exchangeRateSource = normalized;
+                OnPropertyChanged(nameof(ExchangeRateSource));
+                OnPropertyChanged(nameof(ExchangeRateHint));
+            }
+        }
+
+        private const string ManualExchangeRateHint =
+            "Введите курс вручную или нажмите «?» для запроса курса из справочника курсов валют";
+
+        /// <summary>Подсказка ячейки курса: источник курса либо подсказка о ручном вводе.</summary>
+        public string ExchangeRateHint => !string.IsNullOrWhiteSpace(_exchangeRateSource)
+            ? $"{_exchangeRateSource}. {ManualExchangeRateHint}."
+            : ManualExchangeRateHint;
 
         public string Description
         {
