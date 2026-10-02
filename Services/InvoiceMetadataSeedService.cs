@@ -756,7 +756,13 @@ namespace BIS.ERP.Services
             Field(metadataObjectId, "Сумма НДС", "vat_total", "Decimal", 11),
             Field(metadataObjectId, "Налог с продаж", "sales_tax_total", "Decimal", 12),
             Field(metadataObjectId, "Сумма", "amount", "Decimal", 13),
-            Field(metadataObjectId, "Проведён", "is_posted", "Bool", 14, true)
+            // Валютная часть шапки: колонки currency_id / exchange_rate / amount_currency
+            // уже есть в doc_sales_invoice и doc_purchase_invoice, но без полей
+            // метаданных значения не отображались в документе и его списках.
+            Field(metadataObjectId, "Проведён", "is_posted", "Bool", 14, true),
+            Field(metadataObjectId, "Валюта", "currency_id", "Reference", 15, false, "Справочник валют"),
+            Field(metadataObjectId, "Курс", "exchange_rate", "Decimal", 16),
+            Field(metadataObjectId, "Сумма в валюте", "amount_currency", "Decimal", 17)
         };
 
         private static List<MetadataField> GetEsfXmlTagFields(Guid metadataObjectId) => new()

@@ -148,7 +148,8 @@ namespace BIS.ERP.Views
         {
             var accountFields = new[] { "Дебет", "Кредит" };
             var showCurrency = AccountAnalyticsRules.ShouldShowFieldForRows(
-                "Валюта", rawRows, accountFields, accountAnalytics, "Справочник валют");
+                                   "Валюта", rawRows, accountFields, accountAnalytics, "Справочник валют") ||
+                               HasCurrencyData(rawRows);
 
             AmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             CurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
@@ -156,6 +157,18 @@ namespace BIS.ERP.Views
             MaterialColumn.Visibility = GetAnalyticColumnVisibility(
                 "Материал", "Справочник материалов", rawRows, accountFields, accountAnalytics);
         }
+
+        /// <summary>
+        /// В проводках есть валюта: у счет-фактур и платёжных документов счёт
+        /// может не быть привязан к валюте в аналитике, но сумма в валюте
+        /// заполнена, поэтому колонки показываются и по данным.
+        /// </summary>
+        private static bool HasCurrencyData(IEnumerable<Dictionary<string, object>> rows)
+        {
+            return rows.Any(row => GetRowDecimal(row, "Сумма в валюте", "amount_currency") != 0m ||
+                                  !string.IsNullOrWhiteSpace(GetRowString(row, "Валюта", "currency_id")));
+        }
+
 
         private static Visibility GetAnalyticColumnVisibility(
             string fieldName,
@@ -215,8 +228,11 @@ namespace BIS.ERP.Views
                 _accountAnalytics.GetSettingsByCode(posting.CreditAccount)
             };
 
-            var showCurrency = ShouldShowPostingAnalytic("Валюта", "Справочник валют", selectedSettings);
+            var showCurrency = ShouldShowPostingAnalytic("Валюта", "Справочник валют", selectedSettings) ||
+                               posting.AmountCurrency != 0m ||
+                               !string.IsNullOrWhiteSpace(posting.Currency);
             var showOrganization = ShouldShowPostingAnalytic("Организация", "Организации", selectedSettings);
+
             var showEmployee = ShouldShowPostingAnalytic("Сотрудник", "Сотрудники (Списочный состав)", selectedSettings);
             var showMaterial = ShouldShowPostingAnalytic("Материал", "Справочник материалов", selectedSettings);
             SetDetailColumnsVisibility(showCurrency, showOrganization, showEmployee, showMaterial);
