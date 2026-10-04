@@ -1178,6 +1178,15 @@ namespace BIS.ERP.Services
             }
             catch (Exception ex)
             {
+                // Шаг проглатывает ошибку, но оставшиеся в трекере сущности с уже
+                // удалёнными в БД строками уронят следующий SaveChanges. Чистим трекер.
+                if (ex is DbUpdateConcurrencyException)
+                {
+                    await DbUpdateConcurrencyDiagnostics.LogAsync(
+                        _context, ex, nameof(MetadataService), nameof(InitializePredefinedCatalogsAsync));
+                }
+
+                _context.ChangeTracker.Clear();
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания предустановленных справочников : {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"Stack: {ex.StackTrace}");
             }
@@ -2490,6 +2499,15 @@ namespace BIS.ERP.Services
             }
             catch (Exception ex)
             {
+                // Если сохранение упало (в т.ч. DbUpdateConcurrencyException), трекер может
+                // остаться в «отравленном» состоянии и уронить следующий SaveChanges.
+                if (ex is DbUpdateConcurrencyException)
+                {
+                    await DbUpdateConcurrencyDiagnostics.LogAsync(
+                        _context, ex, nameof(MetadataService), nameof(GetAllMetadataObjectsAsync));
+                }
+
+                _context.ChangeTracker.Clear();
                 System.Diagnostics.Debug.WriteLine($"Ошибка синхронизации платежного поручения: {ex.Message}");
             }
 

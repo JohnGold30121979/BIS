@@ -1,8 +1,10 @@
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using BIS.ERP.Views.Dialogs;
 using ClosedXML.Excel;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
 using System;
 using System.Collections.ObjectModel;
@@ -408,6 +410,11 @@ namespace BIS.ERP
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
+            // Контекст и имя текущего шага нужны в catch для диагностики
+            // DbUpdateConcurrencyException, поэтому объявлены вне блока try.
+            AppDbContext? diagnosticContext = null;
+            var initStage = "старт";
+
             try
             {
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
@@ -435,6 +442,7 @@ namespace BIS.ERP
                     }
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
+                    diagnosticContext = context;
                     _accountingPeriodService = new AccountingPeriodService(context);
                     _localizationService = new LocalizationService(context, settings.Language);
                     _metadataService = new MetadataService(context);
@@ -443,24 +451,59 @@ namespace BIS.ERP
                     _userAccessService = new UserAccessService(context);
                     _moduleMetadataService = new ModuleMetadataService(context);
 
+                    initStage = "схемы и сервисы (RuntimeSchemaFixService, PrintForm, шаблоны)";
                     await new RuntimeSchemaFixService(context).EnsureAsync();
                     await _accountingPeriodService.EnsureSchemaAsync();
                     await _userAccessService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
                     await new PrintFormService(context).EnsureSchemaAsync();
                     await new RegulatedReportTemplateService(context).EnsureSchemaAsync();
+
+                    // Каждый шаг инициализации смешивает EF-трекинг и прямые SQL-команды
+                    // (DDL, bulk DELETE/UPDATE, DROP TABLE). Между шагами очищаем трекер,
+                    // чтобы «осиротевшие» сущности из предыдущего шага не привели к
+                    // DbUpdateConcurrencyException в следующем SaveChanges.
+                    context.ChangeTracker.Clear();
+                    initStage = "InitializePredefinedCatalogsAsync (предустановленные справочники)";
                     await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
+
+                    context.ChangeTracker.Clear();
+                    initStage = "DocumentationMetadataSeedService (посадка документации)";
                     await new DocumentationMetadataSeedService(context).EnsureAsync();
+
+                    context.ChangeTracker.Clear();
+                    initStage = "InvoiceMetadataSeedService (посадка счетов-фактур)";
                     await new InvoiceMetadataSeedService(context).EnsureAsync();
+
+                    context.ChangeTracker.Clear();
+                    initStage = "PrintFormService (печатные формы)";
                     var printFormService = new PrintFormService(context);
                     await printFormService.SeedCashOrderFormsAsync();
                     await printFormService.SeedInvoiceFormsAsync();
+
+                    context.ChangeTracker.Clear();
+                    initStage = "EnsureStandardReportsAsync (стандартные отчёты)";
                     await _metadataService.EnsureStandardReportsAsync();
+
+                    context.ChangeTracker.Clear();
+                    initStage = "BuildNavigationTree (дерево навигации)";
                     await BuildNavigationTree();
                 }
             }
             catch (Exception ex)
             {
+                // В MessageBox видна только краткая причина — полный стектрейс сохраняем
+                // в основной системный лог, а для DbUpdateConcurrencyException дополнительно
+                // снимаем состояние ChangeTracker и наличие строк в БД.
+                if (ex is DbUpdateConcurrencyException)
+                {
+                    await DbUpdateConcurrencyDiagnostics.LogAsync(
+                        diagnosticContext, ex, nameof(MainWorkWindow), initStage);
+                }
+
+                SystemLogService.Error(
+                    $"Ошибка загрузки главного окна. Этап: {initStage}",
+                    nameof(MainWorkWindow), ex);
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }

@@ -251,8 +251,10 @@ public sealed class ReportDataSetService
         // загрузку конфигурации. Поэтому: 1) сначала убеждаемся, что родитель
         // реально существует в БД; 2) сиротскую ссылку чиним вместо вставки;
         // 3) ошибку НЕ глотаем — импорт обязан откатить транзакцию, а не продолжать.
-        // Detach the dataSet entity so EF Core doesn't try to update it during SaveChangesAsync,
-        // which would cause a DbUpdateConcurrencyException.
+        // Отсоединяем dataSet и его поля, иначе EF Core попытается обновить их
+        // после правок прямых SQL-команд и упадёт с DbUpdateConcurrencyException.
+        foreach (var field in dataSet.Fields.ToList())
+            _context.Entry(field).State = EntityState.Detached;
         _context.Entry(dataSet).State = EntityState.Detached;
 
         var configId = await _context.MetadataConfigurations
@@ -347,6 +349,11 @@ public sealed class ReportDataSetService
             }
         }
 
+        // Ниже MetadataFields пересоздаются прямым SQL. Если EF уже отслеживает
+        // MetadataObject/поля этого объекта, их строки исчезнут в БД без ведома
+        // трекера — следующий SaveChanges упадёт с DbUpdateConcurrencyException.
+        DetachTrackedMetadataSource(metadataId.Value);
+
         // Update MetadataObjectId via raw SQL
         await _context.Database.ExecuteSqlRawAsync(
             "UPDATE \"ReportDataSets\" SET \"MetadataObjectId\" = @p0 WHERE \"Id\" = @p1",
@@ -377,6 +384,36 @@ public sealed class ReportDataSetService
                 18,
                 2,
                 field.Order);
+        }
+    }
+
+    /// <summary>
+    /// Отсоединяет от трекера MetadataObject и его поля, если они уже загружены в памяти.
+    /// Нужно перед прямым SQL, который пересоздаёт/удаляет строки MetadataObjects/MetadataFields:
+    /// иначе трекер продолжит считать их существующими и следующий SaveChanges упадёт
+    /// с DbUpdateConcurrencyException.
+    /// </summary>
+    private void DetachTrackedMetadataSource(Guid metadataObjectId)
+    {
+        var objectEntry = _context.ChangeTracker.Entries<MetadataObject>()
+            .FirstOrDefault(entry => entry.Entity.Id == metadataObjectId);
+        if (objectEntry != null)
+        {
+            foreach (var field in objectEntry.Entity.Fields.ToList())
+            {
+                var fieldEntry = _context.Entry(field);
+                if (fieldEntry.State != EntityState.Detached)
+                    fieldEntry.State = EntityState.Detached;
+            }
+
+            objectEntry.State = EntityState.Detached;
+        }
+
+        foreach (var fieldEntry in _context.ChangeTracker.Entries<MetadataField>()
+                     .Where(entry => entry.Entity.MetadataObjectId == metadataObjectId)
+                     .ToList())
+        {
+            fieldEntry.State = EntityState.Detached;
         }
     }
 
@@ -430,6 +467,15 @@ public sealed class ReportDataSetService
         }
         catch (Exception ex)
         {
+            // Ошибка проглатывается, но прямой SQL мог уже удалить строки MetadataFields,
+            // оставшиеся в трекере. Чистим трекер, чтобы не отравить следующий SaveChanges.
+            if (ex is DbUpdateConcurrencyException)
+            {
+                await DbUpdateConcurrencyDiagnostics.LogAsync(
+                    _context, ex, nameof(ReportDataSetService), nameof(EnsureCashOrderTurnoverDataSetAsync));
+            }
+
+            _context.ChangeTracker.Clear();
             SystemLogService.Error("Ошибка подготовки системного SQL-набора данных РКО/ПКО. Конфигуратор продолжит загрузку.", "ReportDataSetService", ex);
         }
     }

@@ -88,7 +88,7 @@ namespace BIS.ERP.Services
             await EnsureEsfXmlTagRowsAsync(tableName);
         }
 
-        private static void SynchronizeCatalogFields(MetadataObject catalog, IReadOnlyCollection<MetadataField> desiredFields)
+        private void SynchronizeCatalogFields(MetadataObject catalog, IReadOnlyCollection<MetadataField> desiredFields)
         {
             foreach (var desired in desiredFields)
             {
@@ -97,7 +97,7 @@ namespace BIS.ERP.Services
                 if (existing == null)
                 {
                     desired.MetadataObjectId = catalog.Id;
-                    catalog.Fields.Add(desired);
+                    AddNewField(catalog, desired);
                     continue;
                 }
 
@@ -151,7 +151,7 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
-        private static void SynchronizeInvoiceHeaderFields(MetadataObject document)
+        private void SynchronizeInvoiceHeaderFields(MetadataObject document)
         {
             var desiredFields = GetInvoiceHeaderFields(document.Id);
             foreach (var desired in desiredFields)
@@ -161,7 +161,7 @@ namespace BIS.ERP.Services
                     field.Name.Equals(desired.Name, StringComparison.OrdinalIgnoreCase));
                 if (existing == null)
                 {
-                    document.Fields.Add(desired);
+                    AddNewField(document, desired);
                     continue;
                 }
 
@@ -175,6 +175,26 @@ namespace BIS.ERP.Services
                 existing.Length = desired.Length;
                 existing.Precision = desired.Precision;
                 existing.Scale = desired.Scale;
+            }
+        }
+
+        /// <summary>
+        /// Добавляет новое поле метаданных в УЖЕ отслеживаемый объект.
+        ///
+        /// Корень DbUpdateConcurrencyException ("expected 1 row(s), affected 0"): у нового
+        /// <see cref="MetadataField"/> Id уже задан инициализатором (Guid.NewGuid()), поэтому
+        /// EF Core, обнаружив сущность только через навигацию коллекции, attach'ит её как
+        /// Modified вместо Added. В результате вместо INSERT генерируется
+        /// UPDATE ... WHERE "Id" = &lt;новый guid&gt;, который затрагивает 0 строк.
+        /// Явное состояние Added заставляет EF выполнить INSERT.
+        /// </summary>
+        private void AddNewField(MetadataObject owner, MetadataField field)
+        {
+            _context.Entry(field).State = EntityState.Added;
+
+            if (!owner.Fields.Contains(field))
+            {
+                owner.Fields.Add(field);
             }
         }
 
