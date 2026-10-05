@@ -15,6 +15,7 @@ namespace BIS.ERP.Views
         private readonly MetadataObject _catalog;
         private readonly Dictionary<string, object> _itemData;
         private readonly Dictionary<string, Control> _controls;
+        private readonly Dictionary<string, Panel> _fieldPanels = new(StringComparer.OrdinalIgnoreCase);
         private readonly MetadataService _metadataService;
         private readonly bool _isNewRecord;
         private Dictionary<string, Dictionary<Guid, string>> _referenceCache;
@@ -122,7 +123,12 @@ inputControl = AccountPickerControlFactory.Create(
                     panel.Children.Add(inputControl);
                     FieldsPanel.Children.Add(panel);
                     _controls[field.Name] = inputControl;
+                    _fieldPanels[field.Name] = panel;
                 }
+
+                // «Валютный учет» в «Парах счетов» включает выбор валюты пары.
+                AttachAccountPairsCurrencyFlag();
+                await UpdateAccountPairsCurrencyVisibilityAsync();
 
                 AttachOrganizationNameSync();
 
@@ -700,6 +706,142 @@ inputControl = AccountPickerControlFactory.Create(
             string.Equals(_catalog.TableName, "catalog_advance_payments", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Авансовые платежи", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// В «Парах счетов» флаг «Валютный учет» управляет выбором валюты пары:
+        /// пока флаг снят, поле «Валюта» скрыто и в базу не пишется; когда флаг
+        /// установлен — поле показано и по умолчанию подставлена базовая валюта
+        /// (киргизский сом) из «Справочника валют».
+        /// </summary>
+        private void AttachAccountPairsCurrencyFlag()
+        {
+            if (!IsAccountPairsCatalog())
+                return;
+
+            if (!_controls.TryGetValue(GetFieldName(AccountPairsCurrencyFlagField), out var control) ||
+                control is not CheckBox checkBox)
+            {
+                return;
+            }
+
+            checkBox.Checked += async (_, _) => await UpdateAccountPairsCurrencyVisibilityAsync();
+            checkBox.Unchecked += async (_, _) => await UpdateAccountPairsCurrencyVisibilityAsync();
+        }
+
+        private async Task UpdateAccountPairsCurrencyVisibilityAsync()
+        {
+            if (!IsAccountPairsCatalog())
+                return;
+
+            var currencyField = GetFieldName(AccountPairsCurrencyField);
+            if (!_fieldPanels.TryGetValue(currencyField, out var panel))
+                return;
+
+            var useCurrency = _controls.TryGetValue(GetFieldName(AccountPairsCurrencyFlagField), out var flagControl) &&
+                              flagControl is CheckBox checkBox &&
+                              checkBox.IsChecked == true;
+
+            panel.Visibility = useCurrency ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!useCurrency)
+                return;
+
+            // Валютная пара не должна остаться без валюты: подставляем базовую.
+            if (!_controls.TryGetValue(currencyField, out var inputControl) ||
+                inputControl is not ReferencePickerControl picker ||
+                picker.SelectedReferenceItem != null)
+            {
+                return;
+            }
+
+            var catalogs = (await _metadataService.GetCatalogsAsync())
+                .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            var defaultCurrencyId = await ResolveDefaultCurrencyIdAsync(catalogs);
+            if (string.IsNullOrWhiteSpace(defaultCurrencyId))
+                return;
+
+            var baseCurrency = picker.ComboBox.Items
+                .OfType<ReferenceItem>()
+                .FirstOrDefault(item => item.Id.ToString().Equals(defaultCurrencyId, StringComparison.OrdinalIgnoreCase));
+
+            if (baseCurrency != null)
+                picker.SelectedReferenceItem = baseCurrency;
+        }
+
+        private static readonly (string Name, string Column) AccountPairsCurrencyFlagField = ("Валютный учет", "use_currency");
+        private static readonly (string Name, string Column) AccountPairsCurrencyField = ("Валюта", "currency_id");
+
+        private string GetFieldName((string Name, string Column) field) =>
+            GetEditableFields().Any(item => IsField(item, field))
+                ? field.Name
+                : field.Column;
+
+        private static bool IsField(MetadataField field, (string Name, string Column) candidate) =>
+            field.Name.Equals(candidate.Name, StringComparison.OrdinalIgnoreCase) ||
+            field.DbColumnName.Equals(candidate.Column, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Если валютный учёт пары выключен, ссылка на валюту не сохраняется:
+        /// иначе после повторного включения флага вернулась бы валюта,
+        /// которую пользователь снял.
+        /// </summary>
+        private void NormalizeAccountPairsCurrencyBeforeSave()
+        {
+            if (!IsAccountPairsCatalog())
+                return;
+
+            if (IsAccountPairsCurrencyEnabled())
+                return;
+
+            var currencyField = GetFieldName(AccountPairsCurrencyField);
+            if (_itemData.ContainsKey(currencyField))
+                _itemData[currencyField] = DBNull.Value;
+        }
+
+        /// <summary>
+        /// У валютной пары валюта обязательна: без неё проводки не проводятся.
+        /// </summary>
+        private bool ValidateAccountPairsCurrency()
+        {
+            if (!IsAccountPairsCatalog() || !IsAccountPairsCurrencyEnabled())
+                return true;
+
+            var currencyField = GetFieldName(AccountPairsCurrencyField);
+            var value = _itemData.TryGetValue(currencyField, out var stored)
+                ? stored
+                : GetItemValue(currencyField);
+
+            if (value != null && value != DBNull.Value && !string.IsNullOrWhiteSpace(value.ToString()))
+                return true;
+
+            MessageBox.Show(
+                "Для пары счетов с включённым валютным учётом выберите валюту.",
+                "Пары счетов", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            if (_fieldPanels.TryGetValue(currencyField, out var panel))
+                panel.Visibility = Visibility.Visible;
+
+            if (_controls.TryGetValue(currencyField, out var control))
+                control.Focus();
+
+            return false;
+        }
+
+        private bool IsAccountPairsCurrencyEnabled()
+        {
+            if (!_controls.TryGetValue(GetFieldName(AccountPairsCurrencyFlagField), out var control))
+                return GetItemValue(GetFieldName(AccountPairsCurrencyFlagField)) is true;
+
+            return control switch
+            {
+                CheckBox checkBox => checkBox.IsChecked == true,
+                ComboBox comboBox => comboBox.SelectedItem?.ToString() is "Да" or "True" or "true" or "1",
+                TextBox textBox => bool.TryParse(textBox.Text, out var parsed) && parsed,
+                _ => GetItemValue(GetFieldName(AccountPairsCurrencyFlagField)) is true
+            };
+        }
+
         private Control CreateRegularControl(MetadataField field, Dictionary<string, object> existingData)
         {
             var employeeChoiceControl = CreateEmployeeChoiceControl(field, existingData);
@@ -1072,8 +1214,12 @@ inputControl = AccountPickerControlFactory.Create(
                 }
 
                 NormalizeCatalogItemDataBeforeSave();
+                NormalizeAccountPairsCurrencyBeforeSave();
 
                 if (!ValidateOrganizationCountry())
+                    return;
+
+                if (!ValidateAccountPairsCurrency())
                     return;
 
                 if (!ValidateChartOfAccountsCode())
@@ -1610,6 +1756,7 @@ inputControl = AccountPickerControlFactory.Create(
                     "use_organizations",
                     "use_personnel",
                     "use_currency",
+                    "currency_id",
                     "module_code",
                     "debit_account",
                     "credit_account",

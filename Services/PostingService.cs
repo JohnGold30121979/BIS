@@ -46,6 +46,9 @@ namespace BIS.ERP.Services
             var accountMap = await LoadAccountMapAsync();
             var moduleLookup = await LoadModuleLookupAsync();
             var cashOrderAnalytics = await LoadCashOrderAnalyticsMapAsync(startDate, endDate);
+            // Валюта в проводке хранится ссылкой (currency_id), но в UI её нужно
+            // показывать как «Код - Наименование», а не как GUID.
+            var currencyMap = await LoadReferenceMapAsync("Справочник валют");
 
             // 1. Проводки из doc_postings
             try
@@ -112,7 +115,7 @@ namespace BIS.ERP.Services
                         Direction = ResolvePostingDirection(row.DocumentType),
                         Amount = row.Amount,
                         AmountCurrency = row.AmountCurrency,
-                        Currency = row.Currency,
+                        Currency = ResolveReference(row.Currency, currencyMap),
                         Note = row.Note,
                         Organization = ResolveReference(organizationValue, organizationMap),
                         Employee = ResolveReference(employeeValue, employeeMap),

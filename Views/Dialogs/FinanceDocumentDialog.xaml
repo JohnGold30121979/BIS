@@ -111,6 +111,40 @@
                 </Grid>
             </GroupBox>
 
+            <!-- Валюта идёт сразу после основных реквизитов: у авансовых платежей
+                 валюта берётся из пары счетов (справочник «Пары счетов»,
+                 поле «Валюта» пары с включённым «Валютным учетом»), курс
+                 подтягивается на дату документа кнопкой «?» либо вводится вручную. -->
+            <GroupBox x:Name="CurrencyPanel" Header="Валюта" Padding="10" Margin="0,0,0,10" Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <ComboBox x:Name="CurrencyCombo" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Height="30"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                              SelectionChanged="OnRateInputChanged" Margin="0,0,0,8"/>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Курс и сумма:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
+                        <TextBlock Text="Курс:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="ExchangeRateBox" Width="130" Height="30" Text="0" TextChanged="CurrencyAmountBox_TextChanged"/>
+                        <Button Content="?" Width="34" Height="30" Margin="6,0,18,0" Click="RequestHeaderExchangeRate_Click"
+                                ToolTip="Запросить курс валюты на дату документа"/>
+                        <TextBlock Text="Сумма в валюте:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="AmountCurrencyBox" Width="130" Height="30" Text="0" IsReadOnly="True"
+                                 Background="#F2F4F7" TextChanged="CurrencyAmountBox_TextChanged"/>
+                    </StackPanel>
+                </Grid>
+            </GroupBox>
+
             <GroupBox x:Name="AdvanceBalancesPanel" Header="Остатки по авансу" Padding="10" Margin="0,0,0,10" Visibility="Collapsed">
                 <UniformGrid Columns="4">
                     <StackPanel Margin="0,0,12,0">
@@ -240,36 +274,17 @@
                             <DataGridTextColumn x:Name="AdvanceAmountColumn" Header="Сумма"
                                                 Binding="{Binding Amount, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}"
                                                 Width="130"/>
-                            <DataGridComboBoxColumn x:Name="AdvanceCurrencyColumn" Header="Валюта" Width="150"
-                                                    DisplayMemberPath="DisplayName" SelectedValuePath="Id"
-                                                    SelectedValueBinding="{Binding CurrencyId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                    Visibility="Collapsed"/>
+                            <!-- Курс берётся из шапки документа (валюта пары счетов) и в строке
+                                 не редактируется: колонка только для чтения. -->
+                            <DataGridTextColumn x:Name="AdvanceExchangeRateColumn" Header="Курс"
+                                                Binding="{Binding ExchangeRate, Mode=OneWay, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}"
+                                                Width="130" MinWidth="120" IsReadOnly="True" Visibility="Collapsed"/>
+                            <!-- Сумма в валюте рассчитывается по «Сумма» и «Курс»:
+                                 валюта строки берётся из шапки документа, отдельного
+                                 выбора валюты в строке больше нет. -->
                             <DataGridTextColumn x:Name="AdvanceAmountCurrencyColumn" Header="Сумма в валюте"
-                                                Binding="{Binding AmountCurrency, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}"
-                                                Width="130" Visibility="Collapsed"/>
-                            <!-- Курс вводится вручную либо запрашивается кнопкой «?» из
-                                 справочника курсов валют (см. RequestLineExchangeRate_Click). -->
-                            <DataGridTemplateColumn x:Name="AdvanceExchangeRateColumn" Header="Курс"
-                                                   Width="130" MinWidth="120" CanUserSort="False" Visibility="Collapsed">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox Grid.Column="0" Height="24" Margin="2,0,4,0" Padding="2,0"
-                                                     TextAlignment="Right" VerticalContentAlignment="Center"
-                                                     ToolTip="{Binding ExchangeRateHint}"
-                                                     ToolTipService.InitialShowDelay="400"
-                                                     Text="{Binding ExchangeRate, Mode=TwoWay, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}"/>
-                                            <Button Grid.Column="1" Content="?" Width="30" Height="24" Margin="0,0,2,0"
-                                                    Tag="{Binding}" Click="RequestLineExchangeRate_Click"
-                                                    ToolTip="Запросить курс из справочника курсов валют"/>
-                                        </Grid>
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
+                                                Binding="{Binding AmountCurrency, Mode=OneWay, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}"
+                                                Width="130" IsReadOnly="True" Visibility="Collapsed"/>
                         </DataGrid.Columns>
                     </DataGrid>
 
@@ -374,31 +389,6 @@
                         <TextBox x:Name="WithheldAmountBox" Width="115" Height="30" Text="0" TextChanged="PayrollAmountBox_TextChanged" Margin="0,0,18,0"/>
                         <TextBlock Text="К выплате:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBox x:Name="PayableAmountBox" Width="115" Height="30" Text="0"/>
-                    </StackPanel>
-                </Grid>
-            </GroupBox>
-
-            <GroupBox x:Name="CurrencyPanel" Header="Валюта" Padding="10" Margin="0,0,0,10" Visibility="Collapsed">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="170"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                    <ComboBox x:Name="CurrencyCombo" Grid.Row="0" Grid.Column="1" Height="30"
-                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"
-                              SelectionChanged="OnRateInputChanged" Margin="0,0,0,8"/>
-
-                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal">
-                        <TextBlock Text="Сумма в валюте:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="AmountCurrencyBox" Width="130" Height="30" Text="0" TextChanged="CurrencyAmountBox_TextChanged" Margin="0,0,18,0"/>
-                        <TextBlock Text="Курс:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox x:Name="ExchangeRateBox" Width="130" Height="30" Text="0" TextChanged="CurrencyAmountBox_TextChanged"/>
                     </StackPanel>
                 </Grid>
             </GroupBox>

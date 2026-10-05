@@ -969,7 +969,12 @@ namespace BIS.ERP.Services
             foreach (var field in fields.Where(field => field.DbColumnName == "amount"))
                 field.IsRequired = true;
 
-            fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, true, "Сотрудники (Списочный состав)"));
+            // Сотрудник не обязателен на уровне метаданных: панель «Сотрудник» показывается
+            // только у пар счетов с пометкой «Сотрудники», и тогда обязательность
+            // проверяет сама форма (ApplyAdvanceReportData). Иначе запись валютного
+            // авансового платежа без сотрудника падала бы с «Поле 'Сотрудник'
+            // обязательно для заполнения».
+            fields.Insert(2, Field(Guid.Empty, "Сотрудник", "employee_id", "Reference", 3, false, "Сотрудники (Списочный состав)"));
 
             // Строки затрат теперь хранятся в классической таблице строк
             // (doc_advance_payment_lines), поэтому JSON-поле expense_lines удалено.
@@ -1096,9 +1101,43 @@ namespace BIS.ERP.Services
                 }
 
                 ApplyFieldTemplate(existingField, sourceField);
+
+                // Метаданных недостаточно: снятие обязательности должно
+                // снимать и NOT NULL с уже созданной колонки, иначе запись
+                // без значения падает на уровне БД.
+                await EnsureColumnNullableAsync(metadata.TableName, sourceField);
             }
 
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Приводит колонку в соответствие с признаком обязательности поля:
+        /// обязательное поле — NOT NULL, необязательное — снимаем ограничение
+        /// и ставим пустое значение по умолчанию вместо NULL.
+        /// </summary>
+        private async Task EnsureColumnNullableAsync(string tableName, MetadataField field)
+        {
+            if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(field.DbColumnName))
+                return;
+
+            try
+            {
+                var constraintSql = field.IsRequired
+                    ? $@"ALTER TABLE ""{tableName}"" ALTER COLUMN ""{field.DbColumnName}"" SET NOT NULL;"
+                    : $@"ALTER TABLE ""{tableName}"" ALTER COLUMN ""{field.DbColumnName}"" DROP NOT NULL;
+                        UPDATE ""{tableName}"" SET ""{field.DbColumnName}"" = '' WHERE ""{field.DbColumnName}"" IS NULL;
+                        ALTER TABLE ""{tableName}"" ALTER COLUMN ""{field.DbColumnName}"" SET DEFAULT '';";
+
+                await _context.Database.ExecuteSqlRawAsync(constraintSql);
+            }
+            catch (Exception ex)
+            {
+                // Колонки может не быть (только что созданный объект) —
+                // это не ошибка, синхронизация продолжится.
+                System.Diagnostics.Debug.WriteLine(
+                    $"Не удалось применить обязательность колонки {tableName}.{field.DbColumnName}: {ex.Message}");
+            }
         }
 
         private static void ConfigureField(

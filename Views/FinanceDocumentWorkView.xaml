@@ -104,6 +104,13 @@
                     </DataGridTextColumn.Header>
                 </DataGridTextColumn>
                 <DataGridTextColumn x:Name="PayableAmountColumn" Header="К выплате" Binding="{Binding PayableAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="105"/>
+                <!-- Итог документа по строкам затрат: сумма в валюте и сама валюта.
+                     Показываются только у авансовых платежей (см. ConfigureColumns). -->
+                <DataGridTextColumn x:Name="AmountCurrencyColumn" Header="Сумма вал."
+                                    Binding="{Binding AmountCurrency, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}"
+                                    Width="110" Visibility="Collapsed"/>
+                <DataGridTextColumn x:Name="CurrencyColumn" Header="Валюта"
+                                    Binding="{Binding CurrencyDisplay}" Width="140" Visibility="Collapsed"/>
                 <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="220"/>
                 <DataGridTextColumn x:Name="PostedColumn" Header="Проведен" Binding="{Binding IsPostedDisplay}" Width="90"/>
                 <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt, StringFormat=dd/MM/yyyy HH:mm}" Width="140"/>

@@ -184,6 +184,12 @@ namespace BIS.ERP.Views
                 CreditAccountDisplay = ResolveAccount(row, accountRegistry, "Счет кредита", "credit_account"),
                 PaymentAccountDisplay = ResolveAccount(row, accountRegistry, "Счет выплаты", "payment_account"),
                 Amount = ReadDecimal(row, "Сумма", "amount"),
+                // Итог в валюте считаем по строкам затрат — это источник истины
+                // (шапка хранит только данные первой валютной строки).
+                AmountCurrency = expenseLines.Count > 0
+                    ? Math.Round(expenseLines.Sum(line => line.AmountCurrency), 2, MidpointRounding.AwayFromZero)
+                    : ReadDecimal(row, "Сумма в валюте", "amount_currency"),
+                CurrencyDisplay = ResolveExpenseLinesCurrency(expenseLines, referenceMaps),
                 PayableAmount = ReadDecimal(row, "К выплате", "payable_amount"),
                 ValidUntil = ReadDate(row, "Срок действия", "valid_until"),
                 Basis = ResolveBasis(row),
@@ -205,6 +211,8 @@ namespace BIS.ERP.Views
             CreditAccountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             PaymentAccountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             AmountColumn.Visibility = Visibility.Visible;
+            AmountCurrencyColumn.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
+            CurrencyColumn.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
             PayableAmountColumn.Visibility = isPayrollStatement ? Visibility.Visible : Visibility.Collapsed;
             ReportPeriodPanel.Visibility = isAdvanceReport ? Visibility.Visible : Visibility.Collapsed;
             PostedColumn.Visibility = isAdvanceReport ? Visibility.Collapsed : Visibility.Visible;
@@ -577,6 +585,31 @@ namespace BIS.ERP.Views
 
             return string.Join(" / ", parts);
         }
+        /// <summary>
+        /// Валюта документа по строкам затрат. Берётся первая строка с валютой:
+        /// наименование из строки, а при его отсутствии — подпись из карты
+        /// ссылок документа («Валюта» / «currency_id»).
+        /// </summary>
+        private static string ResolveExpenseLinesCurrency(
+            IReadOnlyList<AdvancePaymentLine> expenseLines,
+            IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps)
+        {
+            var line = expenseLines.FirstOrDefault(item => item.CurrencyId != Guid.Empty);
+            if (line == null)
+                return string.Empty;
+
+            foreach (var mapKey in new[] { "Валюта", "currency_id" })
+            {
+                if (referenceMaps.TryGetValue(mapKey, out var map) &&
+                    map.TryGetValue(line.CurrencyId, out var displayValue))
+                {
+                    return displayValue;
+                }
+            }
+
+            return line.CurrencyName ?? string.Empty;
+        }
+
         private static string ResolveReference(
             IReadOnlyDictionary<string, object> row,
             IReadOnlyDictionary<string, Dictionary<Guid, string>> referenceMaps,
@@ -753,6 +786,13 @@ namespace BIS.ERP.Views
         public string CreditAccountDisplay { get; set; } = string.Empty;
         public string PaymentAccountDisplay { get; set; } = string.Empty;
         public decimal Amount { get; set; }
+
+        /// <summary>Итог документа по строкам затрат в валюте.</summary>
+        public decimal AmountCurrency { get; set; }
+
+        /// <summary>Валюта, в которой выражен итог документа.</summary>
+        public string CurrencyDisplay { get; set; } = string.Empty;
+
         public decimal PayableAmount { get; set; }
         public DateTime? ValidUntil { get; set; }
         public string Basis { get; set; } = string.Empty;

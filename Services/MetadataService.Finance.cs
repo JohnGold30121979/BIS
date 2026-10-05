@@ -20,14 +20,15 @@ public partial class MetadataService
             new MetadataField { Id = Guid.NewGuid(), Name = "Организации", DbColumnName = "use_organizations", FieldType = "Bool", IsRequired = true, Order = 3, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Сотрудники", DbColumnName = "use_personnel", FieldType = "Bool", IsRequired = true, Order = 4, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Валютный учет", DbColumnName = "use_currency", FieldType = "Bool", IsRequired = true, Order = 5, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Остаток брать из модуля", DbColumnName = "module_code", FieldType = "String", Length = 50, IsRequired = false, Order = 6, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Дебет", DbColumnName = "debit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 7, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Кредит", DbColumnName = "credit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 8, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во взаиморасчетах", DbColumnName = "use_settlements", FieldType = "Bool", IsRequired = true, Order = 9, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Формировать проводки авансовых платежей", DbColumnName = "generate_postings", FieldType = "Bool", IsRequired = true, Order = 10, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во внутренних взаиморасчетах", DbColumnName = "use_internal_settlements", FieldType = "Bool", IsRequired = true, Order = 11, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", IsRequired = true, Order = 12, MetadataObjectId = metadataObjectId },
-            new MetadataField { Id = Guid.NewGuid(), Name = "Примечание", DbColumnName = "description", FieldType = "String", Length = 500, IsRequired = false, Order = 13, MetadataObjectId = metadataObjectId }
+            new MetadataField { Id = Guid.NewGuid(), Name = "Валюта", DbColumnName = "currency_id", FieldType = "Reference", ReferenceCatalog = "Справочник валют", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = false, Order = 6, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Остаток брать из модуля", DbColumnName = "module_code", FieldType = "String", Length = 50, IsRequired = false, Order = 7, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Дебет", DbColumnName = "debit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 8, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Кредит", DbColumnName = "credit_account", FieldType = "Reference", ReferenceCatalog = "План счетов", DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование", IsRequired = true, Order = 9, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во взаиморасчетах", DbColumnName = "use_settlements", FieldType = "Bool", IsRequired = true, Order = 10, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Формировать проводки авансовых платежей", DbColumnName = "generate_postings", FieldType = "Bool", IsRequired = true, Order = 11, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Участвует во внутренних взаиморасчетах", DbColumnName = "use_internal_settlements", FieldType = "Bool", IsRequired = true, Order = 12, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Активен", DbColumnName = "is_active", FieldType = "Bool", IsRequired = true, Order = 13, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Примечание", DbColumnName = "description", FieldType = "String", Length = 500, IsRequired = false, Order = 14, MetadataObjectId = metadataObjectId }
         };
     }
 
@@ -165,6 +166,16 @@ public partial class MetadataService
             field.IsRequired = true;
             field.Order = 5;
         }
+        else if (field.DbColumnName?.Equals("currency_id", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            field.Name = "Валюта";
+            field.FieldType = "Reference";
+            field.ReferenceCatalog = "Справочник валют";
+            field.DisplayPattern = "{Код} - {Наименование}";
+            field.DisplayFields = "Код,Наименование";
+            field.IsRequired = false;
+            field.Order = 6;
+        }
         else if (field.DbColumnName?.Equals("module_code", StringComparison.OrdinalIgnoreCase) == true ||
                  field.DbColumnName?.Equals("arm_code", StringComparison.OrdinalIgnoreCase) == true)
         {
@@ -172,7 +183,7 @@ public partial class MetadataService
             field.DbColumnName = "module_code";
             field.FieldType = "String";
             field.Length = Math.Max(field.Length, 50);
-            field.Order = 6;
+            field.Order = 7;
         }
         else if (field.DbColumnName?.Equals("debit_account", StringComparison.OrdinalIgnoreCase) == true)
         {
@@ -182,7 +193,7 @@ public partial class MetadataService
             field.DisplayPattern = "{Код} - {Наименование}";
             field.DisplayFields = "Код,Наименование";
             field.IsRequired = true;
-            field.Order = 7;
+            field.Order = 8;
         }
         else if (field.DbColumnName?.Equals("credit_account", StringComparison.OrdinalIgnoreCase) == true)
         {
@@ -192,42 +203,42 @@ public partial class MetadataService
             field.DisplayPattern = "{Код} - {Наименование}";
             field.DisplayFields = "Код,Наименование";
             field.IsRequired = true;
-            field.Order = 8;
+            field.Order = 9;
         }
         else if (field.DbColumnName?.Equals("use_settlements", StringComparison.OrdinalIgnoreCase) == true)
         {
             field.Name = "Участвует во взаиморасчетах";
             field.FieldType = "Bool";
             field.IsRequired = true;
-            field.Order = 9;
+            field.Order = 10;
         }
         else if (field.DbColumnName?.Equals("generate_postings", StringComparison.OrdinalIgnoreCase) == true)
         {
             field.Name = "Формировать проводки авансовых платежей";
             field.FieldType = "Bool";
             field.IsRequired = true;
-            field.Order = 10;
+            field.Order = 11;
         }
         else if (field.DbColumnName?.Equals("use_internal_settlements", StringComparison.OrdinalIgnoreCase) == true)
         {
             field.Name = "Участвует во внутренних взаиморасчетах";
             field.FieldType = "Bool";
             field.IsRequired = true;
-            field.Order = 11;
+            field.Order = 12;
         }
         else if (field.DbColumnName?.Equals("is_active", StringComparison.OrdinalIgnoreCase) == true)
         {
             field.Name = "Активен";
             field.FieldType = "Bool";
             field.IsRequired = true;
-            field.Order = 12;
+            field.Order = 13;
         }
         else if (field.DbColumnName?.Equals("description", StringComparison.OrdinalIgnoreCase) == true)
         {
             field.Name = "Примечание";
             field.FieldType = "String";
             field.Length = Math.Max(field.Length, 500);
-            field.Order = 13;
+            field.Order = 14;
         }
     }
 
@@ -251,7 +262,20 @@ public partial class MetadataService
                     ""use_settlements"" = COALESCE(""use_settlements"", true),
                     ""generate_postings"" = COALESCE(""generate_postings"", true),
                     ""use_internal_settlements"" = COALESCE(""use_internal_settlements"", false),
-                    ""is_active"" = COALESCE(""is_active"", true)
+                    ""is_active"" = COALESCE(""is_active"", true),
+                    -- Валютная пара должна ссылаться на валюту: подставляем базовую
+                    -- (is_base), а при её отсутствии — с кодом KGS. Невалютным парам
+                    -- поле очищается, чтобы ссылка не сохранялась «про запас».
+                    ""currency_id"" = CASE
+                        WHEN COALESCE(NULLIF(""currency_id"", ''), '') <> '' THEN ""currency_id""
+                        WHEN NOT COALESCE(""use_currency"", false) THEN NULL
+                        ELSE COALESCE(
+                            (SELECT c.""Id""::text FROM ""catalog_currencies"" c
+                             WHERE COALESCE(c.""is_base"", false) = true ORDER BY c.""code"" LIMIT 1),
+                            (SELECT c.""Id""::text FROM ""catalog_currencies"" c
+                             WHERE UPPER(c.""code"") = 'KGS' LIMIT 1)
+                        )
+                    END
                 WHERE true;");
         }
         catch (Exception ex)

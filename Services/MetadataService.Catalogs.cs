@@ -492,7 +492,13 @@ namespace BIS.ERP.Services
 
         public async Task<CurrencyRateLookupResult?> GetCurrencyRateForDateAsync(Guid currencyId, DateTime documentDate)
         {
-            var catalog = await _context.MetadataObjects.AsNoTracking()
+            // Независимый контекст: запрос курса идёт из UI параллельно с другими
+            // командами по общему _context (остатки по авансу, загрузка строк
+            // затрат). Npgsql-соединение не потокобезопасно — параллельные команды
+            // дают "A command is already in progress".
+            await using var context = CreateIndependentContext();
+
+            var catalog = await context.MetadataObjects.AsNoTracking()
                 .FirstOrDefaultAsync(item =>
                     item.ObjectType == "Catalog" &&
                     item.Name == "Справочник курсов валют");
@@ -514,7 +520,7 @@ namespace BIS.ERP.Services
                 ORDER BY rate_date DESC
                 LIMIT 1;";
 
-            using var command = _context.Database.GetDbConnection().CreateCommand();
+            using var command = context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
 
             var currencyParameter = command.CreateParameter();
@@ -530,9 +536,9 @@ namespace BIS.ERP.Services
             var connectionOpened = false;
             try
             {
-                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                if (context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
                 {
-                    await _context.Database.OpenConnectionAsync();
+                    await context.Database.OpenConnectionAsync();
                     connectionOpened = true;
                 }
 
@@ -551,13 +557,16 @@ namespace BIS.ERP.Services
             finally
             {
                 if (connectionOpened)
-                    await _context.Database.CloseConnectionAsync();
+                    await context.Database.CloseConnectionAsync();
             }
         }
 
         public async Task<CurrencyRateLookupResult?> GetLatestCurrencyRateAsync(Guid currencyId, DateTime? maxDate = null)
         {
-            var catalog = await _context.MetadataObjects.AsNoTracking()
+            // Независимый контекст — см. комментарий в GetCurrencyRateForDateAsync.
+            await using var context = CreateIndependentContext();
+
+            var catalog = await context.MetadataObjects.AsNoTracking()
                 .FirstOrDefaultAsync(item =>
                     item.ObjectType == "Catalog" &&
                     item.Name == "Справочник курсов валют");
@@ -581,7 +590,7 @@ namespace BIS.ERP.Services
                 ORDER BY rate_date DESC, COALESCE(is_active, false) DESC, ""UpdatedAt"" DESC
                 LIMIT 1;";
 
-            using var command = _context.Database.GetDbConnection().CreateCommand();
+            using var command = context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
 
             var currencyParameter = command.CreateParameter();
@@ -600,9 +609,9 @@ namespace BIS.ERP.Services
             var connectionOpened = false;
             try
             {
-                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                if (context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
                 {
-                    await _context.Database.OpenConnectionAsync();
+                    await context.Database.OpenConnectionAsync();
                     connectionOpened = true;
                 }
 
@@ -621,7 +630,7 @@ namespace BIS.ERP.Services
             finally
             {
                 if (connectionOpened)
-                    await _context.Database.CloseConnectionAsync();
+                    await context.Database.CloseConnectionAsync();
             }
         }
         // Сотрудники

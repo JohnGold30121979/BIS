@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -51,6 +51,8 @@ namespace BIS.ERP.Views
         private bool _isApplyingExpenseAccount;
         private bool _isCalculatingPayroll;
         private bool _isUpdatingAdvanceBalances;
+        private bool _isUpdatingAdvanceVisibility;
+        private bool _advanceVisibilityUpdateRequested;
 
         public FinanceDocumentDialog(MetadataObject document, MetadataService metadataService)
         {
@@ -180,7 +182,6 @@ namespace BIS.ERP.Views
             // попадала единственная «3 - Расчеты с подотчетными лицами» и выбрать
             // другую пару было невозможно.
             _advancePayments = BuildAdvancePaymentReferenceItems(_advancePaymentRows);
-            AdvanceCurrencyColumn.ItemsSource = _currencies;
 
             ReferenceComboBoxSearchHelper.Attach(OrganizationCombo, _organizations);
             ReferenceComboBoxSearchHelper.Attach(FinanceEmployeeCombo, _employees);
@@ -478,7 +479,7 @@ namespace BIS.ERP.Views
         {
             if (AdvancePaymentCombo.SelectedItem is not ReferenceItem selected)
             {
-                UpdateAdvanceAccountDependentVisibility();
+                UpdateAdvanceAccountDependentVisibilityAsync();
                 QueueAdvanceBalancesUpdate();
                 return;
             }
@@ -500,7 +501,7 @@ namespace BIS.ERP.Views
                     targetRow.PairId = selected.Id;
             }
 
-            UpdateAdvanceAccountDependentVisibility();
+            UpdateAdvanceAccountDependentVisibilityAsync();
             QueueAdvanceBalancesUpdate();
         }
         private async void OnRateInputChanged(object sender, EventArgs e)
@@ -511,12 +512,32 @@ namespace BIS.ERP.Views
             if (_isLoading || _isApplyingCurrencyRate || CurrencyCombo == null || DatePicker == null)
                 return;
 
+            // У авансовых платежей курс шапки задаёт валюту строк затрат,
+            // а сумма документа складывается из строк: направление пересчёта
+            // здесь обратное — из курса считается сумма в валюте.
+            if (_documentKind == FinanceDocumentKind.AdvanceReport)
+            {
+                if (GetSelectedReferenceId(AdvancePaymentCombo) != Guid.Empty)
+                    UpdateAdvanceAccountDependentVisibilityAsync();
+
+                return;
+            }
+
             await LoadExchangeRateFromCatalogAsync();
         }
+
         private void CurrencyAmountBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (_isApplyingCurrencyRate || AmountCurrencyBox == null || ExchangeRateBox == null || AmountBox == null)
                 return;
+
+            // Сумма авансовых платежей определяется строками затрат, поэтому
+            // ввод курса только пересчитывает сумму в валюте.
+            if (_documentKind == FinanceDocumentKind.AdvanceReport)
+            {
+                RecalculateHeaderAmountCurrency();
+                return;
+            }
 
             RecalculateAmountFromCurrency();
         }
@@ -698,7 +719,10 @@ namespace BIS.ERP.Views
 
             data["Сумма"] = total;
             AmountBox.Text = FormatDecimal(total);
-            if (employeeId != Guid.Empty)
+
+            // Скрытое поле не отслеживается и не записывается: иначе в документ
+            // попал бы сотрудник от другой пары счетов, оставшийся в комбо.
+            if (employeeId != Guid.Empty && ShouldShowAdvanceEmployee())
                 SetFieldValueIfExists(data, "Сотрудник", employeeId);
 
             // Строки затрат сохраняются в отдельную таблицу (doc_advance_payment_lines)
@@ -806,10 +830,12 @@ namespace BIS.ERP.Views
         private List<AdvanceExpenseLineRecord> BuildAdvanceExpenseLineRecords()
         {
             var headerPairId = GetSelectedReferenceId(AdvancePaymentCombo);
+            // Курс и сумма в валюте проставляются автоматически из шапки,
+            // поэтому заполненной строку считает только то, что ввёл пользователь:
+            // пара счетов, счёт расхода, сумма и примечание.
             var rows = _advanceExpenseLines
                 .Where(row => row.PairId != Guid.Empty || !IsEmptyAccountValue(row.ExpenseAccountValue) ||
-                              row.Amount != 0 || row.AmountCurrency != 0 || row.ExchangeRate != 0 ||
-                              !string.IsNullOrWhiteSpace(row.Description))
+                              row.Amount != 0 || !string.IsNullOrWhiteSpace(row.Description))
                 .ToList();
             if (rows.Count == 0)
                 throw new InvalidOperationException("Добавьте хотя бы одну строку затрат.");
@@ -1495,7 +1521,11 @@ namespace BIS.ERP.Views
             if (_documentKind == FinanceDocumentKind.AdvanceReport && AmountBox != null)
                 AmountBox.Text = FormatDecimal(total);
             if (_documentKind == FinanceDocumentKind.AdvanceReport && _isInitialized)
+            {
+                // Сумма документа изменилась — пересчитываем сумму в валюте шапки.
+                RecalculateHeaderAmountCurrency();
                 QueueAdvanceBalancesUpdate();
+            }
         }
 
         private void TryCommitAdvanceExpenseGridEdit()
@@ -1522,11 +1552,12 @@ namespace BIS.ERP.Views
 
         private static bool IsAdvanceExpenseRowEmpty(AdvanceExpenseLineRow row)
         {
+            // Валюта, курс и сумма в валюте проставляются из шапки автоматически,
+            // поэтому пустой считается строка без пары, счёта расхода, суммы
+            // и примечания.
             return row.PairId == Guid.Empty &&
                    IsEmptyAccountValue(row.ExpenseAccountValue) &&
                    row.Amount == 0m &&
-                   row.AmountCurrency == 0m &&
-                   row.ExchangeRate == 0m &&
                    string.IsNullOrWhiteSpace(row.Description);
         }
 
@@ -1556,16 +1587,19 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Новая строка затрат создаётся пустой: дату пользователь вводит сам,
-        /// пара счетов и счёт расхода — по необходимости.
+        /// Новая строка затрат создаётся с валютой и курсом шапки документа:
+        /// пользователь вводит только «Сумму», а «Сумма в валюте» считается сама.
         /// </summary>
         private AdvanceExpenseLineRow CreateAdvanceExpenseLineRow()
         {
             var row = new AdvanceExpenseLineRow
             {
-                PairId = GetSelectedReferenceId(AdvancePaymentCombo)
+                PairId = GetSelectedReferenceId(AdvancePaymentCombo),
+                CurrencyId = GetSelectedReferenceId(CurrencyCombo),
+                ExchangeRate = ReadDecimal(ExchangeRateBox.Text)
             };
             AttachAdvanceExpenseLine(row);
+            RecalculateAdvanceExpenseLineCurrency(row);
             return row;
         }
 
@@ -1583,11 +1617,40 @@ namespace BIS.ERP.Views
                 .FirstOrDefault(item => item.Id == pairId);
         }
 
-        private void UpdateAdvanceAccountDependentVisibility()
+        private async void UpdateAdvanceAccountDependentVisibilityAsync()
         {
             if (_documentKind != FinanceDocumentKind.AdvanceReport)
                 return;
 
+            // Метод дёргается сразу несколькими событиями (смена пары счетов,
+            // смена даты документа), а сам ходит в БД за курсом. Параллельный
+            // запуск даёт «A command is already in progress» на общем Npgsql-
+            // соединении, поэтому запуск сериализуется, а повторный вызов
+            // во время работы откладывается на потом.
+            if (_isUpdatingAdvanceVisibility)
+            {
+                _advanceVisibilityUpdateRequested = true;
+                return;
+            }
+
+            _isUpdatingAdvanceVisibility = true;
+            try
+            {
+                do
+                {
+                    _advanceVisibilityUpdateRequested = false;
+                    await UpdateAdvanceAccountDependentVisibilityCoreAsync();
+                }
+                while (_advanceVisibilityUpdateRequested);
+            }
+            finally
+            {
+                _isUpdatingAdvanceVisibility = false;
+            }
+        }
+
+        private async Task UpdateAdvanceAccountDependentVisibilityCoreAsync()
+        {
             var pairRows = GetSelectedAdvancePairRows().ToList();
             var settings = _advanceExpenseLines
                 .Select(row => _accountAnalytics.GetSettingsFromValue(row.ExpenseAccountValue))
@@ -1599,17 +1662,219 @@ namespace BIS.ERP.Views
             // стоят соответствующие пометки справочника «Пары счетов».
             var showEmployee = pairRows.Any(row => ReadBool(row, "use_personnel", "Сотрудники"));
             var showOrganization = pairRows.Any(row => ReadBool(row, "use_organizations", "Организации"));
-            var showCurrency = ShouldShowAdvanceCurrency(pairRows, settings);
 
-            // Валютные колонки показываются только для валютных операций:
-            // пара счетов с валютным учётом, валюта в строке либо аналитика счёта.
             FinanceEmployeePanel.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
             OrganizationPanel.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
 
-            AdvanceCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
-            AdvanceAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            // Валюта документа берётся из выбранной пары счетов: у пары с
+            // включённым «Валютным учетом» в справочнике «Пары счетов» задана
+            // ссылка на валюту (поле «Валюта» пары).
+            var pairCurrencyId = ResolveAdvancePairCurrencyId(pairRows);
+            var showCurrency = pairCurrencyId != Guid.Empty;
+
+            if (showCurrency)
+            {
+                await ApplyHeaderCurrencyAsync(pairCurrencyId);
+            }
+            else
+            {
+                CurrencyPanel.Visibility = Visibility.Collapsed;
+                CurrencyCombo.SelectedItem = null;
+                AmountCurrencyBox.Text = "0";
+                ExchangeRateBox.Text = "0";
+                ClearLineCurrencies();
+            }
+
+            // «Курс» и «Сумма в валюте» в строках затрат показываются вместе
+            // с панелью валюты шапки.
             AdvanceExchangeRateColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
-            CurrencyPanel.Visibility = Visibility.Collapsed;
+            AdvanceAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Валюта пары счетов из справочника «Пары счетов» (catalog_advance_payments):
+        /// берётся у пар с включённым «Валютным учетом». Если пар несколько,
+        /// приоритет у пары, выбранной в шапке документа.
+        /// </summary>
+        private Guid ResolveAdvancePairCurrencyId(IReadOnlyList<Dictionary<string, object>> pairRows)
+        {
+            Guid ReadCurrency(Dictionary<string, object> row) =>
+                TryGetGuid(GetFirstValue(row, "currency_id", "Валюта"), out var id) ? id : Guid.Empty;
+
+            var headerPairId = GetSelectedReferenceId(AdvancePaymentCombo);
+            var headerRow = pairRows.FirstOrDefault(row =>
+                TryGetGuid(row.GetValueOrDefault("Id"), out var id) && id == headerPairId);
+            if (headerRow != null)
+            {
+                var currencyId = ReadCurrency(headerRow);
+                if (currencyId != Guid.Empty)
+                    return currencyId;
+            }
+
+            foreach (var row in pairRows)
+            {
+                var currencyId = ReadCurrency(row);
+                if (currencyId != Guid.Empty)
+                    return currencyId;
+            }
+
+            return Guid.Empty;
+        }
+
+        /// <summary>
+        /// Подставляет валюту пары в шапку документа и подтягивает курс на дату
+        /// документа. Курс можно ввести вручную в поле «Курс» или запросить
+        /// кнопкой «?» — так же, как в счёт-фактуре.
+        /// </summary>
+        private async Task ApplyHeaderCurrencyAsync(Guid currencyId)
+        {
+            CurrencyPanel.Visibility = Visibility.Visible;
+
+            var currency = _currencies.FirstOrDefault(item => item.Id == currencyId);
+            if (currency == null)
+                return;
+
+            if (GetSelectedReferenceId(CurrencyCombo) != currencyId)
+            {
+                try
+                {
+                    _isApplyingCurrencyRate = true;
+                    CurrencyCombo.SelectedItem = currency;
+                }
+                finally
+                {
+                    _isApplyingCurrencyRate = false;
+                }
+            }
+
+            await ApplyHeaderExchangeRateAsync();
+        }
+
+        /// <summary>
+        /// Курс валюты шапки на дату документа: для базовой валюты — единица,
+        /// иначе из справочника курсов валют.
+        /// </summary>
+        private async Task ApplyHeaderExchangeRateAsync(bool interactive = false)
+        {
+            if (CurrencyPanel.Visibility != Visibility.Visible ||
+                CurrencyCombo.SelectedItem is not ReferenceItem currency)
+            {
+                return;
+            }
+
+            var rateDate = (DatePicker.SelectedDate ?? DateTime.Today).Date;
+
+            if (IsBaseCurrency(currency))
+            {
+                SetHeaderExchangeRate("1");
+                ApplyHeaderCurrencyToLines(currency.Id);
+                return;
+            }
+
+            var rate = await _metadataService.GetCurrencyRateForDateAsync(currency.Id, rateDate);
+            if (rate == null && interactive)
+                rate = await RequestNewLineExchangeRateAsync(currency.Id, rateDate);
+
+            if (rate != null)
+            {
+                SetHeaderExchangeRate(rate.Rate.ToString("0.####", CultureInfo.CurrentCulture));
+            }
+            else if (interactive)
+            {
+                MessageBox.Show(
+                    $"Курс валюты на {rateDate:dd/MM/yyyy} не найден. Введите курс вручную.",
+                    "Курс валюты",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+
+            ApplyHeaderCurrencyToLines(currency.Id);
+        }
+
+        private void SetHeaderExchangeRate(string text)
+        {
+            try
+            {
+                _isApplyingCurrencyRate = true;
+                ExchangeRateBox.Text = text;
+            }
+            finally
+            {
+                _isApplyingCurrencyRate = false;
+            }
+
+            RecalculateHeaderAmountCurrency();
+        }
+
+        /// <summary>Кнопка «?» рядом с курсом в шапке: запрос курса валюты.</summary>
+        private async void RequestHeaderExchangeRate_Click(object sender, RoutedEventArgs e)
+        {
+            if (_documentKind != FinanceDocumentKind.AdvanceReport)
+                return;
+
+            await ApplyHeaderExchangeRateAsync(interactive: true);
+        }
+
+        /// <summary>
+        /// «Сумма в валюте» шапки считается от суммы документа по курсу шапки:
+        /// сумма документа у авансовых платежей складывается из строк затрат.
+        /// </summary>
+        private void RecalculateHeaderAmountCurrency()
+        {
+            if (CurrencyPanel.Visibility != Visibility.Visible)
+                return;
+
+            try
+            {
+                _isApplyingCurrencyRate = true;
+
+                var amount = ReadDecimal(AmountBox.Text);
+                var rate = ReadDecimal(ExchangeRateBox.Text);
+                AmountCurrencyBox.Text = amount > 0 && rate > 0
+                    ? FormatDecimal(Math.Round(amount / rate, 2, MidpointRounding.AwayFromZero))
+                    : "0";
+            }
+            finally
+            {
+                _isApplyingCurrencyRate = false;
+            }
+        }
+
+        /// <summary>
+        /// Валюта и курс строки затрат наследуются из шапки документа: в строке
+        /// ничего не выбирается и не вводится — только «Сумма».
+        /// </summary>
+        private void ApplyHeaderCurrencyToLines(Guid currencyId)
+        {
+            var rate = ReadDecimal(ExchangeRateBox.Text);
+            foreach (var row in _advanceExpenseLines.Where(row =>
+                         row.CurrencyId != currencyId || row.ExchangeRate != rate))
+            {
+                row.CurrencyId = currencyId;
+                row.ExchangeRate = rate;
+            }
+
+            RecalculateLineCurrenciesFromRate();
+        }
+
+        private void ClearLineCurrencies()
+        {
+            foreach (var row in _advanceExpenseLines)
+            {
+                row.CurrencyId = Guid.Empty;
+                row.AmountCurrency = 0m;
+                row.ExchangeRate = 0m;
+            }
+        }
+
+        /// <summary>
+        /// Пересчёт «Суммы в валюте» строк по их курсу: исходная величина —
+        /// сумма строки в национальной валюте.
+        /// </summary>
+        private void RecalculateLineCurrenciesFromRate()
+        {
+            foreach (var row in _advanceExpenseLines)
+                RecalculateAdvanceExpenseLineCurrency(row);
         }
 
         private IEnumerable<Dictionary<string, object>> GetSelectedAdvancePairRows()
@@ -1654,27 +1919,19 @@ namespace BIS.ERP.Views
                        showWhenNoAccountSelected: false,
                        showUnmappedFields: false);
         }
-
         /// <summary>
-        /// Реакция строки затрат на изменение валюты и валютных сумм:
-        /// при выборе валюты подтягивается курс на дату строки, а введённые
-        /// «Сумма в валюте» и «Курс» пересчитывают сумму строки.
+        /// Реакция строки затрат на изменение суммы и курса: «Сумма в валюте»
+        /// пересчитывается по курсу строки, итог — по суммам строк.
+        /// Валюта строки наследуется из шапки документа и отдельно не выбирается.
         /// </summary>
-        private async void OnAdvanceExpenseLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
+        private void OnAdvanceExpenseLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             if (sender is not AdvanceExpenseLineRow row)
                 return;
 
             switch (e.PropertyName)
             {
-                case nameof(AdvanceExpenseLineRow.CurrencyId):
-                    await ApplyLineExchangeRateAsync(row);
-                    // Показ колонок «Сумма в валюте»/«Курс» откладываем: колонки нельзя
-                    // менять, пока активна ячейка редактирования валюты.
-                    Dispatcher.BeginInvoke(new Action(UpdateAdvanceAccountDependentVisibility));
-                    RecalculateAdvanceExpenseTotal();
-                    break;
-                case nameof(AdvanceExpenseLineRow.AmountCurrency):
+                case nameof(AdvanceExpenseLineRow.Amount):
                 case nameof(AdvanceExpenseLineRow.ExchangeRate):
                     RecalculateAdvanceExpenseLineCurrency(row);
                     RecalculateAdvanceExpenseTotal();
@@ -1686,80 +1943,6 @@ namespace BIS.ERP.Views
         {
             row.PropertyChanged -= OnAdvanceExpenseLinePropertyChanged;
             row.PropertyChanged += OnAdvanceExpenseLinePropertyChanged;
-        }
-
-        /// <summary>
-        /// Подтягивает курс выбранной валюты на дату строки (дата документа,
-        /// если дата строки ещё не введена). Для базовой валюты курс равен единице.
-        /// При interactive=true курс запрашивается по кнопке «?»: если в справочнике
-        /// его нет, предлагается загрузить актуальные курсы НБКР.
-        /// </summary>
-        private async Task ApplyLineExchangeRateAsync(AdvanceExpenseLineRow row, bool interactive = false)
-        {
-            if (row.CurrencyId == Guid.Empty)
-            {
-                if (row.AmountCurrency == 0 && row.ExchangeRate == 0)
-                    return;
-
-                row.ExchangeRate = 0;
-                row.AmountCurrency = 0;
-                row.ExchangeRateSource = string.Empty;
-                return;
-            }
-
-            var currency = _currencies.FirstOrDefault(item => item.Id == row.CurrencyId);
-            var rateDate = LineDateOrDocumentDate(row).Date;
-
-            if (IsBaseCurrency(currency))
-            {
-                row.ExchangeRate = 1m;
-                row.ExchangeRateSource = "Базовая валюта";
-                RecalculateAdvanceExpenseLineCurrency(row);
-                return;
-            }
-
-            var rate = await _metadataService.GetCurrencyRateForDateAsync(row.CurrencyId, rateDate);
-            if (rate == null && interactive)
-                rate = await RequestNewLineExchangeRateAsync(row.CurrencyId, rateDate);
-
-            if (rate == null)
-            {
-                if (interactive)
-                {
-                    MessageBox.Show(
-                        $"Курс валюты на {rateDate:dd/MM/yyyy} не найден. Введите курс вручную.",
-                        "Курс валюты",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
-
-                return;
-            }
-
-            row.ExchangeRate = rate.Rate;
-            row.ExchangeRateSource = string.IsNullOrWhiteSpace(rate.Source)
-                ? rate.RateDate.ToString("dd/MM/yyyy")
-                : $"{rate.Source} на {rate.RateDate:dd/MM/yyyy}";
-            RecalculateAdvanceExpenseLineCurrency(row);
-        }
-
-        /// <summary>Кнопка «?» в колонке «Курс»: запрос курса из справочника.</summary>
-        private async void RequestLineExchangeRate_Click(object sender, RoutedEventArgs e)
-        {
-            if ((sender as FrameworkElement)?.Tag is not AdvanceExpenseLineRow row)
-                return;
-
-            TryCommitAdvanceExpenseGridEdit();
-
-            if (row.CurrencyId == Guid.Empty)
-            {
-                MessageBox.Show("Сначала выберите валюту в строке затрат.", "Курс валюты",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            await ApplyLineExchangeRateAsync(row, interactive: true);
-            RecalculateAdvanceExpenseTotal();
         }
 
         /// <summary>
@@ -1824,24 +2007,18 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Пересчёт валютных величин строки. «Сумма в валюте» — исходное значение:
-        /// если оно введено, сумма в национальной валюте считается по курсу;
-        /// иначе, если введена сумма, курс применяется в обратную сторону.
-        /// Ручной ввод суммы не перезаписывается, пока валютная сумма не задана.
+        /// Пересчёт валютных величин строки. Исходная величина — сумма строки
+        /// в национальной валюте: «Сумма в валюте» считается по ней и курсу
+        /// строки (курс вводится вручную или запрашивается кнопкой «?»).
         /// </summary>
         private static void RecalculateAdvanceExpenseLineCurrency(AdvanceExpenseLineRow row)
         {
             if (row.CurrencyId == Guid.Empty || row.ExchangeRate <= 0)
                 return;
 
-            if (row.AmountCurrency > 0)
-            {
-                row.Amount = Math.Round(row.AmountCurrency * row.ExchangeRate, 2, MidpointRounding.AwayFromZero);
-                return;
-            }
-
-            if (row.Amount > 0)
-                row.AmountCurrency = Math.Round(row.Amount / row.ExchangeRate, 2, MidpointRounding.AwayFromZero);
+            row.AmountCurrency = row.Amount > 0
+                ? Math.Round(row.Amount / row.ExchangeRate, 2, MidpointRounding.AwayFromZero)
+                : 0m;
         }
 
         private string ResolveCurrencyDisplay(Guid currencyId)
@@ -2004,12 +2181,17 @@ namespace BIS.ERP.Views
         private void SetCurrencyValues(Dictionary<string, object> data)
         {
             // Валюта шапки используется только когда панель валюты действительно
-            // показана. У авансовых платежей валюта задаётся в каждой строке
-            // затрат, и запись в поля шапки из скрытой панели затирала бы их.
+            // показана. Для авансовых платежей панель показывается по флагу
+            // «Валютный учет» выбранной пары счетов (см. UpdateAdvanceAccountDependentVisibility),
+            // а запись в поля шапки из скрытой панели затирала бы значения строк затрат.
             if (CurrencyPanel.Visibility != Visibility.Visible)
                 return;
 
-            SetFieldValueIfExists(data, "Валюта", GetSelectedReferenceId(CurrencyCombo));
+            // Пустой выбор не сохраняем: иначе в поле «Валюта» попадёт Guid.Empty.
+            var currencyId = GetSelectedReferenceId(CurrencyCombo);
+            if (currencyId != Guid.Empty)
+                SetFieldValueIfExists(data, "Валюта", currencyId);
+
             SetFieldValueIfExists(data, "Сумма в валюте", ReadDecimal(AmountCurrencyBox.Text));
             SetFieldValueIfExists(data, "Курс", ReadDecimal(ExchangeRateBox.Text));
         }
@@ -2054,7 +2236,7 @@ namespace BIS.ERP.Views
         {
             if (_documentKind == FinanceDocumentKind.AdvanceReport)
             {
-                UpdateAdvanceAccountDependentVisibility();
+                UpdateAdvanceAccountDependentVisibilityAsync();
                 return;
             }
 
