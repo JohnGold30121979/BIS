@@ -30,6 +30,8 @@
                     <DatePicker x:Name="PeriodStartDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
                     <TextBlock Text="по:" VerticalAlignment="Center" Margin="10,0,6,0"/>
                     <DatePicker x:Name="PeriodEndDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
+                    <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="32" Margin="10,0,0,0"
+                            Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
                     <TextBlock Text="Касса:" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="Bold"/>
                     <ComboBox x:Name="CashDeskFilterCombo"
                               Width="260"
@@ -38,8 +40,7 @@
                               SelectionChanged="OnFilterChanged"/>
                     <Button x:Name="CashPostingsButton" Content="Проводки по кассе" Width="145" Height="32" Margin="10,0,0,0"
                             Background="#16A085" Foreground="White" Click="OnCashPostingsClick"/>
-                    <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="32" Margin="10,0,0,0"
-                            Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
+                   
                 </WrapPanel>
             </Border>
             <Border Margin="0,0,0,8" Padding="6" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">

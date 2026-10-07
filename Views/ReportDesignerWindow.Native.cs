@@ -39,6 +39,7 @@ namespace BIS.ERP.Views
         private bool _suspendNativeRender;
         private string? _deferredNativeTemplateJson;
         private bool _deferredNativeTemplateWarning;
+        private bool _suspendNativeGridSelectionSync;
 
         private void InitializeNativeDesignerState()
         {
@@ -113,6 +114,7 @@ namespace BIS.ERP.Views
         private void OnNativeDesignerTabSelected(object sender, RoutedEventArgs e)
         {
             LoadDeferredNativeTemplateIfNeeded();
+            ScrollNativeElementsGridToSelection();
         }
 
         private void OnFrxFieldsTabSelected(object sender, RoutedEventArgs e)
@@ -611,7 +613,7 @@ namespace BIS.ERP.Views
             _draggedNativeElement = null;
             _rotatingNativeLine = null;
             _resizedNativeElement = null;
-            NativeElementsGrid.Items.Refresh();
+            RefreshNativeElementsGrid();
         }
 
         private void OnNativeDesignerPreviewKeyDown(object sender, KeyEventArgs e)
@@ -985,6 +987,9 @@ namespace BIS.ERP.Views
 
         private void OnNativeElementGridSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_suspendNativeGridSelectionSync)
+                return;
+
             if (NativeElementsGrid.SelectedItem is NativeReportElementViewModel element)
                 SelectNativeElement(element);
         }
@@ -992,10 +997,88 @@ namespace BIS.ERP.Views
         private void SelectNativeElement(NativeReportElementViewModel? element)
         {
             _selectedNativeElement = element;
-            if (element != null && !ReferenceEquals(NativeElementsGrid.SelectedItem, element))
-                NativeElementsGrid.SelectedItem = element;
+            ApplyNativeElementsGridSelection(force: false);
             FillNativeElementProperties(element);
             RenderNativeDesigner();
+        }
+
+        /// <summary>
+        /// Синхронизирует выделение строки в списке «Элементы макета» слева
+        /// с элементом, выбранным на холсте или в свойствах.
+        /// </summary>
+        /// <param name="force">
+        /// true — перевыделить строку, даже если SelectedItem уже совпадает:
+        /// после Items.Refresh() визуальное выделение строки может сбрасываться.
+        /// </param>
+        private void ApplyNativeElementsGridSelection(bool force)
+        {
+            if (NativeElementsGrid == null)
+                return;
+
+            var element = _selectedNativeElement;
+            if (element == null || !_nativeElements.Contains(element))
+            {
+                if (NativeElementsGrid.SelectedItem != null)
+                    SetNativeElementsGridSelection(null);
+
+                return;
+            }
+
+            var alreadySelected = ReferenceEquals(NativeElementsGrid.SelectedItem, element);
+            if (!alreadySelected)
+                SetNativeElementsGridSelection(element);
+            else if (force)
+            {
+                // Сбрасываем и снова выставляем выделение, чтобы строка гарантированно
+                // получила подсветку после обновления коллекции.
+                SetNativeElementsGridSelection(null);
+                SetNativeElementsGridSelection(element);
+            }
+
+            ScrollNativeElementsGridToSelection();
+        }
+
+        private void SetNativeElementsGridSelection(NativeReportElementViewModel? element)
+        {
+            _suspendNativeGridSelectionSync = true;
+            try
+            {
+                NativeElementsGrid.SelectedItem = element;
+            }
+            finally
+            {
+                _suspendNativeGridSelectionSync = false;
+            }
+        }
+
+        private void ScrollNativeElementsGridToSelection()
+        {
+            if (NativeElementsGrid == null || _selectedNativeElement == null)
+                return;
+
+            if (NativeElementsGrid.IsLoaded)
+            {
+                NativeElementsGrid.ScrollIntoView(_selectedNativeElement);
+                return;
+            }
+
+            // Список ещё не в дереве (вкладка «Нативный макет» не открыта) —
+            // прокрутим после загрузки.
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+            {
+                if (NativeElementsGrid.IsLoaded &&
+                    _selectedNativeElement != null &&
+                    _nativeElements.Contains(_selectedNativeElement))
+                {
+                    NativeElementsGrid.ScrollIntoView(_selectedNativeElement);
+                }
+            }));
+        }
+
+        private void RefreshNativeElementsGrid()
+        {
+            NativeElementsGrid.Items.Refresh();
+            ApplyNativeElementsGridSelection(force: true);
         }
 
         private void FillNativeElementProperties(NativeReportElementViewModel? element)
@@ -1079,7 +1162,7 @@ namespace BIS.ERP.Views
             _selectedNativeElement.Bold = NativeBoldCheck.IsChecked == true;
             _selectedNativeElement.Italic = NativeItalicCheck.IsChecked == true;
             EnsureNativeElementBand(_selectedNativeElement);
-            NativeElementsGrid.Items.Refresh();
+            RefreshNativeElementsGrid();
         }
 
         private string GetNativeExpressionFromPropertyControls()
@@ -1201,7 +1284,7 @@ namespace BIS.ERP.Views
             ClampNativeElement(_selectedNativeElement);
             FillNativeElementProperties(_selectedNativeElement);
             RenderNativeDesigner();
-            NativeElementsGrid.Items.Refresh();
+            RefreshNativeElementsGrid();
             return true;
         }
 
@@ -1231,7 +1314,7 @@ namespace BIS.ERP.Views
                     break;
             }
 
-            NativeElementsGrid.Items.Refresh();
+            RefreshNativeElementsGrid();
             NativeDesignerCanvas.Focus();
             e.Handled = true;
         }
@@ -1290,7 +1373,7 @@ namespace BIS.ERP.Views
             _selectedNativeElement.Expression = BuildNativeSubstringExpression(selectedField?.DbColumnName ?? _selectedNativeElement.Expression);
             FillNativeElementProperties(_selectedNativeElement);
             RenderNativeDesigner();
-            NativeElementsGrid.Items.Refresh();
+            RefreshNativeElementsGrid();
         }
 
         private void OnAddNativeLineClick(object sender, RoutedEventArgs e)
@@ -1377,7 +1460,7 @@ namespace BIS.ERP.Views
             var order = 0;
             foreach (var element in _nativeElements)
                 element.Order = order++;
-            NativeElementsGrid.Items.Refresh();
+            RefreshNativeElementsGrid();
         }
 
         private int GetNextNativeElementOrder() =>

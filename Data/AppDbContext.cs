@@ -39,7 +39,6 @@ public class AppDbContext : DbContext
     // Существующие DbSet
     public DbSet<InfoBase> InfoBases { get; set; }
     public DbSet<User> Users { get; set; }
-    public DbSet<Transaction> Transactions { get; set; }
     public DbSet<Material> Materials { get; set; }
     // Legacy compatibility table. The active fixed-assets module is metadata-driven via catalog_assets.
     public DbSet<FixedAsset> FixedAssets { get; set; }
