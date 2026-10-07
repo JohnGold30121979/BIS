@@ -152,7 +152,7 @@ namespace BIS.ERP.Views
 
             if (showCurrency)
             {
-                SetPostingDetail(detail, "Сумма в вал.", row.AmountInCurrency != 0m ? row.AmountInCurrency.ToString("N2") : null);
+                SetPostingDetail(detail, "Сумма вал.", row.AmountInCurrency.ToString("N2"));
                 SetPostingDetail(detail, "Валюта", row.CurrencyName);
             }
 
@@ -2678,13 +2678,3 @@ namespace BIS.ERP.Views
         }
     }
 }
-
-
-
-
-
-
-
-
-
-

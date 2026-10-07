@@ -24,6 +24,10 @@ namespace BIS.ERP.Views
         private readonly MetadataService _metadataService;
         private readonly Guid? _editId;
 
+        private bool _isApplyingCurrencyRate;
+        private bool _isInitialized;
+        private string _currencyCode = string.Empty;
+
         /// <summary>
         /// Идентификатор сохранённого кассового ордера. Заполняется после успешного
         /// сохранения, чтобы вызывающий раздел выделил документ в списке.
@@ -756,8 +760,17 @@ namespace BIS.ERP.Views
 
 
                 // Валюта
-                bool isCurrencyEnabled = IsCurrencyEnabledForAccount(corrAccountCode);
-                decimal amountInCurrency = isCurrencyEnabled ? amount : 0;
+                // Валюта и курс — берём из панели валюты, если она показана.
+                // Курс вводится/подтягивается в ExchangeRateBox, валюта — в CurrencyCombo.
+                var exchangeRate = NumericInputHelper.TryParseDecimal(ExchangeRateBox?.Text, CultureInfo.CurrentCulture, out var parsedRate)
+                    ? parsedRate
+                    : 0m;
+                var currencyId = GetSelectedReferenceId(CurrencyCombo);
+
+                decimal amountInCurrency = 0m;
+                if (CurrencyPanel.Visibility == Visibility.Visible && exchangeRate > 0)
+                    amountInCurrency = Math.Round(amount / exchangeRate, 2, MidpointRounding.AwayFromZero);
+
                 var counterpartyOrganizationId =
                     OrganizationCombo.Visibility == Visibility.Visible && OrganizationCombo.SelectedItem is ReferenceItem organization
                         ? organization.Id.ToString()
@@ -790,6 +803,10 @@ namespace BIS.ERP.Views
                     ["debit_account"] = debitAccount,
                     ["Кредит"] = creditAccount,
                     ["credit_account"] = creditAccount,
+                    ["Курс"] = exchangeRate,
+                    ["exchange_rate"] = exchangeRate,
+                    ["Валюта"] = currencyId != Guid.Empty ? currencyId.ToString() : string.Empty,
+                    ["currency_id"] = currencyId != Guid.Empty ? currencyId.ToString() : string.Empty,
                     ["Сумма в валюте"] = amountInCurrency,
                     ["amount_currency"] = amountInCurrency
                 };
@@ -798,11 +815,6 @@ namespace BIS.ERP.Views
                 SetFieldValueIfExists(itemData, "Организация", counterpartyOrganizationId);
                 SetFieldValueIfExists(itemData, "Первичная организация", primaryOrganizationId);
                 SetFieldValueIfExists(itemData, "Организация Б", counterpartyOrganizationId);
-
-                SetFieldValueIfExists(itemData, "Валюта",
-                    CurrencyPanel.Visibility == Visibility.Visible && CurrencyCombo.SelectedItem is ReferenceItem currency
-                        ? currency.Id.ToString()
-                        : string.Empty);
 
                 SetFieldValueIfExists(itemData, "Сотрудник",
                     EmployeePanel.Visibility == Visibility.Visible && _selectedEmployeeId != Guid.Empty
@@ -1241,6 +1253,7 @@ namespace BIS.ERP.Views
                 ? null
                 : _accountAnalytics.GetSettingsById(_selectedCorrAccountId);
 
+            // Организация
             SetAccountControlledFieldVisibility(
                 OrganizationLabel,
                 OrganizationCombo,
@@ -1252,18 +1265,7 @@ namespace BIS.ERP.Views
                     showWhenNoAccountSelected: false,
                     showUnmappedFields: false));
 
-            SetAccountControlledPanelVisibility(
-                CurrencyPanel,
-                CurrencyCombo,
-                AccountAnalyticsRules.ShouldShowField(
-                    "Организация",
-                    new[] { settings },
-                    _accountAnalytics.Definitions,
-                    "Справочник валют",
-                    showWhenNoAccountSelected: false,
-                    showUnmappedFields: false));
-
-            // Для сотрудника – просто показываем/скрываем панель, ComboBox нет
+            // Сотрудник — просто показываем/скрываем панель
             EmployeePanel.Visibility = AccountAnalyticsRules.ShouldShowField(
                 "Сотрудник",
                 new[] { settings },
@@ -1273,6 +1275,7 @@ namespace BIS.ERP.Views
                 showUnmappedFields: false)
                 ? Visibility.Visible : Visibility.Collapsed;
 
+            // Материал
             SetAccountControlledPanelVisibility(
                 MaterialPanel,
                 MaterialCombo,
@@ -1283,6 +1286,106 @@ namespace BIS.ERP.Views
                     "Справочник материалов",
                     showWhenNoAccountSelected: false,
                     showUnmappedFields: false));
+
+            // Валюта: берётся из самого счёта («Валюта счета» в плане счетов)
+            _ = UpdateCurrencyFromCorrAccountAsync();
+        }
+
+        /// <summary>
+        /// Обновляет панель валюты по выбранному корреспондирующему счёту:
+        /// берёт валюту, закреплённую за счётом в плане счетов, подставляет её
+        /// в CurrencyCombo и подтягивает курс на дату документа.
+        /// </summary>
+        private async Task UpdateCurrencyFromCorrAccountAsync()
+        {
+            if (CurrencyPanel == null)
+                return;
+
+            // Счёт ещё не выбран — панель скрываем
+            if (_selectedCorrAccountId == Guid.Empty &&
+                string.IsNullOrWhiteSpace(_selectedCorrAccountCode))
+            {
+                HideCurrencyPanel();
+                return;
+            }
+
+            // Валюта счёта из плана счетов
+            var currencyId = await ResolveAccountCurrencyIdAsync(
+                _selectedCorrAccountId,
+                _selectedCorrAccountCode);
+
+            // У счёта валюта не задана — панель скрываем
+            if (currencyId == Guid.Empty)
+            {
+                HideCurrencyPanel();
+                return;
+            }
+
+            // Показываем панель
+            CurrencyPanel.Visibility = Visibility.Visible;
+
+            // Находим валюту в ComboBox
+            var currencyItem = CurrencyCombo.Items
+                .OfType<ReferenceItem>()
+                .FirstOrDefault(item => item.Id == currencyId);
+
+            // Если справочник валют ещё не подгружен — подгружаем
+            if (currencyItem == null)
+            {
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var currencies = await LoadReferenceItemsAsync(
+                    allCatalogs, "Справочник валют", "Код", "Наименование");
+
+                ReferenceComboBoxSearchHelper.Attach(CurrencyCombo, currencies);
+
+                currencyItem = currencies.FirstOrDefault(item => item.Id == currencyId);
+            }
+
+            if (currencyItem == null)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Валюта счёта {_selectedCorrAccountCode} не найдена в справочнике валют (Id={currencyId}).");
+                return;
+            }
+
+            // Подставляем валюту без рекурсии
+            if (GetSelectedReferenceId(CurrencyCombo) != currencyItem.Id)
+            {
+                try
+                {
+                    _isApplyingCurrencyRate = true;
+                    CurrencyCombo.SelectedItem = currencyItem;
+                }
+                finally
+                {
+                    _isApplyingCurrencyRate = false;
+                }
+            }
+
+            // Курс на дату документа
+            await LoadExchangeRateFromCatalogAsync();
+        }
+
+        /// <summary>Скрывает панель валюты и очищает связанные поля.</summary>
+        private void HideCurrencyPanel()
+        {
+            if (CurrencyPanel == null)
+                return;
+
+            CurrencyPanel.Visibility = Visibility.Collapsed;
+            CurrencyCombo.SelectedItem = null;
+            if (ExchangeRateBox != null)
+                ExchangeRateBox.Text = "0";
+            if (AmountCurrencyBox != null)
+                AmountCurrencyBox.Text = "0";
+
+            RefreshPostingPreview();
+        }
+
+        /// <summary>Id выбранного элемента в ComboBox.</summary>
+        private static Guid GetSelectedReferenceId(ComboBox? comboBox)
+        {
+            return comboBox?.SelectedItem is ReferenceItem selected ? selected.Id : Guid.Empty;
         }
 
         private void SetFieldValueIfExists(Dictionary<string, object> itemData, string fieldName, object value)
@@ -1683,6 +1786,67 @@ namespace BIS.ERP.Views
         private void OnPostingPreviewChanged(object sender, EventArgs e)
         {
             RefreshPostingPreview();
+
+            // При вводе суммы пересчитываем «Сумму в валюте» по курсу
+            if (!_isApplyingCurrencyRate && CurrencyPanel?.Visibility == Visibility.Visible)
+                RecalculateAmountFromCurrency();
+        }
+
+        /// <summary>
+        /// Кнопка «?» рядом с организацией. Открывает справочник организаций
+        /// и подставляет выбранную в OrganizationCombo.
+        /// </summary>
+        private async void SelectOrganization_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Cursor = Cursors.Wait;
+
+                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var organizationCatalog = allCatalogs.FirstOrDefault(c => c.Name == "Организации");
+                if (organizationCatalog == null)
+                {
+                    MessageBox.Show("Справочник организаций не найден.", "Организации",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var rows = await _metadataService.GetCatalogDataAsync(organizationCatalog.Id);
+                if (rows.Count == 0)
+                {
+                    MessageBox.Show("В справочнике организаций нет данных.", "Организации",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(organizationCatalog, _metadataService);
+                var dialog = new ReferenceSelectionDialog(rows, "Код организации", "Наименование", referenceMaps)
+                {
+                    Title = "Выбор: Организации"
+                };
+
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, dialog.Title) == true &&
+                    dialog.SelectedItem != null &&
+                    dialog.SelectedItem.TryGetValue("Id", out var idValue) &&
+                    Guid.TryParse(idValue?.ToString(), out var selectedId))
+                {
+                    var selected = OrganizationCombo.Items
+                        .OfType<ReferenceItem>()
+                        .FirstOrDefault(item => item.Id == selectedId);
+
+                    if (selected != null)
+                        OrganizationCombo.SelectedItem = selected;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при выборе организации: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
         }
 
         private void RefreshPostingPreview()
@@ -1691,22 +1855,271 @@ namespace BIS.ERP.Views
                 return;
 
             _postingPreviewRows.Clear();
+
             var amount = TryReadAmount();
             var (debitAccount, creditAccount) = BuildPostingAccounts(_selectedCashDeskCode, _selectedCorrAccountCode);
             var isReceipt = IsReceiptOrder(_orderKind);
+
+            // Валюта, курс и сумма в валюте (если панель валюты показана)
+            string currencyName = string.Empty;
+            string exchangeRateText = string.Empty;
+            string amountCurrencyText = string.Empty;
+
+            if (CurrencyPanel?.Visibility == Visibility.Visible)
+            {
+                currencyName = CurrencyCombo?.SelectedItem is ReferenceItem currency
+                    ? currency.DisplayName
+                    : string.Empty;
+
+                var rate = NumericInputHelper.TryParseDecimal(ExchangeRateBox?.Text, CultureInfo.CurrentCulture, out var parsedRate)
+                    ? parsedRate
+                    : 0m;
+
+                var amountCurrency = NumericInputHelper.TryParseDecimal(AmountCurrencyBox?.Text, CultureInfo.CurrentCulture, out var parsedAmountCurrency)
+                    ? parsedAmountCurrency
+                    : 0m;
+
+                exchangeRateText = rate > 0 ? rate.ToString("0.####", CultureInfo.CurrentCulture) : string.Empty;
+                amountCurrencyText = amountCurrency > 0 ? amountCurrency.ToString("N2", CultureInfo.CurrentCulture) : string.Empty;
+            }
 
             _postingPreviewRows.Add(new CashPostingPreviewRow
             {
                 Mark = isReceipt ? "Приходный" : "Расходный",
                 Debit = string.IsNullOrWhiteSpace(debitAccount) ? "не выбран" : debitAccount,
                 Credit = string.IsNullOrWhiteSpace(creditAccount) ? "не выбран" : creditAccount,
-                Amount = amount.ToString("N2"),
+                Amount = amount.ToString("N2", CultureInfo.CurrentCulture),
+                ExchangeRate = exchangeRateText,
+                AmountCurrency = amountCurrencyText,
                 Note = string.IsNullOrWhiteSpace(BasisBox?.Text) ? DescriptionBox?.Text ?? string.Empty : BasisBox.Text
             });
 
             PostingPreviewHint.Text = isReceipt
                 ? "Приходный заказ: дебетуется счет кассы, кредитуется корреспондирующий счет."
                 : "Расходный заказ: дебетуется корреспондирующий счет, кредитуется счет кассы.";
+        }
+
+        /// <summary>
+        /// Смена валюты или даты документа: курс подтягивается из справочника
+        /// курсов валют, «Сумма в валюте» пересчитывается по курсу.
+        /// </summary>
+        private async void OnRateInputChanged(object sender, EventArgs e)
+        {
+            if (_isLoading || _isApplyingCurrencyRate || CurrencyCombo == null || DatePicker == null)
+                return;
+
+            await LoadExchangeRateFromCatalogAsync();
+        }
+
+        /// <summary>
+        /// Ручное изменение курса или суммы в валюте: если курс введён вручную,
+        /// «Сумма в валюте» пересчитывается от суммы документа по курсу.
+        /// </summary>
+        private void CurrencyAmountBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isApplyingCurrencyRate || AmountCurrencyBox == null ||
+                ExchangeRateBox == null || AmountBox == null)
+            {
+                return;
+            }
+
+            RecalculateAmountFromCurrency();
+        }
+
+        /// <summary>
+        /// Загружает курс валюты на дату документа из справочника курсов валют
+        /// и пересчитывает «Сумму в валюте».
+        /// </summary>
+        private async Task LoadExchangeRateFromCatalogAsync(bool interactive = false)
+        {
+            if (CurrencyCombo?.SelectedItem is not ReferenceItem currency ||
+                DatePicker?.SelectedDate is not DateTime documentDate)
+            {
+                return;
+            }
+
+            var rateDate = documentDate.Date;
+            var rate = await _metadataService.GetCurrencyRateForDateAsync(currency.Id, rateDate);
+
+            if (rate == null && interactive)
+                rate = await RequestNewExchangeRateAsync(currency.Id, rateDate);
+
+            if (rate != null)
+            {
+                try
+                {
+                    _isApplyingCurrencyRate = true;
+                    ExchangeRateBox.Text = rate.Rate.ToString("0.####", CultureInfo.CurrentCulture);
+                }
+                finally
+                {
+                    _isApplyingCurrencyRate = false;
+                }
+
+                RecalculateAmountFromCurrency();
+                return;
+            }
+
+            if (interactive)
+            {
+                MessageBox.Show(
+                    $"Курс валюты на {rateDate:dd/MM/yyyy} не найден. Введите курс вручную.",
+                    "Курс валюты",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+
+        /// <summary>
+        /// Предлагает загрузить свежие курсы НБКР и повторно ищет курс на дату.
+        /// Возвращает null, если курс так и не найден — пользователь вводит его вручную.
+        /// </summary>
+        private async Task<CurrencyRateLookupResult?> RequestNewExchangeRateAsync(Guid currencyId, DateTime rateDate)
+        {
+            var answer = MessageBox.Show(
+                $"Курс на {rateDate:dd/MM/yyyy} не найден в справочнике курсов валют. Загрузить актуальные курсы НБКР?",
+                "Курс валюты",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+                return null;
+
+            try
+            {
+                Cursor = Cursors.Wait;
+                var results = await _metadataService.ImportOfficialCurrencyRatesAsync(rateDate.AddDays(-7), rateDate);
+                var refreshed = await _metadataService.GetCurrencyRateForDateAsync(currencyId, rateDate);
+                if (refreshed != null)
+                    return refreshed;
+
+                MessageBox.Show(
+                    $"Курсы загружены (добавлено: {results.Sum(item => item.Imported)}, " +
+                    $"пропущено: {results.Sum(item => item.Skipped)}), но курс на {rateDate:dd/MM/yyyy} отсутствует. " +
+                    "Введите курс вручную.",
+                    "Курс валюты",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось загрузить курсы НБКР: {ex.Message}", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return null;
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
+
+        /// <summary>
+        /// Кнопка «?» рядом с курсом: запрос курса из справочника курсов валют.
+        /// </summary>
+        private async void RequestHeaderExchangeRate_Click(object sender, RoutedEventArgs e)
+        {
+            await LoadExchangeRateFromCatalogAsync(interactive: true);
+        }
+
+        /// <summary>
+        /// «Сумма в валюте» = Сумма документа / Курс.
+        /// </summary>
+        private void RecalculateAmountFromCurrency()
+        {
+            if (AmountCurrencyBox == null || ExchangeRateBox == null || AmountBox == null)
+                return;
+
+            try
+            {
+                _isApplyingCurrencyRate = true;
+
+                var amount = NumericInputHelper.TryParseDecimal(AmountBox.Text, CultureInfo.CurrentCulture, out var parsedAmount)
+                    ? parsedAmount
+                    : 0m;
+                var rate = NumericInputHelper.TryParseDecimal(ExchangeRateBox.Text, CultureInfo.CurrentCulture, out var parsedRate)
+                    ? parsedRate
+                    : 0m;
+
+                AmountCurrencyBox.Text = amount > 0 && rate > 0
+                    ? Math.Round(amount / rate, 2, MidpointRounding.AwayFromZero).ToString("0.##", CultureInfo.CurrentCulture)
+                    : "0";
+            }
+            finally
+            {
+                _isApplyingCurrencyRate = false;
+            }
+
+            // Обновляем предпросмотр проводки: курс и сумма в валюте изменились
+            RefreshPostingPreview();
+        }
+
+        /// <summary>
+        /// Достаёт валюту, закреплённую за счётом плана счетов (реквизит «Валюта счета»).
+        /// Возвращает Guid.Empty, если у счёта валюта не задана или счёт не найден.
+        /// </summary>
+        private async Task<Guid> ResolveAccountCurrencyIdAsync(Guid accountId, string accountCode)
+        {
+            if (accountId == Guid.Empty && string.IsNullOrWhiteSpace(accountCode))
+                return Guid.Empty;
+
+            try
+            {
+                var accountsData = await _metadataService.GetChartOfAccountsSelectionDataForObjectAsync(
+                    _document.Id,
+                    _document.ObjectType);
+
+                if (accountsData == null || accountsData.Count == 0)
+                    return Guid.Empty;
+
+                // Ищем строку счёта: сначала по Id, потом по коду (на случай ручного ввода)
+                Dictionary<string, object>? accountRow = null;
+
+                if (accountId != Guid.Empty)
+                {
+                    accountRow = accountsData.FirstOrDefault(row =>
+                        row.TryGetValue("Id", out var idValue) &&
+                        Guid.TryParse(idValue?.ToString(), out var rowId) &&
+                        rowId == accountId);
+                }
+
+                if (accountRow == null && !string.IsNullOrWhiteSpace(accountCode))
+                {
+                    accountRow = accountsData.FirstOrDefault(row =>
+                        row.TryGetValue("Код", out var codeValue) &&
+                        string.Equals(codeValue?.ToString()?.Trim(), accountCode, StringComparison.Ordinal));
+                }
+
+                if (accountRow == null)
+                    return Guid.Empty;
+
+                // Валюта счёта — это ссылка на справочник валют (Guid).
+                // Пробуем несколько возможных ключей.
+                foreach (var key in new[]
+                         {
+                     "Валюта счета", "account_currency_id",
+                     "Валюта", "currency_id"
+                 })
+                {
+                    if (accountRow.TryGetValue(key, out var value) &&
+                        value != null && value != DBNull.Value)
+                    {
+                        if (value is Guid guid && guid != Guid.Empty)
+                            return guid;
+
+                        if (Guid.TryParse(value.ToString(), out var parsed) && parsed != Guid.Empty)
+                            return parsed;
+                    }
+                }
+
+                return Guid.Empty;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Не удалось определить валюту счёта {accountCode}: {ex.Message}");
+                return Guid.Empty;
+            }
         }
     }
 
@@ -1716,6 +2129,8 @@ namespace BIS.ERP.Views
         public string Debit { get; set; } = string.Empty;
         public string Credit { get; set; } = string.Empty;
         public string Amount { get; set; } = string.Empty;
+        public string ExchangeRate { get; set; } = string.Empty;   // ← новое
+        public string AmountCurrency { get; set; } = string.Empty; // ← новое
         public string Note { get; set; } = string.Empty;
     }
     public class CashDeskItem : ReferenceItem
@@ -1729,7 +2144,3 @@ namespace BIS.ERP.Views
                 : $"{DisplayName} (счет {AccountCode})";
     }
 }
-
-
-
-
