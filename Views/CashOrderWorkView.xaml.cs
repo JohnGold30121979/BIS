@@ -153,6 +153,7 @@ namespace BIS.ERP.Views
             if (showCurrency)
             {
                 SetPostingDetail(detail, "Сумма вал.", row.AmountInCurrency.ToString("N2"));
+                SetPostingDetail(detail, "Курс", ResolveExchangeRateDisplay(row));
                 SetPostingDetail(detail, "Валюта", row.CurrencyName);
             }
 
@@ -187,6 +188,7 @@ namespace BIS.ERP.Views
         private void SetDetailColumnsVisibility(bool showCurrency, bool showOrganization, bool showEmployee, bool showMaterial)
         {
             DetailAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+            DetailExchangeRateColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             DetailCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             DetailOrganizationColumn.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
             DetailEmployeeColumn.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
@@ -195,6 +197,19 @@ namespace BIS.ERP.Views
 
         private static void SetPostingDetail(Dictionary<string, object> detail, string field, string? value) => 
             PostingDetailRowFactory.Set(detail, field, value);
+
+        /// <summary>
+        /// Курс, по которому посчитана «Сумма в валюте»: сохранённый из диалога
+        /// (exchange_rate), иначе восстанавливается из отношения сумм документа.
+        /// </summary>
+        private static string? ResolveExchangeRateDisplay(CashOrderRow row)
+        {
+            var rate = row.ExchangeRate;
+            if (rate <= 0m && row.Amount > 0m && row.AmountInCurrency > 0m && row.AmountInCurrency != row.Amount)
+                rate = Math.Round(row.Amount / row.AmountInCurrency, 4);
+
+            return rate > 0m ? rate.ToString("N4") : null;
+        }
 
         private static string ExtractAccountCode(string value)
         {
@@ -887,6 +902,7 @@ namespace BIS.ERP.Views
                 DebitAccount = GetRowString(row, "Дебет", "debit_account"),
                 CreditAccount = GetRowString(row, "Кредит", "credit_account"),
                 AmountInCurrency = ReadDecimal(row, "Сумма в валюте", "amount_currency"),
+                ExchangeRate = ReadDecimal(row, "Курс", "exchange_rate"),
                 CashDeskId = GetRowString(row, "Касса", "cash_desk_id")
             };
 
@@ -2649,6 +2665,7 @@ namespace BIS.ERP.Views
         public string DebitAccount { get; set; } = string.Empty;
         public string CreditAccount { get; set; } = string.Empty;
         public decimal AmountInCurrency { get; set; }
+        public decimal ExchangeRate { get; set; }
         public string CashDeskId { get; set; } = string.Empty;
     }
     public class CashTurnoverSummary

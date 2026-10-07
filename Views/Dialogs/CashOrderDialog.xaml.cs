@@ -1263,7 +1263,8 @@ namespace BIS.ERP.Views
                     _accountAnalytics.Definitions,
                     "Организации",
                     showWhenNoAccountSelected: false,
-                    showUnmappedFields: false));
+                    showUnmappedFields: false),
+                OrganizationSelectButton);
 
             // Сотрудник — просто показываем/скрываем панель
             EmployeePanel.Visibility = AccountAnalyticsRules.ShouldShowField(
@@ -1525,11 +1526,15 @@ namespace BIS.ERP.Views
         private static void SetAccountControlledFieldVisibility(
             FrameworkElement label,
             ComboBox comboBox,
-            bool isVisible)
+            bool isVisible,
+            FrameworkElement? selectButton = null)
         {
             var visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
             label.Visibility = visibility;
             comboBox.Visibility = visibility;
+
+            if (selectButton != null)
+                selectButton.Visibility = visibility;
 
             if (!isVisible)
                 comboBox.SelectedItem = null;

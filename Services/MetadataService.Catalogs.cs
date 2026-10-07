@@ -2692,6 +2692,7 @@ namespace BIS.ERP.Services
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""debit_account"" varchar(50);
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
                     ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
+                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" decimal(18,4) DEFAULT 0;
                     IF to_regclass('public.doc_cash_receipt') IS NOT NULL THEN
                         ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
                         ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;

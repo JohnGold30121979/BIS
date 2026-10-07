@@ -99,7 +99,8 @@
                 <ComboBox x:Name="OrganizationCombo" Grid.Column="0" Height="30"
                           DisplayMemberPath="DisplayName" SelectedValuePath="Id"
                           Visibility="Collapsed"/>
-                <Button Grid.Column="1" Content="?" Width="34" Height="30" Margin="5,0,0,0" Click="SelectOrganization_Click"/>
+                <Button x:Name="OrganizationSelectButton" Grid.Column="1" Content="?" Width="34" Height="30" Margin="5,0,0,0"
+                        Click="SelectOrganization_Click" Visibility="Collapsed"/>
             </Grid>
 
             <StackPanel Grid.Row="6" Grid.ColumnSpan="3">

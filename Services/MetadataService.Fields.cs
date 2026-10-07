@@ -2193,6 +2193,12 @@ public partial class MetadataService
                 FieldType = "Reference", ReferenceCatalog = "Организации",
                 DisplayPattern = "{Код} - {Наименование}", DisplayFields = "Код,Наименование",
                 Order = 20, MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(), Name = "Курс", DbColumnName = "exchange_rate",
+                FieldType = "Decimal", Precision = 18, Scale = 4,
+                Order = 21, MetadataObjectId = metadataObjectId
             }
         };
     }

@@ -330,6 +330,7 @@
                                          Header="Сумма вал."
                                            Binding="{Binding [Сумма вал.]}"
                     Width="100" Visibility="Collapsed"/>
+                    <DataGridTextColumn x:Name="DetailExchangeRateColumn" Header="Курс" Binding="{Binding [Курс]}" Width="80" Visibility="Collapsed"/>
                     <DataGridTextColumn x:Name="DetailCurrencyColumn" Header="Валюта" Binding="{Binding [Валюта]}" Width="85" Visibility="Collapsed"/>
                     <DataGridTextColumn x:Name="DetailOrganizationColumn" Header="Организация" Binding="{Binding [Организация]}" Width="180" Visibility="Collapsed"/>
                     <DataGridTextColumn x:Name="DetailEmployeeColumn" Header="Сотрудник" Binding="{Binding [Сотрудник]}" Width="160" Visibility="Collapsed"/>
