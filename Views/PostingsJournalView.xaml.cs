@@ -175,7 +175,7 @@ namespace BIS.ERP.Views
             {
                 Owner = Window.GetWindow(this)
             };
-            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Обороты по счету");
+            MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Обороты по счету", null, fillWorkspace: true);
         }
 
         private async void OnOpenJournalReportClick(object sender, RoutedEventArgs e)

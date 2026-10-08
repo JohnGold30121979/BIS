@@ -54,7 +54,10 @@ public sealed class MdiDialogHostControl : UserControl
         HookCloseButtons(body);
         sourceWindow.Closed += (_, _) => RequestClose();
 
-        if (fillWorkspace)
+        // Окно, объявленное maximized в XAML, должно занимать всё пространство
+        // вкладки: в MDI-режиме свойства WindowState/WindowStartupLocation сами
+        // по себе не действуют, поэтому учитываем их здесь явно.
+        if (fillWorkspace || sourceWindow.WindowState == WindowState.Maximized)
             return BuildFullWorkspaceContent(body);
 
         var targetWidth = NormalizeDimension(sourceWindow.Width, 760, 1500);
