@@ -2412,7 +2412,41 @@ namespace BIS.ERP
                 var context = await _infoBaseManager.GetCurrentDbContextAsync();
                 var reportService = new ReportService(context);
                 var loadedReport = await reportService.GetReportAsync(report.Id) ?? report;
-                var data = await reportService.GetReportDataAsync(loadedReport);
+
+                // Если у отчёта есть параметры — спрашиваем значения до выборки данных.
+                Dictionary<string, object>? parameters = null;
+                var parameterDefinitions = (loadedReport.Parameters ?? new List<ReportParameter>())
+                    .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Name))
+                    .ToList();
+
+                if (parameterDefinitions.Count > 0)
+                {
+                    var userLogin = _authService.CurrentUser?.Login;
+                    var settingService = new ReportUserSettingService(context);
+                    var savedValues = await settingService.GetValuesAsync(loadedReport.Id, userLogin);
+
+                    var dialog = new ReportParametersDialog(loadedReport, savedValues, context) { Owner = this };
+                    if (dialog.ShowDialog() != true)
+                        return;
+
+                    parameters = dialog.Values;
+
+                    // Параметр может использоваться не только в фильтре, но и в вычисляемом
+                    // поле или в макете. Проверяем, что для всех таких ссылок есть значение.
+                    foreach (var unresolved in CollectUnresolvedParameters(loadedReport, parameters))
+                    {
+                        MessageBox.Show(
+                            $"Не задано значение параметра «{unresolved}».\n\n" +
+                            "Он используется в вычисляемом поле или в макете отчёта.",
+                            "Отчет", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    if (dialog.RememberValues)
+                        await settingService.SaveValuesAsync(loadedReport.Id, userLogin, parameters);
+                }
+
+                var data = await reportService.GetReportDataAsync(loadedReport, parameters);
                 var pdf = reportService.ExportToPdf(data, loadedReport);
 
                 var preview = new PdfPreviewWindow(pdf) { Owner = this };
@@ -2430,8 +2464,34 @@ namespace BIS.ERP
             }
         }
 
-        private async void OnProfileClick(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Имена параметров, которые используются в вычисляемых полях, но не получили значения.
+        /// Параметры фильтров проверяет сам ReportService при построении запроса.
+        /// </summary>
+        private static List<string> CollectUnresolvedParameters(
+            Report report,
+            IReadOnlyDictionary<string, object>? values)
         {
+            var result = new List<string>();
+
+            foreach (var token in (report.Fields ?? new List<ReportField>())
+                         .Select(field => ReportParameterSyntax.GetSingleToken(field.FieldName))
+                         .Where(token => !string.IsNullOrWhiteSpace(token))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (values != null && values.TryGetValue(token!, out var value) &&
+                    !ReportParameterResolver.IsEmptyValue(value, null))
+                {
+                    continue;
+                }
+
+                result.Add(token!);
+            }
+
+            return result;
+        }
+
+        private async void OnProfileClick(object sender, RoutedEventArgs e)        {
             var user = _authService.CurrentUser;
             if (user == null)
                 return;

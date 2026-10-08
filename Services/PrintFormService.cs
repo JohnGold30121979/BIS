@@ -974,7 +974,11 @@ namespace BIS.ERP.Services
             return BuildTemplateLayoutPdf(report, data, mappings);
         }
 
-        public byte[] ExportTemplatePreview(Report report)
+        public byte[] ExportTemplatePreview(Report report) => ExportTemplatePreview(report, null);
+
+        public byte[] ExportTemplatePreview(
+            Report report,
+            IReadOnlyDictionary<string, object>? reportParameters)
         {
             var sample = new CashOrderPrintData
             {
@@ -985,7 +989,8 @@ namespace BIS.ERP.Services
                 CreditAccount = report.ReportType == "CashPaymentOrder" ? "Касса KGS" : "11100000 - Денежные средства",
                 Amount = 12345.67m,
                 AmountInWords = "двенадцать тысяч триста сорок пять сом 67 тыйын",
-                Basis = "Оплата согласно заявлению", Note = "Предпросмотр импортированного макета"
+                Basis = "Оплата согласно заявлению", Note = "Предпросмотр импортированного макета",
+                ReportParameters = BuildParameterBag(reportParameters)
             };
 
             if (string.IsNullOrWhiteSpace(report.Template))
@@ -1005,10 +1010,20 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyCollection<FoxProReportFieldRule>? rules)
         {
+            return ExportReportTemplatePreview(dataTable, report, rules, null);
+        }
+
+        public byte[] ExportReportTemplatePreview(
+            DataTable dataTable,
+            Report report,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules,
+            IReadOnlyDictionary<string, object>? reportParameters)
+        {
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
-            var data = BuildReportPreviewData(dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>());
+            var data = BuildReportPreviewData(
+                dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>(), reportParameters);
             return BuildTemplateLayoutPdf(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
         }
 
@@ -1023,10 +1038,20 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyCollection<FoxProReportFieldRule>? rules)
         {
+            return ExportReportTemplateExcel(dataTable, report, rules, null);
+        }
+
+        public byte[] ExportReportTemplateExcel(
+            DataTable dataTable,
+            Report report,
+            IReadOnlyCollection<FoxProReportFieldRule>? rules,
+            IReadOnlyDictionary<string, object>? reportParameters)
+        {
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
-            var data = BuildReportPreviewData(dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>());
+            var data = BuildReportPreviewData(
+                dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>(), reportParameters);
             return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
         }
 
@@ -1313,7 +1338,8 @@ namespace BIS.ERP.Services
         private static CashOrderPrintData BuildReportPreviewData(
             DataTable dataTable,
             Report report,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules = null)
+            IReadOnlyCollection<FoxProReportFieldRule>? rules = null,
+            IReadOnlyDictionary<string, object>? reportParameters = null)
         {
             var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             void Add(string key, object? value)
@@ -1324,6 +1350,8 @@ namespace BIS.ERP.Services
                 extra[NormalizeFieldName(key)] = value ?? string.Empty;
             }
 
+            // Значения параметров отчёта доступны в макете как {ИмяПараметра}.
+            // Хранятся отдельно от ExtraFields, чтобы не перекрывать колонки данных.
             Add("report_name", report.Name);
             Add("title", string.IsNullOrWhiteSpace(report.TitleText) ? report.Name : report.TitleText);
             Add("subtitle", report.SubtitleText);
@@ -1366,8 +1394,32 @@ namespace BIS.ERP.Services
                 AmountInWords = RussianMoneyInWords(amount),
                 Basis = report.SubtitleText,
                 Note = "Предпросмотр отчета по импортированному FRX-макету",
-                ExtraFields = extra
+                ExtraFields = extra,
+                ReportParameters = BuildParameterBag(reportParameters)
             };
+        }
+
+        /// <summary>
+        /// Переносит значения параметров отчёта в словарь, который читает подстановка
+        /// плейсхолдеров. Поддерживает и русские, и латинские имена.
+        /// </summary>
+        private static Dictionary<string, object> BuildParameterBag(
+            IReadOnlyDictionary<string, object>? reportParameters)
+        {
+            var bag = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            if (reportParameters == null)
+                return bag;
+
+            foreach (var pair in reportParameters)
+            {
+                if (string.IsNullOrWhiteSpace(pair.Key))
+                    continue;
+
+                bag[pair.Key] = pair.Value ?? string.Empty;
+                bag[NormalizeFieldName(pair.Key)] = pair.Value ?? string.Empty;
+            }
+
+            return bag;
         }
 
         private static void AddReconciliationPeriodAliases(Report report, Action<string, object?> add)
@@ -2119,15 +2171,131 @@ namespace BIS.ERP.Services
             if (template.Elements.Count == 0)
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
             var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
-            var svg = BuildTemplateSvg(layoutTemplate, report, data, mappings ?? Array.Empty<ReportElementMapping>(), true);
+            if (layoutTemplate.Elements.Count == 0)
+                throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
+
+            var pages = SplitTemplateIntoPages(layoutTemplate);
             var useLandscapePage = layoutTemplate.PageWidth >= layoutTemplate.PageHeight ||
                 string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
-            return QuestPDF.Fluent.Document.Create(document => document.Page(page =>
+            var selectedMappings = mappings ?? Array.Empty<ReportElementMapping>();
+
+            return QuestPDF.Fluent.Document.Create(document =>
             {
-                page.Size(useLandscapePage ? PageSizes.A4.Landscape() : PageSizes.A4);
-                page.Margin(8, Unit.Millimetre);
-                page.Content().Svg(svg).FitArea();
-            })).GeneratePdf();
+                for (var pageIndex = 0; pageIndex < pages.Count; pageIndex++)
+                {
+                    var pageTemplate = pages[pageIndex];
+                    var pageNumber = pageIndex + 1;
+                    document.Page(page =>
+                    {
+                        page.Size(useLandscapePage ? PageSizes.A4.Landscape() : PageSizes.A4);
+                        page.Margin(8, Unit.Millimetre);
+                        page.Content().Svg(BuildTemplateSvg(
+                            pageTemplate, report, data, selectedMappings, true,
+                            pageTemplate.Elements, pageNumber, pages.Count)).FitArea();
+                    });
+                }
+            }).GeneratePdf();
+        }
+
+        /// <summary>
+        /// Разбивает подготовленный макет на страницы A4 по вертикали.
+        /// Координаты элементов не меняются: страница отбирает элементы, попадающие
+        /// в свой вертикальный диапазон. Элемент, выходящий за нижнюю границу,
+        /// обрезается — так строка таблицы не уезжает за край листа.
+        /// </summary>
+        private static IReadOnlyList<PrintFormTemplate> SplitTemplateIntoPages(PrintFormTemplate template)
+        {
+            var pageWidth = Math.Max(1000d, template.PageWidth);
+            var contentHeight = Math.Max(1000d, template.PageHeight);
+
+            // Форматы макета хранятся в единицах 10 на миллиметр (2100x2970 — A4 книжная).
+            var isPortrait = pageWidth < contentHeight;
+            var pageSize = isPortrait ? 2970d : 2100d;
+
+            // Небольшое превышение высоты листа (до 35%) по-прежнему масштабируется
+            // в одну страницу: так не ломаются формы, чуть выходящие за формат.
+            // Разбиваем только документы, которые действительно длиннее листа.
+            const double singlePageTolerance = 1.35;
+            if (contentHeight <= pageSize * singlePageTolerance)
+                return new[] { template };
+
+            var pageCount = (int)Math.Ceiling(contentHeight / pageSize);
+            var pageElements = new List<PrintFormElement>[pageCount];
+            for (var index = 0; index < pageCount; index++)
+                pageElements[index] = new List<PrintFormElement>();
+
+            foreach (var element in template.Elements)
+            {
+                var index = (int)Math.Floor(Math.Max(0d, element.Top) / pageSize);
+                index = Math.Clamp(index, 0, pageCount - 1);
+                var pageTop = index * pageSize;
+                var pageBottom = pageTop + pageSize;
+
+                // Элемент целиком выше или ниже своей страницы не рисуем.
+                if (element.Top + Math.Max(element.Height, 0) <= pageTop ||
+                    element.Top >= pageBottom)
+                {
+                    continue;
+                }
+
+                pageElements[index].Add(ClipElementToPage(element, pageTop, pageBottom));
+            }
+
+            var pages = new List<PrintFormTemplate>(pageCount);
+            for (var index = 0; index < pageCount; index++)
+            {
+                if (pageElements[index].Count == 0)
+                    continue;
+
+                pages.Add(new PrintFormTemplate
+                {
+                    SourceFormat = template.SourceFormat,
+                    OriginalFileName = template.OriginalFileName,
+                    RecognitionProfileCode = template.RecognitionProfileCode,
+                    LayoutNormalized = template.LayoutNormalized,
+                    PageWidth = pageWidth,
+                    PageHeight = pageSize,
+                    // Полосы описаны в абсолютных координатах всего документа и после
+                    // разрезания на страницы смысла не несут.
+                    Bands = new List<PrintFormBand>(),
+                    Elements = pageElements[index]
+                });
+            }
+
+            return pages.Count > 0 ? pages : new[] { template };
+        }
+
+        /// <summary>Обрезает элемент по вертикальным границам страницы.</summary>
+        private static PrintFormElement ClipElementToPage(
+            PrintFormElement element,
+            double pageTop,
+            double pageBottom)
+        {
+            var top = Math.Max(element.Top, pageTop) - pageTop;
+            var bottom = Math.Min(element.Top + Math.Max(element.Height, 0), pageBottom) - pageTop;
+            var height = Math.Max(0d, bottom - top);
+
+            if (top == element.Top && height == element.Height)
+                return element;
+
+            return new PrintFormElement
+            {
+                Type = element.Type,
+                Text = element.Text,
+                Expression = element.Expression,
+                BandType = element.BandType,
+                Left = element.Left,
+                Top = top,
+                Width = element.Width,
+                Height = height,
+                FontName = element.FontName,
+                FontSize = element.FontSize,
+                Bold = element.Bold,
+                Italic = element.Italic,
+                Alignment = element.Alignment,
+                BorderStyle = element.BorderStyle,
+                Order = element.Order
+            };
         }
 
         private static byte[] BuildTemplateLayoutExcel(
@@ -3175,11 +3343,16 @@ namespace BIS.ERP.Services
             Report report,
             CashOrderPrintData data,
             IReadOnlyCollection<ReportElementMapping> mappings,
-            bool templatePrepared = false)
+            bool templatePrepared = false,
+            IReadOnlyList<PrintFormElement>? pageElements = null,
+            int pageNumber = 0,
+            int pageCount = 0)
         {
             var layoutTemplate = templatePrepared ? template : FrxRecognitionProfileService.PrepareForRendering(template);
             var width = Math.Max(1000, layoutTemplate.PageWidth);
             var height = Math.Max(1000, layoutTemplate.PageHeight);
+            // При постраничном выводе координаты не меняются, поэтому шкала берётся
+            // от размеров всего документа и одинакова на всех страницах.
             var useCompactScale = width < 5000 && height < 5000;
             var fontScale = useCompactScale ? 10d : 105d;
             var minFontSize = useCompactScale ? 32d : 700d;
@@ -3187,10 +3360,14 @@ namespace BIS.ERP.Services
             var mappingByOrder = mappings
                 .GroupBy(item => item.ElementOrder)
                 .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
+            var drawnElements = pageElements ?? layoutTemplate.Elements;
+            var drawnOrder = pageElements == null
+                ? null
+                : new HashSet<int>(pageElements.Select(element => element.Order));
             var svg = new StringBuilder();
             svg.Append($"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {width.ToString(CultureInfo.InvariantCulture)} {height.ToString(CultureInfo.InvariantCulture)}'>");
             svg.Append("<rect x='0' y='0' width='100%' height='100%' fill='white'/>");
-            var textElements = layoutTemplate.Elements
+            var textElements = drawnElements
                 .Where(item => item.Type is "Text" or "Expression")
                 .ToList();
             var useClipPaths = layoutTemplate.Elements.Count <= 700 && textElements.Count <= 350;
@@ -3204,11 +3381,26 @@ namespace BIS.ERP.Services
                 }
                 svg.Append("</defs>");
             }
-            foreach (var segment in BuildFrxGridSegments(layoutTemplate, mappingByOrder, strokeWidth))
-                AppendSvgGridLine(svg, segment, strokeWidth);
+            // При постраничном выводе элементы уже сдвинуты в координаты страницы,
+            // поэтому линии сетки сдвигаем на тот же вертикальный отступ.
+            var pageOffset = pageElements != null && pageNumber > 1 ? height * (pageNumber - 1) : 0d;
 
-            foreach (var element in layoutTemplate.Elements.OrderBy(item => item.Order))
+            foreach (var segment in BuildFrxGridSegments(layoutTemplate, mappingByOrder, strokeWidth))
             {
+                if (pageElements != null &&
+                    (segment.Y1 < pageOffset || segment.Y1 > pageOffset + height))
+                {
+                    continue;
+                }
+
+                AppendSvgGridLine(svg, segment, strokeWidth, pageOffset);
+            }
+
+            foreach (var element in drawnElements.OrderBy(item => item.Order))
+            {
+                if (drawnOrder != null && !drawnOrder.Contains(element.Order))
+                    continue;
+
                 if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
                     continue;
 
@@ -3235,12 +3427,16 @@ namespace BIS.ERP.Services
             return svg.ToString();
         }
 
-        private static void AppendSvgGridLine(StringBuilder svg, FrxGridSegment segment, double strokeWidth)
+        private static void AppendSvgGridLine(
+            StringBuilder svg,
+            FrxGridSegment segment,
+            double strokeWidth,
+            double verticalOffset = 0d)
         {
             var x1 = segment.X1;
-            var y1 = segment.Y1;
+            var y1 = segment.Y1 - verticalOffset;
             var x2 = segment.X2;
-            var y2 = segment.Y2;
+            var y2 = segment.Y2 - verticalOffset;
             SnapLineCoordinates(ref x1, ref y1, ref x2, ref y2, strokeWidth);
             svg.Append($"<line x1='{x1.ToString(CultureInfo.InvariantCulture)}' y1='{y1.ToString(CultureInfo.InvariantCulture)}' x2='{x2.ToString(CultureInfo.InvariantCulture)}' y2='{y2.ToString(CultureInfo.InvariantCulture)}' stroke='black' stroke-width='{strokeWidth.ToString(CultureInfo.InvariantCulture)}' stroke-linecap='square' shape-rendering='crispEdges'/>");
         }
@@ -3400,7 +3596,27 @@ namespace BIS.ERP.Services
                 return string.Empty;
 
             return Regex.Replace(text, @"\{([^{}]+)\}", match =>
-                GetPrintDataValue(data, match.Groups[1].Value, formatString));
+            {
+                var name = match.Groups[1].Value;
+
+                // Параметры отчёта в макете: {PeriodStart}. Ищутся раньше полей данных,
+                // чтобы имя параметра нельзя было случайно перекрыть колонкой источника.
+                if (data.ReportParameters.TryGetValue(name, out var parameterValue))
+                {
+                    var formatted = parameterValue switch
+                    {
+                        null or DBNull => string.Empty,
+                        DateTime date => string.IsNullOrWhiteSpace(formatString)
+                            ? date.ToString("dd.MM.yyyy")
+                            : date.ToString(formatString),
+                        _ => parameterValue.ToString() ?? string.Empty
+                    };
+
+                    return formatted;
+                }
+
+                return GetPrintDataValue(data, name, formatString);
+            });
         }
 
         private static string GetPrintDataValue(CashOrderPrintData data, string fieldName, string formatString)
@@ -4433,6 +4649,12 @@ namespace BIS.ERP.Services
             public string Basis { get; init; } = string.Empty;
             public string Note { get; init; } = string.Empty;
             public Dictionary<string, object> ExtraFields { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+            /// <summary>
+            /// Значения параметров отчёта, доступные в макете как {ИмяПараметра}.
+            /// Скрыты от внутренних вычислений вне подстановки плейсхолдеров.
+            /// </summary>
+            public Dictionary<string, object> ReportParameters { get; init; } = new(StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed record OrganizationPrintInfo(

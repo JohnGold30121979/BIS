@@ -1,5 +1,6 @@
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
 using System;
@@ -26,6 +27,7 @@ namespace BIS.ERP.Views
         private List<MetadataObject> _availableCatalogs;
         private ObservableCollection<ReportField> _reportFields;
         private ObservableCollection<ReportFilter> _reportFilters;
+        private ObservableCollection<ReportParameter> _reportParameters;
         public ObservableCollection<FieldDef> AvailableDataFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableFilterFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
@@ -41,11 +43,14 @@ namespace BIS.ERP.Views
 
             _reportFields = new ObservableCollection<ReportField>();
             _reportFilters = new ObservableCollection<ReportFilter>();
+            _reportParameters = new ObservableCollection<ReportParameter>();
 
             ReportFieldsGrid.ItemsSource = _reportFields;
             FiltersList.ItemsSource = _reportFilters;
+            ReportParametersGrid.ItemsSource = _reportParameters;
             ElementMappingGrid.ItemsSource = _frxElementMappings;
             ConfigureFieldColumns();
+            ConfigureParameterColumns();
             InitializeNativeDesignerState();
 
             _ = InitializeAsync(report);
@@ -375,6 +380,163 @@ namespace BIS.ERP.Views
         {
             await AddSelectedFieldAsync();
         }
+        // ==================== Параметры отчёта ====================
+
+        private void ConfigureParameterColumns()
+        {
+            ParameterTypeColumn.ItemsSource = ReportParameterTypes.All;
+            ParameterTypeColumn.SelectedValueBinding = new System.Windows.Data.Binding(
+                nameof(ReportParameter.ParameterType))
+            {
+                Mode = System.Windows.Data.BindingMode.TwoWay,
+                UpdateSourceTrigger = System.Windows.Data.UpdateSourceTrigger.PropertyChanged
+            };
+        }
+
+        private void OnAddParameterClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            _reportParameters.Add(new ReportParameter
+            {
+                Id = Guid.NewGuid(),
+                Name = string.Empty,
+                Title = string.Empty,
+                ParameterType = ReportParameterTypes.Date,
+                DefaultValue = "начала месяца",
+                IsRequired = true,
+                Order = _reportParameters.Count + 1
+            });
+            ParameterIssuesText.Text = string.Empty;
+        }
+
+        private void OnSyncParametersFromFiltersClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            var before = _reportParameters.Count;
+            var report = BuildParameterValidationReport();
+            ReportService.EnsureParametersCoverFilters(report);
+
+            _reportParameters.Clear();
+            foreach (var parameter in report.Parameters.OrderBy(item => item.Order))
+                _reportParameters.Add(parameter);
+
+            var added = _reportParameters.Count - before;
+            ParameterIssuesText.Text = added > 0
+                ? $"Добавлено параметров: {added}."
+                : "Новых параметров в фильтрах не найдено.";
+        }
+
+        private void OnCheckParametersClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+            var issues = ReportService.ValidateParameters(BuildParameterValidationReport());
+            ParameterIssuesText.Text = issues.Count == 0
+                ? "✅ Замечаний нет."
+                : "⚠ " + string.Join("  •  ", issues);
+        }
+
+        /// <summary>
+        /// Выбор элемента справочника для параметра типа «Ссылка»:
+        /// выбранный GUID записывается в значение по умолчанию.
+        /// </summary>
+        private async void OnPickReferenceValueClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+
+            if (ReportParametersGrid.SelectedItem is not ReportParameter parameter)
+            {
+                MessageBox.Show("Выберите строку параметра в таблице.", "Параметры",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!string.Equals(parameter.ParameterType, ReportParameterTypes.Reference,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(
+                    $"Параметр «{parameter.DisplayTitle}» имеет тип " +
+                    $"«{ReportParameterTypes.GetDisplayName(parameter.ParameterType)}».\n\n" +
+                    "Выбор из справочника доступен только для типа «Ссылка».",
+                    "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                // Справочник определяется автоматически по ссылочному полю фильтра.
+                if (string.IsNullOrWhiteSpace(parameter.ReferenceSource))
+                {
+                    var draft = BuildParameterValidationReport();
+                    await _reportService.FillReferenceSourcesAsync(draft);
+                    var resolved = draft.Parameters
+                        .FirstOrDefault(item => string.Equals(item.Name, parameter.Name,
+                            StringComparison.OrdinalIgnoreCase));
+
+                    if (resolved != null)
+                        parameter.ReferenceSource = resolved.ReferenceSource;
+                }
+
+                if (string.IsNullOrWhiteSpace(parameter.ReferenceSource))
+                {
+                    MessageBox.Show(
+                        "Не удалось определить справочник.\n\n" +
+                        "Заполните поле «Справочник» вручную или убедитесь, что параметр " +
+                        "используется в фильтре по ссылочному полю.",
+                        "Параметры", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var items = await _reportService.LoadReferenceItemsAsync(parameter.ReferenceSource);
+                if (items.Count == 0)
+                {
+                    MessageBox.Show($"В справочнике «{parameter.ReferenceSource}» нет записей.",
+                        "Параметры", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var picker = new ReferencePickerDialog(
+                    parameter.DisplayTitle, parameter.ReferenceSource, items)
+                {
+                    Owner = this
+                };
+
+                if (picker.ShowDialog() != true)
+                    return;
+
+                // В значение по умолчанию пишем «Название|GUID» — так разработчик видит,
+                // что выбрано, а в фильтр уходит только GUID.
+                parameter.DefaultValue = picker.SelectedStoredValue;
+                ReportParametersGrid.Items.Refresh();
+                ParameterIssuesText.Text = $"Выбрано: {picker.SelectedDisplay}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка выбора значения: {ex.Message}", "Параметры",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>Черновик отчёта только для проверок параметров.</summary>
+        private Report BuildParameterValidationReport() => new()
+        {
+            Id = _currentReport?.Id ?? Guid.Empty,
+            Name = ReportNameBox.Text,
+            Filters = _reportFilters.ToList(),
+            Parameters = _reportParameters.ToList()
+        };
+
+        private void LoadReportParameters(Report report)
+        {
+            _reportParameters.Clear();
+            foreach (var parameter in (report.Parameters ?? new List<ReportParameter>())
+                         .OrderBy(item => item.Order))
+            {
+                _reportParameters.Add(parameter);
+            }
+
+            ParameterIssuesText.Text = string.Empty;
+        }
+
 
         private async void OnComputedFieldDoubleClick(object sender, MouseButtonEventArgs e)
         {
@@ -647,6 +809,8 @@ namespace BIS.ERP.Views
                 _reportFilters.Add(filter);
             }
 
+            LoadReportParameters(report);
+
             if (!string.IsNullOrWhiteSpace(report.Template))
             {
                 await LoadFrxElementMappings(report.Template, report.ElementMappings);
@@ -693,7 +857,10 @@ namespace BIS.ERP.Views
                     if (report == null)
                         return;
 
-                    var pdfBytes = _printFormService.ExportTemplatePreview(report);
+                    // Параметры подставляются в макет как {ИмяПараметра}.
+                    var printFormParameters = await _reportService.ResolveParametersForPreviewAsync(report);
+
+                    var pdfBytes = _printFormService.ExportTemplatePreview(report, printFormParameters);
                     var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
                     previewWindow.ShowDialog();
 
@@ -734,7 +901,8 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var data = await _reportService.GetReportDataAsync(report);
+                var data = await _reportService.GetReportDataAsync(
+                    report, await _reportService.ResolveParametersForPreviewAsync(report));
                 var dialog = new SaveFileDialog
                 {
                     Title = "Сохранить отчет в PDF",
@@ -758,13 +926,14 @@ namespace BIS.ERP.Views
             }
         }
 
-        private Task ExportPrintFormPreviewAsync(bool showConfirmation, Report? report = null)
+        private async Task ExportPrintFormPreviewAsync(bool showConfirmation, Report? report = null)
         {
             report ??= BuildReportFromForm();
             if (report == null)
-                return Task.CompletedTask;
+                return;
 
-            var pdfBytes = _printFormService.ExportTemplatePreview(report);
+            var printFormParameters = await _reportService.ResolveParametersForPreviewAsync(report);
+            var pdfBytes = _printFormService.ExportTemplatePreview(report, printFormParameters);
             var tempPdf = Path.Combine(Path.GetTempPath(), $"preview_{Guid.NewGuid():N}.pdf");
             File.WriteAllBytes(tempPdf, pdfBytes);
 
@@ -777,7 +946,6 @@ namespace BIS.ERP.Views
             System.Diagnostics.Process.Start(psi);
 
             StatusText.Text = "✅ Предпросмотр открыт";
-            return Task.CompletedTask;
         }
 
         private async Task GenerateAndShowReport()
@@ -803,7 +971,11 @@ namespace BIS.ERP.Views
                 if (tempReport == null)
                     return;
 
-                var data = await _reportService.GetReportDataAsync(tempReport);
+                // В конструкторе параметры не спрашиваем: берём значения по умолчанию
+                // с учётом сохранённых значений текущего пользователя.
+                var previewParameters = await _reportService.ResolveParametersForPreviewAsync(tempReport);
+
+                var data = await _reportService.GetReportDataAsync(tempReport, previewParameters);
 
                 var pdfBytes = _reportService.ExportToPdf(data, tempReport);
                 var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
@@ -906,6 +1078,7 @@ namespace BIS.ERP.Views
                         Operation = f.Operation,
                         Value = f.Value,
                         Value2 = f.Value2,
+                        IsOptional = f.IsOptional,
                         Order = f.Order
                     }).ToList();
 
@@ -913,6 +1086,10 @@ namespace BIS.ERP.Views
 
                 _currentReport.Fields = fieldsToAdd;
                 _currentReport.Filters = filtersToAdd;
+                _currentReport.Parameters = _reportParameters
+                    .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Name))
+                    .OrderBy(parameter => parameter.Order)
+                    .ToList();
                 _currentReport.ElementMappings = mappingsToAdd;
 
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
@@ -989,6 +1166,10 @@ namespace BIS.ERP.Views
                 //Template = _currentReport?.Template ?? "",
                 Fields = _reportFields.OrderBy(field => field.Order).ToList(),
                 Filters = _reportFilters.Where(filter => !string.IsNullOrWhiteSpace(filter.FieldName)).ToList(),
+                Parameters = _reportParameters
+                    .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Name))
+                    .OrderBy(parameter => parameter.Order)
+                    .ToList(),
                 PageOrientation = OrientationCombo.SelectedIndex == 1 ? "Landscape" : "Portrait",
                 FontName = FontCombo.Text,
                 FontSize = int.TryParse(FontSizeCombo.Text, out var fontSize) ? fontSize : 10,

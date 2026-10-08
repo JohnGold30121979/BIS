@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using Npgsql;
 using BIS.ERP.Data;
@@ -95,6 +96,16 @@ namespace BIS.ERP.Services
                         var metadataField = FindMetadataField(catalog, field.FieldName);
                         if (metadataField == null)
                         {
+                            // Вычисляемое поле может быть параметром отчёта: {Имя}.
+                            // Такой "столбец" не существует в таблице, поэтому подставляем
+                            // значение параметра прямо в SELECT.
+                            if (TryBuildReportParameterSelect(
+                                    field, report.Parameters, parameters, out var parameterSelect))
+                            {
+                                selectColumns.Add(parameterSelect);
+                                continue;
+                            }
+
                             if (TryBuildComputedReportFieldSelect(catalog, field, out var compatibleSelect) ||
                                 TryBuildCompatibleReportFieldSelect(report, catalog, field, out compatibleSelect))
                             {
@@ -119,7 +130,7 @@ namespace BIS.ERP.Services
                         throw new Exception("В отчете не выбрано ни одного видимого поля");
 
                     using var command = _context.Database.GetDbConnection().CreateCommand();
-                    var whereClauses = BuildFilterClauses(command, catalog, report.Filters);
+                    var whereClauses = BuildFilterClauses(command, catalog, report.Filters, parameters);
                     await AddDefaultFixedAssetSnapshotFilterAsync(command, catalog, whereClauses, parameters);
                     var whereSql = whereClauses.Count == 0
                         ? string.Empty
@@ -526,6 +537,89 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             "DateTime" => "NULL::timestamp",
             _ => "''::text"
         };
+
+        /// <summary>
+        /// Строит выражение SELECT для вычисляемого поля, значением которого является
+        /// параметр отчёта: FieldName = "{ИмяПараметра}". Это позволяет использовать
+        /// параметр как обычный столбец — например, вывести «Период: {PeriodStart}».
+        /// </summary>
+        private static bool TryBuildReportParameterSelect(
+            ReportField field,
+            IEnumerable<ReportParameter>? reportParameters,
+            IReadOnlyDictionary<string, object>? runtimeValues,
+            out string selectExpression)
+        {
+            selectExpression = string.Empty;
+
+            var token = ReportParameterSyntax.GetSingleToken(field.FieldName);
+            if (token == null)
+                return false;
+
+            var definition = reportParameters?
+                .FirstOrDefault(parameter =>
+                    string.Equals(parameter.Name, token, StringComparison.OrdinalIgnoreCase));
+            if (definition == null)
+                return false;
+
+            object? value = null;
+            var hasValue = runtimeValues != null &&
+                           runtimeValues.TryGetValue(definition.Name, out value);
+
+            if (!hasValue)
+                value = ReportParameterResolver.ResolveDefaultValue(
+                    definition.DefaultValue, definition.ParameterType);
+
+            var literal = BuildSqlLiteral(value, definition.ParameterType);
+            var displayName = string.IsNullOrWhiteSpace(field.DisplayName)
+                ? definition.DisplayTitle
+                : field.DisplayName;
+
+            selectExpression = $"{literal} AS {QuoteIdentifier(displayName)}";
+            return true;
+        }
+
+        /// <summary>SQL-литерал для значения параметра отчёта.</summary>
+        private static string BuildSqlLiteral(object? value, string? parameterType)
+        {
+            if (value == null || value == DBNull.Value)
+                return "NULL::text";
+
+            var text = value.ToString() ?? string.Empty;
+
+            switch (parameterType)
+            {
+                case ReportParameterTypes.Date:
+                    var date = value is DateTime parsed
+                        ? parsed
+                        : DateTime.TryParse(text, CultureInfo.CurrentCulture,
+                            DateTimeStyles.None, out var fallback)
+                            ? fallback
+                            : DateTime.Today;
+                    return $"TIMESTAMP '{date:yyyy-MM-dd}'";
+
+                case ReportParameterTypes.Int:
+                    var integer = value is int intValue
+                        ? intValue
+                        : int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedInt)
+                            ? parsedInt
+                            : 0;
+                    return integer.ToString(CultureInfo.InvariantCulture);
+
+                case ReportParameterTypes.Decimal:
+                    var number = value is decimal decimalValue
+                        ? decimalValue
+                        : decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedDecimal)
+                            ? parsedDecimal
+                            : 0m;
+                    return number.ToString(CultureInfo.InvariantCulture);
+
+                case ReportParameterTypes.Bool:
+                    var flag = value is bool boolValue && boolValue;
+                    return flag ? "TRUE" : "FALSE";
+            }
+
+            return $"'{text.Replace("'", "''")}'";
+        }
         private static bool TryBuildCompatibleReportFieldSelect(
             Report report,
             MetadataObject source,
@@ -639,7 +733,8 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
         private static List<string> BuildFilterClauses(
             System.Data.Common.DbCommand command,
             MetadataObject source,
-            IEnumerable<ReportFilter> filters)
+            IEnumerable<ReportFilter> filters,
+            IReadOnlyDictionary<string, object>? reportParameters = null)
         {
             var clauses = new List<string>();
             var index = 0;
@@ -654,20 +749,45 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
 
                 var column = QuoteIdentifier(field.DbColumnName);
                 var operation = (filter.Operation ?? "=").Trim();
+
+                // Необязательное условие: незаданный параметр означает «условие не применяется».
+                if (filter.IsOptional &&
+                    (IsParameterValueEmpty(filter.Value, reportParameters) ||
+                     IsParameterValueEmpty(filter.Value2, reportParameters)))
+                {
+                    continue;
+                }
+
                 var parameterName = $"@filter{index++}";
+
+                // Значение фильтра может быть литералом ("01.03.2025") или ссылкой
+                // на параметр отчёта ("{PeriodStart}").
+                if (!TryResolveFilterValue(
+                        filter.Value, reportParameters, field.FieldType, filter.FieldName,
+                        filter.IsOptional, out var firstValue))
+                {
+                    continue;
+                }
 
                 if (operation.Equals("Like", StringComparison.OrdinalIgnoreCase))
                 {
-                    AddParameter(command, parameterName, $"%{filter.Value}%");
+                    AddParameter(command, parameterName, $"%{firstValue}%");
                     clauses.Add($"CAST({column} AS text) ILIKE {parameterName}");
                     continue;
                 }
 
                 if (operation.Equals("Between", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (!TryResolveFilterValue(
+                            filter.Value2, reportParameters, field.FieldType, filter.FieldName,
+                            filter.IsOptional, out var secondValue))
+                    {
+                        continue;
+                    }
+
                     var secondParameterName = $"@filter{index++}";
-                    AddParameter(command, parameterName, ConvertFilterValue(filter.Value, field.FieldType));
-                    AddParameter(command, secondParameterName, ConvertFilterValue(filter.Value2, field.FieldType));
+                    AddParameter(command, parameterName, firstValue);
+                    AddParameter(command, secondParameterName, secondValue);
                     clauses.Add($"{column} BETWEEN {parameterName} AND {secondParameterName}");
                     continue;
                 }
@@ -675,11 +795,95 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 if (operation is not ("=" or "<" or ">" or "<=" or ">=" or "<>"))
                     throw new Exception($"Операция фильтра '{operation}' не поддерживается");
 
-                AddParameter(command, parameterName, ConvertFilterValue(filter.Value, field.FieldType));
+                AddParameter(command, parameterName, firstValue);
                 clauses.Add($"{column} {operation} {parameterName}");
             }
 
             return clauses;
+        }
+
+        /// <summary>
+        /// Возвращает значение для подстановки в SQL. Если значение фильтра — токен {Имя},
+        /// берётся значение одноимённого параметра отчёта; иначе работает прежнее поведение
+        /// (литерал, приведённый к типу поля метаданных).
+        /// Возвращает false, если это необязательное условие с незаданным параметром.
+        /// </summary>
+        private static bool TryResolveFilterValue(
+            string? rawValue,
+            IReadOnlyDictionary<string, object>? reportParameters,
+            string fieldType,
+            string fieldName,
+            bool isOptional,
+            out object resolvedValue)
+        {
+            resolvedValue = DBNull.Value;
+
+            var token = ReportParameterSyntax.GetSingleToken(rawValue);
+            if (token == null)
+            {
+                if (ReportParameterSyntax.ContainsToken(rawValue))
+                    throw new Exception(
+                        $"Значение фильтра '{fieldName}' содержит параметр вместе с текстом. " +
+                        "Укажите параметр целиком, например {PeriodStart}, либо обычное значение.");
+
+                resolvedValue = ConvertFilterValue(rawValue ?? string.Empty, fieldType);
+                return true;
+            }
+
+            if (reportParameters == null || !reportParameters.TryGetValue(token, out var parameterValue))
+            {
+                if (isOptional)
+                    return false;
+
+                throw new Exception($"Не задано значение параметра '{{{token}}}' (поле '{fieldName}')");
+            }
+
+            if (isOptional && ReportParameterResolver.IsEmptyValue(parameterValue, null))
+                return false;
+
+            resolvedValue = ConvertParameterValue(parameterValue, fieldType);
+            return true;
+        }
+
+        /// <summary>Проверяет, что параметр, на который ссылается значение фильтра, не задан.</summary>
+        private static bool IsParameterValueEmpty(
+            string? rawValue,
+            IReadOnlyDictionary<string, object>? reportParameters)
+        {
+            var token = ReportParameterSyntax.GetSingleToken(rawValue);
+            if (token == null)
+                return false;
+
+            if (reportParameters == null || !reportParameters.TryGetValue(token, out var value))
+                return true;
+
+            return ReportParameterResolver.IsEmptyValue(value, null);
+        }
+
+        /// <summary>Приведение значения параметра отчёта к типу поля метаданных.</summary>
+        private static object ConvertParameterValue(object? value, string fieldType)
+        {
+            if (value == null)
+                return DBNull.Value;
+
+            if (value is DateTime dateValue)
+                return fieldType == "String" ? dateValue.ToString("yyyy-MM-dd") : dateValue;
+
+            if (value is bool boolValue)
+                return fieldType switch
+                {
+                    "Bool" => boolValue,
+                    "Int" => boolValue ? 1 : 0,
+                    _ => boolValue.ToString()
+                };
+
+            if (value is int or long or decimal or double or float)
+            {
+                var text = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+                return ConvertFilterValue(text, fieldType);
+            }
+
+            return ConvertFilterValue(value.ToString() ?? string.Empty, fieldType);
         }
 
         private static void AddParameter(System.Data.Common.DbCommand command, string name, object value)
@@ -692,13 +896,17 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
 
         private static object ConvertFilterValue(string value, string fieldType)
         {
+            var text = value ?? string.Empty;
             return fieldType switch
             {
-                "Int" when int.TryParse(value, out var integer) => integer,
-                "Decimal" when decimal.TryParse(value, out var number) => number,
-                "DateTime" when DateTime.TryParse(value, out var date) => date,
-                "Bool" when bool.TryParse(value, out var boolean) => boolean,
-                _ => value ?? string.Empty
+                "Int" when int.TryParse(text, NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var integer) => integer,
+                "Decimal" when decimal.TryParse(text, NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var number) => number,
+                "DateTime" when DateTime.TryParse(text, System.Globalization.CultureInfo.CurrentCulture,
+                    System.Globalization.DateTimeStyles.None, out var date) => date,
+                "Bool" when bool.TryParse(text, out var boolean) => boolean,
+                _ => text
             };
         }
 
@@ -1287,6 +1495,228 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             };
         }
 
+        // ==================== Параметры отчёта ====================
+
+        /// <summary>
+        /// Проверки параметров отчёта для UI. Возвращает список замечаний (пустой — всё в порядке).
+        /// </summary>
+        public static List<string> ValidateParameters(Report report)
+        {
+            var issues = new List<string>();
+            if (report == null)
+                return issues;
+
+            var parameters = report.Parameters?.ToList() ?? new List<ReportParameter>();
+            var filterTokens = (report.Filters ?? new List<ReportFilter>())
+                .SelectMany(filter => ReportParameterSyntax.ExtractTokens(filter.Value)
+                    .Concat(ReportParameterSyntax.ExtractTokens(filter.Value2)))
+                .ToList();
+
+            var byName = new Dictionary<string, ReportParameter>(StringComparer.OrdinalIgnoreCase);
+            foreach (var parameter in parameters)
+            {
+                if (string.IsNullOrWhiteSpace(parameter.Name))
+                {
+                    issues.Add("У параметра не заполнено имя.");
+                    continue;
+                }
+
+                if (!byName.TryAdd(parameter.Name.Trim(), parameter))
+                    issues.Add($"Имя параметра '{parameter.Name}' повторяется.");
+            }
+
+            foreach (var token in filterTokens.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!byName.ContainsKey(token))
+                    issues.Add($"В фильтре используется {{{token}}}, но такой параметр не описан.");
+            }
+
+            foreach (var parameter in parameters)
+            {
+                if (string.IsNullOrWhiteSpace(parameter.Name))
+                    continue;
+
+                if (parameter.IsRequired &&
+                    string.IsNullOrWhiteSpace(parameter.DefaultValue) &&
+                    !filterTokens.Contains(parameter.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    issues.Add($"Обязательный параметр '{parameter.Name}' нигде не используется в фильтрах.");
+                }
+
+                if (string.Equals(parameter.ParameterType, ReportParameterTypes.Reference,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    string.IsNullOrWhiteSpace(parameter.ReferenceSource))
+                {
+                    issues.Add($"Для параметра-ссылки '{parameter.Name}' не определён справочник. " +
+                               "Используйте его в фильтре по ссылочному полю.");
+                }
+            }
+
+            return issues;
+        }
+
+        /// <summary>
+        /// Гарантирует, что каждый токен в фильтрах имеет определение параметра.
+        /// Отсутствующие определения создаются автоматически и возвращаются вызывающей стороне.
+        /// </summary>
+        public static List<ReportParameter> EnsureParametersCoverFilters(Report report)
+        {
+            report.Parameters ??= new List<ReportParameter>();
+            var missing = ReportParameterResolver.BuildSeedFromFilters(report.Filters ?? new List<ReportFilter>());
+            var existingNames = report.Parameters
+                .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Name))
+                .Select(parameter => parameter.Name.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var nextOrder = report.Parameters.Count == 0
+                ? 1
+                : report.Parameters.Max(parameter => parameter.Order) + 1;
+
+            foreach (var seed in missing)
+            {
+                if (!existingNames.Add(seed.Name))
+                    continue;
+
+                seed.Order = nextOrder++;
+                report.Parameters.Add(seed);
+            }
+
+            return report.Parameters
+                .OrderBy(parameter => parameter.Order)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Значения параметров для предпросмотра в конструкторе: значения по умолчанию,
+        /// поверх которых наложены сохранённые значения текущего пользователя.
+        /// </summary>
+        public async Task<Dictionary<string, object>> ResolveParametersForPreviewAsync(Report report)
+        {
+            var saved = await new ReportUserSettingService(_context).GetValuesAsync(
+                report.Id,
+                ServiceLocator.AuthService.CurrentUser?.Login);
+
+            return ReportParameterResolver.ResolvePreviewValues(report, saved);
+        }
+
+        /// <summary>
+        /// Пользовательские значения параметров отчёта (то, что увидит и введёт бухгалтер):
+        /// значения по умолчанию, перекрытые сохранёнными значениями пользователя.
+        /// </summary>
+        public async Task<Dictionary<string, object>> ResolveUserParametersAsync(Report report)
+        {
+            var saved = await new ReportUserSettingService(_context).GetValuesAsync(
+                report.Id,
+                ServiceLocator.AuthService.CurrentUser?.Login);
+
+            return ReportParameterResolver.ResolvePreviewValues(report, saved);
+        }
+
+        // ==================== Параметры типа «Ссылка» ====================
+
+        /// <summary>
+        /// Имя справочника, из которого берутся значения для параметра с указанным именем.
+        /// Определяется по фильтру: берётся поле метаданных с этим токеном и его ReferenceCatalog.
+        /// </summary>
+        public async Task<string> ResolveReferenceSourceAsync(Report report, string parameterName)
+        {
+            if (report?.DataSourceId == null || string.IsNullOrWhiteSpace(parameterName))
+                return string.Empty;
+
+            var source = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Id == report.DataSourceId.Value);
+            if (source == null)
+                return string.Empty;
+
+            foreach (var filter in report.Filters ?? new List<ReportFilter>())
+            {
+                if (!ValueReferencesParameter(filter.Value, parameterName) &&
+                    !ValueReferencesParameter(filter.Value2, parameterName))
+                {
+                    continue;
+                }
+
+                var field = FindMetadataField(source, filter.FieldName);
+                if (!string.IsNullOrWhiteSpace(field?.ReferenceCatalog))
+                    return field!.ReferenceCatalog!;
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>Заполняет ReferenceSource для параметров типа «Ссылка», если он ещё пуст.</summary>
+        public async Task FillReferenceSourcesAsync(Report report)
+        {
+            if (report?.Parameters == null || report.DataSourceId == null)
+                return;
+
+            foreach (var parameter in report.Parameters)
+            {
+                if (!string.Equals(parameter.ParameterType, ReportParameterTypes.Reference,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !string.IsNullOrWhiteSpace(parameter.ReferenceSource))
+                {
+                    continue;
+                }
+
+                parameter.ReferenceSource = await ResolveReferenceSourceAsync(report, parameter.Name);
+            }
+        }
+
+        /// <summary>Элементы справочника для выпадающего списка выбора значения параметра.</summary>
+        public async Task<List<ReferenceLookupItem>> LoadReferenceItemsAsync(string catalogName)
+        {
+            var items = new List<ReferenceLookupItem>();
+            if (string.IsNullOrWhiteSpace(catalogName))
+                return items;
+
+            var metadataService = new MetadataService(_context);
+            var catalogs = await metadataService.GetCatalogsAsync();
+            var catalog = catalogs.FirstOrDefault(item =>
+                string.Equals(item.Name, catalogName, StringComparison.OrdinalIgnoreCase));
+            if (catalog == null)
+                return items;
+
+            var rows = await metadataService.GetCatalogDataAsync(catalog.Id);
+
+            // Поле-ссылка, по которому строится отображение (DisplayPattern/DisplayFields).
+            var displayField = await _context.MetadataFields
+                .AsNoTracking()
+                .FirstOrDefaultAsync(field =>
+                    field.MetadataObjectId == catalog.Id &&
+                    field.FieldType == "Reference" &&
+                    field.ReferenceCatalog == catalogName)
+                ?? await _context.MetadataFields
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(field => field.MetadataObjectId == catalog.Id);
+
+            foreach (var row in rows)
+            {
+                if (!row.TryGetValue("Id", out var rawId) || !Guid.TryParse(rawId?.ToString(), out var id))
+                    continue;
+
+                var display = displayField == null
+                    ? id.ToString()
+                    : ReferenceDisplayHelper.BuildDisplayValue(row, displayField);
+
+                var searchText = string.Join(' ', row.Values
+                    .Where(value => value != null)
+                    .Select(value => value!.ToString())
+                    .Where(value => !string.IsNullOrWhiteSpace(value)));
+
+                items.Add(new ReferenceLookupItem(id.ToString(), display, searchText));
+            }
+
+            return items
+                .OrderBy(item => item.Display, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
+        private static bool ValueReferencesParameter(string? rawValue, string parameterName) =>
+            string.Equals(ReportParameterSyntax.GetSingleToken(rawValue), parameterName,
+                StringComparison.OrdinalIgnoreCase);
+
         private sealed class ReportOrganizationInfo
         {
             public static ReportOrganizationInfo Empty { get; } = new()
@@ -1315,6 +1745,8 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             try
             {
                 await new PrintFormService(_context).EnsureSchemaAsync();
+                await new ReportUserSettingService(_context).EnsureSchemaAsync();
+                EnsureParametersCoverFilters(report);
                 if (string.IsNullOrWhiteSpace(report.Code))
                     report.Code = $"report.{Guid.NewGuid():N}";
                 if (report.Id == Guid.Empty)
@@ -1376,6 +1808,9 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                         await _context.ReportFilters
                             .Where(filter => filter.ReportId == report.Id)
                             .ExecuteDeleteAsync();
+                        await _context.ReportParameters
+                            .Where(parameter => parameter.ReportId == report.Id)
+                            .ExecuteDeleteAsync();
                         await _context.ReportElementMappings
                             .Where(mapping => mapping.ReportId == report.Id)
                             .ExecuteDeleteAsync();
@@ -1403,6 +1838,18 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                             Value = filter.Value,
                             Value2 = filter.Value2,
                             Order = filter.Order
+                        }).ToList();
+
+                        var newParameters = report.Parameters.Select(parameter => new ReportParameter
+                        {
+                            Id = Guid.NewGuid(),
+                            ReportId = report.Id,
+                            Name = parameter.Name,
+                            Title = parameter.Title,
+                            ParameterType = parameter.ParameterType,
+                            DefaultValue = parameter.DefaultValue,
+                            IsRequired = parameter.IsRequired,
+                            Order = parameter.Order
                         }).ToList();
 
                         var newMappings = report.ElementMappings.Select(mapping => new ReportElementMapping
@@ -1434,10 +1881,12 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
 
                         await _context.ReportFields.AddRangeAsync(newFields);
                         await _context.ReportFilters.AddRangeAsync(newFilters);
+                        await _context.ReportParameters.AddRangeAsync(newParameters);
                         await _context.ReportElementMappings.AddRangeAsync(newMappings);
 
                         report.Fields = newFields;
                         report.Filters = newFilters;
+                        report.Parameters = newParameters;
                         report.ElementMappings = newMappings;
                         _context.Reports.Update(existingReport);
                     }
@@ -1461,6 +1910,11 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                         {
                             mapping.Id = mapping.Id == Guid.Empty ? Guid.NewGuid() : mapping.Id;
                             mapping.ReportId = report.Id;
+                        }
+                        foreach (var parameter in report.Parameters)
+                        {
+                            parameter.Id = parameter.Id == Guid.Empty ? Guid.NewGuid() : parameter.Id;
+                            parameter.ReportId = report.Id;
                         }
                         await _context.Reports.AddAsync(report);
                     }
@@ -1490,6 +1944,7 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 .Include(r => r.Fields)
                 .Include(r => r.Filters)
                 .Include(r => r.Groups)
+                .Include(r => r.Parameters)
                 .Include(r => r.ElementMappings)
                 .OrderBy(r => r.Order)
                 .ToListAsync();
@@ -1527,6 +1982,7 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 .Include(r => r.Fields)
                 .Include(r => r.Filters)
                 .Include(r => r.Groups)
+                .Include(r => r.Parameters)
                 .Include(r => r.ElementMappings)
                 .Include(r => r.HeadersFooters)
                 .FirstOrDefaultAsync(report => report.Id == reportId);
@@ -1674,6 +2130,9 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 .Where(item => item.ReportId == reportId)
                 .ExecuteDeleteAsync();
             await _context.ReportGroups
+                .Where(item => item.ReportId == reportId)
+                .ExecuteDeleteAsync();
+            await _context.ReportParameters
                 .Where(item => item.ReportId == reportId)
                 .ExecuteDeleteAsync();
             await _context.ReportElementMappings

@@ -245,6 +245,7 @@ namespace BIS.ERP.Views
                     : $"Патч: {patchVersion}";
                 _metadataService = new MetadataService(_context);
                 _reportService = new ReportService(_context);
+                await new ReportUserSettingService(_context).EnsureSchemaAsync();
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
@@ -3012,7 +3013,10 @@ namespace BIS.ERP.Views
             try
             {
                 var fullReport = await LoadFullReportAsync(report);
-                var pdf = new PrintFormService(_context).ExportTemplatePreview(fullReport);
+                var reportService = new ReportService(_context);
+                var pdf = new PrintFormService(_context).ExportTemplatePreview(
+                    fullReport,
+                    await reportService.ResolveUserParametersAsync(fullReport));
                 var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.pdf");
                 File.WriteAllBytes(tempFile, pdf);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo

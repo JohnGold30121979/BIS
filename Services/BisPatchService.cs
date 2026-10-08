@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.IO;
@@ -1034,6 +1036,28 @@ namespace BIS.ERP.Services
             Value2 = source.Value2,
             Order = source.Order
         };
+
+        public class ReportParameter
+        {
+            [Key] public Guid Id { get; set; } = Guid.NewGuid();
+            public Guid ReportId { get; set; }
+            [ForeignKey("ReportId")] public virtual Report Report { get; set; }
+            [MaxLength(120)] public string Name { get; set; } = "";      // токен без скобок: ПериодС
+            [MaxLength(200)] public string Title { get; set; } = "";     // подпись в диалоге
+            public string ParameterType { get; set; } = "Date";           // Date | String | Decimal | Int | Bool
+            public string DefaultValue { get; set; } = "";                // "начала месяца", "сегодня" или литерал
+            public bool IsRequired { get; set; } = true;
+            public int Order { get; set; }
+        }
+
+        public class ReportUserSetting
+        {
+            [Key] public Guid Id { get; set; } = Guid.NewGuid();
+            public Guid ReportId { get; set; }
+            [MaxLength(120)] public string UserLogin { get; set; } = "";
+            [MaxLength(120)] public string ParameterName { get; set; } = "";
+            public string Value { get; set; } = "";
+        }
 
         private static ReportGroup CloneReportGroup(ReportGroup source, Guid reportId) => new()
         {

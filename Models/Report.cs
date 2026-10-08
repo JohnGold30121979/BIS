@@ -77,6 +77,7 @@ namespace BIS.ERP.Models
         public virtual ICollection<ReportField> Fields { get; set; } = new List<ReportField>();
         public virtual ICollection<ReportFilter> Filters { get; set; } = new List<ReportFilter>();
         public virtual ICollection<ReportGroup> Groups { get; set; } = new List<ReportGroup>();
+        public virtual ICollection<ReportParameter> Parameters { get; set; } = new List<ReportParameter>();
         public virtual ICollection<ReportElementMapping> ElementMappings { get; set; } = new List<ReportElementMapping>();
         public virtual ICollection<ReportHeaderFooter> HeadersFooters { get; set; } = new List<ReportHeaderFooter>();
 
@@ -161,6 +162,12 @@ namespace BIS.ERP.Models
         public string Value { get; set; } = string.Empty;
         public string Value2 { get; set; } = string.Empty;
         public int Order { get; set; } = 0;
+
+        /// <summary>
+        /// Необязательное условие: если значение параметра не задано, условие
+        /// не попадает в SQL и отчёт показывает все строки.
+        /// </summary>
+        public bool IsOptional { get; set; }
     }
 
     public class ReportGroup

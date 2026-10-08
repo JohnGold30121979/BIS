@@ -634,6 +634,59 @@
                 </Grid>
             </TabItem>
 
+            <!-- Вкладка: Параметры -->
+            <TabItem Header="⚙ Параметры">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Background="#EAF4FB" CornerRadius="6" Padding="12" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock FontWeight="Bold" Text="Параметры отчета задаются пользователем при формировании"/>
+                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#3B4A57"
+                                       Text="Чтобы фильтр зависел от параметра, укажите в его значении ссылку на параметр целиком: {PeriodStart}. Литеральные значения работают как раньше."/>
+                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#3B4A57"
+                                       Text="Имена PeriodStart, PeriodEnd, CashDeskId, OrganizationId, EmployeeId, AccountCode дополнительно подставляются в SQL-наборы данных."/>
+                        </StackPanel>
+                    </Border>
+
+                    <DataGrid x:Name="ReportParametersGrid" Grid.Row="1"
+                              AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                              RowHeight="32" MinRowHeight="28"
+                              HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Имя (токен)" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="1.1*" MinWidth="120"/>
+                            <DataGridTextColumn Header="Подпись" Binding="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Width="1.4*" MinWidth="140"/>
+                            <DataGridComboBoxColumn x:Name="ParameterTypeColumn" Header="Тип" Width="110"/>
+                            <DataGridTextColumn Header="Значение по умолчанию" Binding="{Binding DefaultValue, UpdateSourceTrigger=PropertyChanged}" Width="1.4*" MinWidth="150"/>
+                            <DataGridTextColumn Header="Справочник (для типа Ссылка)" Binding="{Binding ReferenceSource, UpdateSourceTrigger=PropertyChanged}" Width="1.2*" MinWidth="140"/>
+                            <DataGridCheckBoxColumn Header="Обязательный" Binding="{Binding IsRequired, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                            <DataGridTextColumn Header="Порядок" Binding="{Binding Order, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button Content="Добавить параметр" Width="150" Height="30" Margin="0,0,8,0"
+                                Background="#3498DB" Foreground="White" Click="OnAddParameterClick"/>
+                        <Button Content="Параметры из фильтров" Width="180" Height="30" Margin="0,0,8,0"
+                                Background="#8E44AD" Foreground="White" Click="OnSyncParametersFromFiltersClick"
+                                ToolTip="Найти ссылки {Имя} в фильтрах и создать недостающие параметры"/>
+                        <Button Content="Выбрать значение" Width="150" Height="30" Margin="0,0,8,0"
+                                Background="#2980B9" Foreground="White" Click="OnPickReferenceValueClick"
+                                ToolTip="Для параметра типа «Ссылка»: выбрать элемент справочника и подставить его в значение по умолчанию"/>
+                        <Button Content="Проверить" Width="110" Height="30" Margin="0,0,8,0"
+                                Background="#16A085" Foreground="White" Click="OnCheckParametersClick"/>
+                        <TextBlock x:Name="ParameterIssuesText" VerticalAlignment="Center" Margin="8,0,0,0"
+                                   Foreground="#7A6A4F" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
             <!-- Вкладка: Оформление -->            
             <TabItem Header="🎨 Оформление">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -746,18 +799,23 @@
                                 <DataTemplate>
                                     <Border Background="#F8F9FA" CornerRadius="5" Padding="10" Margin="0,0,0,10">
                                         <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="100"/>
                                                 <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="40"/>
                                             </Grid.ColumnDefinitions>
 
-                                            <ComboBox x:Name="FilterField" Grid.Column="0" Height="30" Margin="5"
+                                            <ComboBox x:Name="FilterField" Grid.Row="0" Grid.Column="0" Height="30" Margin="5"
                                                       ItemsSource="{Binding DataContext.AvailableFilterFields, RelativeSource={RelativeSource AncestorType=Window}}"
                                                       DisplayMemberPath="Name" SelectedValuePath="DbColumnName"
                                                       SelectedValue="{Binding FieldName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                            <ComboBox x:Name="FilterOp" Grid.Column="1" Height="30" Margin="5"
+                                            <ComboBox x:Name="FilterOp" Grid.Row="0" Grid.Column="1" Height="30" Margin="5"
                                                       SelectedValuePath="Content"
                                                       SelectedValue="{Binding Operation, Mode=TwoWay}">
                                                 <ComboBoxItem>=</ComboBoxItem>
@@ -765,11 +823,23 @@
                                                 <ComboBoxItem>&gt;</ComboBoxItem>
                                                 <ComboBoxItem>&lt;=</ComboBoxItem>
                                                 <ComboBoxItem>&gt;=</ComboBoxItem>
+                                                <ComboBoxItem>&lt;&gt;</ComboBoxItem>
                                                 <ComboBoxItem>Like</ComboBoxItem>
+                                                <ComboBoxItem>Between</ComboBoxItem>
                                             </ComboBox>
-                                            <TextBox x:Name="FilterValue" Grid.Column="2" Height="30" Margin="5" Text="{Binding Value}"/>
-                                            <Button Content="❌" Grid.Column="3" Width="30" Height="30" Margin="5"
+                                            <TextBox x:Name="FilterValue" Grid.Row="0" Grid.Column="2" Height="30" Margin="5" Text="{Binding Value}"
+                                                     ToolTip="Либо значение (01.03.2025), либо параметр целиком: {PeriodStart}. Параметры описываются на вкладке «⚙ Параметры»."/>
+                                            <CheckBox Grid.Row="0" Grid.Column="3" Margin="8,0" VerticalAlignment="Center"
+                                                      IsChecked="{Binding IsOptional, Mode=TwoWay}"
+                                                      ToolTip="Необязательное условие: если параметр не задан, условие не применяется и отчёт показывает все строки."/>
+                                            <Button Content="❌" Grid.Row="0" Grid.Column="4" Width="30" Height="30" Margin="5"
                                                     Background="Transparent" Click="RemoveFilter_Click"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Margin="5,0" VerticalAlignment="Center"
+                                                       Foreground="#5F6B7A" FontSize="11" Text="Значение 2 (для Between):"/>
+                                            <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="28" Margin="5,2,5,5"
+                                                     Text="{Binding Value2}"
+                                                     ToolTip="Второе значение для операции Between. Можно указать второй параметр: {PeriodEnd}."/>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
