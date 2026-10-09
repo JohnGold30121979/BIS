@@ -1152,8 +1152,7 @@ namespace BIS.ERP.Services
             return $"\"{identifier.Replace("\"", "\"\"")}\"";
         }
 
-        private static string GetAppVersion() =>
-            Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
+        private static string GetAppVersion() => AppVersion.Full;
 
         private sealed class PatchPackageContent
         {

@@ -44,6 +44,9 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             AmountColumnsBehavior.Attach(ReportGrid); // авто-генерируемые колонки отчётов — суммы с разрядами через пробел
+            // Служебные колонки акта сверки нужны только механизму подстановки FRX-макета
+            // и не должны появляться в экранной таблице, поэтому отменяем их генерацию.
+            ReportGrid.AutoGeneratingColumn += OnReportGridAutoGeneratingColumn;
             _context = context;
             _balanceService = new BalanceService(context);
             _organizationBalanceService = new OrganizationBalanceService(context);
@@ -540,6 +543,17 @@ namespace BIS.ERP.Views
                     .Select(column => $"CONVERT([{column.ColumnName}], 'System.String') LIKE '%{search}%'"));
         }
 
+        /// <summary>
+        /// Отменяет автоматическую колонку для служебных полей акта сверки.
+        /// Сетка строится по колонкам таблицы данных, поэтому без этой отмены
+        /// служебные колонки попадали бы в экранную таблицу отчёта.
+        /// </summary>
+        private static void OnReportGridAutoGeneratingColumn(object? sender, DataGridAutoGeneratingColumnEventArgs e)
+        {
+            if (e.PropertyName != null && ServiceColumnNames.Contains(e.PropertyName))
+                e.Cancel = true;
+        }
+
         private void OnReportGridDoubleClick(object sender, MouseButtonEventArgs e)
         {
             if (ReportGrid.SelectedItem is not DataRowView row || !row.Row.Table.Columns.Contains("Счет"))
@@ -795,50 +809,26 @@ namespace BIS.ERP.Views
 
             var calc = await _organizationBalanceService.CalculateAsync(start, end);
             var pairs = calc.Rows
-                .Where(row => !row.IsOrganizationTotal && MatchesSelectedOrganization(row, selectedFilterId, filterName))
+                .Where(row => !row.IsOrganizationTotal && ReconciliationActBuilder.MatchesSelectedOrganization(row, selectedFilterId, filterName))
                 .OrderBy(row => row.OrganizationName, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(row => row.AccountCode, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(row => row.CounterAccountCode, StringComparer.OrdinalIgnoreCase)
                 .ToList();
             var totals = calc.Rows
-                .Where(row => row.IsOrganizationTotal && MatchesSelectedOrganization(row, selectedFilterId, filterName))
+                .Where(row => row.IsOrganizationTotal && ReconciliationActBuilder.MatchesSelectedOrganization(row, selectedFilterId, filterName))
                 .ToList();
-            var movements = await LoadReconciliationMovementRowsAsync(selectedFilterId, start, end);
 
-            var table = CreateReconciliationTable();
-            AddReconciliationRow(table, scoped ? $"АКТ СВЕРКИ между нашей организацией и \"{titleName}\"" : "АКТЫ СВЕРКИ ПО ВСЕМ ОРГАНИЗАЦИЯМ");
-            AddReconciliationRow(table, $"Период: {start:dd/MM/yyyy} - {end:dd/MM/yyyy}");
-            AddReconciliationRow(table, string.Empty);
+            // Построение таблицы выполняется общим сервисом: тот же код используется
+            // диагностическим инструментом, поэтому поведение можно проверить без окна.
+            var builder = new ReconciliationActBuilder(_context);
+            var movements = await builder.LoadMovementsAsync(selectedFilterId, start, end);
+            var act = builder.BuildTable(pairs, totals, movements, start, end, scoped, titleName);
+            var table = act.Table;
 
-            if (pairs.Count == 0)
-            {
-                AddReconciliationRow(table, scoped
-                    ? "Данных по выбранной организации и активным парам счетов за период не найдено."
-                    : "Данных по организациям и активным парам счетов за период не найдено.");
-            }
-            else if (scoped)
-            {
-                var total = totals.FirstOrDefault(row => MatchesSelectedOrganization(row, selectedFilterId, filterName));
-                AddReconciliationSection(table, titleName, pairs, total, movements, start, end, false);
-            }
-            else
-            {
-                foreach (var group in pairs.GroupBy(row => new { row.OrganizationId, Name = NormalizeOrganizationName(row.OrganizationName) }).OrderBy(group => group.Key.Name, StringComparer.CurrentCultureIgnoreCase))
-                {
-                    var groupName = string.IsNullOrWhiteSpace(group.Key.Name) ? "Без организации" : group.Key.Name;
-                    var groupTitle = ResolveOrganizationTitle(group.Key.OrganizationId, groupName);
-                    var total = totals.FirstOrDefault(row => SameOrganization(row, group.Key.OrganizationId, groupName));
-                    var groupMovements = movements.Where(movement => MatchesMovementOrganization(movement, group.Key.OrganizationId, groupName)).ToList();
-                    AddReconciliationSection(table, groupTitle, group.ToList(), total, groupMovements, start, end, true);
-                    AddReconciliationRow(table, string.Empty);
-                }
-            }
+            WriteReconciliationTrace(start, end, scoped, titleName, filterName, selectedFilterId,
+                calc, pairs, totals, movements, act, variant);
 
-            var balance = scoped
-                ? totals.FirstOrDefault(row => MatchesSelectedOrganization(row, selectedFilterId, filterName))?.Balance ?? pairs.Sum(row => row.Balance)
-                : totals.Sum(row => row.Balance);
-            var summary = scoped ? BuildDebtSummary(titleName, balance) : BuildAllOrganizationsDebtSummary(totals.Count, balance);
-            AddReconciliationRow(table, summary);
+            var summary = act.Summary;
 
             var titlePrefix = variant?.IsStandard == false ? variant.DisplayName : "Акт сверки";
             var report = CreateReport(table, scoped ? $"{titlePrefix}: {titleName} на {end:dd/MM/yyyy}" : $"{titlePrefix}: все организации на {end:dd/MM/yyyy}", true);
@@ -867,6 +857,97 @@ namespace BIS.ERP.Views
             SetReportFieldWidth(report, "Модуль", 45);
             await ApplyReconciliationVariantLayoutAsync(report, variant);
             return (table, report);
+        }
+
+        /// <summary>
+        /// Записывает диагностический след построения акта сверки в файл журнала.
+        /// Нужен, чтобы видеть, что именно попало в отчёт, не добавляя служебные
+        /// строки в саму печатную форму.
+        /// </summary>
+        private static void WriteReconciliationTrace(
+            DateTime start,
+            DateTime end,
+            bool scoped,
+            string titleName,
+            string? filterName,
+            Guid? selectedFilterId,
+            OrganizationBalanceCalculationResult calc,
+            IReadOnlyList<OrganizationBalanceRow> pairs,
+            IReadOnlyList<OrganizationBalanceRow> totals,
+            IReadOnlyList<ReconciliationMovementRow> movements,
+            ReconciliationActTable act,
+            ReconciliationReportVariant? variant)
+        {
+            try
+            {
+                var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "reconciliation-trace.log");
+                var lines = new List<string>
+                {
+                    new string('=', 100),
+                    $"Время: {DateTime.Now:dd.MM.yyyy HH:mm:ss}",
+                    $"Версия программы: {AppVersion.Display}",
+                    $"Период: {start:dd.MM.yyyy} - {end:dd.MM.yyyy}",
+                    $"Режим: {(scoped ? "одна организация" : "все организации")}",
+                    $"Выбранная организация: Id={selectedFilterId?.ToString() ?? "<нет>"} Name='{filterName ?? "<нет>"}'",
+                    $"Заголовок отчёта: '{titleName}'",
+                    $"Вариант макета: {variant?.DisplayName ?? "<не выбран>"}",
+                    $"Строк расчёта всего: {calc.Rows.Count}, из них пар {calc.Rows.Count(r => !r.IsOrganizationTotal)}, " +
+                    $"итогов {calc.Rows.Count(r => r.IsOrganizationTotal)}",
+                    $"Пар передано в построение: {pairs.Count}",
+                    $"Итогов передано в построение: {totals.Count}",
+                    $"Движений загружено: {movements.Count}",
+                    $"Организаций в движениях: {movements.Select(m => m.OrganizationId).Distinct().Count()}",
+                    $"Пустых дат: {movements.Count(m => m.Date == default)}, " +
+                    $"пустых номеров: {movements.Count(m => string.IsNullOrWhiteSpace(m.DocumentNumber))}, " +
+                    $"пустых модулей: {movements.Count(m => string.IsNullOrWhiteSpace(m.ModuleCode))}",
+                    string.Empty,
+                    "--- Движения по организациям ---"
+                };
+
+                foreach (var group in movements.GroupBy(m => new { m.OrganizationId, m.OrganizationName }))
+                {
+                    lines.Add($"  Id={group.Key.OrganizationId?.ToString() ?? "<NULL>"} " +
+                              $"Name='{group.Key.OrganizationName}' движений={group.Count()}");
+                }
+
+                lines.Add(string.Empty);
+                lines.Add("--- Пары по организациям ---");
+                foreach (var group in pairs.GroupBy(p => new { p.OrganizationId, p.OrganizationName }))
+                {
+                    lines.Add($"  Id={group.Key.OrganizationId?.ToString() ?? "<NULL>"} " +
+                              $"Name='{group.Key.OrganizationName}' пар={group.Count()}");
+                }
+
+                lines.Add(string.Empty);
+                lines.Add("--- След построения ---");
+                foreach (var line in act.Trace)
+                    lines.Add($"  {line}");
+
+                lines.Add(string.Empty);
+                lines.Add($"--- Таблица акта: строк {act.Table.Rows.Count} ---");
+                foreach (DataRow row in act.Table.Rows)
+                {
+                    var operation = row["Наименование материала, вид операции"]?.ToString() ?? string.Empty;
+                    var debit = row["Дебет"]?.ToString() ?? string.Empty;
+                    var credit = row["Кредит"]?.ToString() ?? string.Empty;
+                    var debitAmount = row["Сумма Дт"] == DBNull.Value ? string.Empty : Convert.ToDecimal(row["Сумма Дт"]).ToString("N2");
+                    var creditAmount = row["Сумма Кт"] == DBNull.Value ? string.Empty : Convert.ToDecimal(row["Сумма Кт"]).ToString("N2");
+                    var document = row["N докум"]?.ToString() ?? string.Empty;
+                    var date = row["Дата"]?.ToString() ?? string.Empty;
+                    var module = row["Модуль"]?.ToString() ?? string.Empty;
+
+                    lines.Add($"  [{operation}] Дт={debit} Кт={credit} " +
+                              $"СуммаДт={debitAmount} СуммаКт={creditAmount} " +
+                              $"N={document} Дата={date} Модуль={module}");
+                }
+
+                lines.Add(string.Empty);
+                File.AppendAllLines(path, lines);
+            }
+            catch
+            {
+                // Диагностика не должна мешать построению отчёта.
+            }
         }
         private async Task ApplyReconciliationVariantLayoutAsync(Report report, ReconciliationReportVariant? variant)
         {
@@ -1326,164 +1407,50 @@ namespace BIS.ERP.Views
             return false;
         }
 
-        private async Task<List<ReconciliationMovementRow>> LoadReconciliationMovementRowsAsync(Guid? organizationId, DateTime start, DateTime end)
+        // ==================================================================================
+        // УСТАРЕВШИЕ МЕТОДЫ ПОСТРОЕНИЯ АКТА СВЕРКИ.
+        //
+        // Логика построения таблицы акта перенесена в Services/ReconciliationActBuilder.cs,
+        // чтобы её можно было проверить диагностическим инструментом (.tools/ReconProbe)
+        // без запуска окна. Методы ниже не вызываются: они оставлены только на время
+        // проверки переноса и подлежат удалению.
+        //
+        // При правке поведения акта сверки менять нужно ReconciliationActBuilder,
+        // а не эти методы.
+        // ==================================================================================
+
+        /// <summary>
+        /// Колонки, которые нужны только механизму подстановки FRX-макета.
+        /// В экранной таблице отчёта они помечаются невидимыми: сетка строится
+        /// по полям отчёта, а не по колонкам таблицы данных.
+        /// </summary>
+        private static readonly HashSet<string> ServiceColumnNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            var rows = new List<ReconciliationMovementRow>();
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync(@"
-                    DO $$
-                    BEGIN
-                        IF to_regclass('public.doc_postings') IS NOT NULL THEN
-                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
-                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2) NOT NULL DEFAULT 0;
-                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
-                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS organization_id uuid;
-                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS description text;
-                            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
-                        END IF;
-                    END $$;");
-            }
-            catch (PostgresException ex) when (ex.SqlState == "42P01")
-            {
-                return rows;
-            }
+            "operation_name", "debit_account", "credit_account",
+            "debit_amount", "credit_amount", "debit_begin", "credit_begin",
+            "document_number", "document_date", "module",
+            "report_title", "report_summary", "period_start", "period_end"
+        };
 
-            using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = @"
-                SELECT p.posting_date, p.doc_number, COALESCE(p.document_type, 'Проводка') AS document_type,
-                       COALESCE(p.module_code, '') AS module_code,
-                       p.debit_account, p.credit_account, COALESCE(p.amount_kgs, 0) AS amount_kgs,
-                       COALESCE(p.description, '') AS description,
-                       CASE
-                           WHEN COALESCE(p.organization_id::text, '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                           THEN p.organization_id::text
-                           ELSE NULL
-                       END AS organization_id_text,
-                       COALESCE(NULLIF(o.""name"", ''), 'Без организации') AS organization_name
-                FROM doc_postings p
-                LEFT JOIN catalog_organizations o ON p.organization_id::text = o.""Id""::text
-                WHERE COALESCE(p.is_active, true) = true
-                  AND (COALESCE(@organizationId, '') = '' OR p.organization_id::text = @organizationId)
-                  AND p.posting_date >= @startDate
-                  AND p.posting_date < @endDateExclusive
-                ORDER BY organization_name, p.posting_date, p.doc_number, p.debit_account, p.credit_account";
-            command.Parameters.Add(new NpgsqlParameter("@organizationId", organizationId.HasValue && organizationId.Value != Guid.Empty ? organizationId.Value.ToString() : string.Empty));
-            command.Parameters.Add(new NpgsqlParameter("@startDate", DateTime.SpecifyKind(start.Date, DateTimeKind.Utc)));
-            command.Parameters.Add(new NpgsqlParameter("@endDateExclusive", DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc)));
+        /// <summary>
+        /// Проставляет поля шапки макета во всех строках: заголовок отчёта, период
+        /// и итоговое описание. Их читает полоса Title.
+        /// </summary>
 
-            try
-            {
-                await _context.Database.OpenConnectionAsync();
-                using var reader = await command.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    var postingDate = reader["posting_date"] is DateTime date ? date : Convert.ToDateTime(reader["posting_date"], CultureInfo.InvariantCulture);
-                    rows.Add(new ReconciliationMovementRow
-                    {
-                        Date = postingDate,
-                        OrganizationId = Guid.TryParse(reader["organization_id_text"]?.ToString(), out var movementOrganizationId) ? movementOrganizationId : null,
-                        OrganizationName = reader["organization_name"]?.ToString() ?? "Без организации",
-                        DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(reader["doc_number"]?.ToString()),
-                        DocumentType = reader["document_type"]?.ToString() ?? string.Empty,
-                        ModuleCode = reader["module_code"]?.ToString() ?? string.Empty,
-                        DebitAccount = reader["debit_account"]?.ToString() ?? string.Empty,
-                        CreditAccount = reader["credit_account"]?.ToString() ?? string.Empty,
-                        Amount = ReadDbDecimal(reader["amount_kgs"]),
-                        Description = reader["description"]?.ToString() ?? string.Empty
-                    });
-                }
-            }
-            catch (PostgresException ex) when (ex.SqlState is "42P01" or "42703")
-            {
-                rows.Clear();
-            }
-            finally
-            {
-                await _context.Database.CloseConnectionAsync();
-            }
+        /// <summary>Добавляет колонку под каноническое имя поля отчёта, если её ещё нет.</summary>
 
-            return rows;
-        }
-        private static DataTable CreateReconciliationTable()
-        {
-            var table = new DataTable("Акт сверки");
-            table.Columns.Add("Наименование материала, вид операции", typeof(string));
-            table.Columns.Add("Дебет", typeof(string));
-            table.Columns.Add("Кредит", typeof(string));
-            table.Columns.Add("Сумма Дт", typeof(decimal));
-            table.Columns.Add("Сумма Кт", typeof(decimal));
-            table.Columns.Add("N докум", typeof(string));
-            table.Columns.Add("Дата", typeof(string));
-            table.Columns.Add("Модуль", typeof(string));
-            return table;
-        }
+        /// <summary>
+        /// Записывает значение в служебную колонку. В числовую колонку нельзя записать
+        /// пустую строку — только DBNull.
+        /// </summary>
 
-        private static void AddReconciliationSection(DataTable table, string organizationTitle, IReadOnlyList<OrganizationBalanceRow> pairs, OrganizationBalanceRow? total, IReadOnlyList<ReconciliationMovementRow> movements, DateTime start, DateTime end, bool showOrganizationHeader)
-        {
-            if (showOrganizationHeader)
-                AddReconciliationRow(table, $"Организация: {organizationTitle}");
-
-            var firstPair = true;
-            foreach (var pair in pairs)
-            {
-                if (!firstPair)
-                    AddReconciliationRow(table, string.Empty);
-                firstPair = false;
-
-                var pairName = string.IsNullOrWhiteSpace(pair.AccountPairName) ? pair.CounterAccountName : pair.AccountPairName;
-                AddReconciliationRow(table, $"Пара счетов : {pair.AccountCode} - {pair.CounterAccountCode} ({pairName})");
-                AddReconciliationRow(table, $"САЛЬДО НА {start:dd/MM/yyyy}", debitAmount: NonZeroAmount(pair.OpeningDebit), creditAmount: NonZeroAmount(pair.OpeningCredit));
-
-                var pairMovements = movements
-                    .Where(movement => AccountInPair(movement.DebitAccount, pair) || AccountInPair(movement.CreditAccount, pair))
-                    .OrderBy(movement => movement.Date)
-                    .ThenBy(movement => movement.DocumentNumber, StringComparer.CurrentCultureIgnoreCase)
-                    .ToList();
-                if (pairMovements.Count == 0 && (pair.TurnoverDebit != 0 || pair.TurnoverCredit != 0))
-                    AddReconciliationRow(table, "Движения найдены в остатках, но детализация проводок недоступна.");
-
-                foreach (var movement in pairMovements)
-                {
-                    AddReconciliationRow(
-                        table,
-                        BuildMovementDescription(movement),
-                        movement.DebitAccount,
-                        movement.CreditAccount,
-                        AccountInPair(movement.DebitAccount, pair) ? (decimal?)movement.Amount : null,
-                        AccountInPair(movement.CreditAccount, pair) ? (decimal?)movement.Amount : null,
-                        movement.DocumentNumber,
-                        movement.Date.ToString("dd/MM/yyyy"),
-                        movement.ModuleCode);
-                }
-
-                AddReconciliationRow(table, "ИТОГО ОБОРОТОВ", debitAmount: NonZeroAmount(pair.TurnoverDebit), creditAmount: NonZeroAmount(pair.TurnoverCredit));
-                AddReconciliationRow(table, $"САЛЬДО НА {end:dd/MM/yyyy}", debitAmount: NonZeroAmount(pair.ClosingDebit), creditAmount: NonZeroAmount(pair.ClosingCredit));
-            }
-
-            if (total != null && pairs.Count > 1)
-            {
-                AddReconciliationRow(table, string.Empty);
-                AddReconciliationRow(table, "ИТОГО ОБОРОТОВ ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.TurnoverDebit), creditAmount: NonZeroAmount(total.TurnoverCredit));
-                AddReconciliationRow(table, $"САЛЬДО НА {end:dd/MM/yyyy} ПО ОРГАНИЗАЦИИ", debitAmount: NonZeroAmount(total.ClosingDebit), creditAmount: NonZeroAmount(total.ClosingCredit));
-            }
-
-            AddReconciliationRow(table, BuildDebtSummary(organizationTitle, total?.Balance ?? pairs.Sum(row => row.Balance)));
-        }
-
-        private static void AddReconciliationRow(DataTable table, string operation, string debit = "", string credit = "", decimal? debitAmount = null, decimal? creditAmount = null, string documentNumber = "", string date = "", string moduleCode = "")
-        {
-            var row = table.NewRow();
-            row["Наименование материала, вид операции"] = operation;
-            row["Дебет"] = debit;
-            row["Кредит"] = credit;
-            row["Сумма Дт"] = debitAmount.HasValue ? debitAmount.Value : DBNull.Value;
-            row["Сумма Кт"] = creditAmount.HasValue ? creditAmount.Value : DBNull.Value;
-            row["N докум"] = documentNumber;
-            row["Дата"] = date;
-            row["Модуль"] = moduleCode;
-            table.Rows.Add(row);
-        }
+        private static bool IsNumericColumn(DataColumn column) =>
+            column.DataType == typeof(decimal) ||
+            column.DataType == typeof(double) ||
+            column.DataType == typeof(float) ||
+            column.DataType == typeof(int) ||
+            column.DataType == typeof(long) ||
+            column.DataType == typeof(short);
 
         private static void SetReportFieldWidth(Report report, string fieldName, int width, string alignment = "Left", string format = "")
         {
@@ -1558,12 +1525,16 @@ namespace BIS.ERP.Views
 
         private static decimal? NonZeroAmount(decimal value) => value == 0m ? null : value;
 
-        private static string BuildMovementDescription(ReconciliationMovementRow movement)
-        {
-            if (!string.IsNullOrWhiteSpace(movement.Description))
-                return movement.Description;
-            return string.IsNullOrWhiteSpace(movement.DocumentType) ? "Проводка" : movement.DocumentType;
-        }
+        /// <summary>
+        /// Сокращает длинное описание операции: убирает перечисление модулей
+        /// («Авансовые платежи; Расчеты по прочим услугам») и ограничивает длину,
+        /// иначе текст не помещается в колонку и наезжает на соседние.
+        /// </summary>
+
+        /// <summary>
+        /// Заголовок документа не должен попадать в колонку операций: он уже выведен
+        /// в шапке, иначе «АКТ СВЕРКИ» печатается дважды.
+        /// </summary>
 
         private static string BuildDebtSummary(string organizationName, decimal balance)
         {
@@ -1718,19 +1689,6 @@ namespace BIS.ERP.Views
                 Id = Guid.Empty,
                 Name = "Все организации"
             };
-        }
-        private sealed class ReconciliationMovementRow
-        {
-            public DateTime Date { get; init; }
-            public Guid? OrganizationId { get; init; }
-            public string OrganizationName { get; init; } = string.Empty;
-            public string DocumentNumber { get; init; } = string.Empty;
-            public string DocumentType { get; init; } = string.Empty;
-            public string ModuleCode { get; init; } = string.Empty;
-            public string DebitAccount { get; init; } = string.Empty;
-            public string CreditAccount { get; init; } = string.Empty;
-            public decimal Amount { get; init; }
-            public string Description { get; init; } = string.Empty;
         }
         private sealed class ReconciliationReportVariant
         {
@@ -2031,7 +1989,9 @@ namespace BIS.ERP.Views
                     DisplayName = column.ColumnName,
                     Order = order++,
                     Width = column.DataType == typeof(string) ? 160 : 85,
-                    IsVisible = true
+                    // Служебные колонки нужны только механизму подстановки FRX-макета,
+                    // поэтому в экранной таблице отчёта они не показываются.
+                    IsVisible = !ServiceColumnNames.Contains(column.ColumnName)
                 });
             }
             return report;
@@ -2519,4 +2479,3 @@ namespace BIS.ERP.Views
         }
     }
 }
-

@@ -40,8 +40,13 @@
                         </Grid>
                     </StackPanel>
                 </Border>
-                <TextBlock Text="Версия 1.0" Foreground="{DynamicResource AppSecondaryTextBrush}"
-                           HorizontalAlignment="Right" Margin="0,10,0,0"/>
+                <!-- Версии в одну строку, выравнивание слева: подробная версия программы
+                     с датой сборки и версия конфигурации из базы. -->
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock x:Name="VersionProgramText" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                    <TextBlock Text="   •   " Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                    <TextBlock x:Name="ConfigurationVersionText" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
         <DockPanel Grid.Row="1" Margin="0,18,0,0">

@@ -35,6 +35,21 @@ namespace BIS.ERP.Services
             await File.WriteAllTextAsync(filePath, json);
         }
 
+        /// <summary>
+        /// Версия конфигурации, записанная при последней выгрузке или загрузке.
+        /// Ничего не изменяет: служит только для показа в интерфейсе.
+        /// </summary>
+        public async Task<string> GetConfigurationVersionAsync()
+        {
+            var version = await _context.MetadataConfigurations
+                .AsNoTracking()
+                .OrderByDescending(item => item.UpdatedAt)
+                .Select(item => item.Version)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(version) ? "не задана" : version;
+        }
+
         public async Task ExportEncryptedAsync(string filePath)
         {
             var package = await BuildPackageAsync();
@@ -182,6 +197,9 @@ namespace BIS.ERP.Services
             var package = new ConfigurationPackage
             {
                 ExportedAt = DateTime.UtcNow,
+                ApplicationVersion = AppVersion.Semantic,
+                ApplicationBuild = AppVersion.Build,
+                ApplicationBuildUtc = AppVersion.BuildUtc,
                 SystemConfigurations = await _context.SystemConfigurations.AsNoTracking().ToListAsync(),
                 MetadataObjects = metadata,
                 ReportDataSets = reportDataSets,
@@ -293,7 +311,7 @@ namespace BIS.ERP.Services
                     InfoBaseId = Guid.Empty,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
-                    Version = "1.0",
+                    Version = AppVersion.Semantic,
                     IsInitialized = true
                 };
                 await _context.MetadataConfigurations.AddAsync(config);
@@ -303,6 +321,10 @@ namespace BIS.ERP.Services
 
             config.IsInitialized = true;
             config.UpdatedAt = DateTime.UtcNow;
+            // Версия конфигурации всегда соответствует версии программы,
+            // которой сделана последняя выгрузка или загрузка.
+            config.Version = AppVersion.Semantic;
+            await _context.SaveChangesAsync();
             return config.Id;
         }
 

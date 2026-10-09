@@ -1,3 +1,4 @@
+using BIS.ERP.Data;
 using BIS.ERP.Services;
 using BIS.ERP.Models;
 using System;
@@ -27,7 +28,22 @@ namespace BIS.ERP.Views.Dialogs
             CompanyDetailsText.Text = EmptyFallback(_configuration.CompanyDetails);
             EmailText.Text = EmptyFallback(_configuration.Email);
             PhoneText.Text = EmptyFallback(_configuration.Phone);
-            UpdateStatusText.Text = $"Версия программы: {_updateService.CurrentAppVersion}";
+            // Подробная версия программы выводится здесь, а не в шапке окна:
+            // в шапке она сокращённая, чтобы не перекрывать название системы.
+            UpdateStatusText.Text = string.Empty;
+            VersionProgramText.Text = $"Версия программы: {AppVersion.Display}";
+
+            // Версия конфигурации пишется в базу при выгрузке и загрузке конфигурации.
+            try
+            {
+                var configurationVersion = await new ConfigurationExchangeService(new AppDbContext())
+                    .GetConfigurationVersionAsync();
+                ConfigurationVersionText.Text = $"Версия конфигурации: {configurationVersion}";
+            }
+            catch
+            {
+                ConfigurationVersionText.Text = "Версия конфигурации: не определена";
+            }
         }
 
         private async void OnCheckUpdateClick(object sender, RoutedEventArgs e)

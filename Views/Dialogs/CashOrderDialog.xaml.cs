@@ -25,7 +25,6 @@ namespace BIS.ERP.Views
         private readonly Guid? _editId;
 
         private bool _isApplyingCurrencyRate;
-        private bool _isInitialized;
         private string _currencyCode = string.Empty;
 
         /// <summary>

@@ -851,15 +851,7 @@ namespace BIS.ERP.Services
             manifest.RestartExecutable = NormalizeRelativePath(manifest.RestartExecutable);
         }
 
-        private static string GetCurrentAppVersion()
-        {
-            var assembly = Assembly.GetEntryAssembly() ?? typeof(AppUpdatePackageService).Assembly;
-            var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-            if (!string.IsNullOrWhiteSpace(informational))
-                return informational.Split('+')[0];
-
-            return assembly.GetName().Version?.ToString() ?? "1.0.0";
-        }
+        private static string GetCurrentAppVersion() => AppVersion.Semantic;
 
         private static string GetNextVersion(string currentVersion)
         {

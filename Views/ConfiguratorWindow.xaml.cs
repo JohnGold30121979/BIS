@@ -220,6 +220,7 @@ namespace BIS.ERP.Views
 
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
+                VersionText.Text = $"версия {AppVersion.DisplayShort}";
                 LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, GetSystemIcon(systemConfiguration.Icon));
                 var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
                 if (currentInfoBase != null)
@@ -3233,6 +3234,7 @@ namespace BIS.ERP.Views
                 return;
             var configuration = await new SystemConfigurationService().GetAsync();
             SystemNameText.Text = configuration.SystemName;
+            VersionText.Text = $"версия {AppVersion.DisplayShort}";
             LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, configuration.LogoImage, GetSystemIcon(configuration.Icon));
             var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
             if (currentInfoBase != null)

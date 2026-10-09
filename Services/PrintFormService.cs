@@ -836,7 +836,6 @@ namespace BIS.ERP.Services
             return isReceipt ? isReceiptForm && !isPaymentForm : isPaymentForm && !isReceiptForm;
         }
 
-
         public async Task SetAvailabilityAsync(Guid reportId, bool isActive)
         {
             await EnsureSchemaAsync();
@@ -1342,12 +1341,21 @@ namespace BIS.ERP.Services
             IReadOnlyDictionary<string, object>? reportParameters = null)
         {
             var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            // Пустое значение не публикуется: иначе пустое поле затрёт реальное значение,
+            // добавленное разбором строки акта сверки или настроенным правилом.
             void Add(string key, object? value)
             {
                 if (string.IsNullOrWhiteSpace(key))
                     return;
-                extra[key] = value ?? string.Empty;
-                extra[NormalizeFieldName(key)] = value ?? string.Empty;
+
+                var normalizedKey = NormalizeFieldName(key);
+                if (value == null || value == DBNull.Value)
+                    return;
+                if (value is string text && string.IsNullOrWhiteSpace(text))
+                    return;
+
+                extra[key] = value;
+                extra[normalizedKey] = value;
             }
 
             // Значения параметров отчёта доступны в макете как {ИмяПараметра}.
@@ -1363,6 +1371,13 @@ namespace BIS.ERP.Services
             {
                 var row = rows[rowIndex];
                 var number = rowIndex + 1;
+
+                // Сначала разбор строки акта сверки — он даёт содержательные значения
+                // под именами ved.*, db_cr.* и другими префиксами наборов данных.
+                AddReconciliationAliases(number, row, Add);
+                AddConfiguredFoxProRuleAliases(number, row, rules ?? Array.Empty<FoxProReportFieldRule>(), Add);
+
+                // Затем колонки данных — они закрывают оставшиеся имена.
                 foreach (DataColumn column in dataTable.Columns)
                 {
                     var value = row[column];
@@ -1370,9 +1385,6 @@ namespace BIS.ERP.Services
                     Add($"line{number}_{column.ColumnName}", value);
                     Add($"line{number}.{column.ColumnName}", value);
                 }
-
-                AddReconciliationAliases(number, row, Add);
-                AddConfiguredFoxProRuleAliases(number, row, rules ?? Array.Empty<FoxProReportFieldRule>(), Add);
             }
 
             AddReconciliationSummaryAliases(rows, report, Add);
@@ -1578,7 +1590,6 @@ namespace BIS.ERP.Services
             var doc = ReadPreviewText(row, "N докум", "Документ", "Номер", "document_number", "nom_dok");
             var date = ReadPreviewText(row, "Дата", "document_date", "datobr");
             var module = ReadPreviewText(row, "Модуль", "module", "prs", "kod_arm");
-
             FoxProReportKnowledgeBase.AddAliases(add, prefixes, "operation_name", name);
             FoxProReportKnowledgeBase.AddAliases(add, prefixes, "debit_account", debit);
             FoxProReportKnowledgeBase.AddAliases(add, prefixes, "credit_account", credit);
@@ -1586,7 +1597,19 @@ namespace BIS.ERP.Services
             FoxProReportKnowledgeBase.AddAliases(add, prefixes, "credit_amount", creditAmount);
             FoxProReportKnowledgeBase.AddAliases(add, prefixes, "document_number", doc);
             FoxProReportKnowledgeBase.AddAliases(add, prefixes, "document_date", date);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "module", module);
+            // В макете колонка АРМ узкая, поэтому выводится первая буква названия модуля.
+            // В экранной таблице полное название модуля сохраняется.
+            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "module", ShortenModuleName(module));
+        }
+
+        /// <summary>
+        /// Сокращает название модуля до первой буквы: «Финансы» → «Ф».
+        /// Так значение помещается в узкую колонку АРМ печатной формы.
+        /// </summary>
+        private static string ShortenModuleName(string? moduleName)
+        {
+            var value = (moduleName ?? string.Empty).Trim();
+            return value.Length == 0 ? string.Empty : value[..1].ToUpperInvariant();
         }
 
         private static void AddConfiguredFoxProRuleAliases(
@@ -2177,6 +2200,9 @@ namespace BIS.ERP.Services
             var pages = SplitTemplateIntoPages(layoutTemplate);
             var useLandscapePage = layoutTemplate.PageWidth >= layoutTemplate.PageHeight ||
                 string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
+            // Если макет сжимается целиком на один лист, сохраняем привычное поведение:
+            // содержимое вписывается в страницу через FitArea.
+            var fitsSinglePage = pages.Count == 1;
             var selectedMappings = mappings ?? Array.Empty<ReportElementMapping>();
 
             return QuestPDF.Fluent.Document.Create(document =>
@@ -2191,30 +2217,314 @@ namespace BIS.ERP.Services
                         page.Margin(8, Unit.Millimetre);
                         page.Content().Svg(BuildTemplateSvg(
                             pageTemplate, report, data, selectedMappings, true,
-                            pageTemplate.Elements, pageNumber, pages.Count)).FitArea();
+                            fitsSinglePage ? null : pageTemplate.Elements,
+                            pageNumber, pages.Count)).FitArea();
                     });
                 }
             }).GeneratePdf();
         }
 
         /// <summary>
-        /// Разбивает подготовленный макет на страницы A4 по вертикали.
-        /// Координаты элементов не меняются: страница отбирает элементы, попадающие
-        /// в свой вертикальный диапазон. Элемент, выходящий за нижнюю границу,
-        /// обрезается — так строка таблицы не уезжает за край листа.
+        /// Высота листа в единицах макета. Макеты FRX задают собственный масштаб
+        /// (акт сверки — 78000 x 86854), поэтому размер листа выводится из пропорций
+        /// A4 относительно ширины макета, а не берётся как 2970.
+        /// </summary>
+        private static double GetTemplatePageHeight(double pageWidth, double templateHeight)
+        {
+            const double a4PortraitRatio = 297d / 210d;   // высота / ширина
+            const double a4LandscapeRatio = 210d / 297d;
+            // Макет шире своей высоты — значит он альбомный.
+            var isLandscape = pageWidth > templateHeight;
+            return pageWidth * (isLandscape ? a4LandscapeRatio : a4PortraitRatio);
+        }
+
+        /// <summary>
+        /// Записывает в журнал параметры разбиения на страницы.
+        /// </summary>
+        /// <summary>Записывает в журнал число страниц и строк на страницу.</summary>
+        private static void WritePaginationTrace(int pageCount, int rowsPerPage)
+        {
+            try
+            {
+                var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "reconciliation-trace.log");
+                File.AppendAllLines(path, new[]
+                {
+                    string.Empty,
+                    "--- Разбиение на страницы ---",
+                    $"  Строк на страницу: {rowsPerPage}",
+                    $"  Страниц: {pageCount}"
+                });
+            }
+            catch
+            {
+                // Диагностика не должна мешать построению отчёта.
+            }
+        }
+
+        /// <summary>
+        /// Измеряет высоту строк данных в упакованном макете.
+        ///
+        /// Строка данных — это группа элементов на одной горизонтали, где есть
+        /// значения: даты, счета, суммы. Высота измеряется между первой и последней
+        /// такой горизонталью. Нужна, чтобы определить высоту листа по числу строк,
+        /// а не по общей высоте документа: упаковщик укладывает строки плотнее
+        /// исходного макета, и от общей высоты лист получается завышенным.
+        /// </summary>
+        private static double MeasureDataRowsHeight(PrintFormTemplate template)
+        {
+            var dataTops = new List<double>();
+
+            foreach (var element in template.Elements)
+            {
+                if (element.Type is not ("Text" or "Expression"))
+                    continue;
+
+                if (!IsLikelyDataValue(element.Text))
+                    continue;
+
+                dataTops.Add(element.Top);
+            }
+
+            if (dataTops.Count < 2)
+                return 0d;
+
+            // Группируем по горизонталям: одна строка данных может содержать
+            // несколько значений на одном уровне.
+            var rows = dataTops
+                .GroupBy(top => Math.Round(top / 100d))
+                .Select(group => group.Average())
+                .OrderBy(top => top)
+                .ToList();
+
+            return rows.Count < 2 ? 0d : rows[^1] - rows[0];
+        }
+
+        /// <summary>
+        /// Разбивает подготовленный макет на страницы по числу строк данных.
+        ///
+        /// Работа идёт со строками, а не с высотами в единицах макета: строка —
+        /// это группа элементов на одной горизонтали. На страницу помещается
+        /// заданное число строк, остальные переносятся. Высота листа выводится
+        /// из фактических границ строк этой страницы, поэтому строки сохраняют
+        /// свой размер и текст остаётся читаемым.
+        ///
+        /// Шапка таблицы повторяется на каждой странице.
         /// </summary>
         private static IReadOnlyList<PrintFormTemplate> SplitTemplateIntoPages(PrintFormTemplate template)
         {
             var pageWidth = Math.Max(1000d, template.PageWidth);
             var contentHeight = Math.Max(1000d, template.PageHeight);
 
-            // Форматы макета хранятся в единицах 10 на миллиметр (2100x2970 — A4 книжная).
-            var isPortrait = pageWidth < contentHeight;
-            var pageSize = isPortrait ? 2970d : 2100d;
+            // Обычные макеты делятся по высоте листа: в них нет упакованных строк.
+            if (!template.LayoutNormalized)
+                return SplitByHeight(template, pageWidth, contentHeight);
 
-            // Небольшое превышение высоты листа (до 35%) по-прежнему масштабируется
-            // в одну страницу: так не ломаются формы, чуть выходящие за формат.
-            // Разбиваем только документы, которые действительно длиннее листа.
+            // Шапка определяется один раз и повторяется на каждой странице.
+            var headerElements = FindRepeatedHeaderElements(template);
+            var headerBandTop = headerElements.Count == 0 ? 0d : headerElements.Min(item => item.Top);
+            var headerBandBottom = headerElements.Count == 0
+                ? 0d
+                : headerElements.Max(item => item.Top + Math.Max(item.Height, 1));
+            var headerHeight = headerBandBottom - headerBandTop;
+
+            // Группируем элементы по строкам: одна строка — одна горизонталь.
+            var rows = template.Elements
+                .GroupBy(element => Math.Round(element.Top / 100d))
+                .OrderBy(group => group.Key)
+                .Select(group => new ElementRow(group.Average(item => item.Top), group.ToList()))
+                .ToList();
+
+            // Порядковый номер первой строки данных: до неё идут заголовок,
+            // шапка таблицы и заголовки групп.
+            var firstDataRowIndex = 0;
+            var sawDataValue = false;
+            for (var index = 0; index < rows.Count; index++)
+            {
+                if (rows[index].Elements.Any(element => IsLikelyDataValue(element.Text)))
+                {
+                    if (!sawDataValue)
+                    {
+                        sawDataValue = true;
+                        firstDataRowIndex = index;
+                    }
+                }
+            }
+
+            if (!sawDataValue)
+                return new[] { template };
+
+            // Число строк данных на страницу. На лист A4 в альбомной ориентации
+            // при кегле макета помещается примерно столько строк с учётом шапки,
+            // заголовков групп и итогов.
+            const int rowsPerPage = 15;
+
+            var pages = new List<PrintFormTemplate>();
+            var rowIndex = firstDataRowIndex;
+            var isFirstPage = true;
+
+            while (rowIndex < rows.Count)
+            {
+                // На первой странице выводятся все строки до данных: заголовок,
+                // шапка таблицы, заголовки групп. На следующих — только шапка.
+                var pageRows = new List<ElementRow>();
+                if (isFirstPage)
+                {
+                    pageRows.AddRange(rows.Take(firstDataRowIndex));
+                }
+                else if (headerElements.Count > 0)
+                {
+                    pageRows.Add(new ElementRow(headerBandTop, headerElements.ToList()));
+                }
+
+                // Набираем строки данных, пока помещается.
+                var taken = 0;
+                while (rowIndex < rows.Count)
+                {
+                    var row = rows[rowIndex];
+
+                    // Строка-разделитель между организациями: если она начинает новую
+                    // страницу и строк уже набрано достаточно, переносим её вперёд.
+                    if (taken >= rowsPerPage && !IsDataRow(row))
+                        break;
+
+                    pageRows.Add(row);
+                    rowIndex++;
+
+                    if (IsDataRow(row))
+                        taken++;
+
+                    if (taken > rowsPerPage)
+                        break;
+                }
+
+                var page = BuildPage(template, pageWidth, pageRows, headerHeight, headerElements);
+                if (page != null)
+                    pages.Add(page);
+
+                isFirstPage = false;
+            }
+
+            WritePaginationTrace(pages.Count, rowsPerPage);
+
+            return pages.Count > 0 ? pages : new[] { template };
+        }
+
+        /// <summary>Строка макета: элементы, стоящие на одной горизонтали.</summary>
+        private sealed record ElementRow(double Top, List<PrintFormElement> Elements);
+
+        /// <summary>Строка данных — та, где есть значения: даты, счета, суммы.</summary>
+        private static bool IsDataRow(ElementRow row) =>
+            row.Elements.Any(element => IsLikelyDataValue(element.Text));
+
+        /// <summary>
+        /// Собирает страницу из набора строк. Шапка повторяется сверху,
+        /// строки данных идут под ней.
+        /// </summary>
+        private static PrintFormTemplate? BuildPage(
+            PrintFormTemplate template,
+            double pageWidth,
+            IReadOnlyList<ElementRow> pageRows,
+            double headerHeight,
+            IReadOnlyList<PrintFormElement> headerElements)
+        {
+            if (pageRows.Count == 0)
+                return null;
+
+            var minTop = pageRows.Min(row => row.Top);
+            var maxBottom = pageRows.Max(row => row.Elements.Max(element => element.Top + Math.Max(element.Height, 1)));
+            var pageHeight = Math.Max(1000d, maxBottom - minTop);
+
+            var elements = new List<PrintFormElement>();
+            var order = 1;
+
+            foreach (var row in pageRows)
+            {
+                foreach (var element in row.Elements)
+                {
+                    var clone = ClonePrintFormElement(element);
+                    clone.Top = element.Top - minTop;
+                    clone.Order = order++;
+                    elements.Add(clone);
+                }
+            }
+
+            return new PrintFormTemplate
+            {
+                SourceFormat = template.SourceFormat,
+                OriginalFileName = template.OriginalFileName,
+                RecognitionProfileCode = template.RecognitionProfileCode,
+                LayoutNormalized = false,
+                PageWidth = pageWidth,
+                PageHeight = pageHeight,
+                Bands = new List<PrintFormBand>(),
+                Elements = elements
+            };
+        }
+
+        /// <summary>
+        /// Находит шапку таблицы — строку заголовков колонок, которая должна
+        /// повторяться на каждой странице.
+        ///
+        /// Шапка определяется по признаку: это ближайшая к данным группа текстов,
+        /// расположенная выше первой строки со значениями и ниже реквизитов документа.
+        /// </summary>
+        private static IReadOnlyList<PrintFormElement> FindRepeatedHeaderElements(PrintFormTemplate template)
+        {
+            var rows = template.Elements
+                .GroupBy(element => Math.Round(element.Top / 100d))
+                .OrderBy(group => group.Key)
+                .Select(group => new ElementRow(group.Average(item => item.Top), group.ToList()))
+                .ToList();
+
+            var firstDataRowIndex = -1;
+            for (var index = 0; index < rows.Count; index++)
+            {
+                if (rows[index].Elements.Any(element => IsLikelyDataValue(element.Text)))
+                {
+                    firstDataRowIndex = index;
+                    break;
+                }
+            }
+
+            if (firstDataRowIndex <= 0)
+                return Array.Empty<PrintFormElement>();
+
+            // Заголовки колонок — тексты без значений, стоящие непосредственно
+            // перед первой строкой данных.
+            for (var index = firstDataRowIndex - 1; index >= 0; index--)
+            {
+                var candidate = rows[index];
+
+                var hasValues = candidate.Elements.Any(element => IsLikelyDataValue(element.Text));
+                if (hasValues)
+                    continue;
+
+                var texts = candidate.Elements
+                    .Where(element => element.Type is "Text" or "Expression")
+                    .Where(element => !string.IsNullOrWhiteSpace(element.Text))
+                    .ToList();
+
+                if (texts.Count >= 2)
+                    return texts;
+            }
+
+            return Array.Empty<PrintFormElement>();
+        }
+
+        /// <summary>
+        /// Разбиение по высоте листа — для обычных макетов без упакованных строк.
+        /// </summary>
+        private static IReadOnlyList<PrintFormTemplate> SplitByHeight(
+            PrintFormTemplate template,
+            double pageWidth,
+            double contentHeight)
+        {
+            var naturalRatio = pageWidth >= contentHeight ? 210d / 297d : 297d / 210d;
+            var pageSize = pageWidth * naturalRatio;
+
+            if (pageSize > contentHeight)
+                pageSize = contentHeight;
+
             const double singlePageTolerance = 1.35;
             if (contentHeight <= pageSize * singlePageTolerance)
                 return new[] { template };
@@ -2231,7 +2541,6 @@ namespace BIS.ERP.Services
                 var pageTop = index * pageSize;
                 var pageBottom = pageTop + pageSize;
 
-                // Элемент целиком выше или ниже своей страницы не рисуем.
                 if (element.Top + Math.Max(element.Height, 0) <= pageTop ||
                     element.Top >= pageBottom)
                 {
@@ -2255,14 +2564,33 @@ namespace BIS.ERP.Services
                     LayoutNormalized = template.LayoutNormalized,
                     PageWidth = pageWidth,
                     PageHeight = pageSize,
-                    // Полосы описаны в абсолютных координатах всего документа и после
-                    // разрезания на страницы смысла не несут.
                     Bands = new List<PrintFormBand>(),
                     Elements = pageElements[index]
                 });
             }
 
             return pages.Count > 0 ? pages : new[] { template };
+        }
+
+        /// <summary>
+        /// Признак значения данных, а не подписи: даты, числа, счета, суммы.
+        /// Нужен, чтобы отличить шапку таблицы от строк отчёта.
+        /// </summary>
+        private static bool IsLikelyDataValue(string? text)
+        {
+            var value = (text ?? string.Empty).Trim();
+            if (value.Length == 0)
+                return false;
+
+            // Дата вида 30.09.2026 или 30/09/2026.
+            if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d{2}[./]\d{2}[./]\d{4}$"))
+                return true;
+
+            // Число или сумма: 15301000, 55 555,55, 222 222,99.
+            if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d[\d\s]*([.,]\d+)?$"))
+                return true;
+
+            return false;
         }
 
         /// <summary>Обрезает элемент по вертикальным границам страницы.</summary>
@@ -2323,49 +2651,83 @@ namespace BIS.ERP.Services
                 .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
 
             using var workbook = new XLWorkbook();
-            var worksheet = workbook.Worksheets.Add(BuildSafeExcelWorksheetName(report.Name));
+            var paperSize = GetExcelPaperSize(report, layoutTemplate);
 
-            var pageWidth = Math.Max(1000d, layoutTemplate.PageWidth);
-            var pageHeight = Math.Max(1000d, layoutTemplate.PageHeight);
-            var landscape = pageWidth >= pageHeight || string.Equals(report.PageOrientation, "Landscape", StringComparison.OrdinalIgnoreCase);
-            ConfigureFrxExcelWorksheet(worksheet, report, landscape);
-            var maxColumns = landscape ? 88 : 66;
-            var maxRows = landscape ? 58 : 82;
-            if (ShouldPackTabularFrxTemplate(layoutTemplate, report, dataTable))
-                maxRows = Math.Max(maxRows, Math.Min(2000, 45 + (dataTable?.Rows.Count ?? 0) * 3));
-            var columnScale = (maxColumns - 1d) / pageWidth;
-            var rowScale = (maxRows - 1d) / pageHeight;
+            // Разбиение на страницы выполняется той же логикой, что и для PDF.
+            // Раньше Excel умещал весь отчёт на один лист с фиксированным числом
+            // строк, поэтому длинный отчёт обрезался, а расположение полей
+            // расходилось с печатной формой. Теперь каждый лист повторяет
+            // одну страницу отчёта.
+            var pages = SplitTemplateIntoPages(layoutTemplate);
 
-            worksheet.Columns(1, maxColumns).Width = landscape ? 1.45 : 1.65;
-            worksheet.Rows(1, maxRows).Height = 9;
-
-            foreach (var element in layoutTemplate.Elements.OrderBy(item => item.Order))
+            for (var pageIndex = 0; pageIndex < pages.Count; pageIndex++)
             {
-                if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
-                    continue;
+                var page = pages[pageIndex];
+                var worksheetName = pages.Count == 1
+                    ? BuildSafeExcelWorksheetName(report.Name)
+                    : BuildSafeExcelWorksheetName($"{report.Name} ({pageIndex + 1})");
 
-                if (element.Type is "Line" or "Box" or "Picture")
-                    continue;
+                var worksheet = workbook.Worksheets.Add(worksheetName);
+                var landscape = paperSize.Width >= paperSize.Height;
+                ConfigureFrxExcelWorksheet(worksheet, report, landscape);
 
-                var value = ResolveElementValue(report, layoutTemplate, element, data, mappingByOrder);
-                if (string.IsNullOrWhiteSpace(value))
-                    continue;
+                var maxColumns = landscape ? 88 : 66;
+                var maxRows = Math.Max(8, (int)Math.Round(paperSize.Height / (paperSize.Width / maxColumns)));
+                var columnScale = (maxColumns - 1d) / paperSize.Width;
+                var rowScale = (maxRows - 1d) / paperSize.Height;
 
-                var startRow = ToExcelIndex(element.Top, rowScale, maxRows);
-                var startColumn = ToExcelIndex(element.Left, columnScale, maxColumns);
-                var endRow = ToExcelIndex(element.Top + Math.Max(element.Height, 24), rowScale, maxRows, startRow);
-                var endColumn = ToExcelIndex(element.Left + Math.Max(element.Width, 24), columnScale, maxColumns, startColumn);
-                WriteFrxExcelText(worksheet, element, value, startRow, startColumn, endRow, endColumn);
+                // Смещение страницы: координаты элементов идут от начала документа,
+                // а лист должен начинаться с верхней границы своей страницы.
+                var pageTop = page.Elements.Count == 0 ? 0d : Math.Max(0d, page.Elements.Min(item => item.Top) - layoutTemplate.PageHeight * 0.012);
+
+                worksheet.Columns(1, maxColumns).Width = landscape ? 1.45 : 1.65;
+                worksheet.Rows(1, maxRows).Height = 9;
+
+                foreach (var element in page.Elements.OrderBy(item => item.Order))
+                {
+                    if (mappingByOrder.TryGetValue(element.Order, out var hiddenMapping) && !hiddenMapping.IsVisible)
+                        continue;
+
+                    if (element.Type is "Line" or "Box" or "Picture")
+                        continue;
+
+                    var value = ResolveElementValue(report, layoutTemplate, element, data, mappingByOrder);
+                    if (string.IsNullOrWhiteSpace(value))
+                        continue;
+
+                    var top = Math.Max(0d, element.Top - pageTop);
+                    var startRow = ToExcelIndex(top, rowScale, maxRows);
+                    var startColumn = ToExcelIndex(element.Left, columnScale, maxColumns);
+                    var endRow = ToExcelIndex(top + Math.Max(element.Height, 24), rowScale, maxRows, startRow);
+                    var endColumn = ToExcelIndex(element.Left + Math.Max(element.Width, 24), columnScale, maxColumns, startColumn);
+                    WriteFrxExcelText(worksheet, element, value, startRow, startColumn, endRow, endColumn);
+                }
+
+                foreach (var segment in BuildFrxGridSegments(page, mappingByOrder, 1d, pageTop))
+                    ApplyFrxExcelGridSegment(worksheet, segment, rowScale, columnScale, maxRows, maxColumns);
+
+                worksheet.Range(1, 1, maxRows, maxColumns).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
             }
-
-            foreach (var segment in BuildFrxGridSegments(layoutTemplate, mappingByOrder, 1d))
-                ApplyFrxExcelGridSegment(worksheet, segment, rowScale, columnScale, maxRows, maxColumns);
-
-            worksheet.Range(1, 1, maxRows, maxColumns).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
 
             using var stream = new MemoryStream();
             workbook.SaveAs(stream);
             return stream.ToArray();
+        }
+
+        /// <summary>
+        /// Размер листа Excel в единицах A4. Ширина берётся из пропорций макета,
+        /// а не из ориентации: акт сверки имеет собственную шкалу координат
+        /// (78000 x 86854), и делить его на единицы A4 нельзя.
+        /// </summary>
+        private static (double Width, double Height) GetExcelPaperSize(Report report, PrintFormTemplate template)
+        {
+            var templateWidth = Math.Max(1000d, template.PageWidth);
+            var templateHeight = Math.Max(1000d, template.PageHeight);
+
+            // Макет шире своей высоты — значит он альбомный.
+            var isLandscape = templateWidth > templateHeight;
+            var ratio = isLandscape ? 297d / 210d : 210d / 297d;
+            return (templateWidth, templateWidth * ratio);
         }
 
         private static PrintFormTemplate PrepareTemplateForReportRendering(
@@ -2447,7 +2809,7 @@ namespace BIS.ERP.Services
             var elementsByBand = bands.ToDictionary(
                 band => band,
                 band => template.Elements
-                    .Where(element => ReferenceEquals(FindBandForElement(element, bands), band))
+                    .Where(element => ReferenceEquals(FindBandForElementForOutput(element, bands), band))
                     .OrderBy(element => element.Top)
                     .ThenBy(element => element.Left)
                     .ThenBy(element => element.Order)
@@ -2498,6 +2860,49 @@ namespace BIS.ERP.Services
                 Elements = packedElements
             };
         }
+        /// <summary>
+        /// Нижняя полоса блока: итоги и подписи. Такие полосы выводятся после полосы данных.
+        /// </summary>
+        private static bool IsTrailingBand(PrintFormBand band) =>
+            band.Type.Contains("Footer", StringComparison.OrdinalIgnoreCase) ||
+            band.Type.Contains("Summary", StringComparison.OrdinalIgnoreCase) ||
+            band.Type.Contains("Итог", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Опознаёт поля, которые повторяются для каждой строки операций.
+        /// В полосе Detail макета акта сверки такие поля стоят в одной горизонтали,
+        /// а всё остальное — обрамление блока.
+        ///
+        /// Важно: часть макетов обращается к полям с префиксом набора данных
+        /// (ved.tex, db_cr.debet), а часть — напрямую (tex, debet). Поэтому префикс
+        /// снимается, если он есть, но не является обязательным.
+        /// </summary>
+        private static bool IsReconciliationRowElement(PrintFormElement element)
+        {
+            var expression = (element.Expression ?? string.Empty).Trim();
+            if (expression.Length == 0)
+                return false;
+
+            // Составные выражения (korsch+' - '+kor_sch) не являются полем строки.
+            if (expression.Contains('+') || expression.Contains('('))
+                return false;
+
+            // Снимаем префикс набора данных, если он есть: ved., ved_, db_cr. и подобные.
+            var name = Regex.Replace(expression, @"^(?:ved\d*|db_crs?|dbcrs?)[._]", string.Empty);
+            return name.ToLowerInvariant() switch
+            {
+                "tex" or "text" or "name_kod" => true,
+                "deb" or "debet" or "debit" or "schet" or "debit_account" => true,
+                "kredit" or "cred" or "korsch" or "kor_sch" or "credit_account" => true,
+                "debsum" or "sum_deb" or "deb_v" or "debit_amount" => true,
+                "credsum" or "sum_cred" or "cred_v" or "credit_amount" => true,
+                "dok" or "dokum" or "nom_dok" or "document_number" => true,
+                "date" or "datobr" or "document_date" => true,
+                "prs" or "kod_arm" or "module" => true,
+                _ => false
+            };
+        }
+
         private static PrintFormTemplate BuildPackedReconciliationFrxTemplate(
             PrintFormTemplate template,
             Report report,
@@ -2527,7 +2932,7 @@ namespace BIS.ERP.Services
             var elementsByBand = bands.ToDictionary(
                 band => band,
                 band => template.Elements
-                    .Where(element => ReferenceEquals(FindBandForElement(element, bands), band))
+                    .Where(element => ReferenceEquals(FindBandForElementForOutput(element, bands), band))
                     .OrderBy(element => element.Top)
                     .ThenBy(element => element.Left)
                     .ThenBy(element => element.Order)
@@ -2539,28 +2944,82 @@ namespace BIS.ERP.Services
             var nextOrder = 1;
             PrintFormBand? previousBand = null;
 
+            // Порядок вывода как в эталонном акте сверки: шапка документа, шапка таблицы,
+            // непрерывный список строк операций, затем итоги, задолженность и подписи.
             foreach (var band in bands)
+            {
+                if (IsTrailingBand(band))
+                    continue;
+                if (!elementsByBand.TryGetValue(band, out var bandElements) || bandElements.Count == 0)
+                    continue;
+
+                if (!IsReconciliationDataBand(band, bandElements))
+                {
+                    AppendPackedBand(template, report, band, bandElements, summaryData, mappingByOrder,
+                        packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                    previousBand = band;
+                    continue;
+                }
+
+                // Полоса данных содержит целый блок акта: шапку пары счетов, строку операций
+                // и итоги. Строку выводим для каждой проводки, а обрамление — один раз,
+                // поэтому шапка и подписи не дублируются.
+                var rowElements = bandElements.Where(IsReconciliationRowElement).ToList();
+                if (rowElements.Count == 0)
+                {
+                    AppendPackedBand(template, report, band, bandElements, summaryData, mappingByOrder,
+                        packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                    previousBand = band;
+                    continue;
+                }
+
+                var rowTopMin = rowElements.Min(element => element.Top);
+                var rowTopMax = rowElements.Max(element => element.Top);
+                var headerElements = bandElements.Where(element => element.Top < rowTopMin).ToList();
+                var footerElements = bandElements.Where(element => element.Top > rowTopMax).ToList();
+
+                if (headerElements.Count > 0)
+                {
+                    AppendPackedBand(template, report, band, headerElements, summaryData, mappingByOrder,
+                        packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                    previousBand = band;
+                }
+
+                foreach (var row in detailRows)
+                {
+                    var rowData = BuildReportPreviewDataForRow(dataTable, report, row, rules, summaryData);
+                    AppendPackedBand(template, report, band, rowElements, rowData, mappingByOrder,
+                        packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                    previousBand = band;
+                }
+
+                if (footerElements.Count > 0)
+                {
+                    AppendPackedBand(template, report, band, footerElements, summaryData, mappingByOrder,
+                        packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                    previousBand = band;
+                }
+            }
+
+            foreach (var band in bands.Where(IsTrailingBand))
             {
                 if (!elementsByBand.TryGetValue(band, out var bandElements) || bandElements.Count == 0)
                     continue;
 
-                if (IsReconciliationDataBand(band, bandElements))
-                {
-                    foreach (var row in detailRows)
-                    {
-                        var rowData = BuildReportPreviewDataForRow(dataTable, report, row, rules, summaryData);
-                        AppendPackedBand(template, report, band, bandElements, rowData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
-                        previousBand = band;
-                    }
-                    continue;
-                }
+                var rowElements = bandElements.Where(IsReconciliationRowElement).ToList();
+                var summaryElements = rowElements.Count == 0
+                    ? bandElements
+                    : bandElements.Where(element => !IsReconciliationRowElement(element)).ToList();
 
-                AppendPackedBand(template, report, band, bandElements, summaryData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
+                AppendPackedBand(template, report, band, summaryElements, summaryData, mappingByOrder,
+                    packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
                 previousBand = band;
             }
 
             if (packedElements.Count == 0)
                 return template;
+
+            WritePackedTemplateTrace(report, packedElements, template, detailRows.Count, summaryData);
 
             var bottomMargin = Math.Clamp(template.PageHeight * 0.025, 100, 320);
             return new PrintFormTemplate
@@ -2574,6 +3033,66 @@ namespace BIS.ERP.Services
                 Bands = packedBands,
                 Elements = packedElements
             };
+        }
+
+        /// <summary>
+        /// Записывает в журнал состав упакованного макета акта сверки.
+        /// Нужна, чтобы видеть, что именно уходит на отрисовку: координаты,
+        /// выражения и подставленные значения.
+        /// </summary>
+        private static void WritePackedTemplateTrace(
+            Report report,
+            IReadOnlyList<PrintFormElement> packedElements,
+            PrintFormTemplate template,
+            int detailRowCount,
+            CashOrderPrintData summaryData)
+        {
+            try
+            {
+                var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "reconciliation-trace.log");
+                var lines = new List<string>
+                {
+                    string.Empty,
+                    "--- Упакованный макет ---",
+                    $"  Строк данных в упаковке: {detailRowCount}",
+                    $"  Элементов после упаковки: {packedElements.Count}",
+                    $"  Высота макета: {template.PageHeight}, ширина: {template.PageWidth}",
+                    $"  Отчёт: '{report.Name}'",
+                    $"  Дата строки: '{summaryData.Date:dd.MM.yyyy}'",
+                    $"  Значения в доп. полях: {summaryData.ExtraFields.Count}"
+                };
+
+                // Ключи, от которых зависит дата и модуль в макете.
+                foreach (var key in new[] { "date", "document_date", "datobr", "Дата",
+                                            "prs", "module", "Модуль", "kod_arm" })
+                {
+                    lines.Add($"    ExtraFields['{key}'] = " +
+                              (summaryData.ExtraFields.TryGetValue(key, out var extraValue)
+                                  ? $"'{extraValue}'"
+                                  : "<нет ключа>"));
+                }
+
+                lines.Add($"  Разрешённое 'date' = '{EvaluateFoxExpression("date", summaryData)}'");
+                lines.Add($"  Разрешённое 'prs' = '{EvaluateFoxExpression("prs", summaryData)}'");
+                lines.Add($"  Разрешённое 'ved.date' = '{EvaluateFoxExpression("ved.date", summaryData)}'");
+                lines.Add($"  Разрешённое 'ved.prs' = '{EvaluateFoxExpression("ved.prs", summaryData)}'");
+
+                foreach (var element in packedElements
+                             .OrderBy(item => item.Top)
+                             .ThenBy(item => item.Left)
+                             .Take(40))
+                {
+                    lines.Add($"  Top={element.Top,-9:0} Left={element.Left,-8:0} " +
+                              $"Type={element.Type,-10} Text='{element.Text}' Expr='{element.Expression}'");
+                }
+
+                lines.Add($"  ... всего элементов: {packedElements.Count}");
+                File.AppendAllLines(path, lines);
+            }
+            catch
+            {
+                // Диагностика не должна мешать построению отчёта.
+            }
         }
 
         private static PrintFormTemplate BuildPackedStaticFrxTemplate(
@@ -2592,7 +3111,7 @@ namespace BIS.ERP.Services
             var elementsByBand = bands.ToDictionary(
                 band => band,
                 band => template.Elements
-                    .Where(element => ReferenceEquals(FindBandForElement(element, bands), band))
+                    .Where(element => ReferenceEquals(FindBandForElementForOutput(element, bands), band))
                     .OrderBy(element => element.Top)
                     .ThenBy(element => element.Left)
                     .ThenBy(element => element.Order)
@@ -2649,8 +3168,10 @@ namespace BIS.ERP.Services
             if (string.IsNullOrWhiteSpace(source))
                 return false;
 
+            // Префикс набора данных необязателен: часть макетов обращается
+            // к полям напрямую (tex, debet, kredit), часть — через ved. или db_cr.
             return Regex.IsMatch(source,
-                @"(?i)\b(?:ved\d*|db_crs?|dbcrs?)[._](?:tex|text|name_kod|schet|deb|debet|kredit|cred|korsch|kor_sch|debsum|credsum|dok|dokum|nom_dok|date|datobr|prs|kod_arm|module)\b");
+                @"(?i)(?:\b(?:ved\d*|db_crs?|dbcrs?)[._])?(?:tex|text|name_kod|schet|deb|debet|kredit|cred|korsch|kor_sch|debsum|credsum|dok|dokum|nom_dok|datobr|prs|kod_arm|module)\b");
         }
 
         private static bool LooksLikeReconciliationGroupElement(PrintFormElement element)
@@ -2769,7 +3290,9 @@ namespace BIS.ERP.Services
             return bands.OrderBy(band => band.Top).ThenBy(band => band.Order).ToList();
         }
 
-        private static PrintFormBand FindBandForElement(PrintFormElement element, IReadOnlyList<PrintFormBand> bands)
+        private static PrintFormBand? FindBandForElement(
+            PrintFormElement element,
+            IReadOnlyList<PrintFormBand> bands)
         {
             const double tolerance = 2d;
             var byCoordinate = bands
@@ -2780,11 +3303,41 @@ namespace BIS.ERP.Services
                 return byCoordinate;
 
             var previous = bands.LastOrDefault(band => element.Top >= band.Top - tolerance);
-            if (previous != null)
-                return previous;
+            return previous ?? bands.FirstOrDefault();
+        }
 
-            var byType = bands.FirstOrDefault(band => band.Type.Equals(element.BandType, StringComparison.OrdinalIgnoreCase));
-            return byType ?? bands[0];
+        /// <summary>
+        /// Определяет полосу элемента для вывода в отчёт.
+        /// Сначала используется явное поле BandType из макета, и только при его отсутствии —
+        /// вертикальная координата. Координатный подбор ненадёжен: в макетах FRX верхние
+        /// позиции полос совпадают, и элементы уезжают в чужую полосу.
+        /// </summary>
+        private static PrintFormBand? FindBandForElementForOutput(
+            PrintFormElement element,
+            IReadOnlyList<PrintFormBand> bands)
+        {
+            var declared = FindBandByType(element.BandType, bands);
+            if (declared != null)
+                return declared;
+
+            return FindBandForElement(element, bands);
+        }
+
+        /// <summary>Ищет полосу по объявленному типу, учитывая повторяющиеся полосы одного типа.</summary>
+        private static PrintFormBand? FindBandByType(string? bandType, IReadOnlyList<PrintFormBand> bands)
+        {
+            if (string.IsNullOrWhiteSpace(bandType))
+                return null;
+
+            var matches = bands
+                .Where(band => string.Equals(band.Type, bandType, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (matches.Count == 0)
+                return null;
+
+            // Если полос с таким типом несколько, элемент относящихся к ним данных
+            // направляется в первую по порядку следования.
+            return matches.OrderBy(band => band.Top).ThenBy(band => band.Order).First();
         }
 
         private static bool IsReconciliationMovementRow(DataRow row, string summary)
@@ -2809,27 +3362,45 @@ namespace BIS.ERP.Services
             CashOrderPrintData summaryData)
         {
             var extra = new Dictionary<string, object>(summaryData.ExtraFields, StringComparer.OrdinalIgnoreCase);
+            // Пустое значение не публикуется: иначе пустая каноническая колонка
+            // затрёт реальное значение, добавленное разбором строки акта сверки.
             void Add(string key, object? value)
             {
                 if (string.IsNullOrWhiteSpace(key))
                     return;
-                extra[key] = value ?? string.Empty;
-                extra[NormalizeFieldName(key)] = value ?? string.Empty;
+
+                var normalizedKey = NormalizeFieldName(key);
+                if (value == null || value == DBNull.Value)
+                    return;
+                if (value is string text && string.IsNullOrWhiteSpace(text))
+                    return;
+
+                extra[key] = value;
+                extra[normalizedKey] = value;
             }
 
-            foreach (DataColumn column in dataTable.Columns)
-                Add(column.ColumnName, row[column]);
-
+            // Сначала разбор строки акта сверки: он публикует содержательные значения
+            // под именами ved.*, db_cr.* и другими префиксами наборов данных.
             AddReconciliationAliases(0, row, Add);
             AddReconciliationAliases(1, row, Add);
             AddConfiguredFoxProRuleAliases(0, row, rules, Add);
             AddConfiguredFoxProRuleAliases(1, row, rules, Add);
+
+            // Затем колонки данных — они закрывают имена, которые не заполнил разбор.
+            foreach (DataColumn column in dataTable.Columns)
+                Add(column.ColumnName, row[column]);
 
             var dateText = ReadPreviewText(row, "Дата", "document_date", "datobr");
             var rowDate = TryParseFoxDate(dateText, out var parsedDate) ? parsedDate : summaryData.Date;
             var debitAmount = ReadPreviewDecimal(row, "Сумма Дт", "Дебет сумма", "debit_amount", "debsum");
             var creditAmount = ReadPreviewDecimal(row, "Сумма Кт", "Кредит сумма", "credit_amount", "credsum");
             var amount = debitAmount != 0m ? debitAmount : creditAmount;
+
+            // В привязках элементов макета поля могут быть названы именами колонок базы:
+            // «posting_date» для даты, «module_code» для модуля. В данных таких ключей нет,
+            // и подстановка возвращала пусто. Публикуем их наравне с остальными.
+            Add("posting_date", rowDate);
+            Add("module_code", ReadPreviewText(row, "Модуль", "module", "prs", "kod_arm"));
 
             return new CashOrderPrintData
             {
@@ -3029,7 +3600,8 @@ namespace BIS.ERP.Services
         private static IReadOnlyList<FrxGridSegment> BuildFrxGridSegments(
             PrintFormTemplate template,
             IReadOnlyDictionary<int, ReportElementMapping> mappingByOrder,
-            double strokeWidth)
+            double strokeWidth,
+            double topOffset = 0d)
         {
             var segments = new List<FrxGridSegment>();
             foreach (var element in template.Elements)
@@ -3039,7 +3611,8 @@ namespace BIS.ERP.Services
 
                 if (element.Type == "Line")
                 {
-                    segments.Add(NormalizeRawFrxGridSegment(new FrxGridSegment(element.Left, element.Top, element.Left + element.Width, element.Top + element.Height)));
+                    var lineTop = element.Top - topOffset;
+                    segments.Add(NormalizeRawFrxGridSegment(new FrxGridSegment(element.Left, lineTop, element.Left + element.Width, lineTop + element.Height)));
                     continue;
                 }
 
@@ -3047,9 +3620,9 @@ namespace BIS.ERP.Services
                     continue;
 
                 var left = element.Left;
-                var top = element.Top;
+                var top = element.Top - topOffset;
                 var right = element.Left + element.Width;
-                var bottom = element.Top + element.Height;
+                var bottom = element.Top + element.Height - topOffset;
                 segments.Add(new FrxGridSegment(left, top, right, top));
                 segments.Add(new FrxGridSegment(left, bottom, right, bottom));
                 segments.Add(new FrxGridSegment(left, top, left, bottom));
@@ -3577,7 +4150,13 @@ namespace BIS.ERP.Services
                 if (template.SourceFormat == "Native" || report.SourceFormat == "Native")
                     return GetPrintDataValue(data, element.Expression, string.Empty);
 
-                return EvaluateFoxExpression(element.Expression, data);
+                var expressionValue = EvaluateFoxExpression(element.Expression, data);
+
+                // Неразрешённое выражение не должно печатать само себя: иначе в отчёте
+                // появляется имя поля — например debsum или kredit вместо значения.
+                return IsUnresolvedExpressionValue(expressionValue, element.Expression)
+                    ? string.Empty
+                    : expressionValue;
             }
 
             var text = UnquoteFoxText(element.Text);
@@ -3588,6 +4167,22 @@ namespace BIS.ERP.Services
             }
 
             return ReplacePlaceholders(text, data, string.Empty);
+        }
+
+        /// <summary>
+        /// Проверяет, что результат подстановки не является исходным выражением.
+        /// Сравнение идёт без фигурных скобок, чтобы «{ved.kredit}» и «ved.kredit」
+        /// распознавались как неразрешённое значение.
+        /// </summary>
+        private static bool IsUnresolvedExpressionValue(string? value, string? expression)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            var candidate = value.Trim().Trim('{', '}', '=', '\'', '"', ' ');
+            var original = (expression ?? string.Empty).Trim().Trim('{', '}', '=', '\'', '"', ' ');
+
+            return string.Equals(candidate, original, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ReplacePlaceholders(string text, CashOrderPrintData data, string formatString)
@@ -3711,6 +4306,12 @@ namespace BIS.ERP.Services
                 "налог с продаж" => "sales_tax_total",
                 "итого" or "всего" or "всего к оплате" => "total_amount",
                 "проведен" or "проведён" => "is_posted",
+                // Колонки акта сверки: макет обращается к ним как ved.debsum,
+                // ved.credsum, ved.date, ved.dok, ved.prs.
+                "сумма дт" or "сумма дебета" or "дебет сумма" => "debit_amount",
+                "сумма кт" or "сумма кредита" or "кредит сумма" => "credit_amount",
+                "n докум" or "n dokum" or "№ докум" or "номер докум" => "document_number",
+                "модуль" or "арм" => "module",
                 _ => Regex.Replace(value, @"[\s\.\-]+", "_")
             };
         }
@@ -3938,7 +4539,16 @@ namespace BIS.ERP.Services
                 ["_PAGENO"] = "1",
                 ["_pageno"] = "1",
                 ["pageno"] = "1",
-                ["date()"] = DateTime.Today.ToString("dd.MM.yyyy"),
+                // Служебная функция FoxPro date() возвращает системную дату.
+                // Но часть макетов обращается к дате документа просто как «date»,
+                // а словарь без учёта регистра перехватывал это имя: в отчёт попадала
+                // сегодняшняя дата вместо даты проводки.
+                //
+                // Порядок: дата из колонок строки, затем дата документа, затем системная.
+                // Для строк без своей даты (заголовки, сальдо) сохраняется системная дата —
+                // так же, как было раньше.
+                ["date"] = ResolveDateVariable(data.ExtraFields, data),
+                ["date()"] = ResolveDateVariable(data.ExtraFields, data),
                 ["na1"] = data.ExtraFields.TryGetValue("sha2", out var summaryValue) ? FormatPlainValue(summaryValue) : data.Note,
                 ["p1"] = "Руководитель",
                 ["p2"] = "Главный бухгалтер",
@@ -3949,19 +4559,36 @@ namespace BIS.ERP.Services
             foreach (var pair in FrxRecognitionProfileService.GetDefaultVariables())
                 variables[pair.Key] = pair.Value;
 
+            // Значение переменной «date» уже определено выше по дате строки.
+            // Доп. поля не должны его перезаписывать: иначе в макет попадает
+            // сегодняшняя дата вместо даты проводки — так было раньше.
+            var dateVariable = variables["date"];
+
             foreach (var extra in data.ExtraFields)
             {
                 var rawKey = (extra.Key ?? string.Empty).Trim();
-                if (!string.IsNullOrWhiteSpace(rawKey))
+                if (!string.IsNullOrWhiteSpace(rawKey) && !IsDateVariableKey(rawKey))
                     variables[rawKey] = FormatPlainValue(extra.Value);
 
                 var normalizedKey = NormalizeFieldName(extra.Key);
-                if (!string.IsNullOrWhiteSpace(normalizedKey))
+                if (!string.IsNullOrWhiteSpace(normalizedKey) && !IsDateVariableKey(normalizedKey))
                     variables[normalizedKey] = FormatPlainValue(extra.Value);
             }
 
+            // Возвращаем дату строки после обработки доп. полей.
+            variables["date"] = dateVariable;
+            variables["date()"] = dateVariable;
+
             return variables;
         }
+
+        /// <summary>
+        /// Ключи, которые относятся к переменной даты. Их нельзя перезаписывать
+        /// значениями доп. полей: иначе системная дата перекроет дату проводки.
+        /// </summary>
+        private static bool IsDateVariableKey(string key) =>
+            key.Equals("date", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("date()", StringComparison.OrdinalIgnoreCase);
 
         private static bool TryResolveFoxVariable(
             IReadOnlyDictionary<string, string> variables,
@@ -4142,6 +4769,41 @@ namespace BIS.ERP.Services
             return result;
         }
 
+        /// <summary>
+        /// Определяет значение переменной «date» для макета.
+        ///
+        /// Порядок: дата из колонок строки («Дата», «document_date», «datobr»),
+        /// затем дата документа, затем системная дата. Системная дата сохраняется
+        /// для строк без своей даты — заголовков, сальдо и итогов, — чтобы
+        /// поведение прежних макетов не изменилось.
+        /// </summary>
+        private static string ResolveDateVariable(
+            IReadOnlyDictionary<string, object> extraFields,
+            CashOrderPrintData data)
+        {
+            foreach (var key in new[] { "Дата", "date", "document_date", "datobr" })
+            {
+                if (!extraFields.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is DateTime rowDate)
+                    return rowDate.ToString("dd.MM.yyyy");
+
+                var text = value.ToString();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                if (TryParseFoxDate(text, out var parsed))
+                    return parsed.ToString("dd.MM.yyyy");
+
+                return text;
+            }
+
+            return data.Date == default
+                ? DateTime.Today.ToString("dd.MM.yyyy")
+                : data.Date.ToString("dd.MM.yyyy");
+        }
+
         private static string FormatPlainValue(object? value)
         {
             return value switch
@@ -4270,7 +4932,6 @@ namespace BIS.ERP.Services
             AddTriplet((int)(value % 1000), "", "", "", false);
             return string.Join(" ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
         }
-
 
         // Парсинг FRX-файла (макет FoxPro) с использованием FrxParser
         public async Task<string> ParseFrxFileAsync(byte[] fileData, string fileName)
@@ -4714,4 +5375,3 @@ namespace BIS.ERP.Services
         private readonly record struct CashDeskPrintInfo(string DisplayName, string Account);
     }
 }
-

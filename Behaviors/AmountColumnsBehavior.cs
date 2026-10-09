@@ -21,7 +21,7 @@ namespace BIS.ERP.Behaviors
             grid.AutoGeneratingColumn += OnAutoGeneratingColumns;
         }
 
-        private static void OnAutoGeneratingColumns(object sender, DataGridAutoGeneratingColumnEventArgs e)
+        private static void OnAutoGeneratingColumns(object? sender, DataGridAutoGeneratingColumnEventArgs e)
         {
             if (e.Column is not DataGridTextColumn textColumn)
                 return;

@@ -132,6 +132,9 @@ namespace BIS.ERP
         public MainWorkWindow(IAuthService authService)
         {
             InitializeComponent();
+            // Версия видна в заголовке окна: это позволяет за секунду понять,
+            // какая сборка запущена, не открывая «О системе».
+            Title = $"BIS ERP - Рабочий режим — версия {AppVersion.Semantic} (сборка {AppVersion.Build})";
             _authService = authService;
             _infoBaseManager = new InfoBaseManager();
             _navigation = new AppNavigationService(ContentArea);
@@ -419,6 +422,7 @@ namespace BIS.ERP
             {
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
+                VersionText.Text = $"версия {AppVersion.DisplayShort}";
                 LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, systemConfiguration.Icon);
                 if (_authService.CurrentUser != null)
                 {
@@ -2152,8 +2156,9 @@ namespace BIS.ERP
                 {
                     var configuration = await new SystemConfigurationService().GetAsync();
                     SystemNameText.Text = configuration.SystemName;
+                    VersionText.Text = $"версия {AppVersion.DisplayShort}";
                     LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, configuration.LogoImage, configuration.Icon);
-                    Title = $"{configuration.SystemName} - {_currentInfoBase?.Name}";
+                    Title = $"{configuration.SystemName} - {_currentInfoBase?.Name} — версия {AppVersion.Semantic} (сборка {AppVersion.Build})";
                 }
             }
             catch (Exception ex)

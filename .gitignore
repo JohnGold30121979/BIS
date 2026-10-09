@@ -3,6 +3,19 @@
 [Bb]in/
 [Oo]bj/
 
+# Временные проекты WPF: создаются при сборке и остаются после её прерывания
+BIS.ERP_*_wpftmp.csproj
+*_wpftmp.csproj
+
+# Журнал диагностики построения акта сверки
+reconciliation-trace.log
+
+# Инструменты диагностики
+.tools/*/bin/
+.tools/*/obj/
+.tools/*.bak
+.tools/*.py
+
 # Visual Studio cache/options directory
 .vs/
 
