@@ -52,6 +52,8 @@ namespace BIS.ERP.Views
             ConfigureFieldColumns();
             ConfigureParameterColumns();
             InitializeNativeDesignerState();
+            InitializeClosedXmlDesignerState();
+            ApplyLayoutKindVisibility();
 
             _ = InitializeAsync(report);
         }
@@ -144,6 +146,8 @@ namespace BIS.ERP.Views
                 AvailableLayoutFields.Clear();
                 RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
+
+            UpdateClosedXmlSourceText();
         }
 
         private async void OnCreateReportDataSetClick(object sender, RoutedEventArgs e)
@@ -731,6 +735,10 @@ namespace BIS.ERP.Views
         private async Task LoadReportAsync(Report report)
         {
             _currentReport = report;
+
+            // Сначала способ макета: от него зависит, какие вкладки и поля видны.
+            SelectLayoutKindFromReport(report);
+
             ReportNameBox.Text = report.Name;
             ReportDescBox.Text = report.Description;
 
@@ -821,6 +829,9 @@ namespace BIS.ERP.Views
             {
                 LoadNativeTemplateFromReport(report);
             }
+
+            LoadClosedXmlLayoutFromReport(report);
+            UpdateClosedXmlSourceText();
         }
 
         private void OnAddFilterClick(object sender, RoutedEventArgs e)
@@ -1035,9 +1046,12 @@ namespace BIS.ERP.Views
                 _currentReport.IsActive = IsActiveCheck.IsChecked ?? true;
                 _currentReport.IsPrintForm = IsPrintFormCheck.IsChecked ?? false;
                 _currentReport.IsDefault = IsDefaultCheck.IsChecked ?? false;
-                _currentReport.SourceFormat = _currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native";
+                _currentReport.SourceFormat = GetSelectedLayoutKind() == FoxProLayoutKind
+                    ? (_currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native")
+                    : ClosedXmlSourceFormat;
                 _currentReport.Template = TemplateTextBox?.Text ?? "";
                 _currentReport.TemplateVersion = Math.Max(_currentReport.TemplateVersion, 2);
+                _currentReport.ClosedXmlLayout = BuildClosedXmlLayoutJson();
                 _currentReport.Icon = "📊";
                 _currentReport.UpdatedAt = DateTime.UtcNow;
 
@@ -1162,7 +1176,9 @@ namespace BIS.ERP.Views
                 IsActive = IsActiveCheck.IsChecked ?? true,
                 IsPrintForm = IsPrintFormCheck.IsChecked ?? false,
                 IsDefault = IsDefaultCheck.IsChecked ?? false,
-                SourceFormat = GetSelectedReportType() == "FoxProLayout" ? "FoxProFRX" : "Native",
+                SourceFormat = GetSelectedLayoutKind() == FoxProLayoutKind
+                    ? (GetSelectedReportType() == "FoxProLayout" ? "FoxProFRX" : "Native")
+                    : ClosedXmlSourceFormat,
                 //Template = _currentReport?.Template ?? "",
                 Fields = _reportFields.OrderBy(field => field.Order).ToList(),
                 Filters = _reportFilters.Where(filter => !string.IsNullOrWhiteSpace(filter.FieldName)).ToList(),
@@ -1178,7 +1194,8 @@ namespace BIS.ERP.Views
                 ShowGridLines = ShowGridLinesCheck.IsChecked ?? true,
                 ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true,
                 ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true,
-                Template = TemplateTextBox.Text
+                Template = TemplateTextBox.Text,
+                ClosedXmlLayout = BuildClosedXmlLayoutJson()
             };
 
             report.ElementMappings = BuildReportElementMappings(report.Id);
@@ -1194,6 +1211,112 @@ namespace BIS.ERP.Views
         private string GetSelectedReportType()
         {
             return (ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Table";
+        }
+
+        // ===================================================================
+        // Способ макета: FRX/native (координатный) или ClosedXML (визуальный).
+        // Выбранный способ скрывает всё, что относится к другому.
+        // ===================================================================
+
+        private const string FoxProLayoutKind = "FoxProFRX";
+        private const string ClosedXmlLayoutKind = "ClosedXml";
+
+        /// <summary>Признак «макет этого отчёта — ClosedXML» в поле Report.SourceFormat.</summary>
+        private const string ClosedXmlSourceFormat = "ClosedXml";
+
+        private ComboBoxItem? _foxProReportTypeItem;
+
+        private void OnLayoutKindChanged(object sender, SelectionChangedEventArgs e)
+        {
+            ApplyLayoutKindVisibility();
+        }
+
+        private string GetSelectedLayoutKind() =>
+            (LayoutKindCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? ClosedXmlLayoutKind;
+
+        private void SetLayoutKind(string kind)
+        {
+            if (LayoutKindCombo == null)
+                return;
+
+            foreach (var item in LayoutKindCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (!string.Equals(item.Tag?.ToString(), kind, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                LayoutKindCombo.SelectedItem = item;
+                break;
+            }
+
+            ApplyLayoutKindVisibility();
+        }
+
+        private void ApplyLayoutKindVisibility()
+        {
+            var isFrx = string.Equals(GetSelectedLayoutKind(), FoxProLayoutKind, StringComparison.OrdinalIgnoreCase);
+
+            // Вкладки: FRX-ветка и ветка ClosedXML никогда не показываются вместе.
+            if (FrXFieldsTab != null)
+                FrXFieldsTab.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
+            if (NativeDesignerTab != null)
+                NativeDesignerTab.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
+            if (ClosedXmlDesignerTab != null)
+                ClosedXmlDesignerTab.Visibility = isFrx ? Visibility.Collapsed : Visibility.Visible;
+
+            // Блок FRX-шаблона на вкладке «Общие».
+            if (FrxTemplateLabel != null)
+                FrxTemplateLabel.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
+            if (FrxTemplatePanel != null)
+                FrxTemplatePanel.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
+
+            SyncFoxProReportTypeItem(isFrx);
+
+            if (LayoutKindHint != null)
+            {
+                LayoutKindHint.Text = isFrx
+                    ? "FRX/native: макет задаётся координатами — работают вкладки «🔗 FRX поля» и «🧱 Нативный макет», вкладка ClosedXML скрыта."
+                    : "ClosedXML: макет собирается визуально на вкладке «📊 ClosedXML макет». Вкладки FRX/native и поле FRX-шаблона скрыты.";
+            }
+        }
+
+        /// <summary>Тип отчёта «Макет Visual FoxPro FRX» доступен только в способе FRX.</summary>
+        private void SyncFoxProReportTypeItem(bool show)
+        {
+            if (ReportTypeCombo == null)
+                return;
+
+            _foxProReportTypeItem ??= ReportTypeCombo.Items.OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), "FoxProLayout", StringComparison.OrdinalIgnoreCase));
+
+            if (_foxProReportTypeItem == null)
+                return;
+
+            var isPresent = ReportTypeCombo.Items.Contains(_foxProReportTypeItem);
+            if (show && !isPresent)
+            {
+                ReportTypeCombo.Items.Add(_foxProReportTypeItem);
+            }
+            else if (!show && isPresent)
+            {
+                if (ReferenceEquals(ReportTypeCombo.SelectedItem, _foxProReportTypeItem))
+                    ReportTypeCombo.SelectedIndex = 0;
+
+                ReportTypeCombo.Items.Remove(_foxProReportTypeItem);
+            }
+        }
+
+        private void SelectLayoutKindFromReport(Report report)
+        {
+            // FRX/native-режим — только если у отчёта действительно координатный макет:
+            // помечен как FRX, загружен FRX-шаблон, это печатная форма или задан макет
+            // конструктора. Стандартные отчёты без макета открываются в ClosedXML.
+            var looksLikeFrx = string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase)
+                               || report.IsPrintForm
+                               || !string.IsNullOrWhiteSpace(report.Template);
+
+            var isFrx = looksLikeFrx && string.IsNullOrWhiteSpace(report.ClosedXmlLayout);
+            SetLayoutKind(isFrx ? FoxProLayoutKind : ClosedXmlLayoutKind);
         }
 
         private void SelectColorInCombo(ComboBox combo, string colorHex)
@@ -1653,9 +1776,650 @@ namespace BIS.ERP.Views
         {
             Dispatcher.BeginInvoke(new Action(UpdateMappingPreview));
         }
+
+        // ===================================================================
+        // Вкладка «📊 ClosedXML макет»: визуальный конструктор Excel-макета.
+        // Модель — ClosedXmlReportLayout, интерпретатор — ClosedXmlReportRenderer.
+        // ===================================================================
+
+        private readonly ObservableCollection<ClosedXmlBlock> _closedXmlBlocks = new();
+        private readonly ObservableCollection<ClosedXmlCellEdit> _closedXmlCells = new();
+        private readonly ObservableCollection<ClosedXmlColumn> _closedXmlColumns = new();
+        private readonly ObservableCollection<ClosedXmlSignature> _closedXmlSignatures = new();
+
+        /// <summary>Текущий лист макета (вкладка редактирует один лист).</summary>
+        private ClosedXmlSheet? _closedXmlSheet;
+
+        /// <summary>Блок, значения которого сейчас показаны в редакторах (для отложенной записи).</summary>
+        private ClosedXmlBlock? _closedXmlEditingBlock;
+
+        /// <summary>
+        /// Блок, для которого редакторы реально заполнены. Пока это не он, содержимое блока
+        /// не переписывается — иначе смена выделения стирала бы строки и колонки.
+        /// </summary>
+        private ClosedXmlBlock? _closedXmlEditorsBlock;
+
+        /// <summary>Защита от рекурсии при программном заполнении полей.</summary>
+        private bool _closedXmlSyncing;
+
+        private void InitializeClosedXmlDesignerState()
+        {
+            ClosedXmlBlocksList.ItemsSource = _closedXmlBlocks;
+            ClosedXmlCellsGrid.ItemsSource = _closedXmlCells;
+            ClosedXmlColumnsGrid.ItemsSource = _closedXmlColumns;
+            ClosedXmlSignaturesGrid.ItemsSource = _closedXmlSignatures;
+            ClosedXmlFieldsList.ItemsSource = _reportFields;
+            LoadClosedXmlLayout(ClosedXmlLayoutTemplates.CreateBlank());
+            UpdateClosedXmlSourceText();
+        }
+
+        /// <summary>Показывает, из какого набора данных строится макет.</summary>
+        private void UpdateClosedXmlSourceText()
+        {
+            var selected = DataSourceCombo.SelectedItem as ComboBoxItem;
+            var sourceName = (selected?.Tag as MetadataObject)?.Name;
+
+            ClosedXmlSourceText.Text = string.IsNullOrWhiteSpace(sourceName)
+                ? "источник не выбран — задайте его на вкладке «📋 Общие»"
+                : $"{sourceName}   ·   полей в отчёте: {_reportFields.Count}";
+
+            ClosedXmlFieldsList.ItemsSource = _reportFields;
+            ClosedXmlFieldsList.Items.Refresh();
+        }
+
+        private void OnClosedXmlGoToSourceClick(object sender, RoutedEventArgs e)
+        {
+            MainTabControl.SelectedItem = GeneralTab;
+        }
+
+        private async void OnClosedXmlRefreshFieldsClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selected = DataSourceCombo.SelectedItem as ComboBoxItem;
+                if (selected?.Tag is MetadataObject catalog)
+                {
+                    CommitDesignerGridEdits();
+                    await LoadAvailableFields(catalog);
+                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
+                    StatusText.Text = $"Поля источника «{catalog.Name}» обновлены";
+                }
+                else
+                {
+                    StatusText.Text = "Источник не выбран — задайте его на вкладке «📋 Общие»";
+                }
+
+                UpdateClosedXmlSourceText();
+                RefreshClosedXmlJson();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось обновить поля: {ex.Message}", "ClosedXML",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>Двойной щелчок по полю набора подставляет его в выбранную строку колонок.</summary>
+        private void OnClosedXmlFieldDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (ClosedXmlFieldsList.SelectedItem is not ReportField field || string.IsNullOrWhiteSpace(field.FieldName))
+                return;
+
+            if (ClosedXmlColumnsGrid.SelectedItem is not ClosedXmlColumn column)
+            {
+                StatusText.Text = "Сначала выберите строку в списке «Колонки таблицы»";
+                return;
+            }
+
+            column.Field = field.FieldName;
+            if (string.IsNullOrWhiteSpace(column.Header))
+                column.Header = string.IsNullOrWhiteSpace(field.DisplayName) ? field.FieldName : field.DisplayName;
+
+            // ClosedXmlColumn — простая модель без INotifyPropertyChanged,
+            // поэтому грид обновляем вручную.
+            ClosedXmlColumnsGrid.Items.Refresh();
+            RefreshClosedXmlJson();
+            StatusText.Text = $"Поле «{field.FieldName}» подставлено в колонку";
+        }
+
+        /// <summary>
+        /// Заполняет колонки новой таблицы полями отчёта — это и есть набор данных
+        /// со вкладок «Общие»/«Поля», поэтому имена полей не нужно угадывать.
+        /// </summary>
+        private void FillClosedXmlTableColumnsFromReportFields(ClosedXmlBlock block)
+        {
+            if (block.Table == null || _reportFields.Count == 0)
+                return;
+
+            var columns = _reportFields
+                .Where(field => field.IsVisible && !string.IsNullOrWhiteSpace(field.FieldName))
+                .OrderBy(field => field.Order)
+                .Select(field => new ClosedXmlColumn
+                {
+                    Field = field.FieldName,
+                    Header = string.IsNullOrWhiteSpace(field.DisplayName) ? field.FieldName : field.DisplayName,
+                    Width = field.Width > 0 ? Math.Clamp(field.Width / 7d, 8, 40) : 14,
+                    NumberFormat = field.Format ?? string.Empty,
+                    Align = field.Alignment is "Right" or "Center" or "Left" ? field.Alignment : "Left"
+                })
+                .ToList();
+
+            if (columns.Count > 0)
+                block.Table.Columns = columns;
+        }
+
+        private void LoadClosedXmlLayoutFromReport(Report report)
+        {
+            // Источник макета — только сам отчёт: код ничего не подставляет.
+            // У стандартных отчётов макет уже посеян в Reports."ClosedXmlLayout".
+            if (string.IsNullOrWhiteSpace(report.ClosedXmlLayout))
+                return;
+
+            var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out var error);
+            if (layout == null)
+            {
+                InfoText.Text = $"ClosedXML-макет не прочитан: {error}";
+                return;
+            }
+
+            LoadClosedXmlLayout(layout);
+        }
+
+        /// <summary>Новая ячейка получает следующую колонку, а не колонку 1.</summary>
+        private void OnClosedXmlCellAddingNewItem(object sender, AddingNewItemEventArgs e)
+        {
+            var lastRow = _closedXmlCells.Count == 0
+                ? 1
+                : _closedXmlCells.Max(cell => cell.Row > 0 ? cell.Row : 1);
+            var nextColumn = _closedXmlCells.Count == 0
+                ? 1
+                : _closedXmlCells.Max(cell => cell.Column) + 1;
+
+            e.NewItem = new ClosedXmlCellEdit
+            {
+                Row = lastRow,
+                Column = nextColumn,
+                Align = "Left",
+                Border = "None"
+            };
+        }
+
+        private void LoadClosedXmlLayout(ClosedXmlReportLayout? layout)
+        {
+            _closedXmlSyncing = true;
+            try
+            {
+                layout ??= ClosedXmlLayoutTemplates.CreateBlank();
+                if (layout.Sheets.Count == 0)
+                    layout.Sheets.Add(new ClosedXmlSheet());
+
+                _closedXmlSheet = layout.Sheets[0];
+                _closedXmlSheet.PageSetup ??= new ClosedXmlPageSetup();
+
+                _closedXmlBlocks.Clear();
+                foreach (var block in _closedXmlSheet.Blocks)
+                    _closedXmlBlocks.Add(block);
+
+                ClosedXmlSheetNameBox.Text = _closedXmlSheet.Name;
+                ClosedXmlOrientationCombo.SelectedIndex =
+                    string.Equals(_closedXmlSheet.PageSetup.Orientation, "Portrait", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                ClosedXmlFreezeRowsBox.Text = _closedXmlSheet.PageSetup.FreezeRows.ToString();
+                ClosedXmlFontCombo.Text = _closedXmlSheet.PageSetup.FontName;
+                ClosedXmlFontSizeBox.Text = _closedXmlSheet.PageSetup.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                ClosedXmlGridLinesCheck.IsChecked = _closedXmlSheet.PageSetup.ShowGridLines;
+
+                ClosedXmlBlocksList.SelectedIndex = _closedXmlBlocks.Count > 0 ? 0 : -1;
+                LoadClosedXmlBlockEditors(_closedXmlBlocks.FirstOrDefault());
+            }
+            finally
+            {
+                _closedXmlSyncing = false;
+            }
+
+            RefreshClosedXmlJson();
+        }
+
+        /// <summary>Показывает в редакторах выбранный блок.</summary>
+        private void LoadClosedXmlBlockEditors(ClosedXmlBlock? block)
+        {
+            _closedXmlCells.Clear();
+            _closedXmlColumns.Clear();
+            _closedXmlSignatures.Clear();
+            _closedXmlEditingBlock = block;
+            _closedXmlEditorsBlock = null;
+
+            var isTable = string.Equals(block?.Type, "TabularSection", StringComparison.Ordinal);
+            var isSignatures = string.Equals(block?.Type, "SignaturesRow", StringComparison.Ordinal);
+
+            ClosedXmlCellsGrid.Visibility = !isTable && !isSignatures ? Visibility.Visible : Visibility.Collapsed;
+            ClosedXmlTableEditor.Visibility = isTable ? Visibility.Visible : Visibility.Collapsed;
+            ClosedXmlSignaturesGrid.Visibility = isSignatures ? Visibility.Visible : Visibility.Collapsed;
+
+            ClosedXmlBlockNameBox.Text = block?.Name ?? string.Empty;
+            if (block == null)
+                return;
+
+            if (isTable)
+            {
+                block.Table ??= new ClosedXmlTableSection();
+                foreach (var column in block.Table.Columns)
+                    _closedXmlColumns.Add(column);
+
+                ClosedXmlHeaderFillBox.Text = block.Table.HeaderFill;
+                ClosedXmlAlternateFillBox.Text = block.Table.AlternateFill;
+                SelectComboByContent(ClosedXmlRowBorderCombo, block.Table.RowBorder);
+
+                var group = block.Table.Groups.FirstOrDefault();
+                ClosedXmlGroupFieldsBox.Text = group == null ? string.Empty : string.Join(", ", group.ByFields);
+                ClosedXmlGroupHeaderBox.Text = group?.HeaderFormat ?? "{value}";
+                ClosedXmlSubtotalLabelBox.Text = group?.Subtotal?.Label ?? string.Empty;
+                ClosedXmlSubtotalFieldsBox.Text = group?.Subtotal == null ? string.Empty : string.Join(", ", group.Subtotal.SumFields);
+                ClosedXmlGrandTotalLabelBox.Text = block.Table.GrandTotal?.Label ?? string.Empty;
+                ClosedXmlGrandTotalFieldsBox.Text = block.Table.GrandTotal == null ? string.Empty : string.Join(", ", block.Table.GrandTotal.SumFields);
+            }
+            else if (isSignatures)
+            {
+                foreach (var signature in block.Signatures)
+                    _closedXmlSignatures.Add(signature);
+            }
+            else
+            {
+                var index = 0;
+                foreach (var row in block.Rows)
+                {
+                    index++;
+                    var rowNumber = row.Row > 0 ? row.Row : index;
+                    foreach (var cell in row.Cells)
+                        _closedXmlCells.Add(ClosedXmlCellEdit.FromModel(rowNumber, cell));
+                }
+            }
+
+            // Редакторы считаются загруженными только для этого блока: фиксация правок
+            // переписывает содержимое блока лишь тогда, когда его редакторы на экране.
+            _closedXmlEditorsBlock = block;
+        }
+
+        /// <summary>Переносит значения редакторов обратно в модель текущего блока и листа.</summary>
+        private void CommitClosedXmlBlockEditors() => CommitClosedXmlBlockEditors(_closedXmlEditingBlock);
+
+        /// <summary>Фиксирует незавершённое редактирование гридов макета перед чтением модели.</summary>
+        private void CommitClosedXmlGridEdits()
+        {
+            TryCommitGrid(ClosedXmlCellsGrid);
+            TryCommitGrid(ClosedXmlColumnsGrid);
+            TryCommitGrid(ClosedXmlSignaturesGrid);
+        }
+
+        private void CommitClosedXmlBlockEditors(ClosedXmlBlock? block)
+        {
+            if (_closedXmlSyncing || _closedXmlSheet == null)
+                return;
+
+            CommitClosedXmlGridEdits();
+
+            // Содержимое блока переписывается только тогда, когда в редакторах загружен
+            // именно этот блок. Иначе любая смена выделения стирала бы строки и колонки.
+            if (block != null && ReferenceEquals(block, _closedXmlEditorsBlock))
+            {
+                block.Name = ClosedXmlBlockNameBox.Text ?? string.Empty;
+
+                if (string.Equals(block.Type, "TabularSection", StringComparison.Ordinal))
+                {
+                    block.Table ??= new ClosedXmlTableSection();
+                    block.Table.Columns = _closedXmlColumns.ToList();
+                    block.Table.HeaderFill = ClosedXmlHeaderFillBox.Text ?? string.Empty;
+                    block.Table.AlternateFill = ClosedXmlAlternateFillBox.Text ?? string.Empty;
+                    block.Table.RowBorder = (ClosedXmlRowBorderCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+
+                    var groupFields = SplitClosedXmlList(ClosedXmlGroupFieldsBox.Text);
+                    if (groupFields.Count > 0)
+                    {
+                        var group = block.Table.Groups.FirstOrDefault() ?? new ClosedXmlGroup();
+                        group.ByFields = groupFields;
+                        group.HeaderFormat = string.IsNullOrWhiteSpace(ClosedXmlGroupHeaderBox.Text)
+                            ? "{value}"
+                            : ClosedXmlGroupHeaderBox.Text;
+                        group.ShowHeader = true;
+
+                        var subtotalLabel = ClosedXmlSubtotalLabelBox.Text?.Trim() ?? string.Empty;
+                        group.Subtotal = string.IsNullOrWhiteSpace(subtotalLabel)
+                            ? null
+                            : new ClosedXmlTotal
+                            {
+                                Label = subtotalLabel,
+                                SumFields = SplitClosedXmlList(ClosedXmlSubtotalFieldsBox.Text)
+                            };
+
+                        block.Table.Groups = new List<ClosedXmlGroup> { group };
+                    }
+                    else
+                    {
+                        block.Table.Groups = new List<ClosedXmlGroup>();
+                    }
+
+                    var grandLabel = ClosedXmlGrandTotalLabelBox.Text?.Trim() ?? string.Empty;
+                    block.Table.GrandTotal = string.IsNullOrWhiteSpace(grandLabel)
+                        ? null
+                        : new ClosedXmlTotal
+                        {
+                            Label = grandLabel,
+                            SumFields = SplitClosedXmlList(ClosedXmlGrandTotalFieldsBox.Text)
+                        };
+                }
+                else if (string.Equals(block.Type, "SignaturesRow", StringComparison.Ordinal))
+                {
+                    block.Signatures = _closedXmlSignatures
+                        .Where(signature => !string.IsNullOrWhiteSpace(signature.Text))
+                        .ToList();
+                }
+                else
+                {
+                    // Плоский список ячеек собираем обратно в строки по номеру строки.
+                    var rows = new List<ClosedXmlTextRow>();
+                    foreach (var group in _closedXmlCells
+                                 .Where(cell => !string.IsNullOrWhiteSpace(cell.Text)
+                                                || cell.MergeToColumn > 0
+                                                || cell.TakeFromRow != 0)
+                                 .GroupBy(cell => cell.Row > 0 ? cell.Row : 1)
+                                 .OrderBy(group => group.Key))
+                    {
+                        var row = new ClosedXmlTextRow { Row = group.Key };
+                        foreach (var cell in group.OrderBy(cell => cell.Column))
+                            row.Cells.Add(cell.ToModel());
+                        rows.Add(row);
+                    }
+
+                    block.Rows = rows;
+                }
+            }
+
+            _closedXmlSheet.Name = string.IsNullOrWhiteSpace(ClosedXmlSheetNameBox.Text)
+                ? "Лист1"
+                : ClosedXmlSheetNameBox.Text.Trim();
+            _closedXmlSheet.PageSetup ??= new ClosedXmlPageSetup();
+            _closedXmlSheet.PageSetup.Orientation = ClosedXmlOrientationCombo.SelectedIndex == 1 ? "Portrait" : "Landscape";
+            _closedXmlSheet.PageSetup.FreezeRows = ParseIntSafe(ClosedXmlFreezeRowsBox.Text);
+            _closedXmlSheet.PageSetup.FontName = string.IsNullOrWhiteSpace(ClosedXmlFontCombo.Text)
+                ? "Times New Roman"
+                : ClosedXmlFontCombo.Text;
+            _closedXmlSheet.PageSetup.FontSize = ParseDoubleSafe(ClosedXmlFontSizeBox.Text, 10);
+            _closedXmlSheet.PageSetup.ShowGridLines = ClosedXmlGridLinesCheck.IsChecked ?? false;
+            _closedXmlSheet.Blocks = _closedXmlBlocks.ToList();
+        }
+
+        /// <summary>Собирает модель макета из текущего состояния редактора.</summary>
+        private ClosedXmlReportLayout? BuildClosedXmlLayout()
+        {
+            if (_closedXmlSheet == null)
+                return null;
+
+            CommitClosedXmlBlockEditors();
+            return new ClosedXmlReportLayout
+            {
+                Version = 1,
+                Sheets = new List<ClosedXmlSheet> { _closedXmlSheet }
+            };
+        }
+
+        private string BuildClosedXmlLayoutJson()
+        {
+            var layout = BuildClosedXmlLayout();
+            return layout == null ? string.Empty : ClosedXmlReportRenderer.SerializeLayout(layout);
+        }
+
+        private void RefreshClosedXmlJson()
+        {
+            var layout = BuildClosedXmlLayout();
+            ClosedXmlJsonBox.Text = layout == null ? string.Empty : ClosedXmlReportRenderer.SerializeLayout(layout);
+        }
+
+        private void OnNewBlankClosedXmlLayoutClick(object sender, RoutedEventArgs e)
+        {
+            LoadClosedXmlLayout(ClosedXmlLayoutTemplates.CreateBlank());
+            StatusText.Text = "Создан пустой ClosedXML-макет";
+        }
+
+        private void OnLoadClosedXmlExampleClick(object sender, RoutedEventArgs e)
+        {
+            var tag = (ClosedXmlExampleCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Turnover";
+            LoadClosedXmlLayout(ClosedXmlLayoutTemplates.Create(tag));
+            StatusText.Text = $"Загружен пример ClosedXML-макета: {tag}";
+        }
+
+        private void OnAddClosedXmlBlockClick(object sender, RoutedEventArgs e)
+        {
+            if (_closedXmlSheet == null)
+                return;
+
+            CommitClosedXmlBlockEditors();
+            var type = (sender as Button)?.Tag?.ToString() ?? "TitleRows";
+            var block = ClosedXmlLayoutTemplates.CreateBlock(type, _closedXmlBlocks.Count + 1);
+            if (string.Equals(type, "TabularSection", StringComparison.Ordinal))
+                FillClosedXmlTableColumnsFromReportFields(block);
+            _closedXmlBlocks.Add(block);
+            ClosedXmlBlocksList.SelectedItem = block;
+            LoadClosedXmlBlockEditors(block);
+            RefreshClosedXmlJson();
+            StatusText.Text = $"Добавлен блок: {block.TypeLabel}";
+        }
+
+        private void OnDeleteClosedXmlBlockClick(object sender, RoutedEventArgs e)
+        {
+            if (ClosedXmlBlocksList.SelectedItem is not ClosedXmlBlock block || _closedXmlSheet == null)
+                return;
+
+            var index = _closedXmlBlocks.IndexOf(block);
+            _closedXmlEditingBlock = null;
+            _closedXmlBlocks.Remove(block);
+            _closedXmlSheet.Blocks = _closedXmlBlocks.ToList();
+
+            ClosedXmlBlocksList.SelectedIndex = _closedXmlBlocks.Count == 0
+                ? -1
+                : Math.Min(index, _closedXmlBlocks.Count - 1);
+            LoadClosedXmlBlockEditors(ClosedXmlBlocksList.SelectedItem as ClosedXmlBlock);
+            RefreshClosedXmlJson();
+        }
+
+        private void OnMoveClosedXmlBlockUpClick(object sender, RoutedEventArgs e)
+        {
+            MoveClosedXmlBlock(-1);
+        }
+
+        private void OnMoveClosedXmlBlockDownClick(object sender, RoutedEventArgs e)
+        {
+            MoveClosedXmlBlock(1);
+        }
+
+        private void MoveClosedXmlBlock(int delta)
+        {
+            if (ClosedXmlBlocksList.SelectedItem is not ClosedXmlBlock block)
+                return;
+
+            var index = _closedXmlBlocks.IndexOf(block);
+            var target = index + delta;
+            if (index < 0 || target < 0 || target >= _closedXmlBlocks.Count)
+                return;
+
+            CommitClosedXmlBlockEditors();
+            _closedXmlBlocks.Move(index, target);
+            ClosedXmlBlocksList.SelectedItem = block;
+            RefreshClosedXmlJson();
+        }
+
+        private void OnClosedXmlBlockSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_closedXmlSyncing)
+                return;
+
+            // Записываем правки в тот блок, который был выбран до смены выделения.
+            var previous = e.RemovedItems.Count > 0
+                ? e.RemovedItems[0] as ClosedXmlBlock
+                : _closedXmlEditingBlock;
+
+            CommitClosedXmlBlockEditors(previous);
+            LoadClosedXmlBlockEditors(ClosedXmlBlocksList.SelectedItem as ClosedXmlBlock);
+            RefreshClosedXmlJson();
+        }
+
+        private void OnClosedXmlBlockNameChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_closedXmlSyncing || _closedXmlEditingBlock == null)
+                return;
+
+            _closedXmlEditingBlock.Name = ClosedXmlBlockNameBox.Text ?? string.Empty;
+            RefreshClosedXmlJson();
+        }
+
+        private async void OnClosedXmlPreviewClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var layout = BuildClosedXmlLayout();
+                if (layout == null)
+                {
+                    MessageBox.Show("Макет не задан.", "ClosedXML",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                RefreshClosedXmlJson();
+
+                var report = BuildReportFromForm();
+                if (report == null)
+                    return;
+
+                if (report.Fields == null || report.Fields.Count == 0)
+                {
+                    MessageBox.Show("Добавьте поля отчёта — без них в макет нечего выводить.", "ClosedXML",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                Mouse.OverrideCursor = Cursors.Wait;
+                StatusText.Text = "Формирование ClosedXML-предпросмотра...";
+
+                var parameters = await _reportService.ResolveParametersForPreviewAsync(report);
+                var data = await _reportService.GetReportDataAsync(report, parameters);
+                var previewData = ClosedXmlReportRenderer.PrepareData(data, report);
+
+                var bytes = ClosedXmlReportRenderer.RenderToBytes(
+                    layout,
+                    previewData,
+                    parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value));
+                var path = Path.Combine(Path.GetTempPath(), $"closedxml_preview_{Guid.NewGuid():N}.xlsx");
+                File.WriteAllBytes(path, bytes);
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = path,
+                    UseShellExecute = true,
+                    Verb = "open"
+                });
+
+                StatusText.Text = $"✅ Предпросмотр ClosedXML: {path}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка предпросмотра ClosedXML: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        private static void SelectComboByContent(ComboBox combo, string? value)
+        {
+            for (var i = 0; i < combo.Items.Count; i++)
+            {
+                if (combo.Items[i] is ComboBoxItem item &&
+                    string.Equals(item.Content?.ToString(), value, StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedIndex = i;
+                    return;
+                }
+            }
+
+            combo.SelectedIndex = -1;
+        }
+
+        private static List<string> SplitClosedXmlList(string? text) =>
+            string.IsNullOrWhiteSpace(text)
+                ? new List<string>()
+                : text.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(part => part.Trim())
+                    .Where(part => part.Length > 0)
+                    .ToList();
+
+        private static int ParseIntSafe(string? text) =>
+            int.TryParse(text, out var value) ? value : 0;
+
+        private static double ParseDoubleSafe(string? text, double fallback) =>
+            double.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : fallback;
     }
 
+    /// <summary>Строка редактора ячеек блока (Row + ClosedXmlTextCell).</summary>
+    public class ClosedXmlCellEdit
+    {
+        public int Row { get; set; }
 
+        public int Column { get; set; } = 1;
+
+        public int MergeToColumn { get; set; }
+
+        public string Text { get; set; } = string.Empty;
+
+        public bool Bold { get; set; }
+
+        public bool Italic { get; set; }
+
+        public double FontSize { get; set; }
+
+        public string Align { get; set; } = "Left";
+
+        public string Fill { get; set; } = string.Empty;
+
+        public string Border { get; set; } = "None";
+
+        /// <summary>Взять значение из строки набора (1-based; отрицательное — с конца).</summary>
+        public int TakeFromRow { get; set; }
+
+        /// <summary>Имя колонки набора для привязки.</summary>
+        public string TakeFromField { get; set; } = string.Empty;
+
+        public static ClosedXmlCellEdit FromModel(int row, ClosedXmlTextCell cell) => new()
+        {
+            Row = row,
+            Column = cell.Column,
+            MergeToColumn = cell.MergeToColumn,
+            Text = cell.Text,
+            Bold = cell.Bold,
+            Italic = cell.Italic,
+            FontSize = cell.FontSize,
+            Align = cell.Align,
+            Fill = cell.Fill,
+            Border = cell.Border,
+            TakeFromRow = cell.TakeFromRow,
+            TakeFromField = cell.TakeFromField
+        };
+
+        public ClosedXmlTextCell ToModel() => new()
+        {
+            Column = Column <= 0 ? 1 : Column,
+            MergeToColumn = MergeToColumn,
+            Text = Text ?? string.Empty,
+            Bold = Bold,
+            Italic = Italic,
+            FontSize = FontSize,
+            Align = string.IsNullOrWhiteSpace(Align) ? "Left" : Align,
+            Fill = Fill ?? string.Empty,
+            Border = string.IsNullOrWhiteSpace(Border) ? "None" : Border,
+            TakeFromRow = TakeFromRow,
+            TakeFromField = TakeFromField ?? string.Empty
+        };
+    }
 
     public class FieldDef
     {

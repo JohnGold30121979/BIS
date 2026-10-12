@@ -348,6 +348,7 @@ namespace BIS.ERP.Views
                     "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
                     "PaymentOrderRegister" => await BuildPaymentOrderRegisterAsync(start, end),
                     "OrganizationReconciliation" => await BuildOrganizationReconciliationAsync(start, end),
+                    "OrganizationReconciliationClosedXml" => await BuildOrganizationReconciliationAsync(start, end, closedXml: true),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
 
@@ -797,9 +798,33 @@ namespace BIS.ERP.Views
             return (table, report);
         }
 
-        private async Task<(DataTable, Report)> BuildOrganizationReconciliationAsync(DateTime start, DateTime end)
+        /// <summary>Код стандартного отчёта, в котором хранится визуальный макет акта сверки.</summary>
+        private const string ClosedXmlReconciliationActCode = "standard.finance.reconciliation-act-closedxml";
+
+        /// <summary>
+        /// Читает макет акта сверки из одноимённого отчёта в базе. Источник макета — сам отчёт,
+        /// поэтому правки, сделанные в генераторе отчётов, сразу влияют на вывод.
+        /// </summary>
+        private async Task<string> LoadClosedXmlActLayoutAsync()
         {
-            var variant = GetSelectedReconciliationReportVariant();
+            var stored = await _context.Reports.AsNoTracking()
+                .Where(report => report.Code == ClosedXmlReconciliationActCode)
+                .Select(report => report.ClosedXmlLayout)
+                .FirstOrDefaultAsync();
+
+            return stored ?? string.Empty;
+        }
+
+        /// <summary>
+        /// Строит акт сверки. При <paramref name="closedXml"/> отчёт помечается как
+        /// ClosedXML-макет: FRX-вариант не применяется, макет берётся из базы.
+        /// </summary>
+        private async Task<(DataTable, Report)> BuildOrganizationReconciliationAsync(
+            DateTime start,
+            DateTime end,
+            bool closedXml = false)
+        {
+            var variant = closedXml ? null : GetSelectedReconciliationReportVariant();
             var selectedOrganizationId = _selectedOrganizationId.GetValueOrDefault();
             var scoped = selectedOrganizationId != Guid.Empty;
             Guid? selectedFilterId = scoped ? selectedOrganizationId : null;
@@ -830,7 +855,9 @@ namespace BIS.ERP.Views
 
             var summary = act.Summary;
 
-            var titlePrefix = variant?.IsStandard == false ? variant.DisplayName : "Акт сверки";
+            var titlePrefix = closedXml
+                ? "Акт сверки (ClosedXML)"
+                : variant?.IsStandard == false ? variant.DisplayName : "Акт сверки";
             var report = CreateReport(table, scoped ? $"{titlePrefix}: {titleName} на {end:dd/MM/yyyy}" : $"{titlePrefix}: все организации на {end:dd/MM/yyyy}", true);
             report.ReportType = "ReconciliationAct";
             report.SubtitleText = $"Период: {start:dd/MM/yyyy} - {end:dd/MM/yyyy}";
@@ -855,7 +882,19 @@ namespace BIS.ERP.Views
             SetReportFieldWidth(report, "N докум", 70);
             SetReportFieldWidth(report, "Дата", 70);
             SetReportFieldWidth(report, "Модуль", 45);
-            await ApplyReconciliationVariantLayoutAsync(report, variant);
+
+            if (closedXml)
+            {
+                // Макет берётся из отчёта «Акт сверки (ClosedXML)» в базе — код его не подставляет.
+                report.SourceFormat = "ClosedXml";
+                report.IsPrintForm = false;
+                report.ClosedXmlLayout = await LoadClosedXmlActLayoutAsync();
+            }
+            else
+            {
+                await ApplyReconciliationVariantLayoutAsync(report, variant);
+            }
+
             return (table, report);
         }
 
@@ -1117,6 +1156,9 @@ namespace BIS.ERP.Views
                     .ToListAsync();
 
                 var candidateReports = reports
+                    // Отчёты с визуальным макетом ClosedXML — это отдельные отчёты,
+                    // а не варианты FRX-акта, поэтому в списке вариантов их нет.
+                    .Where(report => !string.Equals(report.SourceFormat, "ClosedXml", StringComparison.OrdinalIgnoreCase))
                     .Where(report => ReportClassificationService.IsReconciliationReport(new Report
                     {
                         Id = report.Id,
@@ -1169,6 +1211,25 @@ namespace BIS.ERP.Views
         private void OnReportTypeSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateReconciliationVariantVisibility();
+            ApplyRecommendedOutputFormat();
+        }
+
+        /// <summary>
+        /// Для «Акта сверки (ClosedXML)» формат вывода переключается на ClosedXML автоматически.
+        /// </summary>
+        private void ApplyRecommendedOutputFormat()
+        {
+            if (ReportOutputFormatCombo == null || !IsClosedXmlReconciliationSelected())
+                return;
+
+            foreach (var item in ReportOutputFormatCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (!string.Equals(item.Tag?.ToString(), "ClosedXmlExcel", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                ReportOutputFormatCombo.SelectedItem = item;
+                break;
+            }
         }
 
         private void UpdateReconciliationVariantVisibility()
@@ -1183,6 +1244,13 @@ namespace BIS.ERP.Views
                     : Visibility.Collapsed;
             }
 
+            if (ClosedXmlReconciliationPanel != null)
+            {
+                ClosedXmlReconciliationPanel.Visibility = IsClosedXmlReconciliationSelected()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
             if (TrialBalanceFilterPanel != null)
             {
                 TrialBalanceFilterPanel.Visibility = IsTrialBalanceSelected()
@@ -1190,6 +1258,10 @@ namespace BIS.ERP.Views
                     : Visibility.Collapsed;
             }
         }
+
+        private bool IsClosedXmlReconciliationSelected() =>
+            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
+                "OrganizationReconciliationClosedXml", StringComparison.OrdinalIgnoreCase);
 
         private bool IsTrialBalanceSelected() =>
             string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
@@ -1580,6 +1652,13 @@ namespace BIS.ERP.Views
 
         private static bool IsNativePdfFormat(string format) =>
             FormatIs(format, "NativePdf");
+
+        /// <summary>Формат вывода по визуальной разметке ClosedXML (вкладка «📊 ClosedXML макет»).</summary>
+        private static bool IsClosedXmlExcelFormat(string format) =>
+            FormatIs(format, "ClosedXmlExcel", "ExcelClosedXml");
+
+        private static bool HasClosedXmlLayout(Report report) =>
+            report != null && !string.IsNullOrWhiteSpace(report.ClosedXmlLayout);
 
         private static bool IsFoxProExcelFormat(string format) =>
             FormatIs(format, "FoxProExcel", "ExcelFoxPro");
@@ -2054,6 +2133,7 @@ namespace BIS.ERP.Views
                 DataSourceId = source.DataSourceId,
                 ReportType = source.ReportType,
                 Template = source.Template,
+                ClosedXmlLayout = source.ClosedXmlLayout,
                 Settings = source.Settings,
                 Icon = source.Icon,
                 Code = source.Code,
@@ -2324,6 +2404,7 @@ namespace BIS.ERP.Views
 
                 var useFoxProExcelLayout = IsFoxProExcelFormat(format);
                 var useNativeExcelLayout = IsNativeExcelFormat(format);
+                var useClosedXmlLayout = IsClosedXmlExcelFormat(format);
                 if (useFoxProExcelLayout && !HasFoxProTemplate(_currentReport))
                 {
                     MessageBox.Show(
@@ -2340,20 +2421,49 @@ namespace BIS.ERP.Views
                     return;
                 }
 
+                if (useClosedXmlLayout && !HasClosedXmlLayout(_currentReport))
+                {
+                    MessageBox.Show(
+                        "Для выбранного отчета не сохранён ClosedXML-макет. Откройте конструктор, вкладку «📊 ClosedXML макет», соберите разметку и сохраните отчет.",
+                        "ClosedXML Excel", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
                 IsEnabled = false;
                 var formatTitle = useFoxProExcelLayout
                     ? "FRX FoxPro Excel"
                     : useNativeExcelLayout
                         ? "Нативный Excel"
-                        : "Программный Excel";
+                        : useClosedXmlLayout
+                            ? "ClosedXML Excel"
+                            : "Программный Excel";
                 StatusText.Text = $"Открытие {formatTitle}...";
 
-                var suffix = useFoxProExcelLayout ? "FRX" : useNativeExcelLayout ? "NATIVE" : "PROGRAM";
+                var suffix = useFoxProExcelLayout
+                    ? "FRX"
+                    : useNativeExcelLayout
+                        ? "NATIVE"
+                        : useClosedXmlLayout
+                            ? "CLOSEDXML"
+                            : "PROGRAM";
                 var outputPath = BuildTemporaryExcelPath($"{_currentReport.Name}_{suffix}", "xlsx");
                 var dataSnapshot = _currentData.Copy();
                 var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
                 byte[] excelBytes;
-                if (useFoxProExcelLayout || useNativeExcelLayout)
+                if (useClosedXmlLayout)
+                {
+                    // Макет берётся только из самого отчёта (Reports."ClosedXmlLayout").
+                    var layout = ClosedXmlReportRenderer.ParseLayout(reportSnapshot.ClosedXmlLayout, out var layoutError);
+                    if (layout == null)
+                        throw new InvalidOperationException(layoutError);
+
+                    var renderParameters = await _reportService.ResolveParametersForPreviewAsync(reportSnapshot);
+                    var preparedData = ClosedXmlReportRenderer.PrepareData(dataSnapshot, reportSnapshot);
+                    var typedParameters = renderParameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+                    excelBytes = await Task.Run(() =>
+                        ClosedXmlReportRenderer.RenderToBytes(layout, preparedData, typedParameters));
+                }
+                else if (useFoxProExcelLayout || useNativeExcelLayout)
                 {
                     var ruleService = new FoxProReportFieldRuleService(_context);
                     await ruleService.SeedDefaultRulesAsync();

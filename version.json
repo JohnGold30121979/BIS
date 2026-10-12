@@ -1,9 +1,9 @@
 {
-  "Major": 1,
-  "Minor": 1,
-  "Patch": 110,
-  "Build": 110,
-  "Semantic": "1.1.110",
-  "Informational": "1.1.110+2026-10-09T10:28:47Z#110",
-  "LastBuildUtc": "2026-10-09T10:28:47Z"
+    "Major":  1,
+    "Minor":  1,
+    "Patch":  143,
+    "Build":  143,
+    "Semantic":  "1.1.143",
+    "Informational":  "1.1.143+2026-10-11T13:51:21Z#143",
+    "LastBuildUtc":  "2026-10-11T13:51:21Z"
 }

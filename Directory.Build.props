@@ -1,0 +1,93 @@
+<Project>
+
+  <!--
+    Автоматическая версионность продукта BIS ERP.
+
+    Источник версии — version.json в корне репозитория.
+    При каждой сборке основного проекта Build/bump-version.ps1 увеличивает Patch и Build,
+    а полученные значения попадают в метаданные сборки (AssemblyMetadataAttribute),
+    которые читает Services/AppVersion.cs.
+
+    Инкремент выполняет только основной проект: иначе сборка BIS.ERP.Updater,
+    тестовых проектов и временных WPF-проектов (*_wpftmp) добавляла бы лишние +1
+    к одному и тому же version.json.
+  -->
+
+  <PropertyGroup>
+    <ProductVersionFile>$(MSBuildThisFileDirectory)version.json</ProductVersionFile>
+    <ProductVersionScript>$(MSBuildThisFileDirectory)Build\bump-version.ps1</ProductVersionScript>
+    <ProductVersionProject Condition="'$(ProductVersionProject)' == ''">BIS.ERP</ProductVersionProject>
+    <ProductVersioningEnabled Condition="'$(ProductVersioningEnabled)' == '' And '$(MSBuildProjectName)' == '$(ProductVersionProject)'">true</ProductVersioningEnabled>
+  </PropertyGroup>
+
+  <!--
+    Фаза 1. Инкремент версии.
+    Скрипт печатает значения строками BIS_*, они разбираются регулярным выражением.
+    При захвате в свойство MSBuild склеивает строки вывода разделителем ";",
+    поэтому шаблон останавливается и на ";", и на переводе строки.
+  -->
+  <Target Name="BumpProductVersionFiles"
+          Condition="'$(ProductVersioningEnabled)' == 'true' And '$(DesignTimeBuild)' != 'true' And '$(SkipProductVersionBump)' != 'true'">
+
+    <Error Condition="!Exists('$(ProductVersionScript)')"
+           Text="Не найден скрипт версии: $(ProductVersionScript)" />
+
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProductVersionScript)&quot; -VersionFile &quot;$(ProductVersionFile)&quot;"
+          ConsoleToMSBuild="true"
+          WorkingDirectory="$(MSBuildThisFileDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_ProductVersionOutput" />
+    </Exec>
+
+    <PropertyGroup>
+      <ProductSemantic>$([System.Text.RegularExpressions.Regex]::Match($(_ProductVersionOutput), 'BIS_VERSION=([^;\r\n]+)').Groups[1].Value.Trim())</ProductSemantic>
+      <ProductBuild>$([System.Text.RegularExpressions.Regex]::Match($(_ProductVersionOutput), 'BIS_BUILD=([^;\r\n]+)').Groups[1].Value.Trim())</ProductBuild>
+      <ProductInformational>$([System.Text.RegularExpressions.Regex]::Match($(_ProductVersionOutput), 'BIS_INFORMATIONAL=([^;\r\n]+)').Groups[1].Value.Trim())</ProductInformational>
+      <ProductBuildUtc>$([System.Text.RegularExpressions.Regex]::Match($(_ProductVersionOutput), 'BIS_BUILD_UTC=([^;\r\n]+)').Groups[1].Value.Trim())</ProductBuildUtc>
+    </PropertyGroup>
+
+    <Error Condition="'$(ProductSemantic)' == ''"
+           Text="Не удалось определить версию продукта: скрипт $(ProductVersionScript) не вернул строку BIS_VERSION." />
+
+    <Message Importance="high" Text="Версия продукта: $(ProductSemantic) (сборка $(ProductBuild))" />
+  </Target>
+
+  <!--
+    Фаза 2. Запись метаданных сборки.
+    Используются именно метаданные, а не атрибуты версии: так значения не конфликтуют
+    с автоматически создаваемыми атрибутами сборки.
+    Хук — BeforeTargets="GetAssemblyAttributes": эта цель формирует список
+    @(AssemblyAttribute), который затем превращается в код задачей WriteCodeFragment.
+
+    Условие намеренно не проверяет $(ProductSemantic): MSBuild оценивает Condition цели
+    ДО выполнения DependsOnTargets, поэтому такая проверка навсегда отключила бы инкремент.
+  -->
+  <Target Name="ApplyProductVersion"
+          BeforeTargets="GetAssemblyAttributes"
+          DependsOnTargets="BumpProductVersionFiles"
+          Condition="'$(ProductVersioningEnabled)' == 'true'">
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>ProductVersion</_Parameter1>
+        <_Parameter2>$(ProductSemantic)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>ProductBuild</_Parameter1>
+        <_Parameter2>$(ProductBuild)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>ProductInformational</_Parameter1>
+        <_Parameter2>$(ProductInformational)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+
+  <!-- Фаза 3. Файл версии рядом с программой: версию видно даже при подменённых файлах. -->
+  <Target Name="CopyVersionFileToOutput"
+          AfterTargets="Build"
+          Condition="'$(ProductVersioningEnabled)' == 'true' And Exists('$(ProductVersionFile)') And '$(OutDir)' != ''">
+    <Copy SourceFiles="$(ProductVersionFile)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

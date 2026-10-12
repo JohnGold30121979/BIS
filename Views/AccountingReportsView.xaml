@@ -29,6 +29,7 @@
                         <ComboBoxItem Tag="PeriodCollection">Сбор информации за период</ComboBoxItem>
                         <ComboBoxItem Tag="PaymentOrderRegister">Реестр платежных поручений</ComboBoxItem>
                         <ComboBoxItem Tag="OrganizationReconciliation">Акт сверки</ComboBoxItem>
+                        <ComboBoxItem Tag="OrganizationReconciliationClosedXml">Акт сверки (ClosedXML)</ComboBoxItem>
                     </ComboBox>
                     <TextBlock Text="С:" VerticalAlignment="Center" Margin="16,0,6,0"/>
                     <DatePicker x:Name="StartDatePicker" Width="130" Height="32"/>
@@ -38,11 +39,12 @@
                             Background="#27AE60" Foreground="White" Click="OnGenerateClick"/>
                     <TextBlock Text="Формат:" VerticalAlignment="Center" Margin="10,0,6,0"/>
                     <ComboBox x:Name="ReportOutputFormatCombo" Width="250" Height="32" SelectedIndex="0"
-                              ToolTip="Программный формат строится кодом. Нативный берет только макет конструктора. FRX берет только загруженный FoxPro-макет.">
+                              ToolTip="Программный формат строится кодом. Нативный берет только макет конструктора. FRX берет только загруженный FoxPro-макет. ClosedXML берет визуальную разметку со вкладки «ClosedXML макет».">
                         <ComboBoxItem Tag="ProgramExcel">Программный Excel</ComboBoxItem>
                         <ComboBoxItem Tag="ProgramPdf">Программный PDF</ComboBoxItem>
                         <ComboBoxItem Tag="NativeExcel">Нативный Excel</ComboBoxItem>
                         <ComboBoxItem Tag="NativePdf">Нативный PDF</ComboBoxItem>
+                        <ComboBoxItem Tag="ClosedXmlExcel">ClosedXML Excel (визуальный макет)</ComboBoxItem>
                         <ComboBoxItem Tag="FoxProExcel">FRX FoxPro Excel</ComboBoxItem>
                         <ComboBoxItem Tag="FoxProPdf">FRX FoxPro PDF</ComboBoxItem>
                         <ComboBoxItem Tag="TaxExcel">Налоговый Excel</ComboBoxItem>
@@ -86,6 +88,11 @@
                     <TextBlock x:Name="ReconciliationVariantHint" Text="Варианты из метаданных отчетов"
                                VerticalAlignment="Center" Margin="12,0,0,0"
                                Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                </WrapPanel>
+                <WrapPanel x:Name="ClosedXmlReconciliationPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppSecondaryTextBrush}"
+                               Text="Макет: ClosedXML (визуальный Excel). Формат вывода переключён на «ClosedXML Excel» — отчёт строится встроенным визуальным макетом, FRX-варианты не применяются. Открыть и изменить макет можно в конструкторе отчётов."/>
                 </WrapPanel>
                 <WrapPanel Margin="0,10,0,0">
                     <TextBlock Text="Организация:" VerticalAlignment="Center" Margin="0,0,6,0"/>

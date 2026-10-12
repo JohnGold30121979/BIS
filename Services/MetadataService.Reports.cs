@@ -451,12 +451,22 @@ public partial class MetadataService
             report.Icon = definition.Icon;
         if (isNewReport)
         {
-            // Native standard reports stay in metadata, but are hidden until page-perfect output is implemented.
-            report.IsActive = false;
+            // Обычные native-отчёты скрыты, пока не сделан точный вывод.
+            // Отчёт с посеянным ClosedXML-макетом доступен сразу: макет хранится в базе.
+            report.IsActive = definition.SeedClosedXmlLayout;
             report.IsPrintForm = false;
             report.IsDefault = false;
         }
-        report.SourceFormat = "Native";
+
+        report.SourceFormat = definition.SourceFormat;
+        if (definition.SeedClosedXmlLayout && string.IsNullOrWhiteSpace(report.ClosedXmlLayout))
+        {
+            // Макет записывается в Reports."ClosedXmlLayout" один раз и дальше живёт в базе:
+            // правки, сделанные в генераторе отчётов, код не перетирает.
+            report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(
+                ClosedXmlLayoutTemplates.CreateReconciliationAct(definition.Name));
+        }
+
         report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
         if (isNewReport)
             report.Order = definition.Order;
@@ -748,6 +758,24 @@ public partial class MetadataService
                 "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
             }),
         new StandardReportDefinition(
+            Code: "standard.finance.reconciliation-act-closedxml",
+            Name: "Акт сверки (ClosedXML)",
+            Description: "Акт сверки расчётов, собранный визуальным макетом ClosedXML. Макет хранится в самом отчёте и правится в генераторе отчётов.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Проводки",
+            SourceObjectType: "Document",
+            ReportType: "ReconciliationAct",
+            Icon: "📊",
+            Order: 151,
+            PageOrientation: "Landscape",
+            Fields: new[]
+            {
+                "posting_date", "doc_number", "document_type", "debit_account",
+                "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
+            },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true),
+        new StandardReportDefinition(
             Code: "standard.finance.sales-invoice-journal",
             Name: "Журнал продаж",
             Description: "Журнал выписанных счет-фактур и налоговых сумм.",
@@ -1024,7 +1052,9 @@ public partial class MetadataService
         string Icon,
         int Order,
         string PageOrientation,
-        IReadOnlyList<string> Fields);
+        IReadOnlyList<string> Fields,
+        string SourceFormat = "Native",
+        bool SeedClosedXmlLayout = false);
 }
 
 

@@ -2105,6 +2105,7 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             target.SourceFormat = source.SourceFormat;
             target.TemplateVersion = source.TemplateVersion;
             target.Template = source.Template;
+            target.ClosedXmlLayout = source.ClosedXmlLayout;
             target.Settings = source.Settings;
         }
         // Удаление отчета

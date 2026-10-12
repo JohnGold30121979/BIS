@@ -26,6 +26,13 @@ namespace BIS.ERP.Models
 
         public string Template { get; set; } = string.Empty;
 
+        /// <summary>
+        /// JSON-разметка визуального Excel-макета (ClosedXML): строки, шапка, колонки, группы, итоги.
+        /// Редактируется на вкладке «📊 ClosedXML макет» конструктора,
+        /// интерпретируется ClosedXmlReportRenderer. Пусто — макет не задан.
+        /// </summary>
+        public string ClosedXmlLayout { get; set; } = string.Empty;
+
         public string Settings { get; set; } = "{}";
 
         public string Icon { get; set; } = "📊";

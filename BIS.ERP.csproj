@@ -63,10 +63,14 @@
     <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
   </ItemGroup>
 
+  <!-- Updater собирается вместе с основным проектом. Restore обязателен: на свежем
+       клоне у проекта BIS.ERP.Updater ещё нет obj/project.assets.json, и одна только
+       цель Build падает с NETSDK1004. При сборке решения цель пропускается
+       (BuildingSolutionFile), потому что восстановление там делает сама сборка решения. -->
   <Target Name="BuildUpdater" BeforeTargets="Build"
           Condition="Exists('BIS.ERP.Updater\BIS.ERP.Updater.csproj') And '$(BuildingSolutionFile)' != 'true'">
     <MSBuild Projects="BIS.ERP.Updater\BIS.ERP.Updater.csproj"
-             Targets="Build"
+             Targets="Restore;Build"
              Properties="Configuration=$(Configuration)" />
   </Target>
 
