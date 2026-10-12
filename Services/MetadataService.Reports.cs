@@ -463,8 +463,16 @@ public partial class MetadataService
         {
             // Макет записывается в Reports."ClosedXmlLayout" один раз и дальше живёт в базе:
             // правки, сделанные в генераторе отчётов, код не перетирает.
-            report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(
-                ClosedXmlLayoutTemplates.CreateReconciliationAct(definition.Name));
+            // Вид разметки зависит от типа отчёта: у акта сверки, оборотной
+            // ведомости и журнала счет-фактур свои наборы колонок.
+            var seedLayout = definition.ReportType switch
+            {
+                "TrialBalance" => ClosedXmlLayoutTemplates.CreateTrialBalance(definition.Name),
+                "InvoiceJournal" => ClosedXmlLayoutTemplates.CreateInvoiceJournal(definition.Name),
+                _ => ClosedXmlLayoutTemplates.CreateReconciliationAct(definition.Name)
+            };
+
+            report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(seedLayout);
         }
 
         report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
@@ -767,6 +775,44 @@ public partial class MetadataService
             ReportType: "ReconciliationAct",
             Icon: "📊",
             Order: 151,
+            PageOrientation: "Landscape",
+            Fields: new[]
+            {
+                "posting_date", "doc_number", "document_type", "debit_account",
+                "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
+            },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true),
+        new StandardReportDefinition(
+            Code: "standard.finance.invoice-journal",
+            Name: "Журнал счет-фактур",
+            Description: "Журнал выданных и полученных счет-фактур за период: документ, организация, суммы без налога, НДС, налог с продаж. Данные берутся из SQL-набора — образец для сборки отчётов администратором.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Счет-фактуры выданные и полученные",
+            // Источник создаёт набор данных как объект ReportSource — тип должен совпадать.
+            SourceObjectType: "ReportSource",
+            ReportType: "InvoiceJournal",
+            Icon: "🧾",
+            Order: 153,
+            PageOrientation: "Landscape",
+            Fields: new[]
+            {
+                "doc_date", "doc_number", "org_name", "esf_number", "document_kind",
+                "amount_without_tax", "vat_total", "sales_tax_total", "total_amount",
+                "posted_state", "supply_kind", "report_title", "period_start", "period_end"
+            },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true),
+        new StandardReportDefinition(
+            Code: "standard.finance.trial-balance-closedxml",
+            Name: "Оборотная ведомость (ClosedXML)",
+            Description: "Оборотно-сальдовая ведомость по счёту, собранная визуальным макетом ClosedXML. Макет хранится в самом отчёте и правится в генераторе отчётов.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Проводки",
+            SourceObjectType: "Document",
+            ReportType: "TrialBalance",
+            Icon: "📊",
+            Order: 152,
             PageOrientation: "Landscape",
             Fields: new[]
             {

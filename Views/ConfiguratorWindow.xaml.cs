@@ -221,6 +221,9 @@ namespace BIS.ERP.Views
                 var systemConfiguration = await new SystemConfigurationService().GetAsync();
                 SystemNameText.Text = systemConfiguration.SystemName;
                 VersionText.Text = $"версия {AppVersion.DisplayShort}";
+
+                // Импорт FRX-макетов скрыт, пока механизм FRX отключён.
+                ApplyReportingFeaturesVisibility();
                 LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, GetSystemIcon(systemConfiguration.Icon));
                 var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
                 if (currentInfoBase != null)
@@ -3009,11 +3012,27 @@ namespace BIS.ERP.Views
                 await PreviewReportDirectAsync(_selectedReport);
         }
 
+        /// <summary>
+        /// Предпросмотр отчёта. Способ вывода определяется форматом отчёта:
+        ///
+        /// — макет ClosedXML выводится в Excel, PDF-вывода у него нет;
+        /// — макет FRX и нативный выводятся в PDF.
+        ///
+        /// Раньше предпросмотр всегда шёл по FRX-пути, и для отчётов ClosedXML
+        /// выдавал ошибку «нет печатной формы».
+        /// </summary>
         private async Task PreviewReportDirectAsync(Report report)
         {
             try
             {
                 var fullReport = await LoadFullReportAsync(report);
+
+                if (IsClosedXmlReport(fullReport))
+                {
+                    await PreviewClosedXmlReportAsync(fullReport);
+                    return;
+                }
+
                 var reportService = new ReportService(_context);
                 var pdf = new PrintFormService(_context).ExportTemplatePreview(
                     fullReport,
@@ -3031,6 +3050,121 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка предпросмотра: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        /// <summary>Признак отчёта с визуальным макетом ClosedXML.</summary>
+        private static bool IsClosedXmlReport(Report report) =>
+            report != null &&
+            (string.Equals(report.SourceFormat, "ClosedXml", StringComparison.OrdinalIgnoreCase) ||
+             !string.IsNullOrWhiteSpace(report.ClosedXmlLayout));
+
+        /// <summary>
+        /// Предпросмотр отчёта ClosedXML: собирает Excel тем же путём, что и рабочий режим.
+        /// Для акта сверки набор данных строится сервисом акта — макет рассчитан
+        /// на таблицу акта, а не на сырые поля справочника.
+        /// </summary>
+        private async Task PreviewClosedXmlReportAsync(Report report)
+        {
+            var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out var layoutError);
+            if (layout == null)
+                throw new InvalidOperationException(layoutError);
+
+            var reportService = new ReportService(_context);
+            var parameters = await reportService.ResolveUserParametersAsync(report);
+            var data = await BuildClosedXmlPreviewDataAsync(report, parameters);
+
+            var preparedData = ClosedXmlReportRenderer.PrepareData(data, report);
+            var typedParameters = parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+
+            // Спрашиваем способ вывода: макет умеет и Excel, и PDF.
+            var choice = MessageBox.Show(
+                "Вывести в Excel?\n\nДа — Excel (xlsx)\nНет — PDF",
+                "Предпросмотр отчёта",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question);
+
+            if (choice == MessageBoxResult.Cancel)
+                return;
+
+            if (choice == MessageBoxResult.Yes)
+            {
+                var bytes = ClosedXmlReportRenderer.RenderToBytes(layout, preparedData, typedParameters);
+                var tempFile = Path.Combine(Path.GetTempPath(), $"preview_{report.Id:N}.xlsx");
+                File.WriteAllBytes(tempFile, bytes);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = tempFile,
+                    UseShellExecute = true,
+                    Verb = "open"
+                });
+                return;
+            }
+
+            var pdfBytes = ClosedXmlReportRenderer.RenderToPdfBytes(layout, preparedData, typedParameters);
+            var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name) { Owner = this };
+            previewWindow.ShowDialog();
+        }
+
+        /// <summary>
+        /// Готовит набор данных для отчёта ClosedXML.
+        ///
+        /// Для акта сверки используется тот же сервис, что и в рабочем режиме:
+        /// макет обращается к колонкам таблицы акта — «Сумма Дт», «Дата», «Модуль»,
+        /// — и не находит их в сырых полях справочника.
+        /// </summary>
+        private async Task<System.Data.DataTable> BuildClosedXmlPreviewDataAsync(
+            Report report,
+            Dictionary<string, object> parameters)
+        {
+            var isReconciliationAct =
+                string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
+                (report.Code?.Contains("reconciliation", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (report.Name?.Contains("акт свер", StringComparison.OrdinalIgnoreCase) ?? false);
+
+            if (!isReconciliationAct)
+                return await new ReportService(_context).GetReportDataAsync(report, parameters);
+
+            var start = new DateTime(DateTime.Today.Year, 1, 1);
+            var end = DateTime.Today;
+            if (parameters != null)
+            {
+                foreach (var pair in parameters)
+                {
+                    if (pair.Value is DateTime dateValue)
+                    {
+                        var name = pair.Key?.ToLowerInvariant() ?? string.Empty;
+                        if (name.Contains("начал") || name.Contains("start"))
+                            start = dateValue;
+                        else
+                            end = dateValue;
+                    }
+                }
+            }
+
+            if (end < start)
+                end = start;
+
+            var calculation = await new OrganizationBalanceService(_context).CalculateAsync(start, end);
+            var pairs = calculation.Rows.Where(row => !row.IsOrganizationTotal).ToList();
+            var totals = calculation.Rows.Where(row => row.IsOrganizationTotal).ToList();
+
+            var builder = new ReconciliationActBuilder(_context);
+            var movements = await builder.LoadMovementsAsync(null, start, end);
+            var act = builder.BuildTable(pairs, totals, movements, start, end, false, "Все организации");
+
+            // Макет обращается к дате как posting_date, к модулю — как module_code.
+            foreach (System.Data.DataRow row in act.Table.Rows)
+            {
+                var dateText = row.Table.Columns.Contains("Дата") ? row["Дата"]?.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(dateText))
+                    ReconciliationActBuilder.SetServiceValue(row, "posting_date", text: dateText);
+
+                var moduleText = row.Table.Columns.Contains("Модуль") ? row["Модуль"]?.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(moduleText))
+                    ReconciliationActBuilder.SetServiceValue(row, "module_code", text: moduleText);
+            }
+
+            return act.Table;
         }
 
         // ОСТАЛЬНЫЕ МЕТОДЫ
@@ -3051,8 +3185,30 @@ namespace BIS.ERP.Views
                 await LoadMetadata();
         }
 
+        /// <summary>
+        /// Скрывает элементы интерфейса, относящиеся к механизму FRX,
+        /// пока он отключён (<see cref="ReportingFeatures.FrxEnabled"/> = false).
+        ///
+        /// Код импорта и анализа сохранён полностью — возврат к FRX не требует
+        /// восстановления логики.
+        /// </summary>
+        private void ApplyReportingFeaturesVisibility()
+        {
+            var frxVisibility = ReportingFeatures.FrxEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+            if (ImportFrxButton != null)
+                ImportFrxButton.Visibility = frxVisibility;
+
+            if (FoxProAnalysisButton != null)
+                FoxProAnalysisButton.Visibility = frxVisibility;
+        }
+
         private async void OnImportFrxClick(object sender, RoutedEventArgs e)
         {
+            // Импорт FRX недоступен, пока механизм FRX отключён.
+            if (!ReportingFeatures.FrxEnabled)
+                return;
+
             var dialog = new FrxImportWindow();
             dialog.Owner = this;
             if (dialog.ShowDialog() == true)

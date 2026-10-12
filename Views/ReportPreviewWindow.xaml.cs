@@ -221,7 +221,14 @@ namespace BIS.ERP.Views
             }
         }
 
+        /// <summary>
+        /// Признак наличия макета FoxPro FRX.
+        ///
+        /// При отключённом FRX всегда возвращает false: вывод по макетам FoxPro
+        /// недоступен, и предпросмотр идёт обычным путём.
+        /// </summary>
         private static bool HasFoxProTemplate(Report report) =>
+            ReportingFeatures.FrxEnabled &&
             !string.IsNullOrWhiteSpace(report.Template) &&
             (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));

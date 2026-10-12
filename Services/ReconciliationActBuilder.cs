@@ -77,6 +77,9 @@ namespace BIS.ERP.Services
             AddAliasColumn(table, "credit_begin", typeof(decimal));
             AddAliasColumn(table, "document_number", typeof(string));
             AddAliasColumn(table, "document_date", typeof(string));
+            // Макет акта берёт дату из posting_date: значение заполняет вызывающая сторона.
+            AddAliasColumn(table, "posting_date", typeof(string));
+            AddAliasColumn(table, "module_code", typeof(string));
             AddAliasColumn(table, "module", typeof(string));
             AddAliasColumn(table, "report_title", typeof(string));
             AddAliasColumn(table, "report_summary", typeof(string));

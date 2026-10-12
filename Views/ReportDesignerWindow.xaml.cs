@@ -872,7 +872,7 @@ namespace BIS.ERP.Views
                     var printFormParameters = await _reportService.ResolveParametersForPreviewAsync(report);
 
                     var pdfBytes = _printFormService.ExportTemplatePreview(report, printFormParameters);
-                    var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
+                    var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name) { Owner = this };
                     previewWindow.ShowDialog();
 
                     StatusText.Text = "✅ Предпросмотр открыт";
@@ -945,16 +945,10 @@ namespace BIS.ERP.Views
 
             var printFormParameters = await _reportService.ResolveParametersForPreviewAsync(report);
             var pdfBytes = _printFormService.ExportTemplatePreview(report, printFormParameters);
-            var tempPdf = Path.Combine(Path.GetTempPath(), $"preview_{Guid.NewGuid():N}.pdf");
-            File.WriteAllBytes(tempPdf, pdfBytes);
 
-            var psi = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = tempPdf,
-                UseShellExecute = true,
-                Verb = "open"
-            };
-            System.Diagnostics.Process.Start(psi);
+            // Показываем документ прямо в окне: внешняя программа не запускается.
+            var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name) { Owner = this };
+            previewWindow.ShowDialog();
 
             StatusText.Text = "✅ Предпросмотр открыт";
         }
@@ -989,7 +983,7 @@ namespace BIS.ERP.Views
                 var data = await _reportService.GetReportDataAsync(tempReport, previewParameters);
 
                 var pdfBytes = _reportService.ExportToPdf(data, tempReport);
-                var previewWindow = new PdfPreviewWindow(pdfBytes) { Owner = this };
+                var previewWindow = new PdfPreviewWindow(pdfBytes, tempReport.Name) { Owner = this };
                 previewWindow.ShowDialog();
             }
             catch (Exception ex)
@@ -1139,6 +1133,101 @@ namespace BIS.ERP.Views
             return "#2C3E50";
         }
 
+        /// <summary>
+        /// Готовит набор данных для предпросмотра ClosedXML.
+        ///
+        /// Для акта сверки данные строятся тем же сервисом, что и в рабочем режиме:
+        /// макет акта рассчитан на таблицу акта — шапку, пары счетов, сальдо и итоги.
+        /// Общий генератор по метаданным отдаёт сырые поля проводок, и макет
+        /// не находит в них свои колонки.
+        ///
+        /// Для остальных отчётов используется обычный источник данных.
+        /// </summary>
+        private async Task<System.Data.DataTable> BuildClosedXmlPreviewDataAsync(
+            Report report,
+            Dictionary<string, object> parameters)
+        {
+            if (report == null)
+                return new System.Data.DataTable();
+
+            var isReconciliationAct =
+                string.Equals(report.ReportType, "ReconciliationAct", StringComparison.OrdinalIgnoreCase) ||
+                (report.Code?.Contains("reconciliation", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (report.Name?.Contains("акт свер", StringComparison.OrdinalIgnoreCase) ?? false);
+
+            if (!isReconciliationAct)
+                return await _reportService.GetReportDataAsync(report, parameters);
+
+            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            var (start, end) = ResolvePreviewPeriod(parameters);
+
+            var calculation = await new OrganizationBalanceService(context).CalculateAsync(start, end);
+            var pairs = calculation.Rows.Where(row => !row.IsOrganizationTotal).ToList();
+            var totals = calculation.Rows.Where(row => row.IsOrganizationTotal).ToList();
+
+            var builder = new ReconciliationActBuilder(context);
+            var movements = await builder.LoadMovementsAsync(null, start, end);
+            var act = builder.BuildTable(pairs, totals, movements, start, end, false, "Все организации");
+
+            // Макет обращается к дате как posting_date, к модулю — как module_code.
+            foreach (System.Data.DataRow row in act.Table.Rows)
+            {
+                var dateText = row.Table.Columns.Contains("Дата") ? row["Дата"]?.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(dateText) && DateTime.TryParse(dateText, out var parsed))
+                {
+                    ReconciliationActBuilder.SetServiceValue(row, "posting_date", text: parsed.ToString("dd.MM.yyyy"));
+                    ReconciliationActBuilder.SetServiceValue(row, "document_date", text: parsed.ToString("dd.MM.yyyy"));
+                }
+
+                var moduleText = row.Table.Columns.Contains("Модуль") ? row["Модуль"]?.ToString() : null;
+                if (!string.IsNullOrWhiteSpace(moduleText))
+                {
+                    ReconciliationActBuilder.SetServiceValue(row, "module_code", text: moduleText);
+                    ReconciliationActBuilder.SetServiceValue(row, "module", text: moduleText);
+                }
+            }
+
+            return act.Table;
+        }
+
+        /// <summary>
+        /// Определяет период предпросмотра: из параметров отчёта, иначе текущий год.
+        /// </summary>
+        private static (DateTime Start, DateTime End) ResolvePreviewPeriod(
+            IReadOnlyDictionary<string, object> parameters)
+        {
+            var start = new DateTime(DateTime.Today.Year, 1, 1);
+            var end = DateTime.Today;
+
+            if (parameters != null)
+            {
+                foreach (var pair in parameters)
+                {
+                    var name = pair.Key?.ToLowerInvariant() ?? string.Empty;
+
+                    if (pair.Value is DateTime dateValue)
+                    {
+                        if (name.Contains("начал") || name.Contains("start"))
+                            start = dateValue;
+                        else
+                            end = dateValue;
+                    }
+                    else if (pair.Value is string text && DateTime.TryParse(text, out var parsed))
+                    {
+                        if (name.Contains("начал") || name.Contains("start"))
+                            start = parsed;
+                        else if (name.Contains("конец") || name.Contains("end"))
+                            end = parsed;
+                    }
+                }
+            }
+
+            if (end < start)
+                end = start;
+
+            return (start, end);
+        }
+
         private Report? BuildReportFromForm(MetadataObject? selectedCatalog = null)
         {
             selectedCatalog ??= (DataSourceCombo.SelectedItem as ComboBoxItem)?.Tag as MetadataObject;
@@ -1239,6 +1328,13 @@ namespace BIS.ERP.Views
             if (LayoutKindCombo == null)
                 return;
 
+            // При отключённом FRX способ макета всегда ClosedXML.
+            if (!ReportingFeatures.FrxEnabled &&
+                string.Equals(kind, FoxProLayoutKind, StringComparison.OrdinalIgnoreCase))
+            {
+                kind = ClosedXmlLayoutKind;
+            }
+
             foreach (var item in LayoutKindCombo.Items.OfType<ComboBoxItem>())
             {
                 if (!string.Equals(item.Tag?.ToString(), kind, StringComparison.OrdinalIgnoreCase))
@@ -1253,7 +1349,13 @@ namespace BIS.ERP.Views
 
         private void ApplyLayoutKindVisibility()
         {
-            var isFrx = string.Equals(GetSelectedLayoutKind(), FoxProLayoutKind, StringComparison.OrdinalIgnoreCase);
+            // При отключённом FRX способ макета всегда ClosedXML: вкладки FRX/native,
+            // блок FRX-шаблона и тип отчёта «Макет Visual FoxPro FRX» скрываются.
+            var isFrx = ReportingFeatures.FrxEnabled &&
+                        string.Equals(GetSelectedLayoutKind(), FoxProLayoutKind, StringComparison.OrdinalIgnoreCase);
+
+            // Пункт выбора способа FRX скрывается, если механизм отключён.
+            HideFrxLayoutKindItem();
 
             // Вкладки: FRX-ветка и ветка ClosedXML никогда не показываются вместе.
             if (FrXFieldsTab != null)
@@ -1269,13 +1371,102 @@ namespace BIS.ERP.Views
             if (FrxTemplatePanel != null)
                 FrxTemplatePanel.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
 
+            ApplyInactiveTabsVisibility(isFrx);
+
             SyncFoxProReportTypeItem(isFrx);
 
             if (LayoutKindHint != null)
             {
                 LayoutKindHint.Text = isFrx
                     ? "FRX/native: макет задаётся координатами — работают вкладки «🔗 FRX поля» и «🧱 Нативный макет», вкладка ClosedXML скрыта."
-                    : "ClosedXML: макет собирается визуально на вкладке «📊 ClosedXML макет». Вкладки FRX/native и поле FRX-шаблона скрыты.";
+                    : "ClosedXML: макет собирается визуально на вкладке «📊 ClosedXML макет». Вкладки FRX/native, «Оформление» и «Фильтры» скрыты — оформление и отбор задаются в самом макете.";
+            }
+        }
+
+        /// <summary>
+        /// Скрывает вкладки, настройки которых не влияют на вывод ClosedXML.
+        ///
+        /// «Оформление» — ориентация, шрифт, цвет шапки, чередование строк: всё это
+        /// задаётся в параметрах листа и стилях колонок самого макета, поэтому
+        /// значения вкладки в вывод не попадают.
+        ///
+        /// «Фильтры» — условия отбора применяются только при выборке из справочника
+        /// напрямую. Отчёты ClosedXML берут данные из набора данных, и отбор
+        /// выполняется внутри запроса или расчёта.
+        /// </summary>
+        private void ApplyInactiveTabsVisibility(bool isFrx)
+        {
+            var inactiveVisibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
+
+            if (AppearanceTab != null)
+                AppearanceTab.Visibility = inactiveVisibility;
+            if (FiltersTab != null)
+                FiltersTab.Visibility = inactiveVisibility;
+        }
+
+        /// <summary>
+        /// Переключение вида макета: простой или форматный.
+        ///
+        /// Вид определяет, что показывать в конструкторе: у простого макета
+        /// шапка из одной строки, у форматного — уровни шапки и поворот подписей.
+        /// </summary>
+        private void OnLayoutShapeChanged(object sender, RoutedEventArgs e)
+        {
+            if (_closedXmlSheet == null)
+                return;
+
+            _closedXmlSheet.LayoutKind = FormattedLayoutRadio?.IsChecked == true
+                ? ClosedXmlLayoutKinds.Formatted
+                : ClosedXmlLayoutKinds.Simple;
+
+            ApplyLayoutShapeVisibility();
+            RefreshClosedXmlJson();
+        }
+
+        /// <summary>
+        /// Показывает средства, относящиеся к выбранному виду макета.
+        ///
+        /// Уровни шапки и высота её строки нужны только форматному макету:
+        /// в простом шапка состоит из одной строки подписей колонок.
+        /// </summary>
+        private void ApplyLayoutShapeVisibility()
+        {
+            var isFormatted = string.Equals(
+                _closedXmlSheet?.LayoutKind,
+                ClosedXmlLayoutKinds.Formatted,
+                StringComparison.OrdinalIgnoreCase);
+
+            if (FormattedLayoutRadio != null)
+                FormattedLayoutRadio.IsChecked = isFormatted;
+            if (SimpleLayoutRadio != null)
+                SimpleLayoutRadio.IsChecked = !isFormatted;
+
+            if (ClosedXmlHeaderLevelsExpander != null)
+                ClosedXmlHeaderLevelsExpander.Visibility = isFormatted ? Visibility.Visible : Visibility.Collapsed;
+
+            // Панель выбора вида нужна только для ClosedXML: у FRX своя механика.
+            if (LayoutShapePanel != null)
+                LayoutShapePanel.Visibility = ReportingFeatures.FrxEnabled
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+        }
+
+        /// <summary>
+        /// Скрывает пункт «FRX — макет FoxPro» в списке способа макета,
+        /// когда механизм FRX отключён.
+        /// </summary>
+        private void HideFrxLayoutKindItem()
+        {
+            if (LayoutKindCombo == null)
+                return;
+
+            foreach (var item in LayoutKindCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (!string.Equals(item.Tag?.ToString(), FoxProLayoutKind, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                item.Visibility = ReportingFeatures.FrxEnabled ? Visibility.Visible : Visibility.Collapsed;
+                return;
             }
         }
 
@@ -1787,6 +1978,12 @@ namespace BIS.ERP.Views
         private readonly ObservableCollection<ClosedXmlColumn> _closedXmlColumns = new();
         private readonly ObservableCollection<ClosedXmlSignature> _closedXmlSignatures = new();
 
+        /// <summary>
+        /// Ячейки уровней шапки. Плоский список: уровень задаётся номером,
+        /// так его удобнее править в таблице.
+        /// </summary>
+        private readonly ObservableCollection<ClosedXmlHeaderCellEdit> _closedXmlHeaderCells = new();
+
         /// <summary>Текущий лист макета (вкладка редактирует один лист).</summary>
         private ClosedXmlSheet? _closedXmlSheet;
 
@@ -1808,6 +2005,7 @@ namespace BIS.ERP.Views
             ClosedXmlCellsGrid.ItemsSource = _closedXmlCells;
             ClosedXmlColumnsGrid.ItemsSource = _closedXmlColumns;
             ClosedXmlSignaturesGrid.ItemsSource = _closedXmlSignatures;
+            ClosedXmlHeaderCellsGrid.ItemsSource = _closedXmlHeaderCells;
             ClosedXmlFieldsList.ItemsSource = _reportFields;
             LoadClosedXmlLayout(ClosedXmlLayoutTemplates.CreateBlank());
             UpdateClosedXmlSourceText();
@@ -1970,6 +2168,9 @@ namespace BIS.ERP.Views
 
                 ClosedXmlBlocksList.SelectedIndex = _closedXmlBlocks.Count > 0 ? 0 : -1;
                 LoadClosedXmlBlockEditors(_closedXmlBlocks.FirstOrDefault());
+
+                // Вид макета хранится в листе: показываем его состояние.
+                ApplyLayoutShapeVisibility();
             }
             finally
             {
@@ -1985,6 +2186,7 @@ namespace BIS.ERP.Views
             _closedXmlCells.Clear();
             _closedXmlColumns.Clear();
             _closedXmlSignatures.Clear();
+            _closedXmlHeaderCells.Clear();
             _closedXmlEditingBlock = block;
             _closedXmlEditorsBlock = null;
 
@@ -2008,6 +2210,17 @@ namespace BIS.ERP.Views
                 ClosedXmlHeaderFillBox.Text = block.Table.HeaderFill;
                 ClosedXmlAlternateFillBox.Text = block.Table.AlternateFill;
                 SelectComboByContent(ClosedXmlRowBorderCombo, block.Table.RowBorder);
+
+                // Уровни шапки: плоский список с номером уровня.
+                for (var levelIndex = 0; levelIndex < block.Table.HeaderLevels.Count; levelIndex++)
+                {
+                    foreach (var headerCell in block.Table.HeaderLevels[levelIndex].Cells)
+                        _closedXmlHeaderCells.Add(ClosedXmlHeaderCellEdit.FromModel(levelIndex, headerCell));
+                }
+
+                ClosedXmlHeaderHeightBox.Text = block.Table.HeaderRowHeight > 0
+                    ? block.Table.HeaderRowHeight.ToString("0.#")
+                    : string.Empty;
 
                 var group = block.Table.Groups.FirstOrDefault();
                 ClosedXmlGroupFieldsBox.Text = group == null ? string.Empty : string.Join(", ", group.ByFields);
@@ -2042,12 +2255,42 @@ namespace BIS.ERP.Views
         /// <summary>Переносит значения редакторов обратно в модель текущего блока и листа.</summary>
         private void CommitClosedXmlBlockEditors() => CommitClosedXmlBlockEditors(_closedXmlEditingBlock);
 
+        /// <summary>
+        /// Разворачивает плоский список ячеек шапки в уровни.
+        ///
+        /// Уровни идут по возрастанию номера: 0 — верхний. Пустые ячейки
+        /// отбрасываются, чтобы лишняя строка в таблице не портила шапку.
+        /// </summary>
+        private List<ClosedXmlHeaderLevel> BuildHeaderLevelsFromEditor()
+        {
+            var filled = _closedXmlHeaderCells
+                .Where(cell => cell.Column > 0 && (cell.MergeToColumn > 0 || !string.IsNullOrWhiteSpace(cell.Text)))
+                .ToList();
+
+            if (filled.Count == 0)
+                return new List<ClosedXmlHeaderLevel>();
+
+            return filled
+                .GroupBy(cell => Math.Max(0, cell.LevelIndex))
+                .OrderBy(group => group.Key)
+                .Select(group => new ClosedXmlHeaderLevel
+                {
+                    Name = $"Уровень {group.Key + 1}",
+                    Cells = group
+                        .OrderBy(cell => cell.Column)
+                        .Select(cell => cell.ToModel())
+                        .ToList()
+                })
+                .ToList();
+        }
+
         /// <summary>Фиксирует незавершённое редактирование гридов макета перед чтением модели.</summary>
         private void CommitClosedXmlGridEdits()
         {
             TryCommitGrid(ClosedXmlCellsGrid);
             TryCommitGrid(ClosedXmlColumnsGrid);
             TryCommitGrid(ClosedXmlSignaturesGrid);
+            TryCommitGrid(ClosedXmlHeaderCellsGrid);
         }
 
         private void CommitClosedXmlBlockEditors(ClosedXmlBlock? block)
@@ -2105,6 +2348,14 @@ namespace BIS.ERP.Views
                             Label = grandLabel,
                             SumFields = SplitClosedXmlList(ClosedXmlGrandTotalFieldsBox.Text)
                         };
+
+                    // Уровни шапки: плоский список разворачивается в список уровней.
+                    block.Table.HeaderLevels = BuildHeaderLevelsFromEditor();
+
+                    block.Table.HeaderRowHeight = double.TryParse(
+                        ClosedXmlHeaderHeightBox.Text, out var headerHeight) && headerHeight > 0
+                        ? headerHeight
+                        : 0;
                 }
                 else if (string.Equals(block.Type, "SignaturesRow", StringComparison.Ordinal))
                 {
@@ -2177,13 +2428,6 @@ namespace BIS.ERP.Views
         {
             LoadClosedXmlLayout(ClosedXmlLayoutTemplates.CreateBlank());
             StatusText.Text = "Создан пустой ClosedXML-макет";
-        }
-
-        private void OnLoadClosedXmlExampleClick(object sender, RoutedEventArgs e)
-        {
-            var tag = (ClosedXmlExampleCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Turnover";
-            LoadClosedXmlLayout(ClosedXmlLayoutTemplates.Create(tag));
-            StatusText.Text = $"Загружен пример ClosedXML-макета: {tag}";
         }
 
         private void OnAddClosedXmlBlockClick(object sender, RoutedEventArgs e)
@@ -2270,6 +2514,56 @@ namespace BIS.ERP.Views
             RefreshClosedXmlJson();
         }
 
+        /// <summary>
+        /// Предпросмотр макета ClosedXML в PDF.
+        ///
+        /// Вывод идёт по той же модели макета, что и Excel, поэтому документ
+        /// совпадает по составу и оформлению.
+        /// </summary>
+        private async void OnClosedXmlPreviewPdfClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var layout = BuildClosedXmlLayout();
+                if (layout == null)
+                {
+                    MessageBox.Show("Макет не задан.", "ClosedXML PDF",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                RefreshClosedXmlJson();
+
+                var report = BuildReportFromForm();
+                if (report == null)
+                    return;
+
+                Mouse.OverrideCursor = Cursors.Wait;
+                StatusText.Text = "Формирование PDF по макету ClosedXML...";
+
+                var parameters = await _reportService.ResolveParametersForPreviewAsync(report);
+                var data = await BuildClosedXmlPreviewDataAsync(report, parameters);
+                var previewData = ClosedXmlReportRenderer.PrepareData(data, report);
+
+                var typedParameters = parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+                var bytes = ClosedXmlReportRenderer.RenderToPdfBytes(layout, previewData, typedParameters);
+
+                var previewWindow = new PdfPreviewWindow(bytes, report.Name) { Owner = this };
+                previewWindow.ShowDialog();
+
+                StatusText.Text = "✅ Предпросмотр PDF открыт";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка предпросмотра PDF: {ex.Message}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
         private async void OnClosedXmlPreviewClick(object sender, RoutedEventArgs e)
         {
             try
@@ -2299,7 +2593,12 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Формирование ClosedXML-предпросмотра...";
 
                 var parameters = await _reportService.ResolveParametersForPreviewAsync(report);
-                var data = await _reportService.GetReportDataAsync(report, parameters);
+
+                // Для акта сверки набор данных строится тем же сервисом, что и в рабочем
+                // режиме. Общий генератор по метаданным отдаёт сырые поля проводок,
+                // и макет акта не находит в них свои колонки: он рассчитан на таблицу
+                // акта — с шапкой, парами счетов, сальдо и итогами.
+                var data = await BuildClosedXmlPreviewDataAsync(report, parameters);
                 var previewData = ClosedXmlReportRenderer.PrepareData(data, report);
 
                 var bytes = ClosedXmlReportRenderer.RenderToBytes(
@@ -2389,6 +2688,12 @@ namespace BIS.ERP.Views
         /// <summary>Имя колонки набора для привязки.</summary>
         public string TakeFromField { get; set; } = string.Empty;
 
+        /// <summary>Поворот текста в градусах: 0, 45, 90, 270.</summary>
+        public int TextRotation { get; set; }
+
+        /// <summary>Переносить длинный текст по словам.</summary>
+        public bool WrapText { get; set; }
+
         public static ClosedXmlCellEdit FromModel(int row, ClosedXmlTextCell cell) => new()
         {
             Row = row,
@@ -2402,7 +2707,9 @@ namespace BIS.ERP.Views
             Fill = cell.Fill,
             Border = cell.Border,
             TakeFromRow = cell.TakeFromRow,
-            TakeFromField = cell.TakeFromField
+            TakeFromField = cell.TakeFromField,
+            TextRotation = cell.TextRotation,
+            WrapText = cell.WrapText
         };
 
         public ClosedXmlTextCell ToModel() => new()
@@ -2417,7 +2724,61 @@ namespace BIS.ERP.Views
             Fill = Fill ?? string.Empty,
             Border = string.IsNullOrWhiteSpace(Border) ? "None" : Border,
             TakeFromRow = TakeFromRow,
-            TakeFromField = TakeFromField ?? string.Empty
+            TakeFromField = TakeFromField ?? string.Empty,
+            TextRotation = TextRotation,
+            WrapText = WrapText
+        };
+    }
+
+    /// <summary>
+    /// Ячейка уровня шапки для таблицы конструктора.
+    /// Плоский вид: уровень задаётся номером, иначе вложенный список
+    /// было бы неудобно править.
+    /// </summary>
+    public class ClosedXmlHeaderCellEdit
+    {
+        /// <summary>Номер уровня шапки, начиная с 0 (верхний).</summary>
+        public int LevelIndex { get; set; }
+
+        /// <summary>Имя уровня: подписывает уровень в списке.</summary>
+        public string LevelName { get; set; } = string.Empty;
+
+        public int Column { get; set; } = 1;
+
+        public int MergeToColumn { get; set; }
+
+        /// <summary>Подпись. Пусто в нижнем уровне — подставится заголовок колонки.</summary>
+        public string Text { get; set; } = string.Empty;
+
+        public bool Bold { get; set; } = true;
+
+        public string Align { get; set; } = "Center";
+
+        public int TextRotation { get; set; }
+
+        public string Fill { get; set; } = string.Empty;
+
+        public static ClosedXmlHeaderCellEdit FromModel(int levelIndex, ClosedXmlHeaderCell cell) => new()
+        {
+            LevelIndex = levelIndex,
+            Column = cell.Column,
+            MergeToColumn = cell.MergeToColumn,
+            Text = cell.Text,
+            Bold = cell.Bold,
+            Align = cell.Align,
+            TextRotation = cell.TextRotation,
+            Fill = cell.Fill
+        };
+
+        public ClosedXmlHeaderCell ToModel() => new()
+        {
+            Column = Column <= 0 ? 1 : Column,
+            MergeToColumn = MergeToColumn,
+            Text = Text ?? string.Empty,
+            Bold = Bold,
+            Align = string.IsNullOrWhiteSpace(Align) ? "Center" : Align,
+            TextRotation = TextRotation,
+            Fill = Fill ?? string.Empty
         };
     }
 

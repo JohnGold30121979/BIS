@@ -28,7 +28,7 @@
             </MenuItem>
             <MenuItem Header="Создать">
                 <MenuItem Header="Модуль" Click="OnModulesClick"/>
-                <MenuItem Header="📚 Справочник" Click="OnCreateCatalogClick"/>               
+                <MenuItem Header="📚 Справочник" Click="OnCreateCatalogClick"/>
                 <MenuItem Header="Создать Динамически">
                     <MenuItem Header="📚 Справочник" Click="OnCreateDynamicCatalogClick"/>
                     <MenuItem Header="📄 Документ" Click="OnCreateDynamicDocumentClick"/>

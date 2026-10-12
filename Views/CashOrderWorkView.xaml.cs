@@ -2331,7 +2331,7 @@ namespace BIS.ERP.Views
 
                 var printFormService = new PrintFormService(context);
                 var pdf = printFormService.ExportReportTemplatePreview(BuildCashOrdersDataTable(rows), report);
-                var previewWindow = new PdfPreviewWindow(pdf)
+                var previewWindow = new PdfPreviewWindow(pdf, report.Name)
                 {
                     Owner = Window.GetWindow(this)
                 };

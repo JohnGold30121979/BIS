@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -17,6 +17,9 @@ public sealed class ReportDataSetService
 {
     public const string DataSetReferenceKey = "ReportDataSetCode";
     public const string CashOrderTurnoverDataSetCode = "cash.order.turnover";
+
+    /// <summary>Код набора данных отчёта по счет-фактурам.</summary>
+    public const string InvoiceJournalDataSetCode = "finance.invoice-journal";
 
     private static readonly Regex ForbiddenSqlRegex = new(
         @"\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|execute|merge|vacuum|analyze|do|begin|commit|rollback)\b",
@@ -55,6 +58,9 @@ public sealed class ReportDataSetService
                 ""Code"" varchar(160) NOT NULL,
                 ""Name"" varchar(300) NOT NULL,
                 ""Description"" varchar(1000) NOT NULL DEFAULT '',
+                ""Kind"" varchar(20) NOT NULL DEFAULT 'Sql',
+                ""CalculatorCode"" varchar(120) NOT NULL DEFAULT '',
+                ""ParameterDefinitions"" text NOT NULL DEFAULT '',
                 ""SqlText"" text NOT NULL DEFAULT '',
                 ""IsActive"" boolean NOT NULL DEFAULT true,
                 ""IsSystem"" boolean NOT NULL DEFAULT false,
@@ -66,6 +72,12 @@ public sealed class ReportDataSetService
 
             CREATE UNIQUE INDEX IF NOT EXISTS ""IX_ReportDataSets_Code""
                 ON ""ReportDataSets"" (""Code"");
+
+            -- Поля вида набора данных появились позже: добавляем их к существующим
+            -- таблицам, чтобы обновление не требовало пересоздания базы.
+            ALTER TABLE ""ReportDataSets"" ADD COLUMN IF NOT EXISTS ""Kind"" varchar(20) NOT NULL DEFAULT 'Sql';
+            ALTER TABLE ""ReportDataSets"" ADD COLUMN IF NOT EXISTS ""CalculatorCode"" varchar(120) NOT NULL DEFAULT '';
+            ALTER TABLE ""ReportDataSets"" ADD COLUMN IF NOT EXISTS ""ParameterDefinitions"" text NOT NULL DEFAULT '';
 
             CREATE TABLE IF NOT EXISTS ""ReportDataSetFields"" (
                 ""Id"" uuid NOT NULL,
@@ -92,7 +104,222 @@ public sealed class ReportDataSetService
     {
         await EnsureSchemaAsync();
         await EnsureCashOrderTurnoverDataSetAsync();
+        await EnsureInvoiceJournalDataSetAsync();
+        await EnsureSystemCalculatorDataSetsAsync();
     }
+
+    /// <summary>
+    /// Заводит набор данных отчёта по счет-фактурам.
+    ///
+    /// Это образец SQL-набора: администратор открывает его в конфигураторе,
+    /// видит запрос целиком и правит под свою форму. Так же делается любой
+    /// другой отчёт по документам — без разработчика.
+    /// </summary>
+    private async Task EnsureInvoiceJournalDataSetAsync()
+    {
+        var dataSet = await _context.ReportDataSets
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item => item.Code == InvoiceJournalDataSetCode);
+
+        if (dataSet == null)
+        {
+            dataSet = new ReportDataSet
+            {
+                Id = Guid.NewGuid(),
+                Code = InvoiceJournalDataSetCode,
+                Name = "Счет-фактуры выданные и полученные",
+                Description = "SQL-набор данных по счет-фактурам: документ, организация, суммы без налога, НДС, налог с продаж, всего. Образец для сборки отчёта по документу.",
+                Kind = ReportDataSetKinds.Sql,
+                SqlText = BuildInvoiceJournalSql(),
+                IsActive = true,
+                IsSystem = true
+            };
+            await _context.ReportDataSets.AddAsync(dataSet);
+            await _context.SaveChangesAsync();
+        }
+        else if (string.Equals(dataSet.Kind, ReportDataSetKinds.Sql, StringComparison.OrdinalIgnoreCase))
+        {
+            dataSet.IsActive = true;
+            dataSet.IsSystem = true;
+
+            // Запрос обновляем, только если администратор его не менял.
+            // Признак правки — исчезли наши опорные имена.
+            var untouched = dataSet.SqlText.Contains("invoice_rows", StringComparison.OrdinalIgnoreCase)
+                            && dataSet.SqlText.Contains("@PeriodStart", StringComparison.OrdinalIgnoreCase);
+            if (untouched)
+                dataSet.SqlText = BuildInvoiceJournalSql();
+
+            await _context.SaveChangesAsync();
+        }
+
+        try
+        {
+            if (!dataSet.Fields.Any())
+            {
+                await RefreshFieldsFromSqlAsync(dataSet);
+                dataSet = await _context.ReportDataSets
+                    .Include(item => item.Fields)
+                    .FirstAsync(item => item.Id == dataSet.Id);
+            }
+
+            await SyncMetadataSourceAsync(dataSet);
+        }
+        catch (Exception ex)
+        {
+            _context.ChangeTracker.Clear();
+            SystemLogService.Error(
+                "Ошибка подготовки набора данных счет-фактур. Конфигуратор продолжит загрузку.",
+                nameof(ReportDataSetService), ex);
+        }
+    }
+
+    /// <summary>
+    /// Запрос отчёта по счет-фактурам. Образец для администратора:
+    /// соединение документа со справочником организаций, приведение типов,
+    /// вычисляемые подписи, отбор по периоду и организации.
+    /// </summary>
+    private static string BuildInvoiceJournalSql() => @"
+WITH invoice_rows AS (
+    SELECT
+        i.""doc_number""                              AS doc_number,
+        i.""doc_date""::date                          AS doc_date,
+        COALESCE(i.""organization_id""::text, '')     AS organization_id,
+        COALESCE(o.""name"", '')                      AS org_name,
+        COALESCE(NULLIF(i.""esf_number"", ''), '')    AS esf_number,
+        COALESCE(i.""amount_without_tax"", 0)         AS amount_without_tax,
+        COALESCE(i.""vat_total"", 0)                  AS vat_total,
+        COALESCE(i.""sales_tax_total"", 0)            AS sales_tax_total,
+        COALESCE(i.""amount"", 0)                     AS total_amount,
+        CASE WHEN COALESCE(i.""is_posted"", false)
+             THEN 'Проведён' ELSE 'Не проведён' END   AS posted_state,
+        'Выписка'                                     AS document_kind,
+        CASE
+            WHEN COALESCE(i.""supply_kind"", '') LIKE '%1%' THEN '1 - по ставке 0 процентов'
+            WHEN COALESCE(i.""supply_kind"", '') LIKE '%2%' THEN '2 - по ставке 12 процентов'
+            WHEN COALESCE(i.""supply_kind"", '') LIKE '%3%' THEN '3 - освобождённый оборот'
+            ELSE COALESCE(i.""supply_kind"", '')
+        END                                           AS supply_kind
+    FROM ""doc_sales_invoice"" i
+    LEFT JOIN catalog_organizations o ON i.""organization_id""::text = o.""Id""::text
+
+    UNION ALL
+
+    SELECT
+        p.""doc_number"",
+        p.""doc_date""::date,
+        COALESCE(p.""organization_id""::text, ''),
+        COALESCE(o.""name"", ''),
+        COALESCE(NULLIF(p.""esf_number"", ''), ''),
+        COALESCE(p.""amount_without_tax"", 0),
+        COALESCE(p.""vat_total"", 0),
+        COALESCE(p.""sales_tax_total"", 0),
+        COALESCE(p.""amount"", 0),
+        CASE WHEN COALESCE(p.""is_posted"", false)
+             THEN 'Проведён' ELSE 'Не проведён' END,
+        'Регистрация',
+        COALESCE(p.""supply_kind"", '')
+    FROM ""doc_purchase_invoice"" p
+    LEFT JOIN catalog_organizations o ON p.""organization_id""::text = o.""Id""::text
+)
+SELECT
+    doc_number,
+    doc_date,
+    organization_id,
+    org_name,
+    esf_number,
+    amount_without_tax,
+    vat_total,
+    sales_tax_total,
+    total_amount,
+    posted_state,
+    document_kind,
+    supply_kind,
+    'Журнал счет-фактур за период ' || TO_CHAR(CAST(@PeriodStart AS date), 'DD.MM.YYYY')
+        || ' - ' || TO_CHAR(CAST(@PeriodEnd AS date), 'DD.MM.YYYY')  AS report_title,
+    TO_CHAR(CAST(@PeriodStart AS date), 'DD.MM.YYYY')                AS period_start,
+    TO_CHAR(CAST(@PeriodEnd AS date), 'DD.MM.YYYY')                  AS period_end,
+    doc_number                                                       AS doc_number_text,
+    CAST(amount_without_tax AS text) || ' / ' || CAST(total_amount AS text) AS amounts_text
+FROM invoice_rows
+WHERE doc_date >= CAST(@PeriodStart AS date)
+  AND doc_date <= CAST(@PeriodEnd AS date)
+  -- Типы приводим явно: без этого PostgreSQL не сравнивает text с uuid.
+  AND (CAST(@OrganizationId AS text) = '' OR organization_id = CAST(@OrganizationId AS text))
+ORDER BY doc_date DESC, doc_number DESC";
+
+    /// <summary>
+    /// Заводит системные расчёты как готовые наборы данных.
+    ///
+    /// Так администратор сразу видит их в списке источников и может строить по ним
+    /// отчёты, не написав ни одной строки кода. Колонки берутся из справочника
+    /// расчётов, запрос писать не нужно.
+    /// </summary>
+    private async Task EnsureSystemCalculatorDataSetsAsync()
+    {
+        foreach (var calculator in SystemReportCalculators.All)
+        {
+            var existing = await _context.ReportDataSets
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Code == calculator.Code);
+
+            if (existing == null)
+            {
+                var created = new ReportDataSet
+                {
+                    Id = Guid.NewGuid(),
+                    Code = calculator.Code,
+                    Name = calculator.Name,
+                    Description = calculator.Description,
+                    Kind = ReportDataSetKinds.System,
+                    CalculatorCode = calculator.Code,
+                    ParameterDefinitions = BuildParameterDefinitions(calculator),
+                    SqlText = string.Empty,
+                    IsActive = true,
+                    IsSystem = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await _context.ReportDataSets.AddAsync(created);
+                await _context.SaveChangesAsync();
+
+                foreach (var field in SystemReportCalculators.BuildFieldRows(calculator, created.Id))
+                    _context.ReportDataSetFields.Add(field);
+
+                await _context.SaveChangesAsync();
+                await SyncMetadataSourceAsync(created);
+                _context.ChangeTracker.Clear();
+                continue;
+            }
+
+            // У существующего набора обновляем только описание и вид:
+            // правки администратора не перетираем.
+            if (!string.Equals(existing.Kind, ReportDataSetKinds.System, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            existing.CalculatorCode = calculator.Code;
+            existing.ParameterDefinitions = BuildParameterDefinitions(calculator);
+            await _context.SaveChangesAsync();
+
+            if (existing.Fields.Count != calculator.Fields.Count)
+            {
+                await RefreshFieldsFromCalculatorAsync(existing);
+                await SyncMetadataSourceAsync(existing);
+                _context.ChangeTracker.Clear();
+            }
+        }
+    }
+
+    /// <summary>Описание параметров расчёта для интерфейса — в виде JSON.</summary>
+    private static string BuildParameterDefinitions(SystemReportCalculator calculator) =>
+        JsonSerializer.Serialize(calculator.Parameters.Select(parameter => new
+        {
+            parameter.Name,
+            parameter.Title,
+            parameter.ParameterType,
+            parameter.DefaultValue,
+            parameter.IsRequired
+        }));
 
     public async Task<List<ReportDataSet>> GetDataSetsAsync()
     {
@@ -122,8 +349,23 @@ public sealed class ReportDataSetService
     {
         await EnsureSchemaAsync();
         dataSet.Code = NormalizeCode(dataSet.Code);
-        dataSet.SqlText = NormalizeSql(dataSet.SqlText);
-        ValidateSql(dataSet.SqlText);
+
+        var isSystem = IsSystemDataSet(dataSet);
+        dataSet.Kind = isSystem ? ReportDataSetKinds.System : ReportDataSetKinds.Sql;
+
+        if (isSystem)
+        {
+            // У системного расчёта SQL нет: проверять нечего.
+            dataSet.SqlText = string.Empty;
+            dataSet.CalculatorCode = dataSet.CalculatorCode.Trim();
+        }
+        else
+        {
+            dataSet.CalculatorCode = string.Empty;
+            dataSet.SqlText = NormalizeSql(dataSet.SqlText);
+            ValidateSql(dataSet.SqlText);
+        }
+
         dataSet.UpdatedAt = DateTime.UtcNow;
 
         var existing = await _context.ReportDataSets
@@ -146,6 +388,11 @@ public sealed class ReportDataSetService
             existing.IsActive = dataSet.IsActive;
             existing.UpdatedAt = DateTime.UtcNow;
             existing.IsSystem = dataSet.IsSystem;
+
+            // Вид набора данных и выбранный расчёт.
+            existing.Kind = dataSet.Kind;
+            existing.CalculatorCode = dataSet.CalculatorCode;
+            existing.ParameterDefinitions = dataSet.ParameterDefinitions;
         }
 
         await _context.SaveChangesAsync();
@@ -179,6 +426,10 @@ public sealed class ReportDataSetService
         IReadOnlyDictionary<string, object>? parameters = null,
         int? limit = null)
     {
+        // Системный расчёт: данные отдаёт готовый расчёт системы, а не запрос.
+        if (IsSystemDataSet(dataSet))
+            return await ExecuteSystemCalculatorAsync(dataSet, parameters);
+
         var sql = NormalizeSql(dataSet.SqlText);
         ValidateSql(sql);
 
@@ -207,13 +458,54 @@ public sealed class ReportDataSetService
     }
     public async Task<DataTable> TestAsync(ReportDataSet dataSet, int limit = 50)
     {
+        // Системный расчёт проверяется исполнением: SQL у него нет.
+        // Параметры не задаются — расчёт возьмёт период по умолчанию.
+        if (IsSystemDataSet(dataSet))
+            return await ExecuteSystemCalculatorAsync(dataSet, null);
+
         dataSet.SqlText = NormalizeSql(dataSet.SqlText);
         ValidateSql(dataSet.SqlText);
         return await ExecuteAsync(dataSet, null, limit);
     }
 
+    /// <summary>
+    /// Проверяет, что набор данных — системный расчёт.
+    ///
+    /// Вид определяется полем Kind. Старые наборы без этого поля считаются
+    /// SQL-запросами, поэтому обратная совместимость сохраняется.
+    /// </summary>
+    public static bool IsSystemDataSet(ReportDataSet dataSet) =>
+        string.Equals(dataSet.Kind, ReportDataSetKinds.System, StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(dataSet.CalculatorCode);
+
+    /// <summary>
+    /// Выполняет системный расчёт и возвращает его результат как таблицу данных.
+    /// </summary>
+    private async Task<DataTable> ExecuteSystemCalculatorAsync(
+        ReportDataSet dataSet,
+        IReadOnlyDictionary<string, object>? parameters)
+    {
+        var calculator = SystemReportCalculators.Find(dataSet.CalculatorCode);
+        if (calculator == null)
+        {
+            throw new InvalidOperationException(
+                $"Системный расчёт «{dataSet.CalculatorCode}» не найден. " +
+                "Выберите расчёт из списка на экране наборов данных.");
+        }
+
+        return await calculator.Build(_context, parameters, CancellationToken.None);
+    }
+
     public async Task RefreshFieldsFromSqlAsync(ReportDataSet dataSet)
     {
+        // У системного расчёта колонки объявлены в справочнике расчётов:
+        // запрашивать их из базы не нужно.
+        if (IsSystemDataSet(dataSet))
+        {
+            await RefreshFieldsFromCalculatorAsync(dataSet);
+            return;
+        }
+
         dataSet.SqlText = NormalizeSql(dataSet.SqlText);
         ValidateSql(dataSet.SqlText);
 
@@ -239,6 +531,28 @@ public sealed class ReportDataSetService
         await _context.SaveChangesAsync();
 
         foreach (var field in desiredFields)
+            _context.ReportDataSetFields.Add(field);
+        await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Записывает колонки системного расчёта.
+    /// Берутся из справочника — они известны заранее, в отличие от SQL-запроса.
+    /// </summary>
+    private async Task RefreshFieldsFromCalculatorAsync(ReportDataSet dataSet)
+    {
+        var calculator = SystemReportCalculators.Find(dataSet.CalculatorCode);
+        if (calculator == null)
+            return;
+
+        var dataSetId = dataSet.Id;
+        var existingFields = await _context.ReportDataSetFields
+            .Where(f => f.ReportDataSetId == dataSetId)
+            .ToListAsync();
+        _context.ReportDataSetFields.RemoveRange(existingFields);
+        await _context.SaveChangesAsync();
+
+        foreach (var field in SystemReportCalculators.BuildFieldRows(calculator, dataSetId))
             _context.ReportDataSetFields.Add(field);
         await _context.SaveChangesAsync();
     }

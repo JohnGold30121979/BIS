@@ -124,6 +124,20 @@
                                             <ComboBoxItem Content="FRX — макет FoxPro (FRX/native)" Tag="FoxProFRX"/>
                                         </ComboBox>
                                     </StackPanel>
+
+                                    <!-- Вид макета: простой список или печатный бланк. -->
+                                    <StackPanel x:Name="LayoutShapePanel" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <TextBlock Text="Вид макета:" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        <RadioButton x:Name="SimpleLayoutRadio" Content="Простой макет"
+                                                     GroupName="LayoutShape" Margin="12,0,0,0" VerticalAlignment="Center"
+                                                     Checked="OnLayoutShapeChanged"
+                                                     ToolTip="Таблица с одной строкой шапки: журналы, реестры, ведомости."/>
+                                        <RadioButton x:Name="FormattedLayoutRadio" Content="Форматный макет"
+                                                     GroupName="LayoutShape" Margin="16,0,0,0" VerticalAlignment="Center"
+                                                     Checked="OnLayoutShapeChanged"
+                                                     ToolTip="Печатный бланк: многоуровневая шапка, объединённые ячейки, поворот текста. Для счет-фактур и накладных."/>
+                                    </StackPanel>
+
                                     <TextBlock x:Name="LayoutKindHint" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#3B4A57"/>
                                 </StackPanel>
                             </Border>
@@ -689,13 +703,6 @@
                             <StackPanel DockPanel.Dock="Bottom">
                                 <Button Content="Новый пустой макет" Height="30" Margin="0,0,0,6"
                                         Background="#34495E" Foreground="White" Click="OnNewBlankClosedXmlLayoutClick"/>
-                                <ComboBox x:Name="ClosedXmlExampleCombo" Height="30" Margin="0,0,0,6"
-                                          ToolTip="Макеты построены по реальным программным отчётам системы, а не выдуманы">
-                                    <ComboBoxItem Content="Акт сверки (программный отчёт)" Tag="ReconciliationAct"/>
-                                    <ComboBoxItem Content="Оборотная ведомость по авансам" Tag="AdvanceTurnover"/>
-                                </ComboBox>
-                                <Button Content="Загрузить макет" Height="30" Margin="0,0,0,6"
-                                        Background="#8E44AD" Foreground="White" Click="OnLoadClosedXmlExampleClick"/>
                                 <WrapPanel>
                                     <Button Content="+ Заголовок" Width="115" Height="28" Margin="0,0,6,6" Click="OnAddClosedXmlBlockClick" Tag="TitleRows"/>
                                     <Button Content="+ Таблица" Width="115" Height="28" Margin="0,0,6,6" Click="OnAddClosedXmlBlockClick" Tag="TabularSection"/>
@@ -745,6 +752,10 @@
                                     <DataGridTextColumn Header="Выравн." Binding="{Binding Align, Mode=TwoWay}" Width="70"/>
                                     <DataGridTextColumn Header="Заливка" Binding="{Binding Fill, Mode=TwoWay}" Width="80"/>
                                     <DataGridTextColumn Header="Рамка" Binding="{Binding Border, Mode=TwoWay}" Width="70"/>
+                                    <DataGridTextColumn Header="Поворот" Binding="{Binding TextRotation, Mode=TwoWay}" Width="70"
+                                                        ToolTipService.ToolTip="Поворот текста в градусах: 0 — обычный, 90 — снизу вверх, 270 — сверху вниз, 45 — по диагонали."/>
+                                    <DataGridCheckBoxColumn Header="Перенос" Binding="{Binding WrapText, Mode=TwoWay}" Width="65"
+                                                            ToolTipService.ToolTip="Переносить длинный текст по словам внутри ячейки."/>
                                 </DataGrid.Columns>
                             </DataGrid>
 
@@ -753,6 +764,7 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
@@ -768,7 +780,39 @@
                                         <DataGridCheckBoxColumn Header="Жирн." Binding="{Binding Bold, Mode=TwoWay}" Width="55"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
-                                <StackPanel Grid.Row="2" Margin="0,0,0,6">
+
+                                <!-- Уровни шапки: для форматного макета (бланка). -->
+                                <Expander x:Name="ClosedXmlHeaderLevelsExpander" Grid.Row="2"
+                                          Header="Уровни шапки (для форматного макета)"
+                                          IsExpanded="False" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#3B4A57" Margin="0,0,0,4"
+                                                   Text="Пусто — шапка из одной строки по заголовкам колонок. Заполнено — шапка рисуется по уровням: уровень 0 верхний. Пустая подпись в нижнем уровне берёт заголовок колонки."/>
+                                        <WrapPanel Margin="0,0,0,4">
+                                            <TextBlock Text="Высота строки шапки:" VerticalAlignment="Center"/>
+                                            <TextBox x:Name="ClosedXmlHeaderHeightBox" Width="60" Height="24" Margin="6,0,0,0"
+                                                     VerticalContentAlignment="Center"
+                                                     ToolTip="Высота одной строки шапки в пунктах. Для вертикальных подписей нужна высокая строка, например 90."/>
+                                            <TextBlock Text="пт" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                        </WrapPanel>
+                                        <DataGrid x:Name="ClosedXmlHeaderCellsGrid" Height="150" AutoGenerateColumns="False"
+                                                  CanUserAddRows="True" CanUserDeleteRows="True">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Уровень" Binding="{Binding LevelIndex, Mode=TwoWay}" Width="60"
+                                                                    ToolTipService.ToolTip="0 — верхний уровень шапки."/>
+                                                <DataGridTextColumn Header="Колонка" Binding="{Binding Column, Mode=TwoWay}" Width="65"/>
+                                                <DataGridTextColumn Header="До кол." Binding="{Binding MergeToColumn, Mode=TwoWay}" Width="65"/>
+                                                <DataGridTextColumn Header="Подпись" Binding="{Binding Text, Mode=TwoWay}" Width="*"/>
+                                                <DataGridTextColumn Header="Выравн." Binding="{Binding Align, Mode=TwoWay}" Width="70"/>
+                                                <DataGridTextColumn Header="Поворот" Binding="{Binding TextRotation, Mode=TwoWay}" Width="70"
+                                                                    ToolTipService.ToolTip="0, 45, 90, 270."/>
+                                                <DataGridTextColumn Header="Заливка" Binding="{Binding Fill, Mode=TwoWay}" Width="75"/>
+                                                <DataGridCheckBoxColumn Header="Жирн." Binding="{Binding Bold, Mode=TwoWay}" Width="55"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </StackPanel>
+                                </Expander>
+                                <StackPanel Grid.Row="3" Margin="0,0,0,6">
                                     <WrapPanel>
                                         <TextBlock Text="Группировать по:" Width="110" VerticalAlignment="Center"/>
                                         <TextBox x:Name="ClosedXmlGroupFieldsBox" Width="180" Height="24" VerticalContentAlignment="Center"
@@ -811,7 +855,7 @@
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
-                                <WrapPanel Grid.Row="3">
+                                <WrapPanel Grid.Row="4">
                                     <TextBlock Text="Заливка шапки:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                                     <TextBox x:Name="ClosedXmlHeaderFillBox" Width="80" Height="24" VerticalContentAlignment="Center" Text="#D9E6F2"/>
                                     <TextBlock Text="Рамка строк:" VerticalAlignment="Center" Margin="12,0,6,0"/>
@@ -862,8 +906,10 @@
                                 <TextBlock Text="Кегль:"/>
                                 <TextBox x:Name="ClosedXmlFontSizeBox" Height="26" Margin="0,2,0,6" Text="10" VerticalContentAlignment="Center"/>
                                 <CheckBox x:Name="ClosedXmlGridLinesCheck" Content="Линии сетки" Margin="0,4,0,6"/>
-                                <Button Content="📊 Предпросмотр ClosedXML" Height="32" Margin="0,6,0,6"
+                                <Button Content="📊 Предпросмотр Excel" Height="32" Margin="0,6,0,4"
                                         Background="#2980B9" Foreground="White" Click="OnClosedXmlPreviewClick"/>
+                                <Button Content="📄 Предпросмотр PDF" Height="32" Margin="0,0,0,6"
+                                        Background="#8E44AD" Foreground="White" Click="OnClosedXmlPreviewPdfClick"/>
                                 <TextBlock Text="JSON разметки (сохраняется в БД):" Margin="0,6,0,2"/>
                             </StackPanel>
                             <TextBox x:Name="ClosedXmlJsonBox" FontFamily="Consolas" FontSize="10"
@@ -929,7 +975,7 @@
             </TabItem>
 
             <!-- Вкладка: Оформление -->            
-            <TabItem Header="🎨 Оформление">
+            <TabItem Header="🎨 Оформление" x:Name="AppearanceTab">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Border Padding="20" Background="White">
                         <Grid>
@@ -1026,7 +1072,7 @@
             </TabItem>
 
             <!-- Вкладка: Фильтры -->
-            <TabItem Header="🔍 Фильтры">
+            <TabItem Header="🔍 Фильтры" x:Name="FiltersTab">
                 <Border Padding="20" Background="White">
                     <StackPanel>
                         <TextBlock Text="Условия отбора" FontSize="14" FontWeight="Bold" Margin="0,0,0,15"/>

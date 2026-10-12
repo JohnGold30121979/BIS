@@ -349,6 +349,7 @@ namespace BIS.ERP.Views
                     "PaymentOrderRegister" => await BuildPaymentOrderRegisterAsync(start, end),
                     "OrganizationReconciliation" => await BuildOrganizationReconciliationAsync(start, end),
                     "OrganizationReconciliationClosedXml" => await BuildOrganizationReconciliationAsync(start, end, closedXml: true),
+                    "TrialBalanceClosedXml" => await BuildTrialBalanceAsync(start, end, closedXml: true),
                     _ => await BuildTrialBalanceAsync(start, end)
                 };
 
@@ -567,36 +568,42 @@ namespace BIS.ERP.Views
             new TurnoversDialog(code, name, start, end, _postingService) { Owner = Window.GetWindow(this) }.ShowDialog();
         }
 
-        private async Task<(DataTable, Report)> BuildTrialBalanceAsync(DateTime start, DateTime end)
+        /// <summary>
+        /// Строит оборотно-сальдовую ведомость. При <paramref name="closedXml"/> отчёт
+        /// помечается как ClosedXML-макет: FRX-вариант не применяется, макет берётся
+        /// из отчёта «Оборотная ведомость (ClosedXML)» в базе.
+        /// </summary>
+        private async Task<(DataTable, Report)> BuildTrialBalanceAsync(
+            DateTime start,
+            DateTime end,
+            bool closedXml = false)
         {
             if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
                 throw new InvalidOperationException("Для оборотно-сальдовой ведомости выберите счет.");
 
-            var variant = GetSelectedTrialBalanceReportVariant();
+            var variant = closedXml ? null : GetSelectedTrialBalanceReportVariant();
             var selectedOrganization = GetSelectedOrganizationScope();
             var side = GetSelectedTrialBalanceSide();
-            var balances = await BuildTrialBalanceByAccountAsync(start, end, _trialBalanceAccountCode, side, selectedOrganization);
-            balances = balances
-                .Where(HasTurnover)
-                .OrderBy(item => item.AccountCode, StringComparer.OrdinalIgnoreCase)
-                .ToList();
 
-            var table = new DataTable("Оборотно-сальдовая ведомость");
-            table.Columns.Add("Счет", typeof(string));
-            table.Columns.Add("Наименование", typeof(string));
-            foreach (var name in new[] { "Сальдо на начало Дт", "Сальдо на начало Кт", "Оборот Дт", "Оборот Кт", "Сальдо на конец Дт", "Сальдо на конец Кт" })
-                table.Columns.Add(name, typeof(decimal));
+            // Построение таблицы выполняет общий сервис: тот же код используется
+            // диагностическим инструментом, поэтому поведение можно проверить
+            // без запуска окна.
+            var builder = new TrialBalanceBuilder(_context);
+            var request = new TrialBalanceRequest(
+                _trialBalanceAccountCode,
+                start,
+                end,
+                side,
+                ToOrganizationScope(selectedOrganization));
+            var balance = await builder.BuildTableAsync(request);
+            var table = balance.Table;
 
-            foreach (var item in balances)
-                table.Rows.Add(item.AccountCode, item.AccountName, item.OpeningDebit, item.OpeningCredit,
-                    item.TurnoverDebit, item.TurnoverCredit, item.ClosingDebit, item.ClosingCredit);
-
-            AddTotalsRow(table, 2);
-            var sideTitle = side == TrialBalanceAccountSide.Credit ? "кредиту" : "дебету";
+            var sideTitle = side == TrialBalanceSide.Credit ? "кредиту" : "дебету";
             var organizationSuffix = selectedOrganization == null
                 ? string.Empty
                 : $", организация: {ResolveOrganizationTitle(selectedOrganization.Id, selectedOrganization.Name)}";
-            var reportTitle = $"Оборотно-сальдовая ведомость по {sideTitle} счета {_trialBalanceAccountCode} за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}{organizationSuffix}";
+            var titlePrefix = closedXml ? "Оборотная ведомость (ClosedXML)" : "Оборотно-сальдовая ведомость";
+            var reportTitle = $"{titlePrefix} по {sideTitle} счета {_trialBalanceAccountCode} за {start:dd/MM/yyyy} - {end:dd/MM/yyyy}{organizationSuffix}";
             var report = CreateReport(table, reportTitle, true);
             report.ReportType = "TrialBalance";
             report.SubtitleText = variant?.IsStandard == false
@@ -604,97 +611,34 @@ namespace BIS.ERP.Views
                 : $"Счет {_trialBalanceAccountCode}, сторона отбора: {sideTitle}";
             if (variant?.IsStandard == false)
                 report.FooterText = $"Выбран FRX-макет ОСВ: {variant.DisplayName}.";
-            await ApplyTrialBalanceVariantLayoutAsync(report, variant);
+
+            if (closedXml)
+            {
+                // Макет берётся из отчёта «Оборотная ведомость (ClosedXML)» в базе.
+                report.SourceFormat = "ClosedXml";
+                report.IsPrintForm = false;
+                report.ClosedXmlLayout = await LoadClosedXmlTrialBalanceLayoutAsync();
+            }
+            else
+            {
+                await ApplyTrialBalanceVariantLayoutAsync(report, variant);
+            }
+
             return (table, report);
         }
 
-        private async Task<List<TurnoverBalance>> BuildTrialBalanceByAccountAsync(
-            DateTime start,
-            DateTime end,
-            string accountCode,
-            TrialBalanceAccountSide side,
-            OrganizationSelectionItem? organization)
+        /// <summary>Переводит выбранную организацию в ограничение для сервиса ведомости.</summary>
+        private static TrialBalanceOrganizationScope? ToOrganizationScope(OrganizationSelectionItem? organization)
         {
-            var periodStart = start.Date;
-            var periodEndExclusive = end.Date.AddDays(1);
-            var postings = (await _postingService.GetAllPostingsAsync(null, periodEndExclusive.AddTicks(-1)))
-                .Where(posting => posting.Date < periodEndExclusive)
-                .Where(posting => MatchesTrialBalanceOrganization(posting, organization))
-                .ToList();
-            var periodPostings = postings
-                .Where(posting => posting.Date >= periodStart && AccountMatchesSelectedSide(posting, accountCode, side))
-                .ToList();
-            var accountNames = await LoadTrialBalanceAccountNamesAsync();
-            var accountCodes = periodPostings
-                .SelectMany(posting => new[] { posting.DebitAccount, posting.CreditAccount })
-                .Where(code => !string.IsNullOrWhiteSpace(code))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            if (organization == null)
+                return null;
 
-            return accountCodes.Select(code =>
-            {
-                var openingDebit = postings
-                    .Where(posting => posting.Date < periodStart && SameAccount(posting.DebitAccount, code))
-                    .Sum(posting => posting.Amount);
-                var openingCredit = postings
-                    .Where(posting => posting.Date < periodStart && SameAccount(posting.CreditAccount, code))
-                    .Sum(posting => posting.Amount);
-                var turnoverDebit = periodPostings
-                    .Where(posting => SameAccount(posting.DebitAccount, code))
-                    .Sum(posting => posting.Amount);
-                var turnoverCredit = periodPostings
-                    .Where(posting => SameAccount(posting.CreditAccount, code))
-                    .Sum(posting => posting.Amount);
-                var openingNet = openingDebit - openingCredit;
-                var closingNet = openingNet + turnoverDebit - turnoverCredit;
-
-                return new TurnoverBalance
-                {
-                    AccountCode = code,
-                    AccountName = accountNames.TryGetValue(code, out var accountName) ? accountName : code,
-                    OpeningDebit = Math.Max(openingNet, 0),
-                    OpeningCredit = Math.Max(-openingNet, 0),
-                    TurnoverDebit = turnoverDebit,
-                    TurnoverCredit = turnoverCredit,
-                    ClosingDebit = Math.Max(closingNet, 0),
-                    ClosingCredit = Math.Max(-closingNet, 0)
-                };
-            }).ToList();
-        }
-
-        private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync()
-        {
-            var metadata = await _context.MetadataObjects.AsNoTracking()
-                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
-            return metadata == null
-                ? new List<Dictionary<string, object>>()
-                : await _metadataService.GetCatalogDataAsync(metadata.Id);
-        }
-
-        private async Task<Dictionary<string, string>> LoadTrialBalanceAccountNamesAsync()
-        {
-            try
-            {
-                var rows = await LoadTrialBalanceAccountSelectionDataAsync();
-                return rows
-                    .Select(row => new
-                    {
-                        Code = ReadReportString(row, "Код", "code", "Code", "Счет", "account_code"),
-                        Name = ReadReportString(row, "Наименование", "name", "Name")
-                    })
-                    .Where(account => !string.IsNullOrWhiteSpace(account.Code))
-                    .GroupBy(account => account.Code, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(
-                        group => group.Key,
-                        group => string.IsNullOrWhiteSpace(group.First().Name) ? group.Key : group.First().Name,
-                        StringComparer.OrdinalIgnoreCase);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки плана счетов для ОСВ: {ex.Message}");
-                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            }
+            return new TrialBalanceOrganizationScope(
+                organization.Id,
+                organization.Name,
+                organization.DisplayName,
+                organization.FullName,
+                organization.Code);
         }
 
         private OrganizationSelectionItem? GetSelectedOrganizationScope()
@@ -710,56 +654,21 @@ namespace BIS.ERP.Views
                 };
         }
 
-        private TrialBalanceAccountSide GetSelectedTrialBalanceSide()
+        /// <summary>
+        /// Сторона счёта, по которой строится ведомость.
+        /// Значение читается из списка и переводится в тип сервиса.
+        /// </summary>
+        private TrialBalanceSide GetSelectedTrialBalanceSide()
         {
             var side = (TrialBalanceSideCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
             return string.Equals(side, "Credit", StringComparison.OrdinalIgnoreCase)
-                ? TrialBalanceAccountSide.Credit
-                : TrialBalanceAccountSide.Debit;
+                ? TrialBalanceSide.Credit
+                : TrialBalanceSide.Debit;
         }
 
-        private static bool AccountMatchesSelectedSide(PostingViewModel posting, string accountCode, TrialBalanceAccountSide side)
-        {
-            return side == TrialBalanceAccountSide.Credit
-                ? SameAccount(posting.CreditAccount, accountCode)
-                : SameAccount(posting.DebitAccount, accountCode);
-        }
-
-        private static bool MatchesTrialBalanceOrganization(PostingViewModel posting, OrganizationSelectionItem? organization)
-        {
-            if (organization == null || organization.IsAll)
-                return true;
-
-            var postingOrganization = posting.Organization?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(postingOrganization))
-                return false;
-            if (organization.Id.HasValue && organization.Id.Value != Guid.Empty &&
-                postingOrganization.Equals(organization.Id.Value.ToString(), StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            var postingName = NormalizeOrganizationLookupValue(postingOrganization);
-            var candidates = new[] { organization.DisplayName, organization.Name, organization.FullName, organization.Code }
-                .Select(NormalizeOrganizationLookupValue)
-                .Where(value => !string.IsNullOrWhiteSpace(value));
-
-            return candidates.Any(candidate =>
-                postingOrganization.Equals(candidate, StringComparison.CurrentCultureIgnoreCase) ||
-                postingName.Equals(candidate, StringComparison.CurrentCultureIgnoreCase));
-        }
-
-        private static string NormalizeOrganizationLookupValue(string? value) =>
-            NormalizeOrganizationName(value)
-                .Replace(" (неактивна)", string.Empty, StringComparison.CurrentCultureIgnoreCase)
-                .Trim();
-
-        private static bool HasTurnover(TurnoverBalance balance) =>
-            balance.TurnoverDebit != 0m || balance.TurnoverCredit != 0m;
-
-        private enum TrialBalanceAccountSide
-        {
-            Debit,
-            Credit
-        }
+        /// <summary>Строки плана счетов — для выбора счёта в интерфейсе.</summary>
+        private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync() =>
+            await new TrialBalanceBuilder(_context).LoadAccountSelectionDataAsync();
 
         private async Task<(DataTable, Report)> BuildPaymentOrderRegisterAsync(DateTime start, DateTime end)
         {
@@ -802,6 +711,12 @@ namespace BIS.ERP.Views
         private const string ClosedXmlReconciliationActCode = "standard.finance.reconciliation-act-closedxml";
 
         /// <summary>
+        /// Код стандартного отчёта, в котором хранится визуальный макет
+        /// оборотно-сальдовой ведомости.
+        /// </summary>
+        private const string ClosedXmlTrialBalanceCode = "standard.finance.trial-balance-closedxml";
+
+        /// <summary>
         /// Читает макет акта сверки из одноимённого отчёта в базе. Источник макета — сам отчёт,
         /// поэтому правки, сделанные в генераторе отчётов, сразу влияют на вывод.
         /// </summary>
@@ -809,6 +724,19 @@ namespace BIS.ERP.Views
         {
             var stored = await _context.Reports.AsNoTracking()
                 .Where(report => report.Code == ClosedXmlReconciliationActCode)
+                .Select(report => report.ClosedXmlLayout)
+                .FirstOrDefaultAsync();
+
+            return stored ?? string.Empty;
+        }
+
+        /// <summary>
+        /// Читает макет оборотно-сальдовой ведомости из одноимённого отчёта в базе.
+        /// </summary>
+        private async Task<string> LoadClosedXmlTrialBalanceLayoutAsync()
+        {
+            var stored = await _context.Reports.AsNoTracking()
+                .Where(report => report.Code == ClosedXmlTrialBalanceCode)
                 .Select(report => report.ClosedXmlLayout)
                 .FirstOrDefaultAsync();
 
@@ -1071,6 +999,16 @@ namespace BIS.ERP.Views
                     IsStandard = true
                 }
             };
+
+            // При отключённом FRX остаётся только расчётный вариант.
+            if (!ReportingFeatures.FrxEnabled)
+            {
+                TrialBalanceVariantCombo.ItemsSource = variants;
+                TrialBalanceVariantCombo.SelectedIndex = 0;
+                TrialBalanceVariantCombo.IsEnabled = false;
+                return;
+            }
+
             var variantsLoadError = string.Empty;
 
             try
@@ -1135,6 +1073,17 @@ namespace BIS.ERP.Views
                     IsStandard = true
                 }
             };
+
+            // При отключённом FRX список вариантов не заполняется: остаётся только
+            // стандартный расчётный вариант, который выводится через ClosedXML.
+            if (!ReportingFeatures.FrxEnabled)
+            {
+                ReconciliationVariantCombo.ItemsSource = variants;
+                ReconciliationVariantCombo.SelectedIndex = 0;
+                ReconciliationVariantCombo.IsEnabled = false;
+                return;
+            }
+
             var variantsLoadError = string.Empty;
 
             try
@@ -1215,11 +1164,12 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Для «Акта сверки (ClosedXML)» формат вывода переключается на ClosedXML автоматически.
+        /// Для отчётов с визуальным макетом ClosedXML формат вывода переключается
+        /// на ClosedXML автоматически.
         /// </summary>
         private void ApplyRecommendedOutputFormat()
         {
-            if (ReportOutputFormatCombo == null || !IsClosedXmlReconciliationSelected())
+            if (ReportOutputFormatCombo == null || !IsAnyClosedXmlReportSelected())
                 return;
 
             foreach (var item in ReportOutputFormatCombo.Items.OfType<ComboBoxItem>())
@@ -1251,21 +1201,38 @@ namespace BIS.ERP.Views
                     : Visibility.Collapsed;
             }
 
+            if (TrialBalanceClosedXmlPanel != null)
+            {
+                TrialBalanceClosedXmlPanel.Visibility = IsClosedXmlTrialBalanceSelected()
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
             if (TrialBalanceFilterPanel != null)
             {
+                // Фильтр по счёту нужен и программной, и ClosedXML-ведомости.
                 TrialBalanceFilterPanel.Visibility = IsTrialBalanceSelected()
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             }
         }
 
+        /// <summary>Выбран один из отчётов с визуальным макетом ClosedXML.</summary>
+        private bool IsAnyClosedXmlReportSelected() =>
+            IsClosedXmlReconciliationSelected() || IsClosedXmlTrialBalanceSelected();
+
         private bool IsClosedXmlReconciliationSelected() =>
             string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
                 "OrganizationReconciliationClosedXml", StringComparison.OrdinalIgnoreCase);
 
+        private bool IsClosedXmlTrialBalanceSelected() =>
+            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
+                "TrialBalanceClosedXml", StringComparison.OrdinalIgnoreCase);
+
         private bool IsTrialBalanceSelected() =>
             string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
-                "TrialBalance", StringComparison.OrdinalIgnoreCase);
+                "TrialBalance", StringComparison.OrdinalIgnoreCase) ||
+            IsClosedXmlTrialBalanceSelected();
 
         private bool IsOrganizationReconciliationSelected() =>
             string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
@@ -1626,7 +1593,14 @@ namespace BIS.ERP.Views
             return $"Сформировано актов по организациям: {organizationCount}. Итоговая задолженность отсутствует.";
         }
 
+        /// <summary>
+        /// Признак наличия макета FoxPro FRX.
+        ///
+        /// При отключённом FRX всегда false: вывод по макетам FoxPro недоступен,
+        /// и отчёт формируется другими механизмами.
+        /// </summary>
         private static bool HasFoxProTemplate(Report report) =>
+            ReportingFeatures.FrxEnabled &&
             !string.IsNullOrWhiteSpace(report.Template) &&
             (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));
@@ -1638,8 +1612,19 @@ namespace BIS.ERP.Views
         private bool ShouldUseFoxProExcelLayout(Report report) =>
             HasFoxProTemplate(report) && IsFoxProExcelFormat(GetSelectedReportOutputFormat());
 
-        private string GetSelectedReportOutputFormat() =>
-            (ReportOutputFormatCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ProgramExcel";
+        /// <summary>
+        /// Выбранный формат вывода. При отключённом FRX формат FRX заменяется
+        /// на ClosedXML Excel — чтобы отчёт всё равно сформировался.
+        /// </summary>
+        private string GetSelectedReportOutputFormat()
+        {
+            var format = (ReportOutputFormatCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ProgramExcel";
+
+            if (!ReportingFeatures.FrxEnabled && ReportingFeatures.IsFrxFormat(format))
+                return "ClosedXmlExcel";
+
+            return format;
+        }
 
         private static bool IsProgrammaticExcelFormat(string format) =>
             FormatIs(format, "ProgramExcel", "ExcelNative");
@@ -1656,6 +1641,10 @@ namespace BIS.ERP.Views
         /// <summary>Формат вывода по визуальной разметке ClosedXML (вкладка «📊 ClosedXML макет»).</summary>
         private static bool IsClosedXmlExcelFormat(string format) =>
             FormatIs(format, "ClosedXmlExcel", "ExcelClosedXml");
+
+        /// <summary>Формат вывода PDF по визуальной разметке ClosedXML.</summary>
+        private static bool IsClosedXmlPdfFormat(string format) =>
+            FormatIs(format, "ClosedXmlPdf", "PdfClosedXml");
 
         private static bool HasClosedXmlLayout(Report report) =>
             report != null && !string.IsNullOrWhiteSpace(report.ClosedXmlLayout);
@@ -2119,7 +2108,71 @@ namespace BIS.ERP.Views
                 return;
             }
 
+            if (IsClosedXmlPdfFormat(format))
+            {
+                OnExportClosedXmlPdfClick(sender, e);
+                return;
+            }
+
             OnExportExcelClick(sender, e);
+        }
+
+        /// <summary>
+        /// Вывод отчёта в PDF по визуальной разметке ClosedXML.
+        ///
+        /// Идёт по той же модели макета, что и вывод в Excel, поэтому документ
+        /// совпадает по составу и оформлению. Для акта сверки набор данных
+        /// строится тем же сервисом, что и Excel-вывод.
+        /// </summary>
+        private async void OnExportClosedXmlPdfClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_currentData == null || _currentReport == null)
+                {
+                    MessageBox.Show("Сначала сформируйте отчет.", "ClosedXML PDF",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                if (!HasClosedXmlLayout(_currentReport))
+                {
+                    MessageBox.Show(
+                        "Для выбранного отчета не сохранён ClosedXML-макет. Откройте конструктор, вкладку «📊 ClosedXML макет», соберите разметку и сохраните отчет.",
+                        "ClosedXML PDF", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                IsEnabled = false;
+                StatusText.Text = "Открытие ClosedXML PDF...";
+
+                var dataSnapshot = _currentData.Copy();
+                var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
+                var layout = ClosedXmlReportRenderer.ParseLayout(reportSnapshot.ClosedXmlLayout, out var layoutError);
+                if (layout == null)
+                    throw new InvalidOperationException(layoutError);
+
+                var renderParameters = await _reportService.ResolveParametersForPreviewAsync(reportSnapshot);
+                var preparedData = ClosedXmlReportRenderer.PrepareData(dataSnapshot, reportSnapshot);
+                var typedParameters = renderParameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
+                var pdfBytes = await Task.Run(() =>
+                    ClosedXmlReportRenderer.RenderToPdfBytes(layout, preparedData, typedParameters));
+
+                var previewWindow = new PdfPreviewWindow(pdfBytes, _currentReport.Name) { Owner = Window.GetWindow(this) };
+                previewWindow.ShowDialog();
+
+                StatusText.Text = "✅ ClosedXML PDF открыт";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка вывода ClosedXML PDF";
+                MessageBox.Show($"Ошибка вывода ClosedXML PDF: {ex.Message}", "ClosedXML PDF",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsEnabled = true;
+            }
         }
 
         private static Report CloneReportForBackgroundPreview(Report source)
@@ -2247,10 +2300,8 @@ namespace BIS.ERP.Views
                     pdfBytes = await Task.Run(() => _reportService.ExportToPdf(dataSnapshot, reportSnapshot));
                 }
 
-                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_PROGRAM", "pdf");
-                File.WriteAllBytes(outputPath, pdfBytes);
-                OpenGeneratedFile(outputPath);
-                StatusText.Text = $"Программный PDF открыт: {Path.GetFileName(outputPath)}";
+                ShowPdfPreview(pdfBytes, $"{_currentReport.Name} (программный)");
+                StatusText.Text = "Программный PDF открыт в окне предпросмотра";
             }
             catch (Exception ex)
             {
@@ -2306,10 +2357,8 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_NATIVE", "pdf");
-                File.WriteAllBytes(outputPath, await pdfTask);
-                OpenGeneratedFile(outputPath);
-                StatusText.Text = $"Нативный PDF открыт: {Path.GetFileName(outputPath)}";
+                ShowPdfPreview(await pdfTask, $"{_currentReport.Name} (нативный)");
+                StatusText.Text = "Нативный PDF открыт в окне предпросмотра";
             }
             catch (Exception ex)
             {
@@ -2368,10 +2417,8 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var outputPath = BuildTemporaryReportPath($"{_currentReport.Name}_FRX", "pdf");
-                File.WriteAllBytes(outputPath, await pdfTask);
-                OpenGeneratedFile(outputPath);
-                StatusText.Text = $"PDF по FRX-макету открыт: {Path.GetFileName(outputPath)}";
+                ShowPdfPreview(await pdfTask, $"{_currentReport.Name} (FRX)");
+                StatusText.Text = "PDF по FRX-макету открыт в окне предпросмотра";
             }
             catch (Exception ex)
             {
@@ -2577,6 +2624,21 @@ namespace BIS.ERP.Views
                 .Select(ch => invalidChars.Contains(ch) ? '_' : ch)
                 .ToArray();
             return new string(chars).Trim(' ', '.', '_');
+        }
+
+        /// <summary>
+        /// Показывает сформированный PDF в окне предпросмотра.
+        ///
+        /// Документ не пишется на диск и не открывается внешней программой:
+        /// просмотр и печать выполняются в самом окне.
+        /// </summary>
+        private void ShowPdfPreview(byte[] pdfBytes, string documentName)
+        {
+            var previewWindow = new PdfPreviewWindow(pdfBytes, documentName)
+            {
+                Owner = Window.GetWindow(this)
+            };
+            previewWindow.ShowDialog();
         }
 
         private static void OpenGeneratedFile(string filePath)

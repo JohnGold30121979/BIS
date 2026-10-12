@@ -5,14 +5,12 @@ using System.Collections.Generic;
 namespace BIS.ERP.Services
 {
     /// <summary>
-    /// Готовые разметки ClosedXML-макета, построенные по РЕАЛЬНЫМ программным отчётам
+    /// Готовые разметки ClosedXML-макета, построенные по РЕАЛЬНОМУ программному отчёту
     /// системы, а не «на глазок»:
     /// <list type="bullet">
     ///   <item>«Акт сверки» — по <c>ReconciliationActBuilder</c> и
     ///     <c>PrintFormService.BuildReconciliationActExcel</c>: 8 настоящих колонок,
-    ///     плоский поток строк, выделение важных строк по содержимому;</item>
-    ///   <item>«Оборотная ведомость по авансам» — колонки из
-    ///     <c>AdvancePaymentsTurnoverReportService</c>.</item>
+    ///     плоский поток строк, выделение важных строк по содержимому.</item>
     /// </list>
     /// Класс намеренно не зависит от WPF: его используют и конструктор, и вывод отчёта.
     /// </summary>
@@ -25,6 +23,18 @@ namespace BIS.ERP.Services
         private static readonly string[] ActHeaders =
         {
             ActLabelField, "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "N докум", "Дата", "Модуль"
+        };
+
+        /// <summary>Колонка набора ведомости, в которой лежат заголовок и период.</summary>
+        public const string TrialBalanceTitleField = "report_title";
+
+        /// <summary>Заголовки ведомости — те же, что печатает программный вывод.</summary>
+        private static readonly string[] TrialBalanceHeaders =
+        {
+            "Счет", "Наименование",
+            "Сальдо на начало Дт", "Сальдо на начало Кт",
+            "Оборот Дт", "Оборот Кт",
+            "Сальдо на конец Дт", "Сальдо на конец Кт"
         };
 
         public static ClosedXmlReportLayout CreateBlank() => new()
@@ -52,17 +62,23 @@ namespace BIS.ERP.Services
         }
 
         /// <summary>
-        /// Разметка по умолчанию для отчёта: у программного акта сверки визуальный макет
-        /// подставляется сразу, поэтому «программный» отчёт можно открыть и править мышью.
+        /// Разметка по умолчанию для отчёта: у акта сверки и оборотной ведомости
+        /// визуальный макет подставляется сразу, поэтому «программный» отчёт
+        /// можно открыть и править мышью.
         /// </summary>
-        public static ClosedXmlReportLayout CreateForReport(Report? report) =>
-            IsReconciliationAct(report) ? CreateReconciliationAct(report!.Name) : CreateBlank();
-
-        public static ClosedXmlReportLayout Create(string tag) => tag switch
+        public static ClosedXmlReportLayout CreateForReport(Report? report)
         {
-            "AdvanceTurnover" => CreateAdvanceTurnover(),
-            _ => CreateReconciliationAct(null)
-        };
+            if (IsReconciliationAct(report))
+                return CreateReconciliationAct(report!.Name);
+
+            if (IsTrialBalance(report))
+                return CreateTrialBalance(report!.Name);
+
+            if (IsInvoiceJournal(report))
+                return CreateInvoiceJournal(report!.Name);
+
+            return CreateBlank();
+        }
 
         // =============================================================
         // Акт сверки — ТОЧНЫЙ перенос программного Excel
@@ -219,33 +235,48 @@ namespace BIS.ERP.Services
             }
         };
 
+        /// <summary>Признак оборотно-сальдовой ведомости.</summary>
+        public static bool IsTrialBalance(Report? report)
+        {
+            if (report == null)
+                return false;
+
+            return string.Equals(report.ReportType, "TrialBalance", StringComparison.OrdinalIgnoreCase)
+                   || (!string.IsNullOrWhiteSpace(report.Name) &&
+                       report.Name.Contains("Оборот", StringComparison.OrdinalIgnoreCase));
+        }
+
         // =============================================================
-        // Оборотная ведомость по авансам: колонки программного отчёта
-        // (Services/AdvancePaymentsTurnoverReportService.cs).
-        // Многорядная шапка «ОБОРОТЫ - сом» и сальдо с арифметикой вне SUM
-        // моделью пока не выражаются — см. Docs/ExcelReportsProgrammatic.md §13.
+        // Оборотно-сальдовая ведомость — перенос программного вывода.
+        //
+        // Раскладка листа:
+        //   строка 1  — наименование ведомости, объединение A:H, жирный, по центру
+        //   строка 2  — период, объединение A:H, по центру
+        //   строка 3  — шапка 8 колонок, заливка #D9E6F2, жирный, по центру
+        //   строки 4+ — тело: счета ведомости, последняя строка набора — «ИТОГО»
         // =============================================================
-        public static ClosedXmlReportLayout CreateAdvanceTurnover() => new()
+        public static ClosedXmlReportLayout CreateTrialBalance(string? sheetName) => new()
         {
             Sheets =
             {
                 new ClosedXmlSheet
                 {
-                    Name = "Оборотная ведомость",
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Оборотная ведомость" : sheetName,
                     PageSetup = new ClosedXmlPageSetup
                     {
                         Orientation = "Landscape",
                         FitToPagesWide = 1,
-                        ShowGridLines = true,
+                        FreezeRows = 3,
+                        ShowGridLines = false,
                         FontName = "Times New Roman",
-                        FontSize = 10
+                        FontSize = 9
                     },
                     Blocks =
                     {
                         new ClosedXmlBlock
                         {
                             Type = "TitleRows",
-                            Name = "Заголовок",
+                            Name = "Шапка ведомости",
                             Rows =
                             {
                                 new ClosedXmlTextRow
@@ -256,8 +287,8 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell
                                         {
                                             Column = 1, MergeToColumn = 8,
-                                            Text = "Оборотная ведомость синтетического и аналитического учета",
-                                            Bold = true, FontSize = 14, Align = "Center"
+                                            TakeFromRow = 1, TakeFromField = TrialBalanceTitleField,
+                                            Bold = true, Align = "Center"
                                         }
                                     }
                                 },
@@ -269,50 +300,156 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell
                                         {
                                             Column = 1, MergeToColumn = 8,
-                                            Text = "по паре счетов {param.AccountPair} с {param.DateFrom} по {param.DateTo}",
+                                            TakeFromRow = 2, TakeFromField = TrialBalanceTitleField,
                                             Align = "Center"
                                         }
                                     }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    // Пустая строка между периодом и шапкой таблицы.
+                                    Row = 3,
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 8, Text = string.Empty } }
                                 }
                             }
                         },
                         new ClosedXmlBlock
                         {
                             Type = "TabularSection",
-                            Name = "Таблица",
+                            Name = "Таблица ведомости",
                             Table = new ClosedXmlTableSection
                             {
                                 Columns =
                                 {
-                                    new ClosedXmlColumn { Field = "Дата", Header = "Дата", Width = 11, Align = "Center" },
-                                    new ClosedXmlColumn { Field = "Документ", Header = "Документ", Width = 11 },
-                                    new ClosedXmlColumn { Field = "Счет", Header = "Счет", Width = 12 },
-                                    new ClosedXmlColumn { Field = "Корр. счет", Header = "Корр. счет", Width = 12 },
-                                    new ClosedXmlColumn { Field = "Дебет", Header = "Дебет", Width = 14, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
-                                    new ClosedXmlColumn { Field = "Кредит", Header = "Кредит", Width = 14, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
-                                    new ClosedXmlColumn { Field = "Содержание", Header = "Содержание", Width = 38 },
-                                    new ClosedXmlColumn { Field = "Модуль", Header = "Модуль", Width = 10 }
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[0], Header = TrialBalanceHeaders[0], Width = 14, Align = "Left" },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[1], Header = TrialBalanceHeaders[1], Width = 40, Align = "Left" },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[2], Header = TrialBalanceHeaders[2], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[3], Header = TrialBalanceHeaders[3], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[4], Header = TrialBalanceHeaders[4], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[5], Header = TrialBalanceHeaders[5], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[6], Header = TrialBalanceHeaders[6], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = TrialBalanceHeaders[7], Header = TrialBalanceHeaders[7], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true }
                                 },
-                                HeaderFill = string.Empty,
+                                HeaderFill = "#D9E6F2",
                                 HeaderBold = true,
-                                HeaderWrapText = true,
-                                RowBorder = "All",
-                                Groups =
-                                {
-                                    new ClosedXmlGroup
-                                    {
-                                        ByFields = { "Аналитика" },
-                                        ShowHeader = true,
-                                        HeaderFormat = "{value}",
-                                        HeaderBold = true,
-                                        Subtotal = new ClosedXmlTotal { Label = "ИТОГО ПО", SumFields = { "Дебет", "Кредит" } }
-                                    }
-                                },
+                                HeaderWrapText = false,
+                                RowBorder = "Outside",
+                                SkipEmptyRows = true,
+                                // Наименование ведомости и период уже выведены в шапке,
+                                // и в теле таблицы они не печатаются.
+                                SkipRowsStartingWith = { "Оборотно-сальдовая", "Оборотная", "Период" },
+                                // Строка итогов выделяется жирным. Отдельной строки-заголовка
+                                // у ведомости нет: заголовок и период выведены в шапке.
                                 EmphasisRules =
                                 {
-                                    new ClosedXmlEmphasisRule { Match = "StartsWith", Text = "САЛЬДО", Bold = true, Italic = true },
-                                    new ClosedXmlEmphasisRule { Match = "StartsWith", Text = "ОБОРОТЫ", Bold = true, Italic = true },
-                                    new ClosedXmlEmphasisRule { Match = "StartsWith", Text = "ИТОГ", Bold = true }
+                                    new ClosedXmlEmphasisRule { Match = "StartsWith", Text = "ИТОГО", Bold = true }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        /// <summary>Заголовки журнала счет-фактур.</summary>
+        private static readonly string[] InvoiceJournalHeaders =
+        {
+            "Дата", "N докум", "Организация", "ЭСФ", "Вид документа",
+            "Без налога", "НДС", "Налог с продаж", "Всего", "Состояние"
+        };
+
+        /// <summary>Признак журнала счет-фактур.</summary>
+        public static bool IsInvoiceJournal(Report? report)
+        {
+            if (report == null)
+                return false;
+
+            return string.Equals(report.ReportType, "InvoiceJournal", StringComparison.OrdinalIgnoreCase)
+                   || (!string.IsNullOrWhiteSpace(report.Name) &&
+                       report.Name.Contains("счет-фактур", StringComparison.OrdinalIgnoreCase));
+        }
+
+        // =============================================================
+        // Журнал счет-фактур — образец отчёта, собранного администратором.
+        //
+        // Раскладка листа:
+        //   строка 1  — заголовок из набора, объединение A:J, жирный, по центру
+        //   строка 2  — пустая
+        //   строка 3  — шапка 10 колонок, заливка #D9E6F2, жирный, по центру
+        //   строки 4+ — записи журнала
+        // =============================================================
+        public static ClosedXmlReportLayout CreateInvoiceJournal(string? sheetName) => new()
+        {
+            Sheets =
+            {
+                new ClosedXmlSheet
+                {
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Журнал счет-фактур" : sheetName,
+                    PageSetup = new ClosedXmlPageSetup
+                    {
+                        Orientation = "Landscape",
+                        FitToPagesWide = 1,
+                        FreezeRows = 3,
+                        ShowGridLines = false,
+                        FontName = "Times New Roman",
+                        FontSize = 9
+                    },
+                    Blocks =
+                    {
+                        new ClosedXmlBlock
+                        {
+                            Type = "TitleRows",
+                            Name = "Заголовок журнала",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 1,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 1, MergeToColumn = 10,
+                                            TakeFromRow = 1, TakeFromField = "report_title",
+                                            Bold = true, Align = "Center"
+                                        }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 2,
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 10, Text = string.Empty } }
+                                }
+                            }
+                        },
+                        new ClosedXmlBlock
+                        {
+                            Type = "TabularSection",
+                            Name = "Журнал",
+                            Table = new ClosedXmlTableSection
+                            {
+                                Columns =
+                                {
+                                    new ClosedXmlColumn { Field = "doc_date", Header = InvoiceJournalHeaders[0], Width = 13, Align = "Center", NumberFormat = "dd.MM.yyyy" },
+                                    new ClosedXmlColumn { Field = "doc_number", Header = InvoiceJournalHeaders[1], Width = 11, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "org_name", Header = InvoiceJournalHeaders[2], Width = 22, Align = "Left" },
+                                    new ClosedXmlColumn { Field = "esf_number", Header = InvoiceJournalHeaders[3], Width = 14, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "document_kind", Header = InvoiceJournalHeaders[4], Width = 13, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "amount_without_tax", Header = InvoiceJournalHeaders[5], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "vat_total", Header = InvoiceJournalHeaders[6], Width = 13, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "sales_tax_total", Header = InvoiceJournalHeaders[7], Width = 14, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "total_amount", Header = InvoiceJournalHeaders[8], Width = 15, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "posted_state", Header = InvoiceJournalHeaders[9], Width = 13, Align = "Center" }
+                                },
+                                HeaderFill = "#D9E6F2",
+                                HeaderBold = true,
+                                HeaderWrapText = false,
+                                RowBorder = "Outside",
+                                SkipEmptyRows = true,
+                                // Строка «ИТОГО» строки набора не имеет: сумму считает запрос при необходимости.
+                                EmphasisRules =
+                                {
+                                    new ClosedXmlEmphasisRule { Match = "StartsWith", Text = "ИТОГО", Bold = true }
                                 }
                             }
                         }

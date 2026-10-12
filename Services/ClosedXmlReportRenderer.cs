@@ -16,7 +16,7 @@ namespace BIS.ERP.Services
     /// Поддерживает блоки: TitleRows, FreeRows, TabularSection (группы, подытоги SUM,
     /// общий итог), SignaturesRow, PageBreak.
     /// </summary>
-    public static class ClosedXmlReportRenderer
+    public static partial class ClosedXmlReportRenderer
     {
         private static readonly Regex ParameterRegex = new(@"\{param\.([^}]+)\}", RegexOptions.Compiled);
 
@@ -80,28 +80,106 @@ namespace BIS.ERP.Services
         /// переименованы в DisplayName, а в разметке поле обычно указано именем источника.
         /// Добавляем колонки-двойники, чтобы разметка работала и по имени поля, и по его подписи.
         /// </summary>
+        /// <summary>
+        /// Готовит набор данных для вывода по ClosedXML-макету.
+        ///
+        /// Макет обращается к колонкам по своим именам, а набор данных отдаёт их
+        /// под именами базы: «posting_date», «debit_account». Без сопоставления
+        /// такие колонки молча пропадают из отчёта.
+        ///
+        /// Поэтому для каждого поля отчёта добавляются дополнительные колонки:
+        /// под отображаемым именем («Дата», «Сумма Дт») и под именем макета.
+        /// </summary>
         public static DataTable PrepareData(DataTable source, Report report)
         {
             var result = source.Copy();
-            if (report?.Fields == null)
+            if (report?.Fields == null || report.Fields.Count == 0)
                 return result;
 
             foreach (var field in report.Fields)
             {
-                if (string.IsNullOrWhiteSpace(field.FieldName) || result.Columns.Contains(field.FieldName))
+                if (string.IsNullOrWhiteSpace(field.FieldName))
                     continue;
 
-                var displayName = string.IsNullOrWhiteSpace(field.DisplayName) ? field.FieldName : field.DisplayName;
-                if (!result.Columns.Contains(displayName))
+                var candidates = new[]
+                {
+                    field.FieldName,
+                    field.DisplayName,
+                    NormalizeFieldKey(field.FieldName),
+                    NormalizeFieldKey(field.DisplayName)
+                };
+
+                // Ищем колонку-источник среди имён поля и его отображаемого имени.
+                DataColumn? sourceColumn = null;
+                foreach (var candidate in candidates)
+                {
+                    if (string.IsNullOrWhiteSpace(candidate))
+                        continue;
+
+                    if (result.Columns.Contains(candidate))
+                    {
+                        sourceColumn = result.Columns[candidate];
+                        break;
+                    }
+                }
+
+                if (sourceColumn == null)
                     continue;
 
-                var clone = result.Columns.Add(field.FieldName, result.Columns[displayName].DataType);
-                foreach (DataRow row in result.Rows)
-                    row[clone] = row[displayName];
+                // Публикуем значение под всеми именами, чтобы макет нашёл его
+                // независимо от того, как назвал колонку.
+                foreach (var candidate in candidates)
+                {
+                    if (string.IsNullOrWhiteSpace(candidate))
+                        continue;
+
+                    if (result.Columns.Contains(candidate))
+                        continue;
+
+                    var clone = result.Columns.Add(candidate, sourceColumn.DataType);
+                    foreach (DataRow row in result.Rows)
+                        row[clone] = row[sourceColumn];
+                }
             }
 
             return result;
         }
+
+        /// <summary>
+        /// Находит имя колонки набора данных, соответствующее полю макета.
+        /// Сначала точное совпадение, затем — по нормализованному имени,
+        /// чтобы «Сумма Дт» и «сумма_дт» считались одним полем.
+        /// </summary>
+        private static string? ResolveColumnName(DataTable dataTable, string? field)
+        {
+            if (string.IsNullOrWhiteSpace(field))
+                return null;
+
+            if (dataTable.Columns.Contains(field))
+                return field;
+
+            var key = NormalizeFieldKey(field);
+            if (key.Length == 0)
+                return null;
+
+            foreach (DataColumn column in dataTable.Columns)
+            {
+                if (NormalizeFieldKey(column.ColumnName) == key)
+                    return column.ColumnName;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Приводит имя поля к сравнимому виду: убирает регистр, пробелы,
+        /// точки и подчёркивания, а также префикс набора данных (ved.).
+        /// </summary>
+        private static string NormalizeFieldKey(string? name) =>
+            System.Text.RegularExpressions.Regex.Replace(
+                (name ?? string.Empty).ToLowerInvariant(),
+                @"^(?:ved\d*|db_crs?|dbcrs?)[._]|[^a-zа-я0-9]+",
+                string.Empty);
 
         public static byte[] RenderToBytes(
             ClosedXmlReportLayout layout,
@@ -205,6 +283,7 @@ namespace BIS.ERP.Services
 
                     ApplyCellStyle(cell, cellLayout.Bold, cellLayout.Italic, cellLayout.FontSize,
                         cellLayout.Align, cellLayout.Fill, cellLayout.Border);
+                    ApplyTextRotation(cell, cellLayout.TextRotation, cellLayout.WrapText);
                     if (cellLayout.MergeToColumn > column)
                         worksheet.Range(rowIndex, column, rowIndex, cellLayout.MergeToColumn).Merge();
                 }
@@ -257,6 +336,118 @@ namespace BIS.ERP.Services
         }
 
 
+        /// <summary>
+        /// Рисует многоуровневую шапку таблицы и возвращает число занятых строк.
+        ///
+        /// Уровни идут сверху вниз. Ячейка объединяется по своим колонкам.
+        /// Пустая подпись в ячейке нижнего уровня заменяется заголовком колонки —
+        /// так подписи графов не приходится вводить дважды.
+        /// </summary>
+        private static int WriteMultiLevelHeader(
+            IXLWorksheet worksheet,
+            int startRow,
+            ClosedXmlTableSection section,
+            List<ClosedXmlColumn> visible)
+        {
+            var levels = section.HeaderLevels;
+            var lastLevelIndex = levels.Count - 1;
+
+            // Занятые ячейки: объединение по колонкам и по уровням перекрывает
+            // одни и те же места, повторная запись в них недопустима.
+            var mergedCells = new HashSet<(int Level, int Column)>();
+
+            for (var levelIndex = 0; levelIndex < levels.Count; levelIndex++)
+            {
+                var level = levels[levelIndex];
+                var rowIndex = startRow + levelIndex;
+
+                foreach (var headerCell in level.Cells)
+                {
+                    var from = Math.Max(1, headerCell.Column);
+                    var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
+                    if (from > visible.Count)
+                        continue;
+
+                    if (to > visible.Count)
+                        to = visible.Count;
+
+                    if (mergedCells.Contains((levelIndex, from)))
+                        continue;
+
+                    var cell = worksheet.Cell(rowIndex, from);
+
+                    // Ячейка может уже входить в объединение предыдущего уровня.
+                    if (cell.IsMerged())
+                        continue;
+
+                    var text = string.IsNullOrWhiteSpace(headerCell.Text) && levelIndex == lastLevelIndex
+                        ? BuildHeaderTextForRange(visible, from, to)
+                        : headerCell.Text;
+
+                    cell.Value = ResolveText(text, null);
+                    ApplyCellStyle(cell, headerCell.Bold, false, 0, headerCell.Align,
+                        string.IsNullOrWhiteSpace(headerCell.Fill) ? section.HeaderFill : headerCell.Fill,
+                        section.RowBorder);
+                    ApplyTextRotation(cell, headerCell.TextRotation, wrapText: true);
+
+                    var rowSpan = Math.Max(1, headerCell.RowSpan);
+                    var lastRow = rowIndex + rowSpan - 1;
+
+                    if (to > from || lastRow > rowIndex)
+                        worksheet.Range(rowIndex, from, lastRow, to).Merge();
+
+                    for (var coveredLevel = levelIndex; coveredLevel <= levelIndex + rowSpan - 1; coveredLevel++)
+                    {
+                        for (var column = from; column <= to; column++)
+                            mergedCells.Add((coveredLevel, column));
+                    }
+                }
+
+                if (section.HeaderRowHeight > 0)
+                    worksheet.Row(rowIndex).Height = section.HeaderRowHeight;
+            }
+
+            return Math.Max(1, levels.Count);
+        }
+
+        /// <summary>
+        /// Собирает подпись для объединения колонок: заголовки непустых колонок
+        /// через разделитель. Нужно для верхнего уровня шапки.
+        /// </summary>
+        private static string BuildHeaderTextForRange(
+            List<ClosedXmlColumn> visible,
+            int from,
+            int to)
+        {
+            var parts = new List<string>();
+            for (var index = from; index <= to && index <= visible.Count; index++)
+            {
+                var header = visible[index - 1].Header;
+                if (!string.IsNullOrWhiteSpace(header))
+                    parts.Add(header.Trim());
+            }
+
+            return parts.Count switch
+            {
+                0 => string.Empty,
+                1 => parts[0],
+                _ => string.Join(" / ", parts)
+            };
+        }
+
+        /// <summary>
+        /// Поворот текста в ячейке. Значения приводятся к тому, что понимает Excel:
+        /// 255 — вертикальный текст, 90 и 270 — поворот, остальное — как задано.
+        /// </summary>
+        private static void ApplyTextRotation(IXLCell cell, int rotation, bool wrapText)
+        {
+            if (rotation != 0)
+                cell.Style.Alignment.TextRotation = (byte)Math.Clamp(rotation, 0, 180);
+
+            if (wrapText)
+                cell.Style.Alignment.WrapText = true;
+        }
+
         private static int WriteTableSection(
             IXLWorksheet worksheet,
             int startRow,
@@ -270,9 +461,12 @@ namespace BIS.ERP.Services
                 return startRow;
 
             // Индексы колонок, которые реально есть в DataTable.
+            // Если колонки нет под именем макета, ищем её по нормализованному имени:
+            // макет может обращаться к «Сумма Дт», а данные отдавать «amount_kgs».
             var visible = columns
-                .Where(c => dataTable.Columns.Contains(c.Field))
+                .Where(c => !string.IsNullOrWhiteSpace(ResolveColumnName(dataTable, c.Field)))
                 .ToList();
+
             if (visible.Count == 0)
                 return startRow;
 
@@ -281,23 +475,34 @@ namespace BIS.ERP.Services
             {
                 var columnLayout = visible[i];
                 var excelColumn = i + 1;
-                columnByField[columnLayout.Field] = excelColumn;
+                columnByField[ResolveColumnName(dataTable, columnLayout.Field) ?? columnLayout.Field] = excelColumn;
                 worksheet.Column(excelColumn).Width = columnLayout.Width > 0 ? columnLayout.Width : 14;
             }
 
             // Шапка таблицы.
             var headerRow = startRow;
-            for (var i = 0; i < visible.Count; i++)
+            var headerRowCount = 1;
+
+            if (section.HeaderLevels.Count > 0)
             {
-                var cell = worksheet.Cell(headerRow, i + 1);
-                cell.Value = visible[i].Header;
-                ApplyCellStyle(cell, section.HeaderBold, false, 0, "Center",
-                    section.HeaderFill, section.RowBorder);
-                cell.Style.Alignment.WrapText = section.HeaderWrapText;
+                // Форматная шапка: несколько уровней с объединениями и поворотом.
+                headerRowCount = WriteMultiLevelHeader(worksheet, headerRow, section, visible);
+            }
+            else
+            {
+                for (var i = 0; i < visible.Count; i++)
+                {
+                    var cell = worksheet.Cell(headerRow, i + 1);
+                    cell.Value = visible[i].Header;
+                    ApplyCellStyle(cell, section.HeaderBold, false, 0, "Center",
+                        section.HeaderFill, section.RowBorder);
+                    cell.Style.Alignment.WrapText = section.HeaderWrapText;
+                    ApplyTextRotation(cell, visible[i].TextRotation, section.HeaderWrapText);
+                }
             }
 
             var detailRows = new List<int>();
-            var currentRow = headerRow + 1;
+            var currentRow = headerRow + headerRowCount;
 
             var rows = dataTable.Rows.Cast<DataRow>()
                 .Where(row => !ShouldSkipTableRow(section, row, visible))

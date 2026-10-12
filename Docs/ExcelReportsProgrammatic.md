@@ -400,7 +400,7 @@ API: `GetTemplatesAsync`, `GetTemplateAsync(id)`, `GetActiveTemplateAsync(code)`
 | Хранилище | [`Models/Report.cs`](../Models/Report.cs) | `Report.ClosedXmlLayout` (JSON-строка) |
 | Схема БД | [`Services/RuntimeSchemaFixService.cs`](../Services/RuntimeSchemaFixService.cs) | `ALTER TABLE "Reports" ADD COLUMN IF NOT EXISTS "ClosedXmlLayout" text` |
 | Интерпретатор | [`Services/ClosedXmlReportRenderer.cs`](../Services/ClosedXmlReportRenderer.cs) | JSON → `XLWorkbook` |
-| Шаблоны макетов | [`Services/ClosedXmlLayoutTemplates.cs`](../Services/ClosedXmlLayoutTemplates.cs) | Встроенный макет акта сверки и колонки оборотной ведомости |
+| Шаблоны макетов | [`Services/ClosedXmlLayoutTemplates.cs`](../Services/ClosedXmlLayoutTemplates.cs) | Встроенный макет акта сверки (шаблон оборотной ведомости и кнопка «Загрузить макет» удалены) |
 | Конструктор | [`Views/ReportDesignerWindow.xaml`](../Views/ReportDesignerWindow.xaml) | вкладка «📊 ClosedXML макет» |
 | Вывод | [`Views/AccountingReportsView.xaml.cs`](../Views/AccountingReportsView.xaml.cs) | формат `ClosedXmlExcel` |
 

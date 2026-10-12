@@ -1,0 +1,947 @@
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
+using BIS.ERP.Models;
+
+namespace BIS.ERP.Services
+{
+    /// <summary>
+    /// Вывод отчёта с визуальным макетом ClosedXML в PDF.
+    ///
+    /// Обходит ту же модель (<see cref="ClosedXmlReportLayout"/>), что и вывод в Excel,
+    /// поэтому PDF и Excel совпадают по составу и оформлению.
+    ///
+    /// Поддерживается: заголовочные и свободные строки с объединением ячеек,
+    /// табличные разделы с шапкой, рамками, заливкой и чередованием строк,
+    /// правила выделения строк, пропуск строк, группировки с подытогами,
+    /// общий итог и подписи.
+    /// </summary>
+    public static partial class ClosedXmlReportRenderer
+    {
+        /// <summary>
+        /// Шрифт и кегль текущего листа. Нужны для картинок с повёрнутым текстом:
+        /// подпись должна быть набрана тем же шрифтом, что и остальной документ.
+        /// </summary>
+        [ThreadStatic]
+        private static string? _pageFontName;
+
+        [ThreadStatic]
+        private static double _pageFontSize;
+
+        /// <summary>Выводит макет ClosedXML в PDF.</summary>
+        public static byte[] RenderToPdfBytes(
+            ClosedXmlReportLayout layout,
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters = null)
+        {
+            if (layout.Sheets.Count == 0)
+                throw new InvalidOperationException("ClosedXML-макет не содержит листов.");
+
+            // Настройка лицензии QuestPDF: та же, что в ReportService и PrintFormService.
+            // Рендерер самодостаточен — его можно вызывать без подготовки сервисов.
+            QuestPDF.Settings.License = LicenseType.Community;
+
+            var sheetLayout = layout.Sheets[0];
+            var setup = sheetLayout.PageSetup ?? new ClosedXmlPageSetup();
+            var landscape = !string.Equals(setup.Orientation, "Portrait", StringComparison.OrdinalIgnoreCase);
+            var fontName = string.IsNullOrWhiteSpace(setup.FontName) ? "Times New Roman" : setup.FontName;
+            var fontSize = setup.FontSize > 0 ? (float)setup.FontSize : 10f;
+
+            // Запоминаем шрифт листа: им рисуются картинки с повёрнутым текстом.
+            _pageFontName = fontName;
+            _pageFontSize = fontSize;
+
+            return QuestPDF.Fluent.Document.Create(document =>
+            {
+                document.Page(page =>
+                {
+                    page.Size(landscape ? PageSizes.A4.Landscape() : PageSizes.A4);
+                    page.Margin(10, Unit.Millimetre);
+                    page.DefaultTextStyle(style => style.FontFamily(fontName).FontSize(fontSize));
+
+                    page.Content().Column(column =>
+                    {
+                        column.Spacing(2);
+
+                        foreach (var block in sheetLayout.Blocks)
+                        {
+                            switch (block.Type)
+                            {
+                                case "TitleRows":
+                                case "FreeRows":
+                                    RenderTextRows(column, block, dataTable);
+                                    break;
+
+                                case "TabularSection" when block.Table != null:
+                                    RenderTableSection(column, block.Table, dataTable, parameters);
+                                    break;
+
+                                case "SignaturesRow":
+                                    RenderSignatures(column, block);
+                                    break;
+                            }
+                        }
+                    });
+                });
+            }).GeneratePdf();
+        }
+
+        /// <summary>Выводит макет ClosedXML в PDF и сохраняет в файл.</summary>
+        public static void RenderToPdfFile(
+            string filePath,
+            ClosedXmlReportLayout layout,
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters = null)
+        {
+            var bytes = RenderToPdfBytes(layout, dataTable, parameters);
+            File.WriteAllBytes(filePath, bytes);
+        }
+
+        /// <summary>Выводит текстовые строки блока: заголовок, реквизиты, свободные строки.</summary>
+        private static void RenderTextRows(
+            ColumnDescriptor column,
+            ClosedXmlBlock block,
+            DataTable dataTable)
+        {
+            var columnCount = Math.Max(1, ResolveColumnCount(block));
+
+            foreach (var row in block.Rows)
+            {
+                var cells = row.Cells
+                    .Where(cell => cell.Column > 0)
+                    .OrderBy(cell => cell.Column)
+                    .ToList();
+                if (cells.Count == 0)
+                    continue;
+
+                column.Item().Row(rowDescriptor =>
+                {
+                    var cursor = 1;
+                    foreach (var cellLayout in cells)
+                    {
+                        if (cellLayout.Column > cursor)
+                        {
+                            rowDescriptor.RelativeItem(cellLayout.Column - cursor);
+                            cursor = cellLayout.Column;
+                        }
+
+                        var span = cellLayout.MergeToColumn >= cellLayout.Column
+                            ? cellLayout.MergeToColumn - cellLayout.Column + 1
+                            : 1;
+                        span = Math.Max(1, span);
+
+                        var text = BuildTextCellValue(cellLayout, dataTable);
+                        var align = ParseAlign(cellLayout.Align);
+                        var bold = cellLayout.Bold;
+                        var italic = cellLayout.Italic;
+                        var fontSize = cellLayout.FontSize;
+                        var fill = cellLayout.Fill;
+                        var border = cellLayout.Border;
+                        var rotation = cellLayout.TextRotation;
+
+                        var cellContainer = rowDescriptor.RelativeItem(span)
+                            .Element(container => ApplyCellContainer(container, fill, border))
+                            .PaddingVertical(1)
+                            .PaddingHorizontal(3)
+                            .Element(container => ApplyAlign(container, align));
+
+                        if (rotation != 0)
+                        {
+                            // Поворот в PDF недоступен: рисуем повёрнутый текст картинкой.
+                            WriteRotatedText(cellContainer, text, rotation, bold, italic, fontSize);
+                        }
+                        else
+                        {
+                            cellContainer.Text(textBlock =>
+                            {
+                                if (string.IsNullOrWhiteSpace(text))
+                                    return;
+
+                                var textSpan = textBlock.Span(text);
+                                if (bold)
+                                    textSpan.Bold();
+                                if (italic)
+                                    textSpan.Italic();
+                                if (fontSize > 0)
+                                    textSpan.FontSize((float)fontSize);
+                            });
+                        }
+
+                        cursor += span;
+                    }
+
+                    if (cursor <= columnCount)
+                        rowDescriptor.RelativeItem(columnCount - cursor + 1);
+                });
+            }
+        }
+
+        /// <summary>
+        /// Рисует многоуровневую шапку.
+        ///
+        /// Уровни идут сверху вниз. Ячейка объединяется по своим колонкам.
+        /// Ячейка нижнего уровня, не перекрытая верхними, растягивается вниз —
+        /// так одиночные графы получают полную высоту шапки.
+        /// </summary>
+        private static void RenderMultiLevelHeader(
+            TableDescriptor table,
+            ClosedXmlTableSection section,
+            List<ClosedXmlColumn> visible)
+        {
+            var levels = section.HeaderLevels;
+            var lastLevelIndex = levels.Count - 1;
+
+            // Ячейки, уже занятые объединением по колонкам или по уровням.
+            // Ключ — «уровень:колонка», потому что объединение по уровням
+            // перекрывает те же колонки на нижних уровнях.
+            var mergedCells = new HashSet<(int Level, int Column)>();
+
+            // Высота строки шапки ограничивает картинки с вертикальными подписями.
+            var previousHeightLimit = ContainerHeightLimit;
+            ContainerHeightLimit = ResolveHeaderHeightLimit(section, levels.Count);
+
+            try
+            {
+                for (var levelIndex = 0; levelIndex < levels.Count; levelIndex++)
+                {
+                    var level = levels[levelIndex];
+                    var isLastLevel = levelIndex == lastLevelIndex;
+
+                    foreach (var headerCell in level.Cells)
+                    {
+                        var from = Math.Max(1, headerCell.Column);
+                        var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
+                        if (from > visible.Count)
+                            continue;
+
+                        if (to > visible.Count)
+                            to = visible.Count;
+
+                        if (mergedCells.Contains((levelIndex, from)))
+                            continue;
+
+                        var text = string.IsNullOrWhiteSpace(headerCell.Text) && isLastLevel
+                            ? BuildPdfHeaderTextForRange(visible, from, to)
+                            : headerCell.Text;
+
+                        var fill = string.IsNullOrWhiteSpace(headerCell.Fill)
+                            ? section.HeaderFill
+                            : headerCell.Fill;
+                        var border = section.RowBorder;
+                        var align = ParseAlign(headerCell.Align);
+                        var rotation = headerCell.TextRotation;
+                        var bold = headerCell.Bold;
+
+                        var cell = table.Cell();
+                        var span = to - from + 1;
+                        if (span > 1)
+                        {
+                            cell = cell.ColumnSpan((uint)span);
+                            for (var column = from; column <= to; column++)
+                                mergedCells.Add((levelIndex, column));
+                        }
+                        else
+                        {
+                            mergedCells.Add((levelIndex, from));
+                        }
+
+                        // Ячейка может занимать несколько уровней по вертикали:
+                        // подпись графы стоит над нижними уровнями.
+                        var rowSpan = Math.Max(1, headerCell.RowSpan);
+                        if (rowSpan > 1)
+                        {
+                            cell = cell.RowSpan((uint)rowSpan);
+                            for (var coveredLevel = levelIndex + 1; coveredLevel < levelIndex + rowSpan; coveredLevel++)
+                            {
+                                for (var column = from; column <= to; column++)
+                                    mergedCells.Add((coveredLevel, column));
+                            }
+                        }
+
+                        var cellContainer = cell
+                            .Element(container => ApplyCellContainer(container, fill, border))
+                            .PaddingVertical(2)
+                            .PaddingHorizontal(3)
+                            .Element(container => ApplyAlign(container, align));
+
+                        if (rotation != 0)
+                            WriteRotatedText(cellContainer, text, rotation, bold, false, 0);
+                        else
+                            cellContainer.Text(textBlock =>
+                            {
+                                if (string.IsNullOrWhiteSpace(text))
+                                    return;
+
+                                var textSpan = textBlock.Span(text);
+                                if (bold)
+                                    textSpan.Bold();
+                            });
+                    }
+                }
+            }
+            finally
+            {
+                ContainerHeightLimit = previousHeightLimit;
+            }
+        }
+
+        /// <summary>
+        /// Высота, в которую должна уложиться подпись графы.
+        ///
+        /// Значение ограничено намеренно: в PDF высота строки определяется
+        /// содержимым, поэтому высокая картинка растягивает шапку и подпись
+        /// вылезает за границы ячейки. Ограничение задаётся не настройкой
+        /// макета, а удобным размером подписи.
+        /// </summary>
+        private static double ResolveHeaderHeightLimit(ClosedXmlTableSection section, int levelsCount)
+        {
+            // Около 16 пунктов на уровень — примерно высота строки бланка.
+            const double perLevel = 16d;
+            return Math.Max(30d, levelsCount * perLevel);
+        }
+
+        /// <summary>Подписи колонок объединения через разделитель — для верхнего уровня.</summary>
+        private static string BuildPdfHeaderTextForRange(
+            List<ClosedXmlColumn> visible,
+            int from,
+            int to)
+        {
+            var parts = new List<string>();
+            for (var index = from; index <= to && index <= visible.Count; index++)
+            {
+                var header = visible[index - 1].Header;
+                if (!string.IsNullOrWhiteSpace(header))
+                    parts.Add(header.Trim());
+            }
+
+            return parts.Count switch
+            {
+                0 => string.Empty,
+                1 => parts[0],
+                _ => string.Join(" / ", parts)
+            };
+        }
+
+        /// <summary>
+        /// Выводит повёрнутый текст.
+        ///
+        /// В PDF поворот текста недоступен, поэтому подпись рисуется средствами WPF
+        /// в картинку и вставляется в документ. Картинки кэшируются: одинаковые
+        /// подписи рисуются один раз.
+        /// </summary>
+        private static void WriteRotatedText(
+            IContainer container,
+            string? text,
+            int rotation,
+            bool bold,
+            bool italic,
+            double fontSize)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            // Угол приводим к допустимому: 0 заменяем на 90 — вертикальная подпись.
+            var requested = Math.Clamp(rotation, -90, 90);
+            var angle = requested == 0 ? 90 : requested;
+
+            // Кегль: заданный у ячейки, иначе кегль листа.
+            var emSize = fontSize > 0 ? fontSize : (_pageFontSize > 0 ? _pageFontSize : 9d);
+
+            try
+            {
+                var (size, bytes) = GetRotatedTextImage(text.Trim(), angle, bold, italic, emSize);
+
+                // Высота ограничена строкой шапки: без ограничения длинная подпись
+                // вылезает за границы ячейки. Ширину масштабируем по пропорции.
+                var heightLimit = ContainerHeightLimit > 0 ? ContainerHeightLimit : 260d;
+                var scale = size.Height > heightLimit ? heightLimit / size.Height : 1d;
+
+                container
+                    .Width((float)Math.Max(4, size.Width * scale))
+                    .Height((float)Math.Max(4, size.Height * scale))
+                    .Image(bytes);
+            }
+            catch
+            {
+                // Если картинку собрать не удалось, показываем текст как есть:
+                // отчёт важнее оформления.
+                container.Text(textBlock => textBlock.Span(text));
+            }
+        }
+
+        /// <summary>
+        /// Ограничение высоты для картинки с повёрнутым текстом.
+        /// Задаётся при выводе шапки по её высоте.
+        /// </summary>
+        [ThreadStatic]
+        private static double ContainerHeightLimit;
+
+        /// <summary>
+        /// Готовит картинку с повёрнутым текстом. Результат кэшируется по подписи,
+        /// углу и начертанию.
+        /// </summary>
+        private static (RotatedTextSize Size, byte[] Bytes) GetRotatedTextImage(
+            string text,
+            int angle,
+            bool bold,
+            bool italic,
+            double fontSize)
+        {
+            var key = $"{text}|{angle}|{bold}|{italic}|{fontSize:0.##}";
+            if (RotatedTextCache.TryGetValue(key, out var cached))
+                return cached;
+
+            var size = RenderRotatedTextImage(text, angle, bold, italic, fontSize, out var bytes);
+            RotatedTextCache[key] = (size, bytes);
+            return (size, bytes);
+        }
+
+        /// <summary>Размер картинки с повёрнутым текстом.</summary>
+        private readonly record struct RotatedTextSize(double Width, double Height);
+
+        /// <summary>Кэш картинок с повёрнутым текстом.</summary>
+        private static readonly Dictionary<string, (RotatedTextSize Size, byte[] Bytes)> RotatedTextCache =
+            new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Рисует текст, повёрнутый на заданный угол, и возвращает картинку в PNG.
+        /// Размер картинки считается так, чтобы текст поместился целиком.
+        /// </summary>
+        private static RotatedTextSize RenderRotatedTextImage(
+            string text,
+            int angle,
+            bool bold,
+            bool italic,
+            double fontSize,
+            out byte[] pngBytes)
+        {
+            var typeface = new Typeface(
+                new FontFamily(string.IsNullOrWhiteSpace(_pageFontName) ? "Times New Roman" : _pageFontName),
+                italic ? FontStyles.Italic : FontStyles.Normal,
+                bold ? FontWeights.Bold : FontWeights.Normal,
+                FontStretches.Normal);
+
+            var emSize = fontSize > 0 ? fontSize : 9d;
+            var formatted = new FormattedText(
+                text,
+                CultureInfo.CurrentCulture,
+                System.Windows.FlowDirection.LeftToRight,
+                typeface,
+                emSize,
+                System.Windows.Media.Brushes.Black,
+                VisualTreeHelper.GetDpi(new DrawingVisual()).PixelsPerDip);
+
+            // Отступы: картинка не должна обрезать буквы.
+            const double padding = 3d;
+            var textWidth = formatted.Width + padding * 2;
+            var textHeight = formatted.Height + padding * 2;
+
+            var isVertical = Math.Abs(angle) >= 45;
+            var imageWidth = isVertical ? textHeight : textWidth;
+            var imageHeight = isVertical ? textWidth : textHeight;
+
+            var visual = new DrawingVisual();
+            using (var context = visual.RenderOpen())
+            {
+                context.PushTransform(new RotateTransform(angle, imageWidth / 2d, imageHeight / 2d));
+                context.DrawText(formatted, new System.Windows.Point(
+                    (imageWidth - formatted.Width) / 2d,
+                    (imageHeight - formatted.Height) / 2d));
+                context.Pop();
+            }
+
+            var target = new RenderTargetBitmap(
+                (int)Math.Ceiling(imageWidth),
+                (int)Math.Ceiling(imageHeight),
+                96, 96,
+                PixelFormats.Pbgra32);
+            target.Render(visual);
+
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(target));
+
+            using var stream = new MemoryStream();
+            encoder.Save(stream);
+            pngBytes = stream.ToArray();
+
+            return new RotatedTextSize(target.PixelWidth, target.PixelHeight);
+        }
+
+        /// <summary>Выводит табличный раздел: шапку, строки с группировкой и общий итог.</summary>
+        private static void RenderTableSection(
+            ColumnDescriptor column,
+            ClosedXmlTableSection section,
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters)
+        {
+            var columns = section.Columns.Where(item => !string.IsNullOrWhiteSpace(item.Field)).ToList();
+            if (columns.Count == 0)
+                return;
+
+            var visible = columns
+                .Where(item => !string.IsNullOrWhiteSpace(ResolveColumnName(dataTable, item.Field)))
+                .ToList();
+            if (visible.Count == 0)
+                return;
+
+            var weights = visible
+                .Select(item => item.Width > 0 ? item.Width : 14d)
+                .ToList();
+
+            var rows = dataTable.Rows.Cast<DataRow>()
+                .Where(row => !ShouldSkipTableRow(section, row, visible))
+                .ToList();
+
+            column.Item().Table(table =>
+            {
+                table.ColumnsDefinition(definition =>
+                {
+                    foreach (var weight in weights)
+                        definition.RelativeColumn((float)weight);
+                });
+
+                if (section.HeaderLevels.Count > 0)
+                {
+                    // Форматная шапка: уровни с объединениями и поворотом подписей.
+                    RenderMultiLevelHeader(table, section, visible);
+                }
+                else
+                {
+                    var previousHeightLimit = ContainerHeightLimit;
+                    ContainerHeightLimit = ResolveHeaderHeightLimit(section, 1);
+
+                    try
+                    {
+                        foreach (var item in visible)
+                        {
+                            var fill = section.HeaderFill;
+                            var bold = section.HeaderBold;
+                            var align = ParseAlign(item.Align);
+                            var border = section.RowBorder;
+                            var header = item.Header ?? string.Empty;
+                            var rotation = item.TextRotation;
+
+                            var headerContainer = table.Cell()
+                                .Element(container => ApplyCellContainer(container, fill, border))
+                                .PaddingVertical(2)
+                                .PaddingHorizontal(3)
+                                .Element(container => ApplyAlign(container, align));
+
+                            if (rotation != 0)
+                                WriteRotatedText(headerContainer, header, rotation, bold, false, 0);
+                            else
+                                headerContainer.Text(textBlock =>
+                                {
+                                    var textSpan = textBlock.Span(header);
+                                    if (bold)
+                                        textSpan.Bold();
+                                });
+                        }
+                    }
+                    finally
+                    {
+                        ContainerHeightLimit = previousHeightLimit;
+                    }
+                }
+
+                if (section.Groups.Count > 0)
+                {
+                    var groupDetailIndex = 0;
+                    RenderGroups(table, rows, section.Groups, 0, visible, section, parameters, ref groupDetailIndex);
+                }
+                else
+                {
+                    var detailIndex = 0;
+                    foreach (var row in rows)
+                    {
+                        RenderDetailRow(table, row, visible, section, detailIndex);
+                        detailIndex++;
+                    }
+                }
+
+                if (section.GrandTotal != null && rows.Count > 0)
+                    RenderTotalRow(table, rows, visible, section, section.GrandTotal);
+            });
+        }
+
+        /// <summary>Выводит строку данных.</summary>
+        private static void RenderDetailRow(
+            TableDescriptor table,
+            DataRow row,
+            List<ClosedXmlColumn> visible,
+            ClosedXmlTableSection section,
+            int detailIndex)
+        {
+            var alternate = !string.IsNullOrWhiteSpace(section.AlternateFill) && detailIndex % 2 == 1;
+            var fill = alternate ? section.AlternateFill : string.Empty;
+            var labelText = FirstNonEmptyValueText(row, visible);
+            var rule = MatchEmphasisRule(section, labelText);
+            var mergeTo = rule is { MergeLabelToColumn: > 1 }
+                ? Math.Min(rule.MergeLabelToColumn, visible.Count)
+                : 0;
+
+            for (var index = 0; index < visible.Count; index++)
+            {
+                var columnLayout = visible[index];
+                var columnIndex = index + 1;
+
+                if (mergeTo > 1 && columnIndex > 1 && columnIndex <= mergeTo)
+                    continue;
+
+                var span = mergeTo > 1 && columnIndex == 1 ? mergeTo : 1;
+                var text = FormatCellValue(row, columnLayout);
+                var align = rule != null && !string.IsNullOrWhiteSpace(rule.Align) ? rule.Align : columnLayout.Align;
+                var bold = columnLayout.Bold || (rule?.Bold ?? false);
+                var italic = rule?.Italic ?? false;
+                var cellFill = !string.IsNullOrWhiteSpace(rule?.Fill) ? rule!.Fill : fill;
+                var border = section.RowBorder;
+
+                var cell = table.Cell();
+                if (span > 1)
+                    cell = cell.ColumnSpan((uint)span);
+
+                cell.Element(container => ApplyCellContainer(container, cellFill, border))
+                    .PaddingVertical(1)
+                    .PaddingHorizontal(3)
+                    .Element(container => ApplyAlign(container, ParseAlign(align)))
+                    .Text(textBlock =>
+                    {
+                        if (string.IsNullOrWhiteSpace(text))
+                            return;
+
+                        var textSpan = textBlock.Span(text);
+                        if (bold)
+                            textSpan.Bold();
+                        if (italic)
+                            textSpan.Italic();
+                    });
+            }
+        }
+
+        /// <summary>Выводит строки группировок с подытогами.</summary>
+        private static void RenderGroups(
+            TableDescriptor table,
+            List<DataRow> rows,
+            List<ClosedXmlGroup> groups,
+            int level,
+            List<ClosedXmlColumn> visible,
+            ClosedXmlTableSection section,
+            IReadOnlyDictionary<string, object?>? parameters,
+            ref int detailIndex)
+        {
+            if (level >= groups.Count || rows.Count == 0)
+                return;
+
+            var group = groups[level];
+            var byFields = group.ByFields
+                .Where(field => rows[0].Table.Columns.Contains(field))
+                .ToList();
+            if (byFields.Count == 0)
+                return;
+
+            var ordered = rows
+                .OrderBy(row => GetFieldValueText(row, byFields[0]), StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
+            foreach (var chunk in ordered.GroupBy(row =>
+                         string.Join("|", byFields.Select(field => GetFieldValueText(row, field)))))
+            {
+                var groupRows = chunk.ToList();
+
+                if (group.ShowHeader)
+                {
+                    var headerText = BuildGroupHeaderText(group, groupRows[0], byFields, parameters);
+                    var bold = group.HeaderBold;
+
+                    table.Cell().ColumnSpan((uint)visible.Count)
+                        .PaddingVertical(2)
+                        .Text(textBlock =>
+                        {
+                            var textSpan = textBlock.Span(headerText);
+                            if (bold)
+                                textSpan.Bold();
+                        });
+                }
+
+                if (level + 1 < groups.Count)
+                {
+                    RenderGroups(table, groupRows, groups, level + 1, visible, section, parameters, ref detailIndex);
+                }
+                else
+                {
+                    foreach (var row in groupRows)
+                    {
+                        RenderDetailRow(table, row, visible, section, detailIndex);
+                        detailIndex++;
+                    }
+                }
+
+                if (group.Subtotal != null)
+                    RenderTotalRow(table, groupRows, visible, section, group.Subtotal);
+            }
+        }
+
+        /// <summary>Выводит строку итога.</summary>
+        private static void RenderTotalRow(
+            TableDescriptor table,
+            List<DataRow> rows,
+            List<ClosedXmlColumn> visible,
+            ClosedXmlTableSection section,
+            ClosedXmlTotal total)
+        {
+            var dataTable = rows.Count > 0 ? rows[0].Table : null;
+            if (dataTable == null)
+                return;
+
+            var sumFields = total.SumFields.Count > 0
+                ? total.SumFields
+                : visible.Where(column => IsNumericColumn(dataTable, column.Field))
+                    .Select(column => column.Field)
+                    .ToList();
+
+            for (var index = 0; index < visible.Count; index++)
+            {
+                var columnLayout = visible[index];
+                var text = string.Empty;
+
+                if (index == 0)
+                {
+                    text = total.Label;
+                }
+                else if (IsSumField(sumFields, columnLayout, dataTable))
+                {
+                    text = SumColumn(rows, columnLayout, dataTable);
+                }
+
+                var bold = total.Bold;
+                var align = ParseAlign(columnLayout.Align);
+                var border = section.RowBorder;
+
+                table.Cell()
+                    .Element(container => ApplyCellContainer(container, string.Empty, border))
+                    .PaddingVertical(1)
+                    .PaddingHorizontal(3)
+                    .Element(container => ApplyAlign(container, align))
+                    .Text(textBlock =>
+                    {
+                        if (string.IsNullOrWhiteSpace(text))
+                            return;
+
+                        var textSpan = textBlock.Span(text);
+                        if (bold)
+                            textSpan.Bold();
+                    });
+            }
+        }
+
+        /// <summary>Выводит блок подписей.</summary>
+        private static void RenderSignatures(ColumnDescriptor column, ClosedXmlBlock block)
+        {
+            var signatures = block.Signatures
+                .Where(item => !string.IsNullOrWhiteSpace(item.Text))
+                .OrderBy(item => item.Column)
+                .ToList();
+            if (signatures.Count == 0)
+                return;
+
+            var maxColumn = signatures.Max(item => Math.Max(item.Column, item.MergeToColumn));
+
+            column.Item().PaddingTop(12).Row(row =>
+            {
+                var cursor = 1;
+                foreach (var signature in signatures)
+                {
+                    if (signature.Column > cursor)
+                    {
+                        row.RelativeItem(signature.Column - cursor);
+                        cursor = signature.Column;
+                    }
+
+                    var span = signature.MergeToColumn >= signature.Column
+                        ? signature.MergeToColumn - signature.Column + 1
+                        : 1;
+                    span = Math.Max(1, span);
+
+                    var bold = signature.Bold;
+                    var text = signature.Text;
+
+                    row.RelativeItem(span).Text(textBlock =>
+                    {
+                        var textSpan = textBlock.Span(text);
+                        if (bold)
+                            textSpan.Bold();
+                    });
+
+                    cursor += span;
+                }
+
+                if (cursor <= maxColumn)
+                    row.RelativeItem(maxColumn - cursor + 1);
+            });
+        }
+
+        private static bool IsSumField(
+            IReadOnlyList<string> sumFields,
+            ClosedXmlColumn column,
+            DataTable dataTable)
+        {
+            var target = ResolveColumnName(dataTable, column.Field);
+            if (target == null)
+                return false;
+
+            foreach (var field in sumFields)
+            {
+                var resolved = ResolveColumnName(dataTable, field);
+                if (resolved != null && string.Equals(resolved, target, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Значение текстовой ячейки: из набора данных или собственный текст.</summary>
+        private static string BuildTextCellValue(ClosedXmlTextCell cell, DataTable dataTable)
+        {
+            var field = cell.TakeFromField;
+            if (!string.IsNullOrWhiteSpace(field))
+            {
+                var rowNumber = cell.TakeFromRow;
+                if (rowNumber > 0 && rowNumber <= dataTable.Rows.Count)
+                {
+                    var row = dataTable.Rows[rowNumber - 1];
+                    var resolved = ResolveColumnName(dataTable, field);
+                    if (resolved != null)
+                        return FormatValueText(row[resolved]);
+                }
+            }
+
+            return cell.Text ?? string.Empty;
+        }
+
+        /// <summary>Значение ячейки таблицы с учётом формата колонки.</summary>
+        private static string FormatCellValue(DataRow row, ClosedXmlColumn column)
+        {
+            var resolved = ResolveColumnName(row.Table, column.Field);
+            if (resolved == null)
+                return string.Empty;
+
+            var value = row[resolved];
+            if (value == null || value == DBNull.Value)
+                return string.Empty;
+
+            if (value is DateTime date)
+                return date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
+
+            if (value is decimal or double or float or int or long or short or byte)
+            {
+                var number = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                if (column.SuppressZero && number == 0m)
+                    return string.Empty;
+
+                return number.ToString("N2", CultureInfo.CurrentCulture);
+            }
+
+            return value.ToString() ?? string.Empty;
+        }
+
+        private static string SumColumn(List<DataRow> rows, ClosedXmlColumn column, DataTable dataTable)
+        {
+            var resolved = ResolveColumnName(dataTable, column.Field);
+            if (resolved == null)
+                return string.Empty;
+
+            decimal sum = 0m;
+            var hasValue = false;
+
+            foreach (var row in rows)
+            {
+                var value = row[resolved];
+                if (value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is decimal or double or float or int or long or short or byte)
+                {
+                    sum += Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                    hasValue = true;
+                }
+            }
+
+            return hasValue ? sum.ToString("N2", CultureInfo.CurrentCulture) : string.Empty;
+        }
+
+        private static bool IsNumericColumn(DataTable dataTable, string? field)
+        {
+            var resolved = ResolveColumnName(dataTable, field);
+            if (resolved == null)
+                return false;
+
+            var type = dataTable.Columns[resolved]!.DataType;
+            return type == typeof(decimal) || type == typeof(double) || type == typeof(float) ||
+                   type == typeof(int) || type == typeof(long) || type == typeof(short) || type == typeof(byte);
+        }
+
+        private static string FormatValueText(object? value) => value switch
+        {
+            null or DBNull => string.Empty,
+            DateTime date => date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture),
+            decimal number => number.ToString("N2", CultureInfo.CurrentCulture),
+            double number => number.ToString("N2", CultureInfo.CurrentCulture),
+            float number => number.ToString("N2", CultureInfo.CurrentCulture),
+            _ => value.ToString() ?? string.Empty
+        };
+
+        /// <summary>Оформление ячейки: заливка и рамка.</summary>
+        private static IContainer ApplyCellContainer(IContainer container, string? fill, string? border)
+        {
+            if (!string.IsNullOrWhiteSpace(fill))
+                container = container.Background(ParseColor(fill));
+
+            if (string.IsNullOrWhiteSpace(border) || border.Equals("None", StringComparison.OrdinalIgnoreCase))
+                return container;
+
+            return container.Border(0.5f).BorderColor(QuestPDF.Helpers.Colors.Black);
+        }
+
+        /// <summary>Выравнивание содержимого ячейки.</summary>
+        private static IContainer ApplyAlign(IContainer container, string align) => align switch
+        {
+            "Center" => container.AlignCenter(),
+            "Right" => container.AlignRight(),
+            _ => container.AlignLeft()
+        };
+
+        private static string ParseColor(string? html)
+        {
+            var value = (html ?? string.Empty).Trim().TrimStart('#');
+            return value.Length == 6 ? "#" + value.ToUpperInvariant() : QuestPDF.Helpers.Colors.White;
+        }
+
+        private static string ParseAlign(string? align) =>
+            (align ?? "Left").ToUpperInvariant() switch
+            {
+                "CENTER" => "Center",
+                "RIGHT" => "Right",
+                _ => "Left"
+            };
+
+        /// <summary>Число колонок листа по макету.</summary>
+        private static int ResolveColumnCount(ClosedXmlBlock block)
+        {
+            var fromCells = block.Rows
+                .SelectMany(row => row.Cells)
+                .Select(cell => Math.Max(cell.Column, cell.MergeToColumn))
+                .DefaultIfEmpty(0)
+                .Max();
+
+            var fromTable = block.Table?.Columns.Count ?? 0;
+
+            return Math.Max(Math.Max(fromCells, fromTable), 1);
+        }
+    }
+}

@@ -26,6 +26,10 @@ namespace BIS.ERP.Views
             _context = context;
             _service = new ReportDataSetService(_context);
             DataSetsGrid.ItemsSource = _dataSets;
+
+            // Список системных расчётов заполняется один раз: он постоянный.
+            CalculatorCombo.ItemsSource = SystemReportCalculators.All;
+
             _ = LoadAsync();
         }
 
@@ -83,6 +87,94 @@ namespace BIS.ERP.Views
             IsActiveCheck.IsChecked = dataSet?.IsActive ?? true;
             IsSystemCheck.IsChecked = dataSet?.IsSystem ?? false;
             FieldsGrid.ItemsSource = dataSet?.Fields.OrderBy(field => field.Order).ToList();
+
+            var isSystem = dataSet != null && ReportDataSetService.IsSystemDataSet(dataSet);
+
+            // Вид набора данных: запрос или готовый расчёт.
+            SelectKind(isSystem ? ReportDataSetKinds.System : ReportDataSetKinds.Sql);
+            CalculatorCombo.SelectedItem = isSystem
+                ? SystemReportCalculators.Find(dataSet!.CalculatorCode)
+                : null;
+
+            ApplyKindVisibility();
+        }
+
+        /// <summary>Выбирает пункт вида набора данных.</summary>
+        private void SelectKind(string kind)
+        {
+            foreach (var item in KindCombo.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(item.Tag?.ToString(), kind, StringComparison.OrdinalIgnoreCase))
+                {
+                    KindCombo.SelectedItem = item;
+                    return;
+                }
+            }
+
+            KindCombo.SelectedIndex = 0;
+        }
+
+        /// <summary>Выбранный вид набора данных.</summary>
+        private string GetSelectedKind() =>
+            (KindCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? ReportDataSetKinds.Sql;
+
+        private void OnKindChanged(object sender, SelectionChangedEventArgs e) => ApplyKindVisibility();
+
+        private void OnCalculatorChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CalculatorHint == null)
+                return;
+
+            var calculator = CalculatorCombo.SelectedItem as SystemReportCalculator;
+            CalculatorHint.Text = calculator == null
+                ? string.Empty
+                : BuildCalculatorHint(calculator);
+        }
+
+        /// <summary>
+        /// Показывает, что вернёт расчёт и какие параметры у него есть.
+        /// Администратору это заменяет чтение документации.
+        /// </summary>
+        private static string BuildCalculatorHint(SystemReportCalculator calculator)
+        {
+            var fields = string.Join(", ", calculator.Fields
+                .Where(field => !field.DbColumnName.Contains('('))
+                .Take(10)
+                .Select(field => field.Name));
+
+            var parameters = calculator.Parameters.Count == 0
+                ? "без параметров"
+                : string.Join(", ", calculator.Parameters.Select(parameter =>
+                    string.IsNullOrWhiteSpace(parameter.DefaultValue)
+                        ? parameter.Title
+                        : $"{parameter.Title} = {parameter.DefaultValue}"));
+
+            return $"{calculator.Description}\n" +
+                   $"Параметры: {parameters}.\n" +
+                   $"Колонок: {calculator.Fields.Count}. Основные: {fields}.";
+        }
+
+        /// <summary>
+        /// Показывает только то, что относится к выбранному виду:
+        /// либо поле запроса, либо список расчётов.
+        /// </summary>
+        private void ApplyKindVisibility()
+        {
+            if (KindCombo == null || SqlTextBox == null)
+                return;
+
+            var isSystem = string.Equals(GetSelectedKind(), ReportDataSetKinds.System, StringComparison.OrdinalIgnoreCase);
+
+            if (CalculatorLabel != null)
+                CalculatorLabel.Visibility = isSystem ? Visibility.Visible : Visibility.Collapsed;
+            if (CalculatorCombo != null)
+                CalculatorCombo.Visibility = isSystem ? Visibility.Visible : Visibility.Collapsed;
+            if (CalculatorHint != null)
+                CalculatorHint.Visibility = isSystem ? Visibility.Visible : Visibility.Collapsed;
+
+            // Поле запроса при системном расчёте не нужно: SQL у него нет.
+            SqlTextBox.IsEnabled = !isSystem;
+            SqlTextBox.Opacity = isSystem ? 0.5 : 1.0;
         }
 
         private void OnNewClick(object sender, RoutedEventArgs e)
@@ -192,13 +284,26 @@ namespace BIS.ERP.Views
             if (string.IsNullOrWhiteSpace(name))
                 throw new InvalidOperationException("Укажите название набора данных.");
 
+            var kind = GetSelectedKind();
+            var isSystem = string.Equals(kind, ReportDataSetKinds.System, StringComparison.OrdinalIgnoreCase);
+            var calculator = CalculatorCombo.SelectedItem as SystemReportCalculator;
+
+            if (isSystem && calculator == null)
+                throw new InvalidOperationException("Выберите системный расчёт из списка.");
+
+            if (!isSystem && string.IsNullOrWhiteSpace(SqlTextBox.Text))
+                throw new InvalidOperationException("Введите SQL-запрос набора данных.");
+
             return new ReportDataSet
             {
                 Id = _selected?.Id ?? Guid.NewGuid(),
                 Code = code,
                 Name = name,
                 Description = DescriptionBox.Text.Trim(),
-                SqlText = SqlTextBox.Text,
+                Kind = isSystem ? ReportDataSetKinds.System : ReportDataSetKinds.Sql,
+                CalculatorCode = isSystem ? calculator!.Code : string.Empty,
+                ParameterDefinitions = isSystem ? SerializeParameters(calculator!) : string.Empty,
+                SqlText = isSystem ? string.Empty : SqlTextBox.Text,
                 IsActive = IsActiveCheck.IsChecked == true,
                 IsSystem = IsSystemCheck.IsChecked == true,
                 MetadataObjectId = _selected?.MetadataObjectId,
@@ -206,6 +311,21 @@ namespace BIS.ERP.Views
                 UpdatedAt = DateTime.UtcNow
             };
         }
+
+        /// <summary>
+        /// Сохраняет параметры расчёта в набор данных: интерфейс построит по ним
+        /// поля ввода, поэтому описание должно лежать в базе.
+        /// </summary>
+        private static string SerializeParameters(SystemReportCalculator calculator) =>
+            System.Text.Json.JsonSerializer.Serialize(
+                calculator.Parameters.Select(parameter => new
+                {
+                    parameter.Name,
+                    parameter.Title,
+                    parameter.ParameterType,
+                    parameter.DefaultValue,
+                    parameter.IsRequired
+                }));
 
         private void SetStatus(string text)
         {

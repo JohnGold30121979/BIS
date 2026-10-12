@@ -4,6 +4,30 @@ using System.Text.Json.Serialization;
 namespace BIS.ERP.Models
 {
     /// <summary>
+    /// Виды визуального макета.
+    ///
+    /// Разделение введено потому, что отчёты бывают двух разных природ:
+    /// список с плоской шапкой и печатный бланк с многоуровневой шапкой.
+    /// Собирать их удобнее разными наборами средств, поэтому вид макета
+    /// задаётся явно и определяет, что показывать в конструкторе.
+    /// </summary>
+    public static class ClosedXmlLayoutKinds
+    {
+        /// <summary>
+        /// Простой макет: таблица с одной строкой шапки.
+        /// Для журналов, реестров, ведомостей — обычных списков.
+        /// </summary>
+        public const string Simple = "Simple";
+
+        /// <summary>
+        /// Форматный макет: печатный бланк с многоуровневой шапкой,
+        /// объединёнными ячейками и поворотом текста.
+        /// Для счет-фактур, накладных и других форм с графами.
+        /// </summary>
+        public const string Formatted = "Formatted";
+    }
+
+    /// <summary>
     /// JSON-разметка визуального Excel-макета (ClosedXML).
     /// Хранится в <see cref="Report.ClosedXmlLayout"/> и интерпретируется
     /// <c>ClosedXmlReportRenderer</c>: строки, шапка, колонки, группы, итоги.
@@ -19,6 +43,14 @@ namespace BIS.ERP.Models
     public class ClosedXmlSheet
     {
         public string Name { get; set; } = "Лист1";
+
+        /// <summary>
+        /// Вид макета: <see cref="ClosedXmlLayoutKinds.Simple"/> или
+        /// <see cref="ClosedXmlLayoutKinds.Formatted"/>.
+        /// Простой вид — таблица с одной строкой шапки, форматный — бланк
+        /// с многоуровневой шапкой.
+        /// </summary>
+        public string LayoutKind { get; set; } = ClosedXmlLayoutKinds.Simple;
 
         public ClosedXmlPageSetup PageSetup { get; set; } = new();
 
@@ -116,6 +148,67 @@ namespace BIS.ERP.Models
 
         /// <summary>Имя колонки набора для <see cref="TakeFromRow"/>.</summary>
         public string TakeFromField { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Поворот текста в градусах: 0 — обычный, 90 — снизу вверх,
+        /// 270 — сверху вниз, 45 — по диагонали.
+        ///
+        /// Нужен для бланков: в форме СТ-1 заголовки граф стоят вертикально.
+        /// </summary>
+        public int TextRotation { get; set; }
+
+        /// <summary>Перенос текста по словам. Нужен для длинных заголовков графов.</summary>
+        public bool WrapText { get; set; }
+    }
+
+    /// <summary>
+    /// Уровень шапки таблицы.
+    ///
+    /// Шапка бланка состоит из нескольких уровней: верхний объединяет графы
+    /// («Сумма» над колонками «Дт» и «Кт»), нижний подписывает каждую колонку.
+    /// Уровни рисуются сверху вниз в порядке списка.
+    /// </summary>
+    public class ClosedXmlHeaderLevel
+    {
+        /// <summary>Подпись уровня в списке конструктора.</summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>Ячейки уровня: объединения и подписи.</summary>
+        public List<ClosedXmlHeaderCell> Cells { get; set; } = new();
+    }
+
+    /// <summary>Ячейка уровня шапки: объединение по колонкам и подпись.</summary>
+    public class ClosedXmlHeaderCell
+    {
+        /// <summary>1-based первая колонка объединения.</summary>
+        public int Column { get; set; } = 1;
+
+        /// <summary>1-based последняя колонка объединения; 0 или меньше — одна колонка.</summary>
+        public int MergeToColumn { get; set; }
+
+        /// <summary>
+        /// Сколько уровней занимает ячейка по вертикали: 1 — только свой уровень.
+        /// Нужно для графов бланка: подпись «Количество» стоит над двумя уровнями
+        /// и занимает их целиком.
+        /// </summary>
+        public int RowSpan { get; set; } = 1;
+
+        /// <summary>
+        /// Подпись. Пустая строка — подставить заголовок колонки из этого объединения:
+        /// так нижний уровень шапки заполняется автоматически.
+        /// </summary>
+        public string Text { get; set; } = string.Empty;
+
+        public bool Bold { get; set; } = true;
+
+        /// <summary>Left | Center | Right.</summary>
+        public string Align { get; set; } = "Center";
+
+        /// <summary>Поворот текста в градусах: 0, 45, 90, 270.</summary>
+        public int TextRotation { get; set; }
+
+        /// <summary>Цвет заливки #RRGGBB; пусто — заливка шапки из настройки таблицы.</summary>
+        public string Fill { get; set; } = string.Empty;
     }
 
     public class ClosedXmlTableSection
@@ -124,6 +217,22 @@ namespace BIS.ERP.Models
 
         /// <summary>Цвет заливки шапки таблицы, #RRGGBB; пусто — без заливки.</summary>
         public string HeaderFill { get; set; } = "#D9E6F2";
+
+        /// <summary>
+        /// Уровни шапки сверху вниз.
+        ///
+        /// Пусто — шапка из одной строки: подписи берутся из колонок
+        /// (<see cref="ClosedXmlColumn.Header"/>). Заполнено — шапка рисуется
+        /// по уровням, а подписи колонок используются только как значения
+        /// по умолчанию для пустых ячеек нижнего уровня.
+        /// </summary>
+        public List<ClosedXmlHeaderLevel> HeaderLevels { get; set; } = new();
+
+        /// <summary>
+        /// Высота одной строки шапки в пунктах. 0 — размер по умолчанию.
+        /// Для вертикальных подписей нужна высокая строка.
+        /// </summary>
+        public double HeaderRowHeight { get; set; }
 
         public bool HeaderBold { get; set; } = true;
 
@@ -177,6 +286,12 @@ namespace BIS.ERP.Models
 
         /// <summary>Не выводить нулевые суммы (пустая ячейка вместо 0,00).</summary>
         public bool SuppressZero { get; set; }
+
+        /// <summary>
+        /// Поворот подписи колонки в градусах: 0, 45, 90, 270.
+        /// Нужен для бланков, где заголовки граф стоят вертикально.
+        /// </summary>
+        public int TextRotation { get; set; }
     }
 
     /// <summary>Правило выделения строки по содержимому первой непустой ячейки.</summary>

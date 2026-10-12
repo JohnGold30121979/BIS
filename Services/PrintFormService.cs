@@ -979,6 +979,8 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
+            EnsureFrxEnabled();
+
             var sample = new CashOrderPrintData
             {
                 Number = "42", Date = DateTime.Today, Organization = "ОсОО Пример",
@@ -1000,6 +1002,7 @@ namespace BIS.ERP.Services
 
         public byte[] ExportReportTemplatePreview(DataTable dataTable, Report report)
         {
+            EnsureFrxEnabled();
             var rules = new FoxProReportFieldRuleService(_context).GetActiveRulesSafe();
             return ExportReportTemplatePreview(dataTable, report, rules);
         }
@@ -1009,6 +1012,7 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyCollection<FoxProReportFieldRule>? rules)
         {
+            EnsureFrxEnabled();
             return ExportReportTemplatePreview(dataTable, report, rules, null);
         }
 
@@ -1018,6 +1022,8 @@ namespace BIS.ERP.Services
             IReadOnlyCollection<FoxProReportFieldRule>? rules,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
+            EnsureFrxEnabled();
+
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
@@ -1028,6 +1034,7 @@ namespace BIS.ERP.Services
 
         public byte[] ExportReportTemplateExcel(DataTable dataTable, Report report)
         {
+            EnsureFrxEnabled();
             var rules = new FoxProReportFieldRuleService(_context).GetActiveRulesSafe();
             return ExportReportTemplateExcel(dataTable, report, rules);
         }
@@ -1037,6 +1044,7 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyCollection<FoxProReportFieldRule>? rules)
         {
+            EnsureFrxEnabled();
             return ExportReportTemplateExcel(dataTable, report, rules, null);
         }
 
@@ -1046,12 +1054,31 @@ namespace BIS.ERP.Services
             IReadOnlyCollection<FoxProReportFieldRule>? rules,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
+            EnsureFrxEnabled();
+
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
             var data = BuildReportPreviewData(
                 dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>(), reportParameters);
             return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
+        }
+
+        /// <summary>
+        /// Проверяет, что механизм FRX включён.
+        ///
+        /// Вывод по макетам FoxPro отключён на время перехода на ClosedXML.
+        /// Код сохранён полностью: чтобы вернуть механизм, достаточно установить
+        /// <see cref="ReportingFeatures.FrxEnabled"/> в true.
+        /// </summary>
+        private static void EnsureFrxEnabled()
+        {
+            if (!ReportingFeatures.FrxEnabled)
+            {
+                throw new InvalidOperationException(
+                    "Вывод по макетам FoxPro FRX отключён. " +
+                    "Включите ReportingFeatures.FrxEnabled или выберите формат ClosedXML.");
+            }
         }
 
         public byte[] ExportProgrammaticReconciliationActPreview(DataTable dataTable, Report report)

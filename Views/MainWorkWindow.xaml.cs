@@ -543,6 +543,7 @@ namespace BIS.ERP
                 .ToList();
             var reports = (await _reportService.GetNavigationReportsAsync())
                 .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, assignedModuleCodesByObject, activeModuleCodes))
+                .Where(IsReportAvailableForNavigation)
                 .ToList();
             if (modules.Count == 0 && allModules.Count == 0)
             {
@@ -643,15 +644,8 @@ namespace BIS.ERP
                     };
                     foreach (var report in moduleReports)
                     {
-                        group.Children.Add(new NavigationItem
-                        {
-                            Id = report.Id.ToString(),
-                            Name = report.Name,
-                            Icon = report.Icon,
-                            Type = "Report",
-                            Tag = report,
-                            Order = GetNavigationObjectOrder(reportOrderById, report.Id, report.Order)
-                        });
+                        group.Children.Add(CreateReportNavigationItem(
+                            report, GetNavigationObjectOrder(reportOrderById, report.Id, report.Order)));
                     }
                     moduleGroups.Add(group);
                 }
@@ -695,11 +689,7 @@ namespace BIS.ERP
                 };
                 AddDocumentNavigationItems(otherSection, unassignedDocuments);
                 foreach (var report in unassignedReports.OrderBy(report => report.Name))
-                    otherSection.Children.Add(new NavigationItem
-                    {
-                        Id = report.Id.ToString(), Name = report.Name, Icon = report.Icon,
-                        Type = "Report", Tag = report, Order = report.Order
-                    });
+                    otherSection.Children.Add(CreateReportNavigationItem(report));
                 NavigationItems.Add(otherSection);
             }
 
@@ -730,6 +720,32 @@ namespace BIS.ERP
             if (NavigationItems.Count > 0)
                 ShowNavigationOverview(NavigationItems[0]);
         }
+
+        /// <summary>
+        /// Проверяет, что отчёт доступен для показа в дереве.
+        ///
+        /// Отчёты по макетам FoxPro FRX скрываются, пока механизм отключён:
+        /// они не формируются, и в дереве им делать нечего.
+        /// </summary>
+        private static bool IsReportAvailableForNavigation(Report report) =>
+            ReportingFeatures.FrxEnabled || !ReportingFeatures.IsFrxReport(report);
+
+        /// <summary>
+        /// Создаёт элемент дерева для отчёта.
+        ///
+        /// Отчёты с отключённым механизмом сюда не попадают — их отсекает
+        /// <see cref="IsReportAvailableForNavigation"/>.
+        /// </summary>
+        private static NavigationItem CreateReportNavigationItem(Report report, int? order = null) =>
+            new()
+            {
+                Id = report.Id.ToString(),
+                Name = report.Name,
+                Icon = report.Icon,
+                Type = "Report",
+                Tag = report,
+                Order = order ?? report.Order
+            };
 
         private static Dictionary<Guid, HashSet<string>> BuildAssignedModuleCodesByObject(
             IEnumerable<MetadataModuleItem> moduleItems,
@@ -1189,7 +1205,10 @@ namespace BIS.ERP
 
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
-            var navigationReports = reports.Where(report => report.IsActive && !report.IsPrintForm && !IsHiddenByUnavailableModule(report, new HashSet<Guid>(), activeModuleCodes)).ToList();
+            var navigationReports = reports
+                .Where(report => report.IsActive && !report.IsPrintForm && !IsHiddenByUnavailableModule(report, new HashSet<Guid>(), activeModuleCodes))
+                .Where(IsReportAvailableForNavigation)
+                .ToList();
             if (navigationReports.Any())
             {
                 var reportsSection = new NavigationItem
@@ -1201,17 +1220,7 @@ namespace BIS.ERP
                 };
 
                 foreach (var report in navigationReports.OrderBy(r => r.Order).ThenBy(r => r.Name))
-                {
-                    reportsSection.Children.Add(new NavigationItem
-                    {
-                        Id = report.Id.ToString(),
-                        Name = report.Name,
-                        Icon = report.Icon,
-                        Type = "Report",
-                        Tag = report,
-                        Order = report.Order
-                    });
-                }
+                    reportsSection.Children.Add(CreateReportNavigationItem(report));
                 NavigationItems.Add(reportsSection);
             }
 
@@ -2403,6 +2412,19 @@ namespace BIS.ERP
 
         private async Task OpenReport(Report report)
         {
+            // Отчёт с отключённым механизмом остаётся в дереве, но не открывается:
+            // иначе пользователь получил бы непонятную ошибку формирования.
+            if (ReportingFeatures.IsFrxReport(report) && !ReportingFeatures.FrxEnabled)
+            {
+                MessageBox.Show(
+                    $"Отчёт «{report.Name}» построен по макету FoxPro FRX и временно отключён.\n\n" +
+                    "Идёт переход на визуальные макеты ClosedXML. Доступны отчёты " +
+                    "«Акт сверки (ClosedXML)» и «Оборотная ведомость (ClosedXML)» " +
+                    "в разделе «Бухгалтерские отчеты».",
+                    "Отчёт отключён", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
             if (IsReconciliationReport(report))
             {
                 await OpenAccountingReportsAsync("OrganizationReconciliation");
@@ -2454,7 +2476,7 @@ namespace BIS.ERP
                 var data = await reportService.GetReportDataAsync(loadedReport, parameters);
                 var pdf = reportService.ExportToPdf(data, loadedReport);
 
-                var preview = new PdfPreviewWindow(pdf) { Owner = this };
+                var preview = new PdfPreviewWindow(pdf, loadedReport.Name) { Owner = this };
                 preview.ShowDialog();
             }
             catch (Exception ex)

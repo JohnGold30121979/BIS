@@ -9,7 +9,7 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0"
-                   Text="SQL-наборы данных для отчетов. Разрешены только SELECT/WITH; параметры: @PeriodStart, @PeriodEnd, @CashDeskId, @OrganizationId, @EmployeeId, @AccountCode."
+                   Text="Наборы данных для отчетов. Вид «SQL-запрос» — запрос SELECT/WITH (параметры: @PeriodStart, @PeriodEnd, @CashDeskId, @OrganizationId, @EmployeeId, @AccountCode). Вид «Системный расчёт» — готовый расчёт системы: запрос писать не нужно."
                    TextWrapping="Wrap"
                    Foreground="#445"
                    Margin="0,0,0,8"/>
@@ -75,15 +75,44 @@
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Описание:" VerticalAlignment="Top" FontWeight="Bold" Margin="0,8,0,0"/>
                     <TextBox x:Name="DescriptionBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Height="52" Margin="4" TextWrapping="Wrap" AcceptsReturn="True"/>
 
-                    <GroupBox Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Header="SQL набора данных" Margin="0,8,0,8">
-                        <TextBox x:Name="SqlTextBox"
-                                 FontFamily="Consolas"
-                                 FontSize="13"
-                                 AcceptsReturn="True"
-                                 AcceptsTab="True"
-                                 TextWrapping="NoWrap"
-                                 VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Auto"/>
+                    <GroupBox Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Header="Данные набора" Margin="0,8,0,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <WrapPanel Grid.Row="0" Margin="4,4,4,6">
+                                <TextBlock Text="Вид:" VerticalAlignment="Center" FontWeight="Bold" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="KindCombo" Width="230" Height="28"
+                                          SelectionChanged="OnKindChanged">
+                                    <ComboBoxItem Content="SQL-запрос" Tag="Sql"/>
+                                    <ComboBoxItem Content="Системный расчёт" Tag="System"/>
+                                </ComboBox>
+                                <TextBlock x:Name="CalculatorLabel" Text="Расчёт:" VerticalAlignment="Center"
+                                           FontWeight="Bold" Margin="16,0,6,0" Visibility="Collapsed"/>
+                                <ComboBox x:Name="CalculatorCombo" Width="280" Height="28"
+                                          DisplayMemberPath="Name"
+                                          SelectionChanged="OnCalculatorChanged"
+                                          Visibility="Collapsed"/>
+                            </WrapPanel>
+
+                            <!-- Подсказка по выбранному расчёту: что он вернёт. -->
+                            <TextBlock x:Name="CalculatorHint" Grid.Row="1" Margin="6,0,4,6"
+                                       TextWrapping="Wrap" Foreground="#425466"
+                                       Visibility="Collapsed"/>
+
+                            <TextBox x:Name="SqlTextBox"
+                                     Grid.Row="2"
+                                     FontFamily="Consolas"
+                                     FontSize="13"
+                                     AcceptsReturn="True"
+                                     AcceptsTab="True"
+                                     TextWrapping="NoWrap"
+                                     VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto"/>
+                        </Grid>
                     </GroupBox>
 
                     <GroupBox Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="4" Header="Поля результата">
