@@ -299,6 +299,17 @@ namespace BIS.ERP.Services
                 if ((await GetLinesAsync(id)).Count > 0)
                     continue;
 
+                // Шапки может уже не быть: данные бывают старше самой таблицы —
+                // например, после загрузки конфигурации таблица пересоздана, а
+                // колонка expense_lines осталась в старой копии. Вставка строк
+                // без шапки нарушила бы внешний ключ и уронила весь запуск.
+                if (!await DocumentExistsAsync(id))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Авансовый отчет {id}: строки затрат пропущены — документ не найден.");
+                    continue;
+                }
+
                 List<LegacyAdvanceExpenseLine>? payload;
                 try
                 {
@@ -360,7 +371,52 @@ namespace BIS.ERP.Services
                 await _context.Database.CloseConnectionAsync();
             }
         }
-private static string QuoteIdentifier(string identifier)
+        /// <summary>
+        /// Есть ли шапка авансового отчёта с таким идентификатором.
+        ///
+        /// Строки затрат ссылаются на шапку внешним ключом, поэтому вставлять
+        /// их без проверки нельзя: сирота нарушит FK и уронит запуск.
+        ///
+        /// Проверяется таблица, на которую ссылается сам внешний ключ, а не
+        /// настроенное имя шапки: после переименования таблиц они могут
+        /// расходиться, и тогда проверка смотрела бы не туда.
+        /// </summary>
+        private async Task<bool> DocumentExistsAsync(Guid documentId)
+        {
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                // Таблица, на которую ссылается внешний ключ строк.
+                string? target;
+                await using (var lookup = _context.Database.GetDbConnection().CreateCommand())
+                {
+                    lookup.CommandText = @"
+                        SELECT confrelid::regclass::text
+                        FROM pg_constraint
+                        WHERE conname = @constraint;";
+                    lookup.Parameters.Add(new NpgsqlParameter(
+                        "@constraint", $"FK_{LinesTableName}_advance"));
+
+                    target = await lookup.ExecuteScalarAsync() as string;
+                }
+
+                if (string.IsNullOrWhiteSpace(target))
+                    target = HeaderTableName;
+
+                await using var exists = _context.Database.GetDbConnection().CreateCommand();
+                exists.CommandText = $@"SELECT 1 FROM {QuoteIdentifier(target)} WHERE ""Id"" = @id LIMIT 1;";
+                exists.Parameters.Add(new NpgsqlParameter("@id", documentId));
+
+                var value = await exists.ExecuteScalarAsync();
+                return value != null && value != DBNull.Value;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+        }
+
+        private static string QuoteIdentifier(string identifier)
         {
             var escaped = identifier.Replace("\"", "\"\"");
             return "\"" + escaped + "\"";

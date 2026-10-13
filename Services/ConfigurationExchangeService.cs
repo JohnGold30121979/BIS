@@ -509,8 +509,74 @@ namespace BIS.ERP.Services
             // проглоченная ошибка SQL отравляет транзакцию импорта (25P02).
             await _context.Database.ExecuteSqlRawAsync($"TRUNCATE TABLE {Quote(table.TableName)};");
 
+            // Колонки из пакета могут отсутствовать в приёмнике: пакет собран на
+            // другой сборке или на другой конфигурации. Досоздаём их, иначе вставка
+            // падает с 42703 и импорт обрывается на середине.
+            await EnsureColumnsForImportedRowsAsync(table.TableName, table.Rows);
+
             foreach (var row in table.Rows)
                 await InsertRowOnStandaloneConnectionAsync(table.TableName, row);
+        }
+
+        /// <summary>
+        /// Досоздаёт в целевой таблице колонки, которые есть в импортируемых строках,
+        /// но отсутствуют в таблице.
+        ///
+        /// Так импорт переживает расхождение сборок: колонка появляется как текст,
+        /// а не роняет загрузку. Существующие колонки не трогаются.
+        /// </summary>
+        private async Task EnsureColumnsForImportedRowsAsync(
+            string tableName,
+            IReadOnlyList<Dictionary<string, object?>> rows)
+        {
+            if (rows.Count == 0)
+                return;
+
+            // Колонки, которые встречаются в данных пакета.
+            var imported = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows)
+            {
+                foreach (var key in row.Keys)
+                {
+                    if (!string.IsNullOrWhiteSpace(key))
+                        imported.Add(key);
+                }
+            }
+
+            if (imported.Count == 0)
+                return;
+
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            await using (var command = _context.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = @"
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = @table;";
+                command.Parameters.Add(new NpgsqlParameter("@table", tableName));
+
+                await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    await using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                        existing.Add(reader.GetString(0));
+                }
+                finally
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
+
+            foreach (var column in imported.Where(name => !existing.Contains(name)))
+            {
+                await _context.Database.ExecuteSqlRawAsync(
+                    $"ALTER TABLE {Quote(tableName)} ADD COLUMN IF NOT EXISTS {Quote(column)} text;");
+
+                SystemLogService.Warning(
+                    $"В таблицу '{tableName}' добавлена колонка '{column}' из пакета конфигурации.",
+                    "ConfigurationExchange");
+            }
         }
 
         private async Task InsertRowOnStandaloneConnectionAsync(string tableName, Dictionary<string, object?> row)

@@ -45,6 +45,14 @@ namespace BIS.ERP.Models
         public bool IsDefault { get; set; }
         public bool IsSystem { get; set; }
 
+        /// <summary>
+        /// Показывать отчёт в списке окна «Бухгалтерская отчётность».
+        ///
+        /// Отчёт попадает в список, если он активен и эта отметка стоит.
+        /// Администратор включает её в конструкторе отчётов.
+        /// </summary>
+        public bool ShowInAccountingReports { get; set; }
+
         [MaxLength(80)]
         public string SourceFormat { get; set; } = "Native";
 

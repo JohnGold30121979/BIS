@@ -34,6 +34,9 @@ namespace BIS.ERP.Views
         private List<AccountingPeriodModuleStatus> _currentModuleStates = new();
         private bool _reconciliationVariantsLoaded;
         private bool _trialBalanceVariantsLoaded;
+
+        /// <summary>Виды ОСВ. Список из одного расчётного варианта.</summary>
+        private List<TrialBalanceReportVariant> _trialBalanceVariants = new();
         private Guid? _selectedOrganizationId;
         private string? _selectedOrganizationName;
         private string _trialBalanceAccountCode = string.Empty;
@@ -58,6 +61,16 @@ namespace BIS.ERP.Views
             EndDatePicker.SelectedDate = DateTime.Today;
             Loaded += async (_, _) =>
             {
+                // Loaded срабатывает при каждом перемонтировании окна в дереве
+                // (переключение вкладок, возврат из диалога). Повторная загрузка
+                // пересобирала список отчётов и сбрасывала выбор пользователя
+                // на первый пункт.
+                if (_initialized)
+                    return;
+
+                _initialized = true;
+
+                await LoadAccountingReportsAsync();
                 await LoadReconciliationReportVariantsAsync();
                 await LoadTrialBalanceReportVariantsAsync();
                 await LoadOrganizationsAsync();
@@ -65,24 +78,236 @@ namespace BIS.ERP.Views
             UpdateReconciliationVariantVisibility();
         }
 
-        private void OnOrganizationSelectionChanged(object sender, SelectionChangedEventArgs e)
+        /// <summary>Первичная загрузка выполнена. Повторные Loaded её не повторяют.</summary>
+        private bool _initialized;
+
+        /// <summary>
+        /// Пункт списка отчётов окна «Бухгалтерская отчётность».
+        ///
+        /// Список строится по таблице Reports: отчёт попадает в него, если он
+        /// активен и в конструкторе отмечен «Показывать в бухгалтерской отчетности».
+        /// </summary>
+        private sealed class AccountingReportItem
         {
-            if (OrganizationCombo.SelectedItem is OrganizationSelectionItem org && !org.IsAll)
+            public Guid Id { get; init; }
+            public string Code { get; init; } = string.Empty;
+            public string Name { get; init; } = string.Empty;
+            public string ReportType { get; init; } = string.Empty;
+
+            /// <summary>Код набора данных отчёта; пусто — берётся по типу отчёта.</summary>
+            public string DataSetCode { get; init; } = string.Empty;
+
+            public string DisplayName => string.IsNullOrWhiteSpace(Name) ? Code : Name;
+
+            public override string ToString() => DisplayName;
+        }
+
+        /// <summary>Выбранный отчёт списка.</summary>
+        private AccountingReportItem? SelectedAccountingReport =>
+            ReportTypeCombo?.SelectedItem as AccountingReportItem;
+
+        /// <summary>
+        /// Загружает список отчётов из базы.
+        ///
+        /// Показываются только отчёты с отметкой «Показывать в бухгалтерской
+        /// отчетности», включённой в конструкторе отчётов.
+        /// </summary>
+        private async Task LoadAccountingReportsAsync()
+        {
+            try
             {
-                _selectedOrganizationId = org.Id;
-                _selectedOrganizationName = org.Name;
+                var reports = await _context.Reports.AsNoTracking()
+                    .Where(report => report.IsActive && report.ShowInAccountingReports)
+                    .OrderBy(report => report.Order)
+                    .ThenBy(report => report.Name)
+                    .Select(report => new
+                    {
+                        report.Id,
+                        report.Code,
+                        report.Name,
+                        report.ReportType
+                    })
+                    .ToListAsync();
+
+                var items = reports
+                    .Select(report => new AccountingReportItem
+                    {
+                        Id = report.Id,
+                        Code = report.Code,
+                        Name = report.Name,
+                        ReportType = report.ReportType ?? string.Empty
+                    })
+                    .ToList();
+
+                ReportTypeCombo.ItemsSource = items;
+
+                // Выбор из главного окна применяется после загрузки списка:
+                // до неё выбирать не из чего, и выбор сбрасывался на первый пункт.
+                if (!string.IsNullOrWhiteSpace(_requestedReportCode))
+                    ApplyRequestedReportSelection();
+                else
+                    ReportTypeCombo.SelectedIndex = items.Count > 0 ? 0 : -1;
+
+                UpdateReconciliationVariantVisibility();
+
+                StatusText.Text = items.Count == 0
+                    ? "В конструкторе отчётов не отмечен ни один отчёт для этого окна"
+                    : $"Доступно отчетов: {items.Count}";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка загрузки списка отчетов: {ex.Message}", "Отчеты",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Пользователь вписал номер организации вручную.
+        ///
+        /// По Enter номер ищется в справочнике: сначала точное совпадение кода,
+        /// затем — по началу кода или наименования.
+        /// </summary>
+        private void OnOrganizationNumberKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter)
+                return;
+
+            e.Handled = true;
+            ApplyTypedOrganization();
+        }
+
+        /// <summary>
+        /// Отметка «Все организации».
+        ///
+        /// Стоит — отчёт строится по всем организациям. Снята — нужен выбор
+        /// конкретной организации: подсказка просит вписать номер.
+        ///
+        /// Обработчик вызывается и при построении окна: галка отмечена прямо
+        /// в разметке, поэтому соседние поля могут быть ещё не созданы —
+        /// все обращения к ним идут через проверки.
+        /// </summary>
+        private void OnAllOrganizationsChanged(object sender, RoutedEventArgs e)
+        {
+            if (AllOrganizationsCheckBox?.IsChecked == true)
+            {
+                _selectedOrganizationId = null;
+                _selectedOrganizationName = null;
+
+                if (OrganizationNumberTextBox != null)
+                    OrganizationNumberTextBox.Text = string.Empty;
+
+                if (OrganizationHintText != null)
+                    OrganizationHintText.Text = string.Empty;
+
                 return;
             }
 
-            _selectedOrganizationId = null;
-            _selectedOrganizationName = null;
+            UpdateOrganizationHint();
+
+            if (!_selectedOrganizationId.HasValue && OrganizationHintText != null)
+                OrganizationHintText.Text = "Впишите номер организации";
         }
 
-        private void OnClearOrganizationClick(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Применяет номер организации, вписанный пользователем.
+        ///
+        /// Если совпадение не найдено, выбор не меняется и пользователь
+        /// видит подсказку.
+        /// </summary>
+        private void ApplyTypedOrganization()
         {
-            OrganizationCombo.SelectedIndex = OrganizationCombo.Items.Count > 0 ? 0 : -1;
+            var typed = (OrganizationNumberTextBox?.Text ?? string.Empty).Trim();
+            if (typed.Length == 0)
+            {
+                ClearOrganizationFilter();
+                return;
+            }
+
+            var match = FindOrganizationByTyped(typed);
+            if (match == null)
+            {
+                if (OrganizationHintText != null)
+                    OrganizationHintText.Text = $"Организация «{typed}» не найдена";
+
+                return;
+            }
+
+            SelectOrganization(match);
+        }
+
+        /// <summary>
+        /// Ищет организацию по вписанному номеру: точное совпадение кода,
+        /// затем код или наименование с этого текста.
+        /// </summary>
+        private OrganizationSelectionItem? FindOrganizationByTyped(string typed)
+        {
+            var items = _organizationSelectionItems;
+            if (items.Count == 0)
+                return null;
+
+            var exact = items.FirstOrDefault(item =>
+                string.Equals(item.Code, typed, StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+                return exact;
+
+            return items.FirstOrDefault(item =>
+                       item.Code?.StartsWith(typed, StringComparison.OrdinalIgnoreCase) == true)
+                   ?? items.FirstOrDefault(item =>
+                       item.Name?.StartsWith(typed, StringComparison.OrdinalIgnoreCase) == true);
+        }
+
+        /// <summary>
+        /// Применяет выбранную организацию: подставляет её номер в поле
+        /// и снимает отметку «Все организации».
+        /// </summary>
+        private void SelectOrganization(OrganizationSelectionItem organization)
+        {
+            _selectedOrganizationId = organization.IsAll ? null : organization.Id;
+            _selectedOrganizationName = organization.IsAll ? null : organization.Name;
+
+            if (OrganizationNumberTextBox != null)
+            {
+                // Если у организации нет номера, показываем наименование:
+                // поле не должно остаться пустым после выбора.
+                OrganizationNumberTextBox.Text = string.IsNullOrWhiteSpace(organization.Code)
+                    ? organization.Name ?? string.Empty
+                    : organization.Code;
+            }
+
+            // Явный выбор организации снимает отметку «Все организации».
+            if (AllOrganizationsCheckBox != null && AllOrganizationsCheckBox.IsChecked == true)
+                AllOrganizationsCheckBox.IsChecked = false;
+
+            UpdateOrganizationHint();
+        }
+
+        /// <summary>Показывает, по какой организации строится отчёт.</summary>
+        private void UpdateOrganizationHint()
+        {
+            if (OrganizationHintText == null)
+                return;
+
+            OrganizationHintText.Text = _selectedOrganizationId.HasValue
+                ? _selectedOrganizationName
+                : string.Empty;
+        }
+
+        /// <summary>
+        /// Снимает выбор организации: отчёт строится по всем организациям.
+        /// </summary>
+        private void ClearOrganizationFilter()
+        {
             _selectedOrganizationId = null;
             _selectedOrganizationName = null;
+
+            if (OrganizationNumberTextBox != null)
+                OrganizationNumberTextBox.Text = string.Empty;
+
+            if (AllOrganizationsCheckBox != null)
+                AllOrganizationsCheckBox.IsChecked = true;
+
+            UpdateOrganizationHint();
         }
 
         private async void OnSelectTrialBalanceAccountClick(object sender, RoutedEventArgs e)
@@ -188,12 +413,16 @@ namespace BIS.ERP.Views
                 if (selectedOrg == null)
                     return;
 
+                // Запись из справочника могла не попасть в загруженный список:
+                // добавляем её, чтобы выбор не потерялся при следующей перезагрузке.
                 if (_organizationSelectionItems.All(item => item.Id != selectedOrg.Id))
-                    await LoadOrganizationsAsync();
+                {
+                    _organizationSelectionItems = _organizationSelectionItems
+                        .Concat(new[] { selectedOrg })
+                        .ToList();
+                }
 
-                OrganizationCombo.SelectedItem = _organizationSelectionItems.FirstOrDefault(item => item.Id == selectedOrg.Id) ?? selectedOrg;
-                _selectedOrganizationId = selectedOrg.Id;
-                _selectedOrganizationName = selectedOrg.Name;
+                SelectOrganization(selectedOrg);
             }
             catch (Exception ex)
             {
@@ -206,13 +435,25 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Выберите отчет и период";
             }
         }
+        /// <summary>
+        /// Загружает организации для выбора.
+        ///
+        /// Отдельного поля «Первичная» нет: оно было избыточным. По умолчанию
+        /// отчёт строится по всем организациям — отметка «Все организации» стоит.
+        /// </summary>
         private async Task LoadOrganizationsAsync()
         {
             try
             {
                 _organizationSelectionItems = await LoadOrganizationSelectionItemsAsync(true);
-                OrganizationCombo.ItemsSource = _organizationSelectionItems;
-                OrganizationCombo.SelectedIndex = _organizationSelectionItems.Count > 0 ? 0 : -1;
+
+                if (OrganizationNumberTextBox != null)
+                    OrganizationNumberTextBox.Text = string.Empty;
+
+                if (AllOrganizationsCheckBox != null)
+                    AllOrganizationsCheckBox.IsChecked = true;
+
+                UpdateOrganizationHint();
             }
             catch (Exception ex)
             {
@@ -310,18 +551,51 @@ namespace BIS.ERP.Views
                 .Select(group => group.First())
                 .ToList();
         }
+        /// <summary>
+        /// Код отчёта, который нужно выбрать после загрузки списка.
+        ///
+        /// Список грузится асинхронно, а запрос выбора приходит сразу после
+        /// создания окна. Поэтому код запоминается и применяется, когда
+        /// список уже построен.
+        /// </summary>
+        private string _requestedReportCode = string.Empty;
+
+        /// <summary>
+        /// Выбирает отчёт по коду отчёта или по типу.
+        ///
+        /// Вызывается из главного окна при открытии отчёта из дерева.
+        /// </summary>
         public void SelectReportType(string reportType)
         {
-            foreach (var item in ReportTypeCombo.Items.OfType<ComboBoxItem>())
-            {
-                if (!string.Equals(item.Tag?.ToString(), reportType, StringComparison.OrdinalIgnoreCase))
-                    continue;
+            if (string.IsNullOrWhiteSpace(reportType))
+                return;
 
-                ReportTypeCombo.SelectedItem = item;
-                break;
-            }
+            _requestedReportCode = reportType;
+            ApplyRequestedReportSelection();
+        }
 
-            UpdateReconciliationVariantVisibility();
+        /// <summary>
+        /// Применяет запомненный выбор отчёта к загруженному списку.
+        ///
+        /// Ищет совпадение по коду отчёта, затем по типу. Если ничего не
+        /// найдено, выбор остаётся первым пунктом.
+        /// </summary>
+        private void ApplyRequestedReportSelection()
+        {
+            if (ReportTypeCombo?.ItemsSource == null || string.IsNullOrWhiteSpace(_requestedReportCode))
+                return;
+
+            var items = ReportTypeCombo.Items.OfType<AccountingReportItem>().ToList();
+            if (items.Count == 0)
+                return;
+
+            var match = items.FirstOrDefault(item =>
+                            string.Equals(item.Code, _requestedReportCode, StringComparison.OrdinalIgnoreCase))
+                        ?? items.FirstOrDefault(item =>
+                            string.Equals(item.ReportType, _requestedReportCode, StringComparison.OrdinalIgnoreCase));
+
+            if (match != null)
+                ReportTypeCombo.SelectedItem = match;
         }
 
         private async void OnGenerateClick(object sender, RoutedEventArgs e)
@@ -330,7 +604,6 @@ namespace BIS.ERP.Views
             {
                 IsEnabled = false;
                 StatusText.Text = "Формирование отчета...";
-                var reportType = (ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
                 var start = StartDatePicker.SelectedDate ?? new DateTime(DateTime.Today.Year, 1, 1);
                 var end = EndDatePicker.SelectedDate ?? DateTime.Today;
                 if (end < start)
@@ -338,20 +611,12 @@ namespace BIS.ERP.Views
 
                 await _periodService.EnsureSchemaAsync();
 
-                (_currentData, _currentReport) = reportType switch
-                {
-                    "GeneralLedger" => await BuildGeneralLedgerAsync(start.Year),
-                    "FinancialPosition" => await BuildFinancialPositionAsync(end),
-                    "FinancialResults" => await BuildFinancialResultsAsync(start, end),
-                    "PurchaseSalesJournal" => await BuildPurchaseSalesJournalAsync(start, end),
-                    "OrganizationBalances" => await BuildOrganizationBalancesAsync(start, end),
-                    "PeriodCollection" => await BuildPeriodCollectionAsync(start, end),
-                    "PaymentOrderRegister" => await BuildPaymentOrderRegisterAsync(start, end),
-                    "OrganizationReconciliation" => await BuildOrganizationReconciliationAsync(start, end),
-                    "OrganizationReconciliationClosedXml" => await BuildOrganizationReconciliationAsync(start, end, closedXml: true),
-                    "TrialBalanceClosedXml" => await BuildTrialBalanceAsync(start, end, closedXml: true),
-                    _ => await BuildTrialBalanceAsync(start, end)
-                };
+                var selectedReport = SelectedAccountingReport;
+                if (selectedReport == null)
+                    throw new InvalidOperationException(
+                        "В списке нет отчетов. Отметьте нужный отчет в конструкторе: «Показывать в бухгалтерской отчетности».");
+
+                (_currentData, _currentReport) = await BuildSelectedAccountingReportAsync(selectedReport, start, end);
 
                 ReportGrid.ItemsSource = _currentData.DefaultView;
                 SearchBox.Clear();
@@ -550,7 +815,7 @@ namespace BIS.ERP.Views
         /// Сетка строится по колонкам таблицы данных, поэтому без этой отмены
         /// служебные колонки попадали бы в экранную таблицу отчёта.
         /// </summary>
-        private static void OnReportGridAutoGeneratingColumn(object? sender, DataGridAutoGeneratingColumnEventArgs e)
+        private void OnReportGridAutoGeneratingColumn(object? sender, DataGridAutoGeneratingColumnEventArgs e)
         {
             if (e.PropertyName != null && ServiceColumnNames.Contains(e.PropertyName))
                 e.Cancel = true;
@@ -566,6 +831,203 @@ namespace BIS.ERP.Views
             var name = row.Row.Table.Columns.Contains("Наименование") ? row["Наименование"]?.ToString() ?? code : code;
             var (start, end) = GetPeriod();
             new TurnoversDialog(code, name, start, end, _postingService) { Owner = Window.GetWindow(this) }.ShowDialog();
+        }
+
+        /// <summary>
+        /// Строит выбранный отчёт по его типу из базы.
+        ///
+        /// Акт сверки и ведомость по счёту строятся своими построителями:
+        /// им нужны отбор по счёту и особая форма. Остальные отчёты собираются
+        /// по визуальному макету ClosedXML из набора данных отчёта.
+        /// </summary>
+        private async Task<(DataTable, Report)> BuildSelectedAccountingReportAsync(
+            AccountingReportItem selected,
+            DateTime start,
+            DateTime end)
+        {
+            if (IsReconciliationType(selected.ReportType))
+                return await BuildOrganizationReconciliationAsync(start, end, closedXml: true);
+
+            if (IsTurnoverType(selected.ReportType))
+                return await BuildTurnoverStatementAsync(start, end);
+
+            return await BuildClosedXmlReportByCodeAsync(selected.Code, start, end);
+        }
+
+        /// <summary>
+        /// Оборотная ведомость по счёту по визуальному макету ClosedXML.
+        ///
+        /// Таблица строится системным расчётом «Движения по проводкам»: он отдаёт
+        /// те же колонки, что ждёт макет (дата, документ, корреспондентский счёт,
+        /// обороты, валюта, организация). Оборотно-сальдовый расчёт здесь не годится —
+        /// у него колонки сальдо, и макет не нашёл бы ни одной своей колонки.
+        /// </summary>
+        private async Task<(DataTable, Report)> BuildTurnoverStatementAsync(DateTime start, DateTime end)
+        {
+            if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
+                throw new InvalidOperationException("Для оборотной ведомости выберите счет.");
+
+            var report = await _context.Reports.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Code == "standard.finance.trial-balance-closedxml");
+
+            if (report == null)
+                throw new InvalidOperationException(
+                    "Отчёт «Оборотная ведомость (ClosedXML)» не найден в базе. Проверьте метаданные отчётов.");
+
+            var dataSet = await _context.ReportDataSets.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Code == SystemReportCalculators.MovementsCode);
+
+            if (dataSet == null)
+                throw new InvalidOperationException(
+                    "Набор данных «Движения по проводкам» не найден. Проверьте наборы данных отчётов.");
+
+            var selectedOrganization = GetSelectedOrganizationScope();
+
+            var parameters = new Dictionary<string, object>
+            {
+                ["PeriodStart"] = start,
+                ["PeriodEnd"] = end,
+                // Отбор по счёту: без него в ведомость попадут все проводки.
+                ["AccountCode"] = _trialBalanceAccountCode,
+                ["OrganizationId"] = selectedOrganization?.Id?.ToString() ?? string.Empty
+            };
+
+            var table = await new ReportDataSetService(_context).ExecuteAsync(dataSet, parameters);
+
+            var reportTitle = $"Оборотная ведомость по счету {_trialBalanceAccountCode} " +
+                              $"с {start:dd/MM/yyyy} по {end:dd/MM/yyyy}";
+
+            var current = CreateReport(table, reportTitle, true);
+            current.Name = report.Name;
+            current.ReportType = report.ReportType;
+            current.SourceFormat = "ClosedXml";
+            current.IsPrintForm = false;
+            current.ClosedXmlLayout = report.ClosedXmlLayout;
+            current.PageOrientation = report.PageOrientation;
+
+            // Параметры для подстановок в шапке макета: «по счету {AccountCode}
+            // с {PeriodStart:dd/MM/yyyy} по {PeriodEnd:dd/MM/yyyy}». Без них
+            // в шапке печаталось «по счету с по».
+            SetRenderParameters(current,
+                ("AccountCode", _trialBalanceAccountCode),
+                ("PeriodStart", start),
+                ("PeriodEnd", end));
+
+            return (table, current);
+        }
+
+        /// <summary>
+        /// Записывает параметры отчёта, которые подставляет макет.
+        ///
+        /// Значения попадают в отчёт как значения по умолчанию: построитель
+        /// уже выбрал данные, поэтому макет обязан показать тот же счёт и период.
+        /// Даты хранятся в неизменном виде — формат задаёт сам макет.
+        /// </summary>
+        private static void SetRenderParameters(Report report, params (string Name, object Value)[] values)
+        {
+            report.Parameters ??= new List<ReportParameter>();
+
+            var order = report.Parameters.Count;
+
+            foreach (var (name, value) in values)
+            {
+                if (string.IsNullOrWhiteSpace(name) || value == null)
+                    continue;
+
+                var parameter = report.Parameters
+                    .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+
+                if (parameter == null)
+                {
+                    parameter = new ReportParameter
+                    {
+                        ReportId = report.Id,
+                        Name = name,
+                        Order = order++
+                    };
+                    report.Parameters.Add(parameter);
+                }
+
+                parameter.DefaultValue = value switch
+                {
+                    // Дата пишется в неизменном формате: его понимает разбор
+                    // значения по умолчанию независимо от культуры системы.
+                    DateTime date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    _ => value.ToString() ?? string.Empty
+                };
+                parameter.ParameterType = value is DateTime
+                    ? ReportParameterTypes.Date
+                    : ReportParameterTypes.String;
+            }
+        }
+
+        /// <summary>
+        /// Строит отчёт по визуальному макету ClosedXML из его набора данных.
+        ///
+        /// Набор данных определяется по типу отчёта: макет ждёт определённые
+        /// колонки, и набор обязан их отдавать.
+        /// </summary>
+        private async Task<(DataTable, Report)> BuildClosedXmlReportByCodeAsync(
+            string reportCode,
+            DateTime start,
+            DateTime end)
+        {
+            var stored = await _context.Reports.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Code == reportCode);
+
+            if (stored == null)
+                throw new InvalidOperationException($"Отчёт с кодом «{reportCode}» не найден.");
+
+            var dataSetCode = ResolveDataSetCodeForReport(stored.ReportType);
+
+            var dataSet = await _context.ReportDataSets.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Code == dataSetCode);
+
+            if (dataSet == null)
+                throw new InvalidOperationException(
+                    $"Набор данных «{dataSetCode}» для отчёта «{stored.Name}» не найден.");
+
+            var selectedOrganization = GetSelectedOrganizationScope();
+
+            var parameters = new Dictionary<string, object>
+            {
+                ["PeriodStart"] = start,
+                ["PeriodEnd"] = end,
+                ["OrganizationId"] = selectedOrganization?.Id?.ToString() ?? string.Empty
+            };
+
+            var table = await new ReportDataSetService(_context).ExecuteAsync(dataSet, parameters);
+
+            var report = CreateReport(table, stored.Name, true);
+
+            // Поля построителя замещаются сохранёнными в отчёте: макет читает
+            // именно их, а не колонки, угаданные по таблице.
+            report.Name = stored.Name;
+            report.ReportType = stored.ReportType;
+            report.SourceFormat = "ClosedXml";
+            report.IsPrintForm = false;
+            report.ClosedXmlLayout = stored.ClosedXmlLayout;
+
+            if (!string.IsNullOrWhiteSpace(stored.PageOrientation))
+                report.PageOrientation = stored.PageOrientation;
+
+            return (table, report);
+        }
+
+        /// <summary>Набор данных, который отдаёт колонки макета этого типа отчёта.</summary>
+        private static string ResolveDataSetCodeForReport(string? reportType)
+        {
+            if (string.Equals(reportType, "InvoiceJournal", StringComparison.OrdinalIgnoreCase))
+                return ReportDataSetService.InvoiceJournalDataSetCode;
+
+            if (string.Equals(reportType, "VatInvoiceSt1", StringComparison.OrdinalIgnoreCase))
+                return ReportDataSetService.VatInvoiceSt1DataSetCode;
+
+            if (IsReconciliationType(reportType))
+                return SystemReportCalculators.ReconciliationActCode;
+
+            // Ведомость по счёту и прочие табличные отчёты — движения по проводкам.
+            return SystemReportCalculators.MovementsCode;
         }
 
         /// <summary>
@@ -655,16 +1117,13 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Сторона счёта, по которой строится ведомость.
-        /// Значение читается из списка и переводится в тип сервиса.
+        /// Сторона счёта для оборотной ведомости.
+        ///
+        /// Выбор стороны убран из интерфейса: ведомость показывает и дебет,
+        /// и кредит по выбранному счёту. Значение оставлено для совместимости
+        /// с программной оборотно-сальдовой ведомостью.
         /// </summary>
-        private TrialBalanceSide GetSelectedTrialBalanceSide()
-        {
-            var side = (TrialBalanceSideCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString();
-            return string.Equals(side, "Credit", StringComparison.OrdinalIgnoreCase)
-                ? TrialBalanceSide.Credit
-                : TrialBalanceSide.Debit;
-        }
+        private static TrialBalanceSide GetSelectedTrialBalanceSide() => TrialBalanceSide.Debit;
 
         /// <summary>Строки плана счетов — для выбора счёта в интерфейсе.</summary>
         private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync() =>
@@ -984,13 +1443,15 @@ namespace BIS.ERP.Views
             });
         }
 
-        private async Task LoadTrialBalanceReportVariantsAsync()
+        /// <summary>
+        /// Виды ОСВ убраны из интерфейса: оборотная ведомость строится
+        /// встроенным макетом. Список оставлен из одного расчётного варианта —
+        /// его читает построение отчёта.
+        /// </summary>
+        private Task LoadTrialBalanceReportVariantsAsync()
         {
-            if (_trialBalanceVariantsLoaded)
-                return;
-
             _trialBalanceVariantsLoaded = true;
-            var variants = new List<TrialBalanceReportVariant>
+            _trialBalanceVariants = new List<TrialBalanceReportVariant>
             {
                 new()
                 {
@@ -1000,63 +1461,12 @@ namespace BIS.ERP.Views
                 }
             };
 
-            // При отключённом FRX остаётся только расчётный вариант.
-            if (!ReportingFeatures.FrxEnabled)
-            {
-                TrialBalanceVariantCombo.ItemsSource = variants;
-                TrialBalanceVariantCombo.SelectedIndex = 0;
-                TrialBalanceVariantCombo.IsEnabled = false;
-                return;
-            }
-
-            var variantsLoadError = string.Empty;
-
-            try
-            {
-                var reports = await _context.Reports.AsNoTracking()
-                    .Where(report => report.IsActive && EF.Functions.Like(report.Code, "standard.frx.finance.trial-balance.%"))
-                    .OrderBy(report => report.Order)
-                    .ThenBy(report => report.Name)
-                    .Select(report => new
-                    {
-                        report.Id,
-                        report.Name,
-                        report.Description,
-                        report.Code,
-                        report.SourceFormat,
-                        report.ReportType
-                    })
-                    .ToListAsync();
-
-                foreach (var report in reports)
-                {
-                    if (variants.Any(item => item.ReportId == report.Id))
-                        continue;
-
-                    variants.Add(new TrialBalanceReportVariant
-                    {
-                        ReportId = report.Id,
-                        DisplayName = BuildTrialBalanceVariantDisplayName(report.Name, report.SourceFormat, report.ReportType),
-                        Description = report.Description,
-                        Code = report.Code,
-                        IsStandard = false
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                variantsLoadError = $"Макеты ОСВ не загружены: {ex.Message}";
-            }
-
-            TrialBalanceVariantCombo.ItemsSource = variants;
-            TrialBalanceVariantCombo.SelectedIndex = variants.Count > 1 ? 1 : 0;
-            TrialBalanceVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
-                ? variantsLoadError
-                : variants.Count == 1
-                    ? "FRX-варианты ОСВ в метаданных не найдены"
-                    : $"Доступно вариантов: {variants.Count - 1}";
-            UpdateReconciliationVariantVisibility();
+            return Task.CompletedTask;
         }
+
+        /// <summary>Выбранный вид ОСВ: он всегда расчётный.</summary>
+        private TrialBalanceReportVariant? GetSelectedTrialBalanceReportVariant() =>
+            _trialBalanceVariants?.FirstOrDefault();
 
         private async Task LoadReconciliationReportVariantsAsync()
         {
@@ -1160,89 +1570,57 @@ namespace BIS.ERP.Views
         private void OnReportTypeSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateReconciliationVariantVisibility();
-            ApplyRecommendedOutputFormat();
         }
 
         /// <summary>
-        /// Для отчётов с визуальным макетом ClosedXML формат вывода переключается
-        /// на ClosedXML автоматически.
+        /// Показывает панели, нужные выбранному отчёту.
+        ///
+        /// Вид отчёта определяется его типом из базы: тип <c>ReconciliationAct</c> —
+        /// акт сверки, <c>TurnoverByAccount</c> — ведомость по счёту.
         /// </summary>
-        private void ApplyRecommendedOutputFormat()
-        {
-            if (ReportOutputFormatCombo == null || !IsAnyClosedXmlReportSelected())
-                return;
-
-            foreach (var item in ReportOutputFormatCombo.Items.OfType<ComboBoxItem>())
-            {
-                if (!string.Equals(item.Tag?.ToString(), "ClosedXmlExcel", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                ReportOutputFormatCombo.SelectedItem = item;
-                break;
-            }
-        }
-
         private void UpdateReconciliationVariantVisibility()
         {
             if (ReportTypeCombo == null)
                 return;
 
-            if (ReconciliationVariantPanel != null)
-            {
-                ReconciliationVariantPanel.Visibility = IsOrganizationReconciliationSelected()
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
+            var selected = SelectedAccountingReport;
+            var isReconciliation = selected != null && IsReconciliationType(selected.ReportType);
+            var isTurnover = selected != null && IsTurnoverType(selected.ReportType);
 
             if (ClosedXmlReconciliationPanel != null)
             {
-                ClosedXmlReconciliationPanel.Visibility = IsClosedXmlReconciliationSelected()
+                ClosedXmlReconciliationPanel.Visibility = isReconciliation
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             }
 
             if (TrialBalanceClosedXmlPanel != null)
             {
-                TrialBalanceClosedXmlPanel.Visibility = IsClosedXmlTrialBalanceSelected()
+                TrialBalanceClosedXmlPanel.Visibility = isTurnover
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             }
 
             if (TrialBalanceFilterPanel != null)
             {
-                // Фильтр по счёту нужен и программной, и ClosedXML-ведомости.
-                TrialBalanceFilterPanel.Visibility = IsTrialBalanceSelected()
+                // Счёт нужен ведомости по счёту.
+                TrialBalanceFilterPanel.Visibility = isTurnover
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             }
         }
 
-        /// <summary>Выбран один из отчётов с визуальным макетом ClosedXML.</summary>
-        private bool IsAnyClosedXmlReportSelected() =>
-            IsClosedXmlReconciliationSelected() || IsClosedXmlTrialBalanceSelected();
+        /// <summary>Тип отчёта — акт сверки.</summary>
+        private static bool IsReconciliationType(string? reportType) =>
+            !string.IsNullOrWhiteSpace(reportType) &&
+            reportType.StartsWith("ReconciliationAct", StringComparison.OrdinalIgnoreCase);
 
-        private bool IsClosedXmlReconciliationSelected() =>
-            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
-                "OrganizationReconciliationClosedXml", StringComparison.OrdinalIgnoreCase);
-
-        private bool IsClosedXmlTrialBalanceSelected() =>
-            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
-                "TrialBalanceClosedXml", StringComparison.OrdinalIgnoreCase);
-
-        private bool IsTrialBalanceSelected() =>
-            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
-                "TrialBalance", StringComparison.OrdinalIgnoreCase) ||
-            IsClosedXmlTrialBalanceSelected();
-
-        private bool IsOrganizationReconciliationSelected() =>
-            string.Equals((ReportTypeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
-                "OrganizationReconciliation", StringComparison.OrdinalIgnoreCase);
+        /// <summary>Тип отчёта — ведомость по счёту.</summary>
+        private static bool IsTurnoverType(string? reportType) =>
+            string.Equals(reportType, "TurnoverByAccount", StringComparison.OrdinalIgnoreCase);
 
         private ReconciliationReportVariant? GetSelectedReconciliationReportVariant() =>
             ReconciliationVariantCombo?.SelectedItem as ReconciliationReportVariant;
-
-        private TrialBalanceReportVariant? GetSelectedTrialBalanceReportVariant() =>
-            TrialBalanceVariantCombo?.SelectedItem as TrialBalanceReportVariant;
 
         private static string BuildTrialBalanceVariantDisplayName(string name, string sourceFormat, string reportType)
         {
@@ -1459,16 +1837,30 @@ namespace BIS.ERP.Views
         // ==================================================================================
 
         /// <summary>
-        /// Колонки, которые нужны только механизму подстановки FRX-макета.
+        /// Колонки, которые нужны только механизму подстановки макета.
         /// В экранной таблице отчёта они помечаются невидимыми: сетка строится
         /// по полям отчёта, а не по колонкам таблицы данных.
+        ///
+        /// Список объединяет служебные имена акта сверки, оборотно-сальдовой
+        /// ведомости и оборотной ведомости по счёту.
         /// </summary>
         private static readonly HashSet<string> ServiceColumnNames = new(StringComparer.OrdinalIgnoreCase)
         {
+            // Акт сверки.
             "operation_name", "debit_account", "credit_account",
             "debit_amount", "credit_amount", "debit_begin", "credit_begin",
             "document_number", "document_date", "module",
-            "report_title", "report_summary", "period_start", "period_end"
+            "report_title", "report_summary", "period_start", "period_end",
+            // Оборотно-сальдовая ведомость.
+            "account_code", "account_name",
+            "opening_debit", "opening_credit", "turnover_debit", "turnover_credit",
+            "closing_debit", "closing_credit",
+            // Оборотная ведомость по счёту.
+            "posting_date", "doc_number", "counter_account_code", "description",
+            "module_code", "report_org", "report_period",
+            "opening_balance", "closing_balance",
+            "currency_code", "amount_currency", "exchange_rate",
+            "organization_name", "row_kind"
         };
 
         /// <summary>
@@ -1613,18 +2005,15 @@ namespace BIS.ERP.Views
             HasFoxProTemplate(report) && IsFoxProExcelFormat(GetSelectedReportOutputFormat());
 
         /// <summary>
-        /// Выбранный формат вывода. При отключённом FRX формат FRX заменяется
-        /// на ClosedXML Excel — чтобы отчёт всё равно сформировался.
+        /// Запрошенный формат вывода.
+        ///
+        /// Формат задают кнопки «Excel» и «PDF»: список форматов убран из интерфейса,
+        /// поэтому выбранное значение хранится в поле.
         /// </summary>
-        private string GetSelectedReportOutputFormat()
-        {
-            var format = (ReportOutputFormatCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ProgramExcel";
+        private string _requestedOutputFormat = "ProgramExcel";
 
-            if (!ReportingFeatures.FrxEnabled && ReportingFeatures.IsFrxFormat(format))
-                return "ClosedXmlExcel";
-
-            return format;
-        }
+        /// <summary>Формат вывода, запрошенный кнопкой.</summary>
+        private string GetSelectedReportOutputFormat() => _requestedOutputFormat;
 
         private static bool IsProgrammaticExcelFormat(string format) =>
             FormatIs(format, "ProgramExcel", "ExcelNative");
@@ -2072,6 +2461,59 @@ namespace BIS.ERP.Views
             for (var index = firstNumericColumn; index < table.Columns.Count; index++)
                 row[index] = table.Rows.Cast<DataRow>().Sum(item => Convert.ToDecimal(item[index]));
             table.Rows.Add(row);
+        }
+
+        /// <summary>
+        /// Кнопка «Excel»: формирует отчёт и открывает его в Excel.
+        ///
+        /// Формат вывода выбирается здесь, а не в списке: список форматов убран.
+        /// </summary>
+        private async void OnExportExcelButtonClick(object sender, RoutedEventArgs e)
+        {
+            _requestedOutputFormat = ResolveClosedXmlLayoutUsage()
+                ? "ClosedXmlExcel"
+                : "ProgramExcel";
+
+            await EnsureReportBuiltAsync();
+            OnExportExcelClick(sender, e);
+        }
+
+        /// <summary>
+        /// Кнопка «PDF»: формирует отчёт и показывает его в окне предпросмотра.
+        /// </summary>
+        private async void OnExportPdfButtonClick(object sender, RoutedEventArgs e)
+        {
+            _requestedOutputFormat = ResolveClosedXmlLayoutUsage()
+                ? "ClosedXmlPdf"
+                : "ProgramPdf";
+
+            await EnsureReportBuiltAsync();
+
+            if (string.Equals(_requestedOutputFormat, "ClosedXmlPdf", StringComparison.OrdinalIgnoreCase))
+                OnExportClosedXmlPdfClick(sender, e);
+            else
+                OnExportProgrammaticPdfClick(sender, e);
+        }
+
+        /// <summary>
+        /// Отчёт выводится по визуальному макету ClosedXML.
+        ///
+        /// В этом окне все отчёты строятся по макету ClosedXML, поэтому вывод
+        /// всегда идёт визуальным макетом.
+        /// </summary>
+        private bool ResolveClosedXmlLayoutUsage() => SelectedAccountingReport != null;
+
+        /// <summary>
+        /// Формирует отчёт, если он ещё не построен или построен за другой период.
+        /// Кнопки вывода работают без отдельного нажатия «Сформировать».
+        /// </summary>
+        private async Task EnsureReportBuiltAsync()
+        {
+            if (_currentData == null || _currentReport == null)
+            {
+                OnGenerateClick(this, new RoutedEventArgs());
+                return;
+            }
         }
 
         private void OnOpenReportClick(object sender, RoutedEventArgs e)

@@ -21,6 +21,9 @@ public sealed class ReportDataSetService
     /// <summary>Код набора данных отчёта по счет-фактурам.</summary>
     public const string InvoiceJournalDataSetCode = "finance.invoice-journal";
 
+    /// <summary>Код набора данных счёта-фактуры по форме СТ-1.</summary>
+    public const string VatInvoiceSt1DataSetCode = "finance.vat-invoice-st1";
+
     private static readonly Regex ForbiddenSqlRegex = new(
         @"\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|execute|merge|vacuum|analyze|do|begin|commit|rollback)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -105,8 +108,189 @@ public sealed class ReportDataSetService
         await EnsureSchemaAsync();
         await EnsureCashOrderTurnoverDataSetAsync();
         await EnsureInvoiceJournalDataSetAsync();
+        await EnsureVatInvoiceSt1DataSetAsync();
         await EnsureSystemCalculatorDataSetsAsync();
     }
+
+    /// <summary>
+    /// Заводит набор данных счёта-фактуры по форме СТ-1.
+    ///
+    /// Набор отдаёт строки позиций вместе с реквизитами сторон: макет бланка
+    /// берёт из первой строки продавца, покупателя и данные документа.
+    /// </summary>
+    private async Task EnsureVatInvoiceSt1DataSetAsync()
+    {
+        var dataSet = await _context.ReportDataSets
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item => item.Code == VatInvoiceSt1DataSetCode);
+
+        if (dataSet == null)
+        {
+            dataSet = new ReportDataSet
+            {
+                Id = Guid.NewGuid(),
+                Code = VatInvoiceSt1DataSetCode,
+                Name = "Счет-фактура СТ-1: строки и реквизиты",
+                Description = "SQL-набор данных бланка СТ-1: позиции счёта-фактуры и реквизиты сторон. Образец форматного макета с многоуровневой шапкой.",
+                Kind = ReportDataSetKinds.Sql,
+                SqlText = BuildVatInvoiceSt1Sql(),
+                IsActive = true,
+                IsSystem = true
+            };
+            await _context.ReportDataSets.AddAsync(dataSet);
+            await _context.SaveChangesAsync();
+        }
+        else if (string.Equals(dataSet.Kind, ReportDataSetKinds.Sql, StringComparison.OrdinalIgnoreCase))
+        {
+            dataSet.IsActive = true;
+            dataSet.IsSystem = true;
+
+            var untouched = dataSet.SqlText.Contains("invoice_positions", StringComparison.OrdinalIgnoreCase);
+            if (untouched)
+                dataSet.SqlText = BuildVatInvoiceSt1Sql();
+
+            await _context.SaveChangesAsync();
+        }
+
+        try
+        {
+            if (!dataSet.Fields.Any())
+            {
+                await RefreshFieldsFromSqlAsync(dataSet);
+                dataSet = await _context.ReportDataSets
+                    .Include(item => item.Fields)
+                    .FirstAsync(item => item.Id == dataSet.Id);
+            }
+
+            await SyncMetadataSourceAsync(dataSet);
+        }
+        catch (Exception ex)
+        {
+            _context.ChangeTracker.Clear();
+            SystemLogService.Error(
+                "Ошибка подготовки набора данных СТ-1. Конфигуратор продолжит загрузку.",
+                nameof(ReportDataSetService), ex);
+        }
+    }
+
+    /// <summary>
+    /// Запрос бланка СТ-1.
+    ///
+    /// Реквизиты сторон берутся из справочника организаций и подставляются
+    /// в каждую строку: макет читает их из первой строки набора.
+    /// </summary>
+    private static string BuildVatInvoiceSt1Sql() => @"
+WITH invoice_header AS (
+    SELECT
+        i.""Id""                                     AS invoice_id,
+        COALESCE(i.""doc_number"", '')              AS doc_number,
+        i.""doc_date""::date                        AS doc_date,
+        COALESCE(NULLIF(i.""esf_number"", ''), '')  AS esf_number,
+        i.""organization_id""                       AS organization_id
+    FROM ""doc_sales_invoice"" i
+    WHERE i.""doc_date""::date >= CAST(@PeriodStart AS date)
+      AND i.""doc_date""::date <= CAST(@PeriodEnd AS date)
+      AND (CAST(@OrganizationId AS text) = '' OR i.""organization_id""::text = CAST(@OrganizationId AS text))
+),
+seller AS (
+    SELECT
+        h.invoice_id,
+        COALESCE(NULLIF(o.""full_name"", ''), o.""name"", '')       AS seller_name,
+        COALESCE(o.""inn"", '')                                     AS seller_inn,
+        COALESCE(o.""okpo"", '')                                    AS seller_okpo,
+        COALESCE(NULLIF(o.""legal_address"", ''), NULLIF(o.""actual_address"", ''), '') AS seller_address,
+        COALESCE(o.""registration_number"", '')                     AS seller_reg_number,
+        COALESCE(o.""bank_name"", '')                               AS seller_bank,
+        COALESCE(o.""bank_account"", '')                            AS seller_account,
+        COALESCE(o.""director"", '')                                AS seller_director,
+        COALESCE(o.""chief_accountant"", '')                        AS seller_accountant,
+        COALESCE(h.doc_number, '')                                  AS doc_number,
+        h.doc_date,
+        COALESCE(h.esf_number, '')                                  AS esf_number
+    FROM invoice_header h
+    LEFT JOIN catalog_organizations o ON o.""Id""::text = h.organization_id::text
+),
+invoice_positions AS (
+    SELECT
+        s.*,
+        l.""line_number"",
+        COALESCE(l.""name"", '')                AS item_name,
+        COALESCE(l.""unit_name"", '')           AS unit_name,
+        COALESCE(l.""quantity"", 0)             AS quantity,
+        CASE WHEN COALESCE(l.""quantity"", 0) <> 0
+             THEN ROUND(COALESCE(l.""amount_without_tax"", 0) / l.""quantity"", 2)
+             ELSE 0 END                         AS price,
+        COALESCE(l.""amount_without_tax"", 0)   AS amount_without_tax,
+        COALESCE(l.""vat_rate"", 0)             AS vat_rate,
+        COALESCE(l.""vat_amount"", 0)           AS vat_amount,
+        COALESCE(l.""sales_tax_rate"", 0)       AS sales_tax_rate,
+        COALESCE(l.""sales_tax_amount"", 0)     AS sales_tax_amount,
+        COALESCE(l.""line_total"", 0)           AS line_total,
+        COALESCE(l.""vat_tax_code"", '')        AS vat_tax_code,
+        COALESCE(l.""sales_tax_code"", '')      AS tax_code
+    FROM seller s
+    JOIN ""doc_sales_invoice_lines"" l ON l.""invoice_id"" = s.invoice_id
+),
+totals AS (
+    SELECT
+        SUM(amount_without_tax) AS total_without_tax,
+        SUM(vat_amount)         AS total_vat,
+        SUM(sales_tax_amount)   AS total_sales_tax,
+        SUM(line_total)         AS total_amount
+    FROM invoice_positions
+)
+SELECT
+    CAST(p.line_number AS text)                                     AS line_number,
+    p.item_name,
+    p.unit_name,
+    p.quantity,
+    p.price,
+    p.amount_without_tax,
+    p.vat_rate,
+    p.vat_amount,
+    p.sales_tax_rate,
+    p.sales_tax_amount,
+    p.line_total,
+    p.tax_code,
+    p.vat_tax_code,
+
+    -- Реквизиты сторон: их читает шапка бланка.
+    p.seller_name,
+    p.seller_inn,
+    p.seller_okpo,
+    p.seller_address,
+    p.seller_reg_number,
+    p.seller_bank,
+    p.seller_account,
+    p.seller_director,
+    p.seller_accountant,
+    ''                                                              AS buyer_name,
+    ''                                                              AS buyer_inn,
+    ''                                                              AS buyer_address,
+
+    -- Готовые подписи бланка.
+    'ИНН: ' || p.seller_inn || '   ОКПО: ' || p.seller_okpo          AS seller_inn_text,
+    'Адрес: ' || p.seller_address                                    AS seller_address_text,
+    'ИНН: ' || '' || '   ОКПО: ' || ''                              AS buyer_inn_text,
+    'Адрес: ' || ''                                                 AS buyer_address_text,
+    'Рег. N: ' || p.seller_reg_number                                AS seller_reg_number_text,
+    'Р/с: ' || p.seller_account || ' в ' || p.seller_bank            AS seller_bank_text,
+
+    'СЧЕТ-ФАКТУРА N ' || p.doc_number || ' от '
+        || TO_CHAR(p.doc_date, 'DD.MM.YYYY')                        AS report_title,
+    TO_CHAR(CAST(@PeriodStart AS date), 'DD.MM.YYYY')                AS period_start,
+    TO_CHAR(CAST(@PeriodEnd AS date), 'DD.MM.YYYY')                  AS period_end,
+    COALESCE(p.esf_number, '')                                       AS esf_number,
+
+    t.total_without_tax,
+    t.total_vat,
+    t.total_sales_tax,
+    t.total_amount
+FROM invoice_positions p
+CROSS JOIN totals t
+-- Сначала документы с заполненными реквизитами: макет берёт их из первой строки.
+ORDER BY (CASE WHEN COALESCE(p.seller_name, '') = '' THEN 1 ELSE 0 END),
+         p.doc_date DESC, p.doc_number DESC, p.line_number";
 
     /// <summary>
     /// Заводит набор данных отчёта по счет-фактурам.

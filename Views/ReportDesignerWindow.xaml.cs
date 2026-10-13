@@ -541,6 +541,143 @@ namespace BIS.ERP.Views
             ParameterIssuesText.Text = string.Empty;
         }
 
+        /// <summary>Подстановки вида {Имя} и {Имя:формат} в тексте.</summary>
+        private static readonly System.Text.RegularExpressions.Regex LayoutSubstitutionRegex = new(
+            @"\{(?:param\.)?([A-Za-z_][A-Za-z0-9_]*)(?::[^}]+)?\}",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        /// <summary>
+        /// Описания параметров, которые встречаются в макете ClosedXML.
+        ///
+        /// Значения подставляет окно отчёта, а описания нужны администратору:
+        /// без них вкладка «Параметры» пуста и непонятно, что требует отчёт.
+        /// </summary>
+        private static readonly Dictionary<string, (string Title, string Type, string Default)> KnownLayoutParameters =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PeriodStart"] = ("Начало периода", ReportParameterTypes.Date, "начала года"),
+                ["PeriodEnd"] = ("Конец периода", ReportParameterTypes.Date, "конца года"),
+                ["AccountCode"] = ("Счёт", ReportParameterTypes.String, string.Empty),
+                ["OrganizationId"] = ("Организация", ReportParameterTypes.String, string.Empty),
+                ["CashDeskId"] = ("Касса", ReportParameterTypes.String, string.Empty),
+                ["EmployeeId"] = ("Сотрудник", ReportParameterTypes.String, string.Empty),
+                ["UserName"] = ("Пользователь", ReportParameterTypes.String, string.Empty)
+            };
+
+        /// <summary>
+        /// Дополняет вкладку «Параметры» теми параметрами, которые использует макет.
+        ///
+        /// Уже описанные параметры не трогаются: правки администратора сохраняются.
+        /// </summary>
+        private void SeedParametersFromClosedXmlLayout(Report report)
+        {
+            if (string.IsNullOrWhiteSpace(report.ClosedXmlLayout))
+                return;
+
+            var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out _);
+            if (layout == null)
+                return;
+
+            var names = CollectLayoutSubstitutionNames(layout);
+            if (names.Count == 0)
+                return;
+
+            var existing = _reportParameters
+                .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Name))
+                .Select(parameter => parameter.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var added = new List<string>();
+
+            foreach (var name in names)
+            {
+                if (existing.Contains(name))
+                    continue;
+
+                var known = KnownLayoutParameters.TryGetValue(name, out var preset)
+                    ? preset
+                    : (Title: name, Type: ReportParameterTypes.String, Default: string.Empty);
+
+                _reportParameters.Add(new ReportParameter
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = report.Id,
+                    Name = name,
+                    Title = known.Title,
+                    ParameterType = known.Type,
+                    DefaultValue = known.Default,
+                    IsRequired = false,
+                    Order = _reportParameters.Count + 1
+                });
+
+                existing.Add(name);
+                added.Add(name);
+            }
+
+            if (added.Count > 0)
+            {
+                ParameterIssuesText.Text =
+                    $"Из макета добавлены параметры: {string.Join(", ", added)}.";
+            }
+        }
+
+        /// <summary>
+        /// Имена параметров, встречающихся в макете: в заголовках, свободных строках
+        /// и подписях колонок.
+        /// </summary>
+        private static List<string> CollectLayoutSubstitutionNames(ClosedXmlReportLayout layout)
+        {
+            var names = new List<string>();
+
+            void Scan(string? text)
+            {
+                if (string.IsNullOrWhiteSpace(text))
+                    return;
+
+                foreach (System.Text.RegularExpressions.Match match in
+                         LayoutSubstitutionRegex.Matches(text))
+                {
+                    var name = match.Groups[1].Value;
+
+                    // Служебные подстановки колонтитула в параметрах не нуждаются.
+                    if (string.Equals(name, "Organization", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "Дата", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!names.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        names.Add(name);
+                }
+            }
+
+            foreach (var sheet in layout.Sheets)
+            {
+                foreach (var block in sheet.Blocks)
+                {
+                    foreach (var row in block.Rows)
+                    {
+                        foreach (var cell in row.Cells)
+                            Scan(cell.Text);
+                    }
+
+                    if (block.Table == null)
+                        continue;
+
+                    foreach (var column in block.Table.Columns)
+                        Scan(column.Header);
+
+                    foreach (var level in block.Table.HeaderLevels)
+                    {
+                        foreach (var cell in level.Cells)
+                            Scan(cell.Text);
+                    }
+                }
+            }
+
+            return names;
+        }
+
 
         private async void OnComputedFieldDoubleClick(object sender, MouseButtonEventArgs e)
         {
@@ -762,6 +899,7 @@ namespace BIS.ERP.Views
             IsActiveCheck.IsChecked = report.IsActive;
             IsPrintFormCheck.IsChecked = report.IsPrintForm;
             IsDefaultCheck.IsChecked = report.IsDefault;
+            ShowInAccountingReportsCheck.IsChecked = report.ShowInAccountingReports;
             ReportTypeCombo.SelectedItem = ReportTypeCombo.Items.Cast<ComboBoxItem>()
                 .FirstOrDefault(item => item.Tag?.ToString() == report.ReportType) ?? ReportTypeCombo.Items[0];
 
@@ -831,6 +969,10 @@ namespace BIS.ERP.Views
             }
 
             LoadClosedXmlLayoutFromReport(report);
+
+            // Параметры дополняются подстановками из макета: администратор должен
+            // видеть на вкладке «Параметры», что требует отчёт.
+            SeedParametersFromClosedXmlLayout(report);
             UpdateClosedXmlSourceText();
         }
 
@@ -1038,6 +1180,7 @@ namespace BIS.ERP.Views
                 _currentReport.DataSourceId = catalog.Id;
                 _currentReport.ReportType = GetSelectedReportType();
                 _currentReport.IsActive = IsActiveCheck.IsChecked ?? true;
+                _currentReport.ShowInAccountingReports = ShowInAccountingReportsCheck.IsChecked ?? false;
                 _currentReport.IsPrintForm = IsPrintFormCheck.IsChecked ?? false;
                 _currentReport.IsDefault = IsDefaultCheck.IsChecked ?? false;
                 _currentReport.SourceFormat = GetSelectedLayoutKind() == FoxProLayoutKind
@@ -1263,6 +1406,7 @@ namespace BIS.ERP.Views
                 DataSourceId = selectedCatalog.Id,
                 ReportType = GetSelectedReportType(),
                 IsActive = IsActiveCheck.IsChecked ?? true,
+                ShowInAccountingReports = ShowInAccountingReportsCheck.IsChecked ?? false,
                 IsPrintForm = IsPrintFormCheck.IsChecked ?? false,
                 IsDefault = IsDefaultCheck.IsChecked ?? false,
                 SourceFormat = GetSelectedLayoutKind() == FoxProLayoutKind
@@ -1470,11 +1614,29 @@ namespace BIS.ERP.Views
             }
         }
 
-        /// <summary>Тип отчёта «Макет Visual FoxPro FRX» доступен только в способе FRX.</summary>
+        /// <summary>
+        /// Тип отчёта «Макет Visual FoxPro FRX» доступен только в способе FRX.
+        ///
+        /// В режиме ClosedXML поле «Тип отчета» скрывается целиком: вид отчёта
+        /// там задаёт макет, а тип на вывод не влияет. Источник занимает всю строку.
+        /// </summary>
         private void SyncFoxProReportTypeItem(bool show)
         {
             if (ReportTypeCombo == null)
                 return;
+
+            // Поле нужно только там, где отчёт выводится кодом или FRX-макетом.
+            var visible = show ? Visibility.Visible : Visibility.Collapsed;
+            if (ReportTypeLabel != null)
+                ReportTypeLabel.Visibility = visible;
+            if (ReportTypeGrid != null)
+                ReportTypeGrid.Visibility = visible;
+
+            if (DataSourceGrid != null)
+            {
+                Grid.SetColumnSpan(DataSourceGrid, show ? 1 : 3);
+                Grid.SetColumn(DataSourceGrid, show ? 1 : 1);
+            }
 
             _foxProReportTypeItem ??= ReportTypeCombo.Items.OfType<ComboBoxItem>()
                 .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), "FoxProLayout", StringComparison.OrdinalIgnoreCase));
@@ -2162,6 +2324,9 @@ namespace BIS.ERP.Views
                 ClosedXmlOrientationCombo.SelectedIndex =
                     string.Equals(_closedXmlSheet.PageSetup.Orientation, "Portrait", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
                 ClosedXmlFreezeRowsBox.Text = _closedXmlSheet.PageSetup.FreezeRows.ToString();
+                ClosedXmlPageHeaderBox.Text = _closedXmlSheet.PageSetup.PageHeaderText;
+                ClosedXmlPageFooterBox.Text = _closedXmlSheet.PageSetup.PageFooterText;
+                ClosedXmlShowPageHeaderCheck.IsChecked = _closedXmlSheet.PageSetup.ShowPageHeader;
                 ClosedXmlFontCombo.Text = _closedXmlSheet.PageSetup.FontName;
                 ClosedXmlFontSizeBox.Text = _closedXmlSheet.PageSetup.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 ClosedXmlGridLinesCheck.IsChecked = _closedXmlSheet.PageSetup.ShowGridLines;
@@ -2395,6 +2560,9 @@ namespace BIS.ERP.Views
                 : ClosedXmlFontCombo.Text;
             _closedXmlSheet.PageSetup.FontSize = ParseDoubleSafe(ClosedXmlFontSizeBox.Text, 10);
             _closedXmlSheet.PageSetup.ShowGridLines = ClosedXmlGridLinesCheck.IsChecked ?? false;
+            _closedXmlSheet.PageSetup.PageHeaderText = ClosedXmlPageHeaderBox.Text?.Trim() ?? string.Empty;
+            _closedXmlSheet.PageSetup.PageFooterText = ClosedXmlPageFooterBox.Text?.Trim() ?? string.Empty;
+            _closedXmlSheet.PageSetup.ShowPageHeader = ClosedXmlShowPageHeaderCheck.IsChecked ?? true;
             _closedXmlSheet.Blocks = _closedXmlBlocks.ToList();
         }
 

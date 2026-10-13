@@ -74,7 +74,7 @@
 
                             <!-- Row 2: Источник + Тип отчета -->
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="Источник:" VerticalAlignment="Center" FontWeight="Bold"/>
-                            <Grid Grid.Row="2" Grid.Column="1" Margin="5">
+                            <Grid x:Name="DataSourceGrid" Grid.Row="2" Grid.Column="1" Margin="5">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="36"/>
@@ -90,8 +90,11 @@
                                         ToolTip="Открыть наборы данных отчетов и создать новый источник"
                                         Click="OnCreateReportDataSetClick"/>
                             </Grid>
-                            <TextBlock Grid.Row="2" Grid.Column="2" Text="Тип отчета:" VerticalAlignment="Center" FontWeight="Bold"/>
-                            <Grid Grid.Row="2" Grid.Column="3" Margin="5">
+                            <!-- Тип отчёта влияет только на программный и FRX-вывод.
+                                 В режиме ClosedXML поле скрыто: вид отчёта задаёт макет. -->
+                            <TextBlock x:Name="ReportTypeLabel" Grid.Row="2" Grid.Column="2"
+                                       Text="Тип отчета:" VerticalAlignment="Center" FontWeight="Bold"/>
+                            <Grid x:Name="ReportTypeGrid" Grid.Row="2" Grid.Column="3" Margin="5">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="36"/>
@@ -186,6 +189,9 @@
                             <!-- Row 10: Чекбоксы -->
                             <StackPanel Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="5,12,5,0">
                                 <CheckBox x:Name="IsActiveCheck" Content="Отчет доступен" IsChecked="True" Margin="0,0,20,0"/>
+                                <CheckBox x:Name="ShowInAccountingReportsCheck" Content="Показывать в бухгалтерской отчетности"
+                                          Margin="0,0,20,0"
+                                          ToolTip="Отчет появится в списке окна «Бухгалтерская отчетность». Нужен сохраненный ClosedXML-макет."/>
                                 <CheckBox x:Name="IsPrintFormCheck" Content="Печатная форма документа" Margin="0,0,20,0"/>
                                 <CheckBox x:Name="IsDefaultCheck" Content="По умолчанию"/>
                             </StackPanel>
@@ -896,6 +902,19 @@
                                 </ComboBox>
                                 <TextBlock Text="Заморозить строк:"/>
                                 <TextBox x:Name="ClosedXmlFreezeRowsBox" Height="26" Margin="0,2,0,6" Text="0" VerticalContentAlignment="Center"/>
+                                <TextBlock Text="Колонтитул (верх):" Margin="0,4,0,0"/>
+                                <TextBox x:Name="ClosedXmlPageHeaderBox" Height="26" Margin="0,2,0,2"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Печатается на каждой странице. Подстановки: {Organization} — первичная организация, {Дата} — дата печати."/>
+                                <TextBlock Text="Подстановки: {Organization}  {Дата}"
+                                           FontSize="10" Foreground="#7F8C8D" Margin="0,0,0,6"/>
+                                <CheckBox x:Name="ClosedXmlShowPageHeaderCheck" Content="Организация и листы вверху справа"
+                                          Margin="0,0,0,6" IsChecked="True"
+                                          ToolTip="Печатать наименование первичной организации и счётчик листов. Действует, если текст колонтитула пуст."/>
+                                <TextBlock Text="Колонтитул (низ):"/>
+                                <TextBox x:Name="ClosedXmlPageFooterBox" Height="26" Margin="0,2,0,6"
+                                         VerticalContentAlignment="Center"
+                                         ToolTip="Печатается внизу каждой страницы. Те же подстановки."/>
                                 <TextBlock Text="Шрифт:"/>
                                 <ComboBox x:Name="ClosedXmlFontCombo" Height="26" Margin="0,2,0,6" SelectedIndex="0">
                                     <ComboBoxItem Content="Times New Roman"/>

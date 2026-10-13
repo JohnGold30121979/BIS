@@ -51,6 +51,7 @@ namespace BIS.ERP.Services
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""SourceFormat"" varchar(80) NOT NULL DEFAULT 'Native';
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""TemplateVersion"" integer NOT NULL DEFAULT 1;
                         ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""ClosedXmlLayout"" text NOT NULL DEFAULT '';
+                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""ShowInAccountingReports"" boolean NOT NULL DEFAULT false;
                         ALTER TABLE ""Reports"" ALTER COLUMN ""Name"" TYPE varchar(500);
                         ALTER TABLE ""Reports"" ALTER COLUMN ""Description"" TYPE varchar(2000);
                         ALTER TABLE ""Reports"" ALTER COLUMN ""DataSourceType"" TYPE varchar(80);
@@ -172,9 +173,59 @@ namespace BIS.ERP.Services
             await new CashDayClosureService(_context).EnsureSchemaAsync();
             await new ReportDataSetService(_context).EnsureSchemaAsync();
 
+            // Разово отмечаем рабочие отчёты для окна «Бухгалтерская отчётность».
+            await MarkAccountingReportsOnceAsync();
+
             lock (SyncLock)
             {
                 EnsuredConnections.Add(connectionKey);
+            }
+        }
+
+        /// <summary>
+        /// Отчёты, которые сразу показываются в окне «Бухгалтерская отчётность».
+        ///
+        /// Это отчёты с готовым визуальным макетом ClosedXML.
+        /// </summary>
+        private static readonly string[] DefaultAccountingReportCodes =
+        {
+            "standard.finance.trial-balance-closedxml",
+            "standard.finance.reconciliation-act-closedxml",
+            "standard.finance.invoice-journal",
+            "standard.finance.vat-invoice-st1"
+        };
+
+        /// <summary>
+        /// Разово отмечает рабочие отчёты для окна «Бухгалтерская отчётность».
+        ///
+        /// Выполняется только тогда, когда ни один отчёт ещё не отмечен: дальше
+        /// отметками управляет администратор в конструкторе отчётов,
+        /// и повторный запуск его выбор не перетирает.
+        /// </summary>
+        private async Task MarkAccountingReportsOnceAsync()
+        {
+            try
+            {
+                var anyMarked = await _context.Reports
+                    .AsNoTracking()
+                    .AnyAsync(report => report.ShowInAccountingReports);
+
+                if (anyMarked)
+                    return;
+
+                var codes = DefaultAccountingReportCodes;
+
+                await _context.Reports
+                    .Where(report => codes.Contains(report.Code))
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(report => report.ShowInAccountingReports, true)
+                        .SetProperty(report => report.IsActive, true));
+            }
+            catch (Exception ex)
+            {
+                // Разметка отчётов не должна мешать запуску приложения.
+                System.Diagnostics.Debug.WriteLine(
+                    $"Не удалось отметить отчеты для бухгалтерской отчетности: {ex.Message}");
             }
         }
     }

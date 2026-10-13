@@ -58,14 +58,27 @@ namespace BIS.ERP.Services
             new("OrganizationId", "Организация", "Reference", "", false)
         };
 
+        /// <summary>
+        /// Период, организация и счёт — для ведомостей по конкретному счёту.
+        ///
+        /// Счёт необязателен: без него возвращаются движения по всем счетам.
+        /// </summary>
+        private static readonly SystemCalculatorParameter[] PeriodOrganizationAndAccountParameters =
+        {
+            new("PeriodStart", "Начало периода", "Date"),
+            new("PeriodEnd", "Конец периода", "Date"),
+            new("OrganizationId", "Организация", "Reference", "", false),
+            new("AccountCode", "Счёт", "Reference", "", false)
+        };
+
         /// <summary>Все доступные расчёты, в порядке показа.</summary>
         public static IReadOnlyList<SystemReportCalculator> All { get; } = new List<SystemReportCalculator>
         {
             new(
                 MovementsCode,
                 "Движения по проводкам",
-                "Проводки за период: дата, документ, счета, сумма, организация. Основа для журналов и реестров.",
-                PeriodAndOrganizationParameters,
+                "Проводки за период: дата, документ, счета, сумма, организация. Основа для журналов, реестров и ведомостей по счёту.",
+                PeriodOrganizationAndAccountParameters,
                 new[]
                 {
                     new SystemCalculatorField("Дата", "Дата", "Date"),
@@ -79,13 +92,24 @@ namespace BIS.ERP.Services
                     new SystemCalculatorField("Модуль", "Модуль"),
                     new SystemCalculatorField("posting_date", "Дата (макет)", "Date"),
                     new SystemCalculatorField("organization_id", "Организация (макет)"),
+                    new SystemCalculatorField("organization_code", "Номер организации"),
+                    new SystemCalculatorField("organization_name", "Наименование организации"),
                     new SystemCalculatorField("doc_number", "Номер документа (макет)"),
                     new SystemCalculatorField("document_type", "Вид документа (макет)"),
                     new SystemCalculatorField("debit_account", "Дебет (макет)"),
                     new SystemCalculatorField("credit_account", "Кредит (макет)"),
                     new SystemCalculatorField("amount_kgs", "Сумма (макет)", "Number"),
                     new SystemCalculatorField("description", "Содержание (макет)"),
-                    new SystemCalculatorField("module_code", "Модуль (макет)")
+                    new SystemCalculatorField("module_code", "Модуль (макет)"),
+                    // Поля ведомости по счёту: выбранный счёт, корреспондентский счёт,
+                    // валюта и курс. Обязательны для печатного бланка.
+                    new SystemCalculatorField("account_code", "Счёт (ведомость)"),
+                    new SystemCalculatorField("counter_account_code", "Корр. счёт (ведомость)"),
+                    new SystemCalculatorField("debit_amount", "Оборот Дт (ведомость)", "Number"),
+                    new SystemCalculatorField("credit_amount", "Оборот Кт (ведомость)", "Number"),
+                    new SystemCalculatorField("currency_code", "Валюта"),
+                    new SystemCalculatorField("amount_currency", "Сумма в валюте", "Number"),
+                    new SystemCalculatorField("exchange_rate", "Курс", "Number")
                 },
                 BuildMovementsAsync),
 
@@ -215,7 +239,14 @@ namespace BIS.ERP.Services
         // Исполнители расчётов
         // =============================================================
 
-        /// <summary>Движения по проводкам за период.</summary>
+        /// <summary>
+        /// Движения по проводкам за период.
+        ///
+        /// Если задан счёт, в набор попадают только проводки, где этот счёт стоит
+        /// в дебете или кредите. Оборот записывается в ту сторону, где стоит счёт,
+        /// а противоположный счёт становится корреспондентским — так набор годится
+        /// для ведомости по счёту.
+        /// </summary>
         private static async Task<DataTable> BuildMovementsAsync(
             AppDbContext context,
             IReadOnlyDictionary<string, object>? parameters,
@@ -223,9 +254,20 @@ namespace BIS.ERP.Services
         {
             var (start, end) = ReadPeriod(parameters);
             var organizationId = ReadGuid(parameters, "OrganizationId");
+            var accountCode = ReadText(parameters, "AccountCode");
 
             var rows = await new ReconciliationActBuilder(context)
                 .LoadMovementsAsync(organizationId, start, end);
+
+            // Отбор по счёту: проводка входит, если счёт стоит в дебете или кредите.
+            if (!string.IsNullOrWhiteSpace(accountCode))
+            {
+                rows = rows
+                    .Where(movement =>
+                        SameAccount(movement.DebitAccount, accountCode) ||
+                        SameAccount(movement.CreditAccount, accountCode))
+                    .ToList();
+            }
 
             var table = new DataTable("Движения по проводкам");
             table.Columns.Add("Дата", typeof(DateTime));
@@ -239,6 +281,8 @@ namespace BIS.ERP.Services
             table.Columns.Add("Модуль", typeof(string));
             table.Columns.Add("posting_date", typeof(DateTime));
             table.Columns.Add("organization_id", typeof(string));
+            table.Columns.Add("organization_code", typeof(string));
+            table.Columns.Add("organization_name", typeof(string));
             table.Columns.Add("doc_number", typeof(string));
             table.Columns.Add("document_type", typeof(string));
             table.Columns.Add("debit_account", typeof(string));
@@ -246,9 +290,32 @@ namespace BIS.ERP.Services
             table.Columns.Add("amount_kgs", typeof(decimal));
             table.Columns.Add("description", typeof(string));
             table.Columns.Add("module_code", typeof(string));
+            table.Columns.Add("account_code", typeof(string));
+            table.Columns.Add("counter_account_code", typeof(string));
+            table.Columns.Add("debit_amount", typeof(decimal));
+            table.Columns.Add("credit_amount", typeof(decimal));
+            table.Columns.Add("currency_code", typeof(string));
+            table.Columns.Add("amount_currency", typeof(decimal));
+            table.Columns.Add("exchange_rate", typeof(decimal));
 
             foreach (var movement in rows)
             {
+                var inDebit = SameAccount(movement.DebitAccount, accountCode);
+                var inCredit = SameAccount(movement.CreditAccount, accountCode);
+
+                // Без отбора по счёту оборот не делится: сумма идёт в дебет счёта.
+                var debitAmount = string.IsNullOrWhiteSpace(accountCode) || inDebit ? movement.Amount : 0m;
+                var creditAmount = !string.IsNullOrWhiteSpace(accountCode) && inCredit ? movement.Amount : 0m;
+                var counterAccount = string.IsNullOrWhiteSpace(accountCode)
+                    ? string.Empty
+                    : inDebit
+                        ? movement.CreditAccount
+                        : movement.DebitAccount;
+
+                var rate = movement.AmountCurrency != 0m
+                    ? Math.Round(movement.Amount / movement.AmountCurrency, 4)
+                    : 0m;
+
                 var row = table.NewRow();
                 row["Дата"] = movement.Date;
                 row["Организация"] = movement.OrganizationName;
@@ -263,6 +330,8 @@ namespace BIS.ERP.Services
                 // Те же значения под именами, которые ищет макет.
                 row["posting_date"] = movement.Date;
                 row["organization_id"] = movement.OrganizationName;
+                row["organization_code"] = movement.OrganizationCode;
+                row["organization_name"] = movement.OrganizationName;
                 row["doc_number"] = movement.DocumentNumber;
                 row["document_type"] = movement.DocumentType;
                 row["debit_account"] = movement.DebitAccount;
@@ -271,11 +340,23 @@ namespace BIS.ERP.Services
                 row["description"] = movement.Description;
                 row["module_code"] = movement.ModuleCode;
 
+                row["account_code"] = accountCode ?? string.Empty;
+                row["counter_account_code"] = counterAccount;
+                row["debit_amount"] = debitAmount;
+                row["credit_amount"] = creditAmount;
+                row["currency_code"] = movement.CurrencyCode;
+                row["amount_currency"] = movement.AmountCurrency;
+                row["exchange_rate"] = rate;
+
                 table.Rows.Add(row);
             }
 
             return table;
         }
+
+        /// <summary>Сравнение счетов без учёта регистра и пробелов по краям.</summary>
+        private static bool SameAccount(string? left, string? right) =>
+            (left ?? string.Empty).Trim().Equals((right ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Оборотно-сальдовая ведомость по счёту.</summary>
         private static async Task<DataTable> BuildTurnoverAsync(

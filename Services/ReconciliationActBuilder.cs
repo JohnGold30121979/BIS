@@ -17,6 +17,9 @@ namespace BIS.ERP.Services
         public DateTime Date { get; init; }
         public Guid? OrganizationId { get; init; }
         public string OrganizationName { get; init; } = string.Empty;
+
+        /// <summary>Номер организации из справочника: нужен для заголовка группировки.</summary>
+        public string OrganizationCode { get; init; } = string.Empty;
         public string DocumentNumber { get; init; } = string.Empty;
         public string DocumentType { get; init; } = string.Empty;
         public string ModuleCode { get; init; } = string.Empty;
@@ -24,6 +27,12 @@ namespace BIS.ERP.Services
         public string CreditAccount { get; init; } = string.Empty;
         public decimal Amount { get; init; }
         public string Description { get; init; } = string.Empty;
+
+        /// <summary>Сумма в валюте: 0, если проводка в сомах.</summary>
+        public decimal AmountCurrency { get; init; }
+
+        /// <summary>Код валюты: RUB, USD, EUR. Пусто, если проводка в сомах.</summary>
+        public string CurrencyCode { get; init; } = string.Empty;
     }
 
     /// <summary>
@@ -129,15 +138,19 @@ namespace BIS.ERP.Services
                 SELECT p.posting_date, p.doc_number, COALESCE(p.document_type, 'Проводка') AS document_type,
                        COALESCE(p.module_code, '') AS module_code,
                        p.debit_account, p.credit_account, COALESCE(p.amount_kgs, 0) AS amount_kgs,
+                       COALESCE(p.amount_currency, 0) AS amount_currency,
+                       COALESCE(c.""code"", '') AS currency_code,
                        COALESCE(p.description, '') AS description,
                        CASE
                            WHEN COALESCE(p.organization_id::text, '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                            THEN p.organization_id::text
                            ELSE NULL
                        END AS organization_id_text,
-                       COALESCE(NULLIF(o.""name"", ''), 'Без организации') AS organization_name
+                       COALESCE(NULLIF(o.""name"", ''), 'Без организации') AS organization_name,
+                       COALESCE(o.""code"", '') AS organization_code
                 FROM doc_postings p
                 LEFT JOIN catalog_organizations o ON p.organization_id::text = o.""Id""::text
+                LEFT JOIN catalog_currencies c ON c.""Id""::text = p.currency_id
                 WHERE COALESCE(p.is_active, true) = true
                   AND (COALESCE(@organizationId, '') = '' OR p.organization_id::text = @organizationId)
                   AND p.posting_date >= @startDate
@@ -165,13 +178,16 @@ namespace BIS.ERP.Services
                             ? movementOrganizationId
                             : null,
                         OrganizationName = reader["organization_name"]?.ToString() ?? "Без организации",
+                        OrganizationCode = reader["organization_code"]?.ToString() ?? string.Empty,
                         DocumentNumber = MetadataService.NormalizeLegacyDocumentNumber(reader["doc_number"]?.ToString()),
                         DocumentType = reader["document_type"]?.ToString() ?? string.Empty,
                         ModuleCode = reader["module_code"]?.ToString() ?? string.Empty,
                         DebitAccount = reader["debit_account"]?.ToString() ?? string.Empty,
                         CreditAccount = reader["credit_account"]?.ToString() ?? string.Empty,
                         Amount = ReadDecimal(reader["amount_kgs"]),
-                        Description = reader["description"]?.ToString() ?? string.Empty
+                        Description = reader["description"]?.ToString() ?? string.Empty,
+                        AmountCurrency = ReadDecimal(reader["amount_currency"]),
+                        CurrencyCode = reader["currency_code"]?.ToString() ?? string.Empty
                     });
                 }
             }

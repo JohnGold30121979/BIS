@@ -1849,6 +1849,9 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                             ParameterType = parameter.ParameterType,
                             DefaultValue = parameter.DefaultValue,
                             IsRequired = parameter.IsRequired,
+                            // Справочник-источник для параметра типа «Ссылка»:
+                            // без него выбор значения в форме отчёта не работает.
+                            ReferenceSource = parameter.ReferenceSource,
                             Order = parameter.Order
                         }).ToList();
 

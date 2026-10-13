@@ -456,6 +456,10 @@ public partial class MetadataService
             report.IsActive = definition.SeedClosedXmlLayout;
             report.IsPrintForm = false;
             report.IsDefault = false;
+
+            // Отметка для окна «Бухгалтерская отчётность» ставится один раз:
+            // дальше администратор управляет ею в конструкторе.
+            report.ShowInAccountingReports = definition.ShowInAccountingReports;
         }
 
         report.SourceFormat = definition.SourceFormat;
@@ -468,7 +472,9 @@ public partial class MetadataService
             var seedLayout = definition.ReportType switch
             {
                 "TrialBalance" => ClosedXmlLayoutTemplates.CreateTrialBalance(definition.Name),
+                "TurnoverByAccount" => ClosedXmlLayoutTemplates.CreateTurnoverByAccount(definition.Name),
                 "InvoiceJournal" => ClosedXmlLayoutTemplates.CreateInvoiceJournal(definition.Name),
+                "VatInvoiceSt1" => ClosedXmlLayoutTemplates.CreateVatInvoiceSt1(definition.Name),
                 _ => ClosedXmlLayoutTemplates.CreateReconciliationAct(definition.Name)
             };
 
@@ -782,7 +788,7 @@ public partial class MetadataService
                 "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
             },
             SourceFormat: "ClosedXml",
-            SeedClosedXmlLayout: true),
+            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
         new StandardReportDefinition(
             Code: "standard.finance.invoice-journal",
             Name: "Журнал счет-фактур",
@@ -802,25 +808,49 @@ public partial class MetadataService
                 "posted_state", "supply_kind", "report_title", "period_start", "period_end"
             },
             SourceFormat: "ClosedXml",
-            SeedClosedXmlLayout: true),
+            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
+        new StandardReportDefinition(
+            Code: "standard.finance.vat-invoice-st1",
+            Name: "Счёт-фактура по форме СТ-1",
+            Description: "Бланк счёта-фактуры по форме СТ-1: реквизиты сторон, многоуровневая шапка из 13 графов, вертикальные подписи. Образец форматного макета.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Счет-фактура СТ-1: строки и реквизиты",
+            SourceObjectType: "ReportSource",
+            ReportType: "VatInvoiceSt1",
+            Icon: "🧾",
+            Order: 154,
+            PageOrientation: "Landscape",
+            Fields: new[]
+            {
+                "line_number", "item_name", "unit_name", "quantity", "price",
+                "amount_without_tax", "vat_rate", "vat_amount", "sales_tax_rate",
+                "sales_tax_amount", "line_total", "tax_code", "vat_tax_code",
+                "seller_name", "buyer_name", "seller_inn_text", "buyer_inn_text",
+                "seller_address_text", "buyer_address_text", "seller_reg_number",
+                "seller_bank_text", "report_title", "period_start", "period_end", "esf_number"
+            },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
         new StandardReportDefinition(
             Code: "standard.finance.trial-balance-closedxml",
             Name: "Оборотная ведомость (ClosedXML)",
-            Description: "Оборотно-сальдовая ведомость по счёту, собранная визуальным макетом ClosedXML. Макет хранится в самом отчёте и правится в генераторе отчётов.",
+            Description: "Оборотная ведомость синтетического и аналитического учёта по счёту: проводки, сгруппированные по организации, с итогом по каждой организации и общим итогом. Источник — системный расчёт «Движения по проводкам». Макет хранится в отчёте и правится в конструкторе.",
             ModuleCode: ModuleMetadataService.FinanceCode,
-            SourceName: "Проводки",
-            SourceObjectType: "Document",
-            ReportType: "TrialBalance",
+            SourceName: "Движения по проводкам",
+            SourceObjectType: "ReportSource",
+            ReportType: "TurnoverByAccount",
             Icon: "📊",
             Order: 152,
             PageOrientation: "Landscape",
             Fields: new[]
             {
-                "posting_date", "doc_number", "document_type", "debit_account",
-                "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
+                "posting_date", "doc_number", "counter_account_code",
+                "debit_amount", "credit_amount", "description",
+                "currency_code", "amount_currency", "exchange_rate",
+                "module_code", "organization_code", "organization_name"
             },
             SourceFormat: "ClosedXml",
-            SeedClosedXmlLayout: true),
+            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
         new StandardReportDefinition(
             Code: "standard.finance.sales-invoice-journal",
             Name: "Журнал продаж",
@@ -1100,7 +1130,13 @@ public partial class MetadataService
         string PageOrientation,
         IReadOnlyList<string> Fields,
         string SourceFormat = "Native",
-        bool SeedClosedXmlLayout = false);
+        bool SeedClosedXmlLayout = false,
+
+        /// <summary>
+        /// Отметить отчёт для списка окна «Бухгалтерская отчётность».
+        /// Администратор может снять или поставить отметку в конструкторе.
+        /// </summary>
+        bool ShowInAccountingReports = false);
 }
 
 

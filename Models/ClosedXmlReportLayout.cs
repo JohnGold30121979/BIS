@@ -72,6 +72,26 @@ namespace BIS.ERP.Models
         public string FontName { get; set; } = "Times New Roman";
 
         public double FontSize { get; set; } = 10;
+
+        /// <summary>
+        /// Верхний колонтитул: повторяется на каждой странице.
+        ///
+        /// Поддерживаются подстановки <c>{Organization}</c> — первичная организация,
+        /// <c>{Page}</c> — номер листа и <c>{Pages}</c> — всего листов.
+        /// Пусто — колонтитул не выводится.
+        /// </summary>
+        public string PageHeaderText { get; set; } = string.Empty;
+
+        /// <summary>Нижний колонтитул. Подстановки те же, что в верхнем.</summary>
+        public string PageFooterText { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Выводить вверху справа наименование первичной организации и счётчик листов.
+        ///
+        /// Включено по умолчанию: так оформлен печатный бланк. Если задан
+        /// <see cref="PageHeaderText"/>, он имеет приоритет.
+        /// </summary>
+        public bool ShowPageHeader { get; set; } = true;
     }
 
     /// <summary>
@@ -333,6 +353,13 @@ namespace BIS.ERP.Models
 
         /// <summary>Подытог группы; null — не выводить.</summary>
         public ClosedXmlTotal? Subtotal { get; set; }
+
+        /// <summary>
+        /// Поле, значение которого добавляется к подписи подытога: «ИТОГО по 2».
+        ///
+        /// Пусто — берётся первое поле группировки.
+        /// </summary>
+        public string? SubtotalValueField { get; set; }
     }
 
     public class ClosedXmlTotal

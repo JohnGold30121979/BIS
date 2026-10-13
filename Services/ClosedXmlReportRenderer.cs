@@ -18,7 +18,9 @@ namespace BIS.ERP.Services
     /// </summary>
     public static partial class ClosedXmlReportRenderer
     {
-        private static readonly Regex ParameterRegex = new(@"\{param\.([^}]+)\}", RegexOptions.Compiled);
+        private static readonly Regex ParameterRegex = new(
+            @"\{(?:param\.)?([A-Za-z_][A-Za-z0-9_]*)(?::([^}]+))?\}",
+            RegexOptions.Compiled);
 
         public static string SerializeLayout(ClosedXmlReportLayout layout) =>
             JsonSerializer.Serialize(layout, new JsonSerializerOptions
@@ -214,6 +216,90 @@ namespace BIS.ERP.Services
             File.WriteAllBytes(filePath, bytes);
         }
 
+        /// <summary>
+        /// Верхний и нижний колонтитулы листа.
+        ///
+        /// По умолчанию вверху справа печатается наименование первичной организации
+        /// и счётчик листов: так оформлен печатный бланк ведомости.
+        /// </summary>
+        private static void ApplyPageHeader(
+            IXLWorksheet worksheet,
+            ClosedXmlPageSetup setup,
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters)
+        {
+            var organization = ResolveOrganizationFromData(dataTable, parameters);
+
+            // Заданный текст колонтитула имеет приоритет над оформлением по умолчанию.
+            if (!string.IsNullOrWhiteSpace(setup.PageHeaderText))
+            {
+                var text = BuildPageText(setup.PageHeaderText, organization);
+                var header = worksheet.PageSetup.Header;
+
+                // Счётчик листов ставится только тогда, когда он запрошен в тексте.
+                if (text.Contains("&P", StringComparison.OrdinalIgnoreCase))
+                    text = text.Replace("Лист &P", "&\"Times New Roman\"Лист &P из &N", StringComparison.OrdinalIgnoreCase);
+
+                header.Right.Clear();
+                header.Right.AddText(text);
+            }
+            else if (setup.ShowPageHeader)
+            {
+                // Организация и счётчик листов — одной строкой справа вверху.
+                var header = worksheet.PageSetup.Header;
+                header.Right.Clear();
+
+                if (!string.IsNullOrWhiteSpace(organization))
+                    header.Right.AddText(organization + "   ", XLHFOccurrence.AllPages);
+
+                header.Right.AddText("Лист &P из &N", XLHFOccurrence.AllPages);
+            }
+
+            if (!string.IsNullOrWhiteSpace(setup.PageFooterText))
+            {
+                var footer = worksheet.PageSetup.Footer;
+                footer.Center.Clear();
+                footer.Center.AddText(BuildPageText(setup.PageFooterText, organization));
+            }
+        }
+
+        /// <summary>Подставляет значения в текст колонтитула.</summary>
+        private static string BuildPageText(string text, string organization) =>
+            text
+                .Replace("{Organization}", organization, StringComparison.OrdinalIgnoreCase)
+                .Replace("{Дата}", DateTime.Now.ToString("dd/MM/yy"), StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Ищет наименование организации в данных отчёта.
+        ///
+        /// Порядок: колонка report_org, затем organization_name, затем «Организация».
+        /// </summary>
+        private static string ResolveOrganizationFromData(
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters)
+        {
+            foreach (var name in new[] { "report_org", "organization_name", "Организация", "organization_id" })
+            {
+                if (!dataTable.Columns.Contains(name) || dataTable.Rows.Count == 0)
+                    continue;
+
+                var value = dataTable.Rows[0][name]?.ToString();
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value.Trim();
+            }
+
+            foreach (var pair in parameters ?? new Dictionary<string, object?>())
+            {
+                if (pair.Key.Contains("Organization", StringComparison.OrdinalIgnoreCase) &&
+                    !string.IsNullOrWhiteSpace(pair.Value?.ToString()))
+                {
+                    return pair.Value!.ToString()!;
+                }
+            }
+
+            return string.Empty;
+        }
+
         private static void RenderSheet(
             IXLWorksheet worksheet,
             ClosedXmlSheet sheetLayout,
@@ -231,6 +317,8 @@ namespace BIS.ERP.Services
                 worksheet.PageSetup.FitToPages(setup.FitToPagesWide, 0);
             if (setup.FreezeRows > 0)
                 worksheet.SheetView.FreezeRows(setup.FreezeRows);
+
+            ApplyPageHeader(worksheet, setup, dataTable, parameters);
 
             var rowCursor = 1;
             foreach (var block in sheetLayout.Blocks)
@@ -349,65 +437,37 @@ namespace BIS.ERP.Services
             ClosedXmlTableSection section,
             List<ClosedXmlColumn> visible)
         {
-            var levels = section.HeaderLevels;
-            var lastLevelIndex = levels.Count - 1;
+            var header = BuildHeaderGrid(section, visible);
 
-            // Занятые ячейки: объединение по колонкам и по уровням перекрывает
-            // одни и те же места, повторная запись в них недопустима.
-            var mergedCells = new HashSet<(int Level, int Column)>();
-
-            for (var levelIndex = 0; levelIndex < levels.Count; levelIndex++)
+            foreach (var placement in header.Placements)
             {
-                var level = levels[levelIndex];
-                var rowIndex = startRow + levelIndex;
+                var rowIndex = startRow + placement.Row;
+                var excelCell = worksheet.Cell(rowIndex, placement.FromColumn);
 
-                foreach (var headerCell in level.Cells)
+                if (worksheet.Cell(rowIndex, placement.FromColumn).IsMerged())
+                    continue;
+
+                excelCell.Value = ResolveText(placement.Text, null);
+                ApplyCellStyle(excelCell, placement.Bold, false, 0, placement.Align,
+                    string.IsNullOrWhiteSpace(placement.Fill) ? section.HeaderFill : placement.Fill,
+                    section.RowBorder);
+                ApplyTextRotation(excelCell, placement.TextRotation, wrapText: true);
+
+                if (placement.ToColumn > placement.FromColumn || placement.RowSpan > 1)
                 {
-                    var from = Math.Max(1, headerCell.Column);
-                    var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
-                    if (from > visible.Count)
-                        continue;
-
-                    if (to > visible.Count)
-                        to = visible.Count;
-
-                    if (mergedCells.Contains((levelIndex, from)))
-                        continue;
-
-                    var cell = worksheet.Cell(rowIndex, from);
-
-                    // Ячейка может уже входить в объединение предыдущего уровня.
-                    if (cell.IsMerged())
-                        continue;
-
-                    var text = string.IsNullOrWhiteSpace(headerCell.Text) && levelIndex == lastLevelIndex
-                        ? BuildHeaderTextForRange(visible, from, to)
-                        : headerCell.Text;
-
-                    cell.Value = ResolveText(text, null);
-                    ApplyCellStyle(cell, headerCell.Bold, false, 0, headerCell.Align,
-                        string.IsNullOrWhiteSpace(headerCell.Fill) ? section.HeaderFill : headerCell.Fill,
-                        section.RowBorder);
-                    ApplyTextRotation(cell, headerCell.TextRotation, wrapText: true);
-
-                    var rowSpan = Math.Max(1, headerCell.RowSpan);
-                    var lastRow = rowIndex + rowSpan - 1;
-
-                    if (to > from || lastRow > rowIndex)
-                        worksheet.Range(rowIndex, from, lastRow, to).Merge();
-
-                    for (var coveredLevel = levelIndex; coveredLevel <= levelIndex + rowSpan - 1; coveredLevel++)
-                    {
-                        for (var column = from; column <= to; column++)
-                            mergedCells.Add((coveredLevel, column));
-                    }
+                    worksheet.Range(
+                        rowIndex, placement.FromColumn,
+                        rowIndex + placement.RowSpan - 1, placement.ToColumn).Merge();
                 }
-
-                if (section.HeaderRowHeight > 0)
-                    worksheet.Row(rowIndex).Height = section.HeaderRowHeight;
             }
 
-            return Math.Max(1, levels.Count);
+            for (var offset = 0; offset < header.RowCount; offset++)
+            {
+                if (section.HeaderRowHeight > 0)
+                    worksheet.Row(startRow + offset).Height = section.HeaderRowHeight;
+            }
+
+            return header.RowCount;
         }
 
         /// <summary>
@@ -415,7 +475,7 @@ namespace BIS.ERP.Services
         /// через разделитель. Нужно для верхнего уровня шапки.
         /// </summary>
         private static string BuildHeaderTextForRange(
-            List<ClosedXmlColumn> visible,
+            IReadOnlyList<ClosedXmlColumn> visible,
             int from,
             int to)
         {
@@ -446,6 +506,137 @@ namespace BIS.ERP.Services
 
             if (wrapText)
                 cell.Style.Alignment.WrapText = true;
+        }
+
+        /// <summary>
+        /// Размещённая ячейка шапки: где стоит и что подписывает.
+        ///
+        /// Начертание хранится копией, а не ссылкой на модель: при растягивании
+        /// ячейки в пустую строку объединение по вертикали увеличивается.
+        /// </summary>
+        private sealed record HeaderPlacement(
+            int Row,
+            int RowSpan,
+            int FromColumn,
+            int ToColumn,
+            string Text,
+            bool Bold,
+            string Align,
+            int TextRotation,
+            string Fill);
+
+        /// <summary>Размещение шапки: ячейки и число занятых строк.</summary>
+        private sealed record HeaderGrid(
+            IReadOnlyList<HeaderPlacement> Placements,
+            int RowCount);
+
+        /// <summary>
+        /// Раскладывает ячейки уровней шапки по строкам сетки.
+        ///
+        /// Для каждой колонки хранится первая свободная строка. Ячейка занимает
+        /// самую верхнюю свободную строку своих колонок, но не выше начала своего
+        /// уровня: поэтому подпись графы поднимается вверх, когда верхний уровень
+        /// её не перекрывает, и не налезает на уже поставленные подписи.
+        ///
+        /// Ячейка с <c>RowSpan</c> больше единицы занимает столько строк вниз:
+        /// так «НДС» перекрывает строку со «Ставка» и «Сумма».
+        ///
+        /// Пустая подпись ячейки последнего уровня заменяется заголовком колонки.
+        /// </summary>
+        private static HeaderGrid BuildHeaderGrid(
+            ClosedXmlTableSection section,
+            IReadOnlyList<ClosedXmlColumn> visible)
+        {
+            var levels = section.HeaderLevels;
+            var lastLevelIndex = levels.Count - 1;
+            var columnCount = visible.Count;
+
+            var placements = new List<HeaderPlacement>();
+
+            // Занятые ячейки: строки, которые уже перекрыты подписями.
+            var occupied = new HashSet<(int Row, int Column)>();
+
+            var levelBaseRow = 0;
+            var rowCount = 0;
+
+            for (var levelIndex = 0; levelIndex < levels.Count; levelIndex++)
+            {
+                var isLastLevel = levelIndex == lastLevelIndex;
+
+                foreach (var headerCell in levels[levelIndex].Cells)
+                {
+                    var from = headerCell.Column;
+                    var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
+
+                    if (from < 1 || from > columnCount)
+                        continue;
+
+                    if (to > columnCount)
+                        to = columnCount;
+
+                    var rowSpan = Math.Max(1, headerCell.RowSpan);
+
+                    // Ищем самую верхнюю свободную строку для этих колонок.
+                    // Подпись поднимается вверх, если верхние уровни её не перекрывают.
+                    var row = levelBaseRow;
+                    while (IsRangeOccupied(occupied, row, rowSpan, from, to))
+                        row++;
+
+                    for (var probe = row; probe < row + rowSpan; probe++)
+                    {
+                        for (var column = from; column <= to; column++)
+                            occupied.Add((probe, column));
+                    }
+
+                    if (row + rowSpan > rowCount)
+                        rowCount = row + rowSpan;
+
+                    var text = string.IsNullOrWhiteSpace(headerCell.Text) && isLastLevel
+                        ? BuildHeaderTextForRange(visible, from, to)
+                        : headerCell.Text;
+
+                    placements.Add(new HeaderPlacement(
+                        row, rowSpan, from, to, text,
+                        headerCell.Bold, headerCell.Align, headerCell.TextRotation, headerCell.Fill));
+                }
+
+                // Следующий уровень ищет место не ниже самого верхнего края
+                // уже поставленных подписей: так он может занять строку, которую
+                // верхний уровень не перекрыл, и в шапке не остаётся пустой полосы.
+                var highestOccupiedRow = int.MaxValue;
+                foreach (var cell in occupied)
+                {
+                    if (cell.Row < highestOccupiedRow)
+                        highestOccupiedRow = cell.Row;
+                }
+
+                levelBaseRow = highestOccupiedRow == int.MaxValue ? levelBaseRow : highestOccupiedRow;
+            }
+
+            if (rowCount == 0)
+                rowCount = Math.Max(1, levels.Count);
+
+            return new HeaderGrid(placements, rowCount);
+        }
+
+        /// <summary>Проверяет, перекрыт ли участок сетки уже поставленными подписями.</summary>
+        private static bool IsRangeOccupied(
+            HashSet<(int Row, int Column)> occupied,
+            int row,
+            int rowSpan,
+            int fromColumn,
+            int toColumn)
+        {
+            for (var probe = row; probe < row + rowSpan; probe++)
+            {
+                for (var column = fromColumn; column <= toColumn; column++)
+                {
+                    if (occupied.Contains((probe, column)))
+                        return true;
+                }
+            }
+
+            return false;
         }
 
         private static int WriteTableSection(
@@ -551,8 +742,16 @@ namespace BIS.ERP.Services
                 return startRow;
 
             var rowCursor = startRow;
+
+            // Группы без значения поля (например, «Без организации») идут последними:
+            // так заполненные группы стоят в начале, как в печатной форме.
             var ordered = rows
-                .OrderBy(r => GetFieldValueText(r, byFields[0]), StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(r =>
+                {
+                    var text = GetFieldValueText(r, byFields[0]);
+                    return string.IsNullOrWhiteSpace(text) ? 1 : 0;
+                })
+                .ThenBy(r => GetFieldValueText(r, byFields[0]), StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
 
             foreach (var chunk in ordered.GroupBy(r => string.Join("|", byFields.Select(f => GetFieldValueText(r, f)))))
@@ -598,8 +797,24 @@ namespace BIS.ERP.Services
                     }
 
                     if (groupDetailRows.Count > 0)
+                    {
+                        // Значение группы попадает в подпись подытога: «ИТОГО по 2».
+                        // Если заданное поле пусто, берётся первое непустое из группировки.
+                        var groupValue = string.Empty;
+                        var valueFields = !string.IsNullOrWhiteSpace(group.SubtotalValueField)
+                            ? new List<string> { group.SubtotalValueField! }
+                            : byFields.ToList();
+
+                        foreach (var field in valueFields)
+                        {
+                            groupValue = GetFieldValueText(groupRows[0], field);
+                            if (!string.IsNullOrWhiteSpace(groupValue))
+                                break;
+                        }
+
                         rowCursor = WriteTotalRow(worksheet, rowCursor, group.Subtotal, visible,
-                            columnByField, groupDetailRows, "All");
+                            columnByField, groupDetailRows, "All", groupValue);
+                    }
                 }
             }
 
@@ -805,11 +1020,15 @@ namespace BIS.ERP.Services
             List<ClosedXmlColumn> visible,
             Dictionary<string, int> columnByField,
             List<int> detailRows,
-            string border)
+            string border,
+            string groupValue = "")
         {
-            // Метка итога — в первую колонку.
+            // Метка итога — в первую колонку. К подытогу группы добавляется
+            // её значение: «ИТОГО по 2».
             var labelCell = worksheet.Cell(startRow, 1);
-            labelCell.Value = total.Label;
+            labelCell.Value = string.IsNullOrWhiteSpace(groupValue)
+                ? total.Label
+                : $"{total.Label} {groupValue}";
             labelCell.Style.Font.Bold = total.Bold;
 
             var sumFields = total.SumFields.Count > 0
@@ -936,24 +1155,58 @@ namespace BIS.ERP.Services
             return value == DBNull.Value || value == null ? string.Empty : value.ToString() ?? string.Empty;
         }
 
+        /// <summary>
+        /// Подставляет параметры отчёта в текст.
+        ///
+        /// Поддерживаются записи <c>{Имя}</c> и <c>{param.Имя}</c>, а также формат
+        /// значения через двоеточие: <c>{PeriodStart:dd/MM/yyyy}</c>.
+        /// Неизвестные подстановки удаляются, чтобы в документе не осталось
+        /// фигурных скобок.
+        /// </summary>
         private static string ResolveText(string? text, IReadOnlyDictionary<string, object?>? parameters)
         {
             if (string.IsNullOrEmpty(text))
                 return string.Empty;
-            if (parameters == null || parameters.Count == 0)
-                return text;
 
             return ParameterRegex.Replace(text, match =>
             {
                 var name = match.Groups[1].Value;
-                foreach (var pair in parameters)
+                var format = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+                foreach (var pair in parameters ?? new Dictionary<string, object?>())
                 {
-                    if (string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))
-                        return pair.Value?.ToString() ?? string.Empty;
+                    if (!string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    return FormatParameterValue(pair.Value, format);
                 }
 
-                return string.Empty;
+                return parameters == null ? match.Value : string.Empty;
             });
+        }
+
+        /// <summary>Приводит значение параметра к тексту с учётом формата.</summary>
+        private static string FormatParameterValue(object? value, string? format)
+        {
+            if (value == null)
+                return string.Empty;
+
+            if (value is DateTime date)
+                return date.ToString(string.IsNullOrWhiteSpace(format) ? "dd.MM.yyyy" : format,
+                    System.Globalization.CultureInfo.CurrentCulture);
+
+            if (value is DateOnly dateOnly)
+                return dateOnly.ToString(string.IsNullOrWhiteSpace(format) ? "dd.MM.yyyy" : format,
+                    System.Globalization.CultureInfo.CurrentCulture);
+
+            if (value is decimal or double or float && !string.IsNullOrWhiteSpace(format))
+                return Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture).ToString(format);
+
+            var text = value.ToString() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(format) && DateTime.TryParse(text, out var parsed))
+                return parsed.ToString(format, System.Globalization.CultureInfo.CurrentCulture);
+
+            return text;
         }
 
         private static string BuildSafeSheetName(string? name)

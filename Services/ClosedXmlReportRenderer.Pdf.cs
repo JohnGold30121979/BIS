@@ -57,6 +57,9 @@ namespace BIS.ERP.Services
             _pageFontName = fontName;
             _pageFontSize = fontSize;
 
+            // Верхний колонтитул: организация и счётчик листов справа вверху.
+            var headerText = ResolvePdfHeaderText(setup, dataTable, parameters);
+
             return QuestPDF.Fluent.Document.Create(document =>
             {
                 document.Page(page =>
@@ -64,6 +67,29 @@ namespace BIS.ERP.Services
                     page.Size(landscape ? PageSizes.A4.Landscape() : PageSizes.A4);
                     page.Margin(10, Unit.Millimetre);
                     page.DefaultTextStyle(style => style.FontFamily(fontName).FontSize(fontSize));
+
+                    if (!string.IsNullOrWhiteSpace(headerText))
+                    {
+                        // Организация и счётчик листов — справа вверху, как в бланке.
+                        page.Header().AlignRight().Text(text =>
+                        {
+                            text.Span(headerText + "    ").FontSize(fontSize - 1);
+                            text.Span("Лист ").FontSize(fontSize - 1);
+                            text.CurrentPageNumber().FontSize(fontSize - 1);
+                            text.Span(" из ").FontSize(fontSize - 1);
+                            text.TotalPages().FontSize(fontSize - 1);
+                        });
+                    }
+                    else
+                    {
+                        page.Header().AlignRight().Text(text =>
+                        {
+                            text.Span("Лист ").FontSize(fontSize - 1);
+                            text.CurrentPageNumber().FontSize(fontSize - 1);
+                            text.Span(" из ").FontSize(fontSize - 1);
+                            text.TotalPages().FontSize(fontSize - 1);
+                        });
+                    }
 
                     page.Content().Column(column =>
                     {
@@ -75,7 +101,7 @@ namespace BIS.ERP.Services
                             {
                                 case "TitleRows":
                                 case "FreeRows":
-                                    RenderTextRows(column, block, dataTable);
+                                    RenderTextRows(column, block, dataTable, parameters);
                                     break;
 
                                 case "TabularSection" when block.Table != null:
@@ -90,6 +116,29 @@ namespace BIS.ERP.Services
                     });
                 });
             }).GeneratePdf();
+        }
+
+        /// <summary>
+        /// Текст верхнего колонтитула PDF.
+        ///
+        /// По умолчанию — наименование первичной организации. Номер листа
+        /// подставляет сам PDF-документ, поэтому в текст он не входит.
+        /// </summary>
+        private static string ResolvePdfHeaderText(
+            ClosedXmlPageSetup setup,
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters)
+        {
+            if (!string.IsNullOrWhiteSpace(setup.PageHeaderText))
+            {
+                var text = setup.PageHeaderText
+                    .Replace("{Дата}", DateTime.Now.ToString("dd/MM/yy"), StringComparison.OrdinalIgnoreCase);
+
+                return text.Replace("{Organization}", ResolveOrganizationFromData(dataTable, parameters),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            return setup.ShowPageHeader ? ResolveOrganizationFromData(dataTable, parameters) : string.Empty;
         }
 
         /// <summary>Выводит макет ClosedXML в PDF и сохраняет в файл.</summary>
@@ -107,7 +156,8 @@ namespace BIS.ERP.Services
         private static void RenderTextRows(
             ColumnDescriptor column,
             ClosedXmlBlock block,
-            DataTable dataTable)
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters = null)
         {
             var columnCount = Math.Max(1, ResolveColumnCount(block));
 
@@ -136,7 +186,7 @@ namespace BIS.ERP.Services
                             : 1;
                         span = Math.Max(1, span);
 
-                        var text = BuildTextCellValue(cellLayout, dataTable);
+                        var text = BuildTextCellValue(cellLayout, dataTable, parameters);
                         var align = ParseAlign(cellLayout.Align);
                         var bold = cellLayout.Bold;
                         var italic = cellLayout.Italic;
@@ -185,104 +235,63 @@ namespace BIS.ERP.Services
         /// <summary>
         /// Рисует многоуровневую шапку.
         ///
-        /// Уровни идут сверху вниз. Ячейка объединяется по своим колонкам.
-        /// Ячейка нижнего уровня, не перекрытая верхними, растягивается вниз —
-        /// так одиночные графы получают полную высоту шапки.
+        /// Размещение ячеек считает общий расчёт <c>BuildHeaderGrid</c>: он же
+        /// используется выводом в Excel, поэтому шапки совпадают.
         /// </summary>
         private static void RenderMultiLevelHeader(
             TableDescriptor table,
             ClosedXmlTableSection section,
             List<ClosedXmlColumn> visible)
         {
-            var levels = section.HeaderLevels;
-            var lastLevelIndex = levels.Count - 1;
-
-            // Ячейки, уже занятые объединением по колонкам или по уровням.
-            // Ключ — «уровень:колонка», потому что объединение по уровням
-            // перекрывает те же колонки на нижних уровнях.
-            var mergedCells = new HashSet<(int Level, int Column)>();
+            var header = BuildHeaderGrid(section, visible.GetRange(0, visible.Count));
 
             // Высота строки шапки ограничивает картинки с вертикальными подписями.
             var previousHeightLimit = ContainerHeightLimit;
-            ContainerHeightLimit = ResolveHeaderHeightLimit(section, levels.Count);
+            ContainerHeightLimit = ResolveHeaderHeightLimit(section, header.RowCount);
 
             try
             {
-                for (var levelIndex = 0; levelIndex < levels.Count; levelIndex++)
+                var lastRow = -1;
+
+                foreach (var placement in header.Placements)
                 {
-                    var level = levels[levelIndex];
-                    var isLastLevel = levelIndex == lastLevelIndex;
-
-                    foreach (var headerCell in level.Cells)
+                    // Начало новой строки шапки.
+                    if (placement.Row != lastRow)
                     {
-                        var from = Math.Max(1, headerCell.Column);
-                        var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
-                        if (from > visible.Count)
-                            continue;
-
-                        if (to > visible.Count)
-                            to = visible.Count;
-
-                        if (mergedCells.Contains((levelIndex, from)))
-                            continue;
-
-                        var text = string.IsNullOrWhiteSpace(headerCell.Text) && isLastLevel
-                            ? BuildPdfHeaderTextForRange(visible, from, to)
-                            : headerCell.Text;
-
-                        var fill = string.IsNullOrWhiteSpace(headerCell.Fill)
-                            ? section.HeaderFill
-                            : headerCell.Fill;
-                        var border = section.RowBorder;
-                        var align = ParseAlign(headerCell.Align);
-                        var rotation = headerCell.TextRotation;
-                        var bold = headerCell.Bold;
-
-                        var cell = table.Cell();
-                        var span = to - from + 1;
-                        if (span > 1)
-                        {
-                            cell = cell.ColumnSpan((uint)span);
-                            for (var column = from; column <= to; column++)
-                                mergedCells.Add((levelIndex, column));
-                        }
-                        else
-                        {
-                            mergedCells.Add((levelIndex, from));
-                        }
-
-                        // Ячейка может занимать несколько уровней по вертикали:
-                        // подпись графы стоит над нижними уровнями.
-                        var rowSpan = Math.Max(1, headerCell.RowSpan);
-                        if (rowSpan > 1)
-                        {
-                            cell = cell.RowSpan((uint)rowSpan);
-                            for (var coveredLevel = levelIndex + 1; coveredLevel < levelIndex + rowSpan; coveredLevel++)
-                            {
-                                for (var column = from; column <= to; column++)
-                                    mergedCells.Add((coveredLevel, column));
-                            }
-                        }
-
-                        var cellContainer = cell
-                            .Element(container => ApplyCellContainer(container, fill, border))
-                            .PaddingVertical(2)
-                            .PaddingHorizontal(3)
-                            .Element(container => ApplyAlign(container, align));
-
-                        if (rotation != 0)
-                            WriteRotatedText(cellContainer, text, rotation, bold, false, 0);
-                        else
-                            cellContainer.Text(textBlock =>
-                            {
-                                if (string.IsNullOrWhiteSpace(text))
-                                    return;
-
-                                var textSpan = textBlock.Span(text);
-                                if (bold)
-                                    textSpan.Bold();
-                            });
+                        lastRow = placement.Row;
                     }
+
+                    var cell = table.Cell();
+                    if (placement.ToColumn > placement.FromColumn)
+                        cell = cell.ColumnSpan((uint)(placement.ToColumn - placement.FromColumn + 1));
+                    if (placement.RowSpan > 1)
+                        cell = cell.RowSpan((uint)placement.RowSpan);
+
+                    var fill = string.IsNullOrWhiteSpace(placement.Fill)
+                        ? section.HeaderFill
+                        : placement.Fill;
+                    var align = ParseAlign(placement.Align);
+                    var rotation = placement.TextRotation;
+                    var bold = placement.Bold;
+
+                    var cellContainer = cell
+                        .Element(container => ApplyCellContainer(container, fill, section.RowBorder))
+                        .PaddingVertical(2)
+                        .PaddingHorizontal(3)
+                        .Element(container => ApplyAlign(container, align));
+
+                    if (rotation != 0)
+                        WriteRotatedText(cellContainer, placement.Text, rotation, bold, false, 0);
+                    else
+                        cellContainer.Text(textBlock =>
+                        {
+                            if (string.IsNullOrWhiteSpace(placement.Text))
+                                return;
+
+                            var textSpan = textBlock.Span(placement.Text);
+                            if (bold)
+                                textSpan.Bold();
+                        });
                 }
             }
             finally
@@ -304,28 +313,6 @@ namespace BIS.ERP.Services
             // Около 16 пунктов на уровень — примерно высота строки бланка.
             const double perLevel = 16d;
             return Math.Max(30d, levelsCount * perLevel);
-        }
-
-        /// <summary>Подписи колонок объединения через разделитель — для верхнего уровня.</summary>
-        private static string BuildPdfHeaderTextForRange(
-            List<ClosedXmlColumn> visible,
-            int from,
-            int to)
-        {
-            var parts = new List<string>();
-            for (var index = from; index <= to && index <= visible.Count; index++)
-            {
-                var header = visible[index - 1].Header;
-                if (!string.IsNullOrWhiteSpace(header))
-                    parts.Add(header.Trim());
-            }
-
-            return parts.Count switch
-            {
-                0 => string.Empty,
-                1 => parts[0],
-                _ => string.Join(" / ", parts)
-            };
         }
 
         /// <summary>
@@ -683,7 +670,27 @@ namespace BIS.ERP.Services
                 }
 
                 if (group.Subtotal != null)
-                    RenderTotalRow(table, groupRows, visible, section, group.Subtotal);
+                {
+                    // Значение группы попадает в подпись подытога: «ИТОГО по 3».
+                    var groupValue = string.Empty;
+                    var valueFields = !string.IsNullOrWhiteSpace(group.SubtotalValueField)
+                        ? new List<string> { group.SubtotalValueField! }
+                        : byFields.ToList();
+
+                        foreach (var field in valueFields)
+                        {
+                            groupValue = GetFieldValueText(groupRows[0], field);
+                            if (!string.IsNullOrWhiteSpace(groupValue))
+                                break;
+                        }
+
+                        // Группа без номера подписывается наименованием, чтобы
+                        // подытог не остался без значения.
+                        if (string.IsNullOrWhiteSpace(groupValue))
+                            groupValue = GetFieldValueText(groupRows[0], "organization_name");
+
+                        RenderTotalRow(table, groupRows, visible, section, group.Subtotal, groupValue);
+                }
             }
         }
 
@@ -693,7 +700,8 @@ namespace BIS.ERP.Services
             List<DataRow> rows,
             List<ClosedXmlColumn> visible,
             ClosedXmlTableSection section,
-            ClosedXmlTotal total)
+            ClosedXmlTotal total,
+            string groupValue = "")
         {
             var dataTable = rows.Count > 0 ? rows[0].Table : null;
             if (dataTable == null)
@@ -712,7 +720,10 @@ namespace BIS.ERP.Services
 
                 if (index == 0)
                 {
-                    text = total.Label;
+                    // К подытогу группы добавляется её значение: «ИТОГО по 3».
+                    text = string.IsNullOrWhiteSpace(groupValue)
+                        ? total.Label
+                        : $"{total.Label} {groupValue}";
                 }
                 else if (IsSumField(sumFields, columnLayout, dataTable))
                 {
@@ -806,7 +817,16 @@ namespace BIS.ERP.Services
         }
 
         /// <summary>Значение текстовой ячейки: из набора данных или собственный текст.</summary>
-        private static string BuildTextCellValue(ClosedXmlTextCell cell, DataTable dataTable)
+        /// <summary>
+        /// Текст ячейки заголовка или свободной строки.
+        ///
+        /// Если задано поле <see cref="ClosedXmlTextCell.TakeFromField"/>, берётся
+        /// значение из данных; иначе — сам текст с подстановкой параметров отчёта.
+        /// </summary>
+        private static string BuildTextCellValue(
+            ClosedXmlTextCell cell,
+            DataTable dataTable,
+            IReadOnlyDictionary<string, object?>? parameters = null)
         {
             var field = cell.TakeFromField;
             if (!string.IsNullOrWhiteSpace(field))
@@ -821,7 +841,9 @@ namespace BIS.ERP.Services
                 }
             }
 
-            return cell.Text ?? string.Empty;
+            // Подстановки {Счёт}, {Период} и подобные: без них в документе
+            // остались бы фигурные скобки.
+            return ResolveText(cell.Text ?? string.Empty, parameters);
         }
 
         /// <summary>Значение ячейки таблицы с учётом формата колонки.</summary>
