@@ -397,6 +397,36 @@ namespace BIS.ERP.Views
             };
         }
 
+        /// <summary>
+        /// Удаляет выбранный параметр отчёта.
+        ///
+        /// Параметр, нужный подстановкам макета, вернётся при следующем открытии
+        /// отчёта: заполнение из макета добавит его снова.
+        /// </summary>
+        private void OnDeleteParameterClick(object sender, RoutedEventArgs e)
+        {
+            CommitDesignerGridEdits();
+
+            if (ReportParametersGrid.SelectedItem is not ReportParameter parameter)
+            {
+                ParameterIssuesText.Text = "Выберите параметр в списке.";
+                return;
+            }
+
+            var name = string.IsNullOrWhiteSpace(parameter.Name) ? "(без имени)" : parameter.Name;
+            var answer = MessageBox.Show(
+                $"Удалить параметр «{name}»?",
+                "Удаление параметра",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            _reportParameters.Remove(parameter);
+            ParameterIssuesText.Text = $"Параметр «{name}» удалён.";
+        }
+
         private void OnAddParameterClick(object sender, RoutedEventArgs e)
         {
             CommitDesignerGridEdits();
@@ -1570,8 +1600,9 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Показывает средства, относящиеся к выбранному виду макета.
         ///
-        /// Уровни шапки и высота её строки нужны только форматному макету:
-        /// в простом шапка состоит из одной строки подписей колонок.
+        /// Раздел «Уровни шапки» от вида не зависит: рендер рисует многоуровневую
+        /// шапку всегда, когда уровни заполнены. Скрытое поле всё равно меняло бы
+        /// вывод, поэтому вид макета задаёт только подсказки конструктора.
         /// </summary>
         private void ApplyLayoutShapeVisibility()
         {
@@ -1586,13 +1617,46 @@ namespace BIS.ERP.Views
                 SimpleLayoutRadio.IsChecked = !isFormatted;
 
             if (ClosedXmlHeaderLevelsExpander != null)
-                ClosedXmlHeaderLevelsExpander.Visibility = isFormatted ? Visibility.Visible : Visibility.Collapsed;
+            {
+                // Раздел живёт в блоке «Таблица» и показывается развёрнутым:
+                // свёрнутый блок прячет уровни, и они выглядят пропавшими.
+                ClosedXmlHeaderLevelsExpander.Visibility = Visibility.Visible;
+                ClosedXmlHeaderLevelsExpander.IsExpanded = true;
+            }
+
+            // Форматный макет — про уровни шапки, а их показывает редактор
+            // таблицы: открываем блок «Таблица», иначе раздел скрыт.
+            if (isFormatted)
+                SelectTableBlockIfNeeded();
 
             // Панель выбора вида нужна только для ClosedXML: у FRX своя механика.
             if (LayoutShapePanel != null)
                 LayoutShapePanel.Visibility = ReportingFeatures.FrxEnabled
                     ? Visibility.Collapsed
                     : Visibility.Visible;
+        }
+
+        /// <summary>
+        /// Выбирает в списке блок «Таблица», если сейчас выбран другой блок.
+        ///
+        /// «Уровни шапки» показывает редактор таблицы, поэтому в форматном макете
+        /// нужен именно этот блок: иначе при открытии отчёта, где первым идёт
+        /// заголовок, раздел остаётся за кадром.
+        /// </summary>
+        private void SelectTableBlockIfNeeded()
+        {
+            if (_closedXmlSyncing || _closedXmlSheet == null)
+                return;
+
+            if (string.Equals(_closedXmlEditingBlock?.Type, "TabularSection", StringComparison.Ordinal))
+                return;
+
+            var tableBlock = _closedXmlBlocks.FirstOrDefault(block =>
+                string.Equals(block?.Type, "TabularSection", StringComparison.Ordinal));
+            if (tableBlock == null)
+                return;
+
+            ClosedXmlBlocksList.SelectedItem = tableBlock;
         }
 
         /// <summary>
@@ -2321,6 +2385,12 @@ namespace BIS.ERP.Views
                     _closedXmlBlocks.Add(block);
 
                 ClosedXmlSheetNameBox.Text = _closedXmlSheet.Name;
+                ClosedXmlGridColumnsBox.Text = _closedXmlSheet.GridColumns > 0
+                    ? _closedXmlSheet.GridColumns.ToString()
+                    : string.Empty;
+                ClosedXmlGridColumnWidthBox.Text = _closedXmlSheet.GridColumnWidth > 0
+                    ? _closedXmlSheet.GridColumnWidth.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    : string.Empty;
                 ClosedXmlOrientationCombo.SelectedIndex =
                     string.Equals(_closedXmlSheet.PageSetup.Orientation, "Portrait", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
                 ClosedXmlFreezeRowsBox.Text = _closedXmlSheet.PageSetup.FreezeRows.ToString();
@@ -2331,8 +2401,19 @@ namespace BIS.ERP.Views
                 ClosedXmlFontSizeBox.Text = _closedXmlSheet.PageSetup.FontSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 ClosedXmlGridLinesCheck.IsChecked = _closedXmlSheet.PageSetup.ShowGridLines;
 
-                ClosedXmlBlocksList.SelectedIndex = _closedXmlBlocks.Count > 0 ? 0 : -1;
-                LoadClosedXmlBlockEditors(_closedXmlBlocks.FirstOrDefault());
+                // Форматный макет открываем на блоке «Таблица»: в нём уровни шапки,
+                // ради которых этот вид и выбирают.
+                var initialBlock = string.Equals(
+                    _closedXmlSheet.LayoutKind,
+                    ClosedXmlLayoutKinds.Formatted,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? _closedXmlBlocks.FirstOrDefault(block =>
+                        string.Equals(block?.Type, "TabularSection", StringComparison.Ordinal))
+                    : null;
+                initialBlock ??= _closedXmlBlocks.FirstOrDefault();
+
+                ClosedXmlBlocksList.SelectedItem = initialBlock;
+                LoadClosedXmlBlockEditors(initialBlock);
 
                 // Вид макета хранится в листе: показываем его состояние.
                 ApplyLayoutShapeVisibility();
@@ -2394,6 +2475,7 @@ namespace BIS.ERP.Views
                 ClosedXmlSubtotalFieldsBox.Text = group?.Subtotal == null ? string.Empty : string.Join(", ", group.Subtotal.SumFields);
                 ClosedXmlGrandTotalLabelBox.Text = block.Table.GrandTotal?.Label ?? string.Empty;
                 ClosedXmlGrandTotalFieldsBox.Text = block.Table.GrandTotal == null ? string.Empty : string.Join(", ", block.Table.GrandTotal.SumFields);
+                ClosedXmlExtraTotalsBox.Text = FormatExtraTotals(block.Table.ExtraTotals);
             }
             else if (isSignatures)
             {
@@ -2447,6 +2529,63 @@ namespace BIS.ERP.Views
                         .ToList()
                 })
                 .ToList();
+        }
+
+        /// <summary>
+        /// Разбирает дополнительные итоговые строки бланка.
+        ///
+        /// Формат строки: «Метка | поля сумм через запятую». Метка вида @поле берёт
+        /// текст из набора данных — так печатается «Налог с продаж по ставке 0.00 %».
+        /// </summary>
+        private static List<ClosedXmlTotal> ParseExtraTotals(string? text)
+        {
+            var totals = new List<ClosedXmlTotal>();
+            if (string.IsNullOrWhiteSpace(text))
+                return totals;
+
+            foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var parts = line.Split('|');
+                var label = parts[0].Trim();
+                var fields = parts.Length > 1 ? SplitClosedXmlList(parts[1]) : new List<string>();
+
+                if (string.IsNullOrWhiteSpace(label) && fields.Count == 0)
+                    continue;
+
+                var total = new ClosedXmlTotal { SumFields = fields };
+                if (label.StartsWith('@'))
+                {
+                    // Метка собирается в наборе данных: в настройке храним только имя поля.
+                    total.LabelField = label[1..].Trim();
+                    total.Label = total.LabelField;
+                }
+                else
+                {
+                    total.Label = label;
+                }
+
+                totals.Add(total);
+            }
+
+            return totals;
+        }
+
+        /// <summary>Показывает дополнительные итоги в редакторе: по строке на итог.</summary>
+        private static string FormatExtraTotals(IEnumerable<ClosedXmlTotal>? totals)
+        {
+            if (totals == null)
+                return string.Empty;
+
+            return string.Join(Environment.NewLine, totals
+                .Where(total => total != null)
+                .Select(total =>
+                {
+                    var label = string.IsNullOrWhiteSpace(total.LabelField)
+                        ? total.Label
+                        : $"@{total.LabelField}";
+
+                    return $"{label} | {string.Join(", ", total.SumFields)}";
+                }));
         }
 
         /// <summary>Фиксирует незавершённое редактирование гридов макета перед чтением модели.</summary>
@@ -2514,6 +2653,9 @@ namespace BIS.ERP.Views
                             SumFields = SplitClosedXmlList(ClosedXmlGrandTotalFieldsBox.Text)
                         };
 
+                    // Дополнительные итоги: «Налог с продаж по ставке … %», «ВСЕГО».
+                    block.Table.ExtraTotals = ParseExtraTotals(ClosedXmlExtraTotalsBox.Text);
+
                     // Уровни шапки: плоский список разворачивается в список уровней.
                     block.Table.HeaderLevels = BuildHeaderLevelsFromEditor();
 
@@ -2552,6 +2694,10 @@ namespace BIS.ERP.Views
             _closedXmlSheet.Name = string.IsNullOrWhiteSpace(ClosedXmlSheetNameBox.Text)
                 ? "Лист1"
                 : ClosedXmlSheetNameBox.Text.Trim();
+            // Узкая сетка листа: 0 — сетки нет, колонок столько же, сколько графов таблицы.
+            _closedXmlSheet.GridColumns = Math.Max(0, ParseIntSafe(ClosedXmlGridColumnsBox.Text));
+            _closedXmlSheet.GridColumnWidth = ParseDoubleSafe(ClosedXmlGridColumnWidthBox.Text, 0);
+
             _closedXmlSheet.PageSetup ??= new ClosedXmlPageSetup();
             _closedXmlSheet.PageSetup.Orientation = ClosedXmlOrientationCombo.SelectedIndex == 1 ? "Portrait" : "Landscape";
             _closedXmlSheet.PageSetup.FreezeRows = ParseIntSafe(ClosedXmlFreezeRowsBox.Text);
@@ -2915,6 +3061,13 @@ namespace BIS.ERP.Views
 
         public int MergeToColumn { get; set; }
 
+        /// <summary>
+        /// Сколько строк шапки подпись занимает по вертикали: 1 — только свой
+        /// уровень; 2 — подпись стоит сразу над двумя уровнями (граф бланка,
+        /// под которым идёт второй уровень).
+        /// </summary>
+        public int RowSpan { get; set; } = 1;
+
         /// <summary>Подпись. Пусто в нижнем уровне — подставится заголовок колонки.</summary>
         public string Text { get; set; } = string.Empty;
 
@@ -2931,6 +3084,7 @@ namespace BIS.ERP.Views
             LevelIndex = levelIndex,
             Column = cell.Column,
             MergeToColumn = cell.MergeToColumn,
+            RowSpan = cell.RowSpan <= 0 ? 1 : cell.RowSpan,
             Text = cell.Text,
             Bold = cell.Bold,
             Align = cell.Align,
@@ -2942,6 +3096,7 @@ namespace BIS.ERP.Views
         {
             Column = Column <= 0 ? 1 : Column,
             MergeToColumn = MergeToColumn,
+            RowSpan = RowSpan <= 0 ? 1 : RowSpan,
             Text = Text ?? string.Empty,
             Bold = Bold,
             Align = string.IsNullOrWhiteSpace(Align) ? "Center" : Align,

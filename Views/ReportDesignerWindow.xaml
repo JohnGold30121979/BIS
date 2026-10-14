@@ -781,16 +781,20 @@
                                         <DataGridTextColumn Header="Поле (DataTable)" Binding="{Binding Field, Mode=TwoWay}" Width="*"/>
                                         <DataGridTextColumn Header="Заголовок" Binding="{Binding Header, Mode=TwoWay}" Width="*"/>
                                         <DataGridTextColumn Header="Ширина" Binding="{Binding Width, Mode=TwoWay}" Width="65"/>
+                                        <DataGridTextColumn Header="Колонок" Binding="{Binding Span, Mode=TwoWay}" Width="70"
+                                                            ToolTipService.ToolTip="Сколько узких колонок листа занимает графа (узкая сетка задаётся в настройках листа). 0 или 1 — одна колонка."/>
                                         <DataGridTextColumn Header="Формат" Binding="{Binding NumberFormat, Mode=TwoWay}" Width="90"/>
                                         <DataGridTextColumn Header="Выравн." Binding="{Binding Align, Mode=TwoWay}" Width="70"/>
                                         <DataGridCheckBoxColumn Header="Жирн." Binding="{Binding Bold, Mode=TwoWay}" Width="55"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
 
-                                <!-- Уровни шапки: для форматного макета (бланка). -->
+                                <!-- Уровни шапки: многоуровневая шапка бланка.
+                                     Раздел показывается развёрнутым — свёрнутый блок
+                                     прячет уровни, и они выглядят пропавшими. -->
                                 <Expander x:Name="ClosedXmlHeaderLevelsExpander" Grid.Row="2"
                                           Header="Уровни шапки (для форматного макета)"
-                                          IsExpanded="False" Margin="0,0,0,6">
+                                          IsExpanded="True" Margin="0,0,0,6">
                                     <StackPanel>
                                         <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#3B4A57" Margin="0,0,0,4"
                                                    Text="Пусто — шапка из одной строки по заголовкам колонок. Заполнено — шапка рисуется по уровням: уровень 0 верхний. Пустая подпись в нижнем уровне берёт заголовок колонки."/>
@@ -808,6 +812,8 @@
                                                                     ToolTipService.ToolTip="0 — верхний уровень шапки."/>
                                                 <DataGridTextColumn Header="Колонка" Binding="{Binding Column, Mode=TwoWay}" Width="65"/>
                                                 <DataGridTextColumn Header="До кол." Binding="{Binding MergeToColumn, Mode=TwoWay}" Width="65"/>
+                                                <DataGridTextColumn Header="Строк" Binding="{Binding RowSpan, Mode=TwoWay}" Width="60"
+                                                                    ToolTipService.ToolTip="Сколько строк шапки подпись занимает по вертикали: 2 — она стоит сразу над двумя уровнями, как «Кол-во» над «Ед. изм.». Если под этой подписью идёт второй уровень, оставьте 1."/>
                                                 <DataGridTextColumn Header="Подпись" Binding="{Binding Text, Mode=TwoWay}" Width="*"/>
                                                 <DataGridTextColumn Header="Выравн." Binding="{Binding Align, Mode=TwoWay}" Width="70"/>
                                                 <DataGridTextColumn Header="Поворот" Binding="{Binding TextRotation, Mode=TwoWay}" Width="70"
@@ -839,6 +845,12 @@
                                         <TextBox x:Name="ClosedXmlGrandTotalLabelBox" Width="100" Height="24" VerticalContentAlignment="Center" Text="ИТОГ"/>
                                         <TextBlock Text="сумма полей:" Width="80" VerticalAlignment="Center" Margin="12,0,0,0"/>
                                         <TextBox x:Name="ClosedXmlGrandTotalFieldsBox" Width="150" Height="24" VerticalContentAlignment="Center"/>
+                                    </WrapPanel>
+                                    <WrapPanel Margin="0,6,0,0">
+                                        <TextBlock Text="Доп. итоги:" Width="110" VerticalAlignment="Top"/>
+                                        <TextBox x:Name="ClosedXmlExtraTotalsBox" Width="420" Height="46" AcceptsReturn="True"
+                                                 TextWrapping="Wrap" VerticalContentAlignment="Top"
+                                                 ToolTip="По строке на итог: «Метка | поля сумм через запятую». Метка вида @поле берёт текст из набора данных — например «@sales_tax_label | sales_tax_amount» выведет «Налог с продаж по ставке 0.00 %» и сумму."/>
                                     </WrapPanel>
                                     <Border Background="#F8FAFC" BorderBrush="#D5DDE5" BorderThickness="1"
                                             CornerRadius="4" Padding="6" Margin="0,8,0,0">
@@ -895,6 +907,12 @@
                             <StackPanel DockPanel.Dock="Top">
                                 <TextBlock Text="Имя листа:"/>
                                 <TextBox x:Name="ClosedXmlSheetNameBox" Height="26" Margin="0,2,0,6" Text="Лист1" VerticalContentAlignment="Center"/>
+                                <TextBlock Text="Узких колонок (0 — без сетки):" TextWrapping="Wrap"/>
+                                <TextBox x:Name="ClosedXmlGridColumnsBox" Height="26" Margin="0,2,0,6" VerticalContentAlignment="Center"
+                                         ToolTip="Сколько узких колонок делит лист. Бланки с клетками по цифрам: 40 колонок по 2,5 ≈ 190 мм — A4 книжная. 0 — колонок столько же, сколько графов таблицы."/>
+                                <TextBlock Text="Ширина узкой колонки:"/>
+                                <TextBox x:Name="ClosedXmlGridColumnWidthBox" Height="26" Margin="0,2,0,6" VerticalContentAlignment="Center"
+                                         ToolTip="Ширина одной узкой колонки в единицах Excel. Пусто или 0 — 2,5."/>
                                 <TextBlock Text="Ориентация:"/>
                                 <ComboBox x:Name="ClosedXmlOrientationCombo" Height="26" Margin="0,2,0,6" SelectedIndex="0">
                                     <ComboBoxItem Content="Landscape"/>
@@ -956,6 +974,8 @@
                                        Text="Чтобы фильтр зависел от параметра, укажите в его значении ссылку на параметр целиком: {PeriodStart}. Литеральные значения работают как раньше."/>
                             <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#3B4A57"
                                        Text="Имена PeriodStart, PeriodEnd, CashDeskId, OrganizationId, EmployeeId, AccountCode дополнительно подставляются в SQL-наборы данных."/>
+                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#7A6A4F"
+                                       Text="Подстановки из макета ClosedXML добавляются в этот список сами — например {AccountCode} и {PeriodStart}. Здесь их видно, можно переименовать подпись, сменить тип и значение по умолчанию."/>
                         </StackPanel>
                     </Border>
 
@@ -979,12 +999,9 @@
                     <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
                         <Button Content="Добавить параметр" Width="150" Height="30" Margin="0,0,8,0"
                                 Background="#3498DB" Foreground="White" Click="OnAddParameterClick"/>
-                        <Button Content="Параметры из фильтров" Width="180" Height="30" Margin="0,0,8,0"
-                                Background="#8E44AD" Foreground="White" Click="OnSyncParametersFromFiltersClick"
-                                ToolTip="Найти ссылки {Имя} в фильтрах и создать недостающие параметры"/>
-                        <Button Content="Выбрать значение" Width="150" Height="30" Margin="0,0,8,0"
-                                Background="#2980B9" Foreground="White" Click="OnPickReferenceValueClick"
-                                ToolTip="Для параметра типа «Ссылка»: выбрать элемент справочника и подставить его в значение по умолчанию"/>
+                        <Button Content="Удалить параметр" Width="150" Height="30" Margin="0,0,8,0"
+                                Background="#C0392B" Foreground="White" Click="OnDeleteParameterClick"
+                                ToolTip="Удалить выбранный параметр из отчёта"/>
                         <Button Content="Проверить" Width="110" Height="30" Margin="0,0,8,0"
                                 Background="#16A085" Foreground="White" Click="OnCheckParametersClick"/>
                         <TextBlock x:Name="ParameterIssuesText" VerticalAlignment="Center" Margin="8,0,0,0"

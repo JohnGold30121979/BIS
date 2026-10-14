@@ -737,6 +737,7 @@ namespace BIS.ERP.Views
             toolbar.Children.Add(saveButton);
             toolbar.Children.Add(deleteButton);
             PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateBackToMetadataButton());
             PropertiesPanel.Children.Add(toolbar);
             PropertiesPanel.Children.Add(grid);
         }
@@ -1025,6 +1026,7 @@ namespace BIS.ERP.Views
             toolbar.Children.Add(refreshButton);
 
             PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateBackToMetadataButton());
             PropertiesPanel.Children.Add(note);
             PropertiesPanel.Children.Add(toolbar);
             PropertiesPanel.Children.Add(grid);
@@ -1631,6 +1633,7 @@ namespace BIS.ERP.Views
             EditorTitle.Text = "📚 Справочники";
             EditorDescription.Text = "Список справочников в системе";
             PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateBackToMetadataButton());
 
             var stackPanel = new StackPanel();
             var contentPanel = new StackPanel();
@@ -1680,6 +1683,7 @@ namespace BIS.ERP.Views
             EditorTitle.Text = "📄 Документы";
             EditorDescription.Text = "Управление документами";
             PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateBackToMetadataButton());
 
             var stackPanel = new StackPanel();
             var contentPanel = new StackPanel();
@@ -1790,6 +1794,7 @@ namespace BIS.ERP.Views
             EditorTitle.Text = "📊 Отчеты и печатные формы";
             EditorDescription.Text = "Список отчетов и печатных форм в системе";
             PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateBackToMetadataButton());
 
             var stackPanel = new StackPanel();
             var contentPanel = new StackPanel();
@@ -2226,6 +2231,7 @@ namespace BIS.ERP.Views
             EditorTitle.Text = "📋 Операции";
             EditorDescription.Text = "Список всех операций";
             PropertiesPanel.Children.Clear();
+            PropertiesPanel.Children.Add(CreateBackToMetadataButton());
 
             var stackPanel = new StackPanel();
 
@@ -2767,6 +2773,65 @@ namespace BIS.ERP.Views
             return button;
         }
 
+        /// <summary>
+        /// Кнопка возврата к общему списку метаданных.
+        ///
+        /// Экраны конфигуратора показываются в панели свойств, поэтому назад
+        /// нужна кнопка: возврат через дерево слева виден не всегда.
+        /// </summary>
+        /// <param name="content">Подпись кнопки.</param>
+        /// <param name="onClick">Куда вернуться. Не задано — к списку метаданных.</param>
+        private Button CreateBackToMetadataButton(string content = "← К метаданным", Action? onClick = null)
+        {
+            var button = new Button
+            {
+                Content = content,
+                Height = 34,
+                MinWidth = 190,
+                Padding = new Thickness(14, 0, 14, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 0, 14),
+                Cursor = Cursors.Hand
+            };
+
+            button.SetResourceReference(Control.BackgroundProperty, "ConfiguratorSidebarCardBrush");
+            button.SetResourceReference(Control.ForegroundProperty, "ConfiguratorTreeItemForegroundBrush");
+            button.SetResourceReference(Control.BorderBrushProperty, "AppBorderBrush");
+
+            button.Click += (_, _) =>
+            {
+                if (onClick != null)
+                    onClick();
+                else
+                    GoToMetadataOverview();
+            };
+
+            return button;
+        }
+
+        /// <summary>
+        /// Возвращает панель к общему списку метаданных и переносит подсветку дерева
+        /// на корневой узел «Метаданные».
+        ///
+        /// Без переноса подсветки дерево остаётся на прежнем узле: он выглядит
+        /// открытым, а повторный щелчок по нему уже не срабатывает.
+        /// </summary>
+        private void GoToMetadataOverview()
+        {
+            var root = MetadataTree.Items.OfType<TreeViewItem>().FirstOrDefault();
+
+            if (root != null && !root.IsSelected)
+            {
+                // Обзор показывает обработчик корневого узла — по выделению.
+                root.IsSelected = true;
+
+                if (ReferenceEquals(MetadataTree.SelectedItem, root))
+                    return;
+            }
+
+            ShowMetadataOverview();
+        }
+
         private void ShowReportEditor(Report report)
         {
             SetPropertiesScrollEnabled(true);
@@ -2778,6 +2843,7 @@ namespace BIS.ERP.Views
             PropertiesPanel.Children.Clear();
 
             var mainPanel = new StackPanel { MaxWidth = 620 };
+            mainPanel.Children.Add(CreateBackToMetadataButton("← К списку отчётов", ShowReportsList));
             mainPanel.Children.Add(new TextBlock
             {
                 Text = $"{report.Description}\nСтатус: {report.AvailabilityDisplay}; формат: {report.SourceFormat}; " +
@@ -3214,6 +3280,42 @@ namespace BIS.ERP.Views
             if (dialog.ShowDialog() == true)
             {
                 await LoadMetadata();
+            }
+        }
+
+        /// <summary>
+        /// Возвращает удалённые по ошибке стандартные отчёты.
+        ///
+        /// Удаление стандартного отчёта запоминается в таблице DeletedStandardReports,
+        /// и сам по себе отчёт больше не создаётся. Кнопка забывает эти записи —
+        /// отчёты создаются заново при следующем обновлении списка.
+        /// </summary>
+        private async void OnRestoreStandardReportsClick(object sender, RoutedEventArgs e)
+        {
+            var answer = MessageBox.Show(
+                "Вернуть удалённые стандартные отчёты? Они создадутся заново.",
+                "Восстановление отчётов",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            try
+            {
+                if (_context == null)
+                    _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+
+                await new StandardReportDeletionService(_context).RestoreAllAsync();
+                await LoadMetadata();
+
+                MessageBox.Show("Стандартные отчёты восстановлены.", "Восстановление отчётов",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось восстановить отчёты: {GetFullExceptionMessage(ex)}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

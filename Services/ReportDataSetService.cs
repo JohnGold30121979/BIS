@@ -24,6 +24,9 @@ public sealed class ReportDataSetService
     /// <summary>Код набора данных счёта-фактуры по форме СТ-1.</summary>
     public const string VatInvoiceSt1DataSetCode = "finance.vat-invoice-st1";
 
+    /// <summary>Код набора данных бланка «СЧЕТ-ФАКТУРА НДС» (сомы, РНИ/БИК).</summary>
+    public const string VatInvoiceVatKgDataSetCode = "finance.vat-invoice-vat-nds";
+
     private static readonly Regex ForbiddenSqlRegex = new(
         @"\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|execute|merge|vacuum|analyze|do|begin|commit|rollback)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -109,6 +112,7 @@ public sealed class ReportDataSetService
         await EnsureCashOrderTurnoverDataSetAsync();
         await EnsureInvoiceJournalDataSetAsync();
         await EnsureVatInvoiceSt1DataSetAsync();
+        await EnsureVatInvoiceVatKgDataSetAsync();
         await EnsureSystemCalculatorDataSetsAsync();
     }
 
@@ -282,6 +286,305 @@ SELECT
     TO_CHAR(CAST(@PeriodEnd AS date), 'DD.MM.YYYY')                  AS period_end,
     COALESCE(p.esf_number, '')                                       AS esf_number,
 
+    t.total_without_tax,
+    t.total_vat,
+    t.total_sales_tax,
+    t.total_amount
+FROM invoice_positions p
+CROSS JOIN totals t
+-- Сначала документы с заполненными реквизитами: макет берёт их из первой строки.
+ORDER BY (CASE WHEN COALESCE(p.seller_name, '') = '' THEN 1 ELSE 0 END),
+         p.doc_date DESC, p.doc_number DESC, p.line_number";
+
+    /// <summary>
+    /// Заводит набор данных бланка «СЧЕТ-ФАКТУРА НДС» (сомы, РНИ/БИК).
+    ///
+    /// Поля те же, что у бланка СТ-1, плюс код группы товаров, способ платежа
+    /// и готовая метка строки «Налог с продаж по ставке … %»: метку собирает
+    /// запрос, чтобы в макете не было формул.
+    /// </summary>
+    private async Task EnsureVatInvoiceVatKgDataSetAsync()
+    {
+        var dataSet = await _context.ReportDataSets
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item => item.Code == VatInvoiceVatKgDataSetCode);
+
+        if (dataSet == null)
+        {
+            dataSet = new ReportDataSet
+            {
+                Id = Guid.NewGuid(),
+                Code = VatInvoiceVatKgDataSetCode,
+                Name = "Счет-фактура НДС: позиции и реквизиты",
+                Description = "SQL-набор данных бланка «СЧЕТ-ФАКТУРА НДС»: позиции счёта-фактуры и реквизиты поставщика. Шапка бланка берёт их из первой строки набора.",
+                Kind = ReportDataSetKinds.Sql,
+                SqlText = BuildVatInvoiceVatKgSql(),
+                IsActive = true,
+                IsSystem = true
+            };
+            await _context.ReportDataSets.AddAsync(dataSet);
+            await _context.SaveChangesAsync();
+        }
+        else if (string.Equals(dataSet.Kind, ReportDataSetKinds.Sql, StringComparison.OrdinalIgnoreCase))
+        {
+            dataSet.IsActive = true;
+            dataSet.IsSystem = true;
+
+            // Запрос обновляем только тогда, когда администратор его не менял.
+            var untouched = dataSet.SqlText.Contains("invoice_positions", StringComparison.OrdinalIgnoreCase);
+            if (untouched)
+                dataSet.SqlText = BuildVatInvoiceVatKgSql();
+
+            await _context.SaveChangesAsync();
+        }
+
+        try
+        {
+            if (!dataSet.Fields.Any())
+            {
+                await RefreshFieldsFromSqlAsync(dataSet);
+                dataSet = await _context.ReportDataSets
+                    .Include(item => item.Fields)
+                    .FirstAsync(item => item.Id == dataSet.Id);
+            }
+
+            await SyncMetadataSourceAsync(dataSet);
+        }
+        catch (Exception ex)
+        {
+            _context.ChangeTracker.Clear();
+            SystemLogService.Error(
+                "Ошибка подготовки набора данных счёт-фактуры НДС. Конфигуратор продолжит загрузку.",
+                nameof(ReportDataSetService), ex);
+        }
+    }
+
+    /// <summary>
+    /// Запрос бланка «СЧЕТ-ФАКТУРА НДС».
+    ///
+    /// Реквизиты сторон берутся из справочника организаций и подставляются
+    /// в каждую строку: макет читает их из первой строки набора. Реквизиты
+    /// покупателя в документе не хранятся — их задаёт администратор параметрами.
+    /// </summary>
+    private static string BuildVatInvoiceVatKgSql() => @"
+WITH invoice_header AS (
+    SELECT
+        i.""Id""                                     AS invoice_id,
+        COALESCE(i.""doc_number"", '')              AS doc_number,
+        i.""doc_date""::date                        AS doc_date,
+        COALESCE(NULLIF(i.""esf_number"", ''), '')  AS esf_number,
+        i.""organization_id""                       AS organization_id,
+        COALESCE(i.""payment_kind"", '')            AS payment_kind,
+        COALESCE(i.""supply_kind"", '')             AS supply_kind
+    FROM ""doc_sales_invoice"" i
+    WHERE i.""doc_date""::date >= CAST(@PeriodStart AS date)
+      AND i.""doc_date""::date <= CAST(@PeriodEnd AS date)
+      AND (CAST(@OrganizationId AS text) = '' OR i.""organization_id""::text = CAST(@OrganizationId AS text))
+),
+seller AS (
+    SELECT
+        h.*,
+        COALESCE(NULLIF(o.""full_name"", ''), o.""name"", '')                         AS seller_name,
+        COALESCE(o.""inn"", '')                                                     AS seller_inn,
+        COALESCE(o.""okpo"", '')                                                    AS seller_okpo,
+        COALESCE(NULLIF(o.""legal_address"", ''), NULLIF(o.""actual_address"", ''), '') AS seller_address,
+        COALESCE(o.""registration_number"", '')                                     AS seller_reg_number,
+        COALESCE(o.""bank_name"", '')                                               AS seller_bank,
+        COALESCE(o.""bank_account"", '')                                            AS seller_account,
+        COALESCE(o.""bic"", '')                                                     AS seller_bic,
+        COALESCE(o.""director"", '')                                                AS seller_director,
+        COALESCE(o.""chief_accountant"", '')                                        AS seller_accountant,
+        -- Справа: реквизиты покупателя — организации документа.
+        COALESCE(NULLIF(bo.""full_name"", ''), bo.""name"", '')                         AS buyer_name,
+        COALESCE(bo.""inn"", '')                                                     AS buyer_inn,
+        COALESCE(NULLIF(bo.""legal_address"", ''), NULLIF(bo.""actual_address"", ''), '') AS buyer_address,
+        COALESCE(bo.""registration_number"", '')                                     AS buyer_reg_number,
+        COALESCE(bo.""bic"", '')                                                     AS buyer_bic,
+        COALESCE(bo.""bank_name"", '')                                               AS buyer_bank,
+        COALESCE(bo.""bank_account"", '')                                            AS buyer_account
+    FROM invoice_header h
+    -- Организация документа — это покупатель: тот же GUID пишется в проводки.
+    LEFT JOIN ""catalog_organizations"" bo ON bo.""Id""::text = h.organization_id::text
+    LEFT JOIN LATERAL (
+        SELECT *
+        FROM ""catalog_organizations"" x
+        WHERE COALESCE(x.""is_primary"", false)
+           OR x.""Id""::text = h.organization_id::text
+        -- Первая — наша компания (флаг «Первичная организация»), она идёт слева.
+        ORDER BY COALESCE(x.""is_primary"", false) DESC,
+                 (x.""Id""::text = h.organization_id::text) DESC
+        LIMIT 1
+    ) o ON true
+),
+invoice_positions AS (
+    SELECT
+        s.*,
+        l.""line_number"",
+        COALESCE(l.""name"", '')                AS item_name,
+        COALESCE(l.""unit_name"", '')           AS unit_name,
+        COALESCE(l.""account_code"", '')        AS account_code,
+        COALESCE(l.""quantity"", 0)             AS quantity,
+        CASE WHEN COALESCE(l.""quantity"", 0) <> 0
+             THEN ROUND(COALESCE(l.""amount_without_tax"", 0) / l.""quantity"", 2)
+             ELSE 0 END                         AS price,
+        COALESCE(l.""amount_without_tax"", 0)   AS amount_without_tax,
+        COALESCE(l.""vat_rate"", 0)             AS vat_rate,
+        COALESCE(l.""vat_amount"", 0)           AS vat_amount,
+        COALESCE(l.""sales_tax_rate"", 0)       AS sales_tax_rate,
+        COALESCE(l.""sales_tax_amount"", 0)     AS sales_tax_amount,
+        COALESCE(l.""line_total"", 0)           AS line_total
+    FROM seller s
+    JOIN ""doc_sales_invoice_lines"" l ON l.""invoice_id"" = s.invoice_id
+),
+totals AS (
+    SELECT
+        SUM(amount_without_tax) AS total_without_tax,
+        SUM(vat_amount)         AS total_vat,
+        SUM(sales_tax_amount)   AS total_sales_tax,
+        SUM(line_total)         AS total_amount,
+        MAX(sales_tax_rate)     AS sales_tax_rate
+    FROM invoice_positions
+)
+SELECT
+    CAST(p.line_number AS text)                                     AS line_number,
+    p.account_code,
+    -- Код группы товаров — первые три знака счёта учёта строки: цифру
+    -- выбирает администратор в запросе, под свой классификатор.
+    COALESCE(SUBSTRING(p.account_code FROM 1 FOR 3), '')             AS group_code,
+
+    -- Клетки бланка: макет не режет значение по символам, поэтому
+    -- строку режет запрос — SUBSTRING по одному знаку.
+    COALESCE(SUBSTRING(p.seller_inn FROM 1 FOR 1), '')               AS seller_inn_1,
+    COALESCE(SUBSTRING(p.seller_inn FROM 2 FOR 1), '')               AS seller_inn_2,
+    COALESCE(SUBSTRING(p.seller_inn FROM 3 FOR 1), '')               AS seller_inn_3,
+    COALESCE(SUBSTRING(p.seller_inn FROM 4 FOR 1), '')               AS seller_inn_4,
+    COALESCE(SUBSTRING(p.seller_inn FROM 5 FOR 1), '')               AS seller_inn_5,
+    COALESCE(SUBSTRING(p.seller_inn FROM 6 FOR 1), '')               AS seller_inn_6,
+    COALESCE(SUBSTRING(p.seller_inn FROM 7 FOR 1), '')               AS seller_inn_7,
+    COALESCE(SUBSTRING(p.seller_inn FROM 8 FOR 1), '')               AS seller_inn_8,
+    COALESCE(SUBSTRING(p.seller_inn FROM 9 FOR 1), '')               AS seller_inn_9,
+    COALESCE(SUBSTRING(p.seller_inn FROM 10 FOR 1), '')              AS seller_inn_10,
+    COALESCE(SUBSTRING(p.seller_inn FROM 11 FOR 1), '')              AS seller_inn_11,
+    COALESCE(SUBSTRING(p.seller_inn FROM 12 FOR 1), '')              AS seller_inn_12,
+    COALESCE(SUBSTRING(p.seller_inn FROM 13 FOR 1), '')              AS seller_inn_13,
+    COALESCE(SUBSTRING(p.seller_inn FROM 14 FOR 1), '')              AS seller_inn_14,
+    COALESCE(SUBSTRING(p.seller_account FROM 1 FOR 1), '')           AS seller_account_1,
+    COALESCE(SUBSTRING(p.seller_account FROM 2 FOR 1), '')           AS seller_account_2,
+    COALESCE(SUBSTRING(p.seller_account FROM 3 FOR 1), '')           AS seller_account_3,
+    COALESCE(SUBSTRING(p.seller_account FROM 4 FOR 1), '')           AS seller_account_4,
+    COALESCE(SUBSTRING(p.seller_account FROM 5 FOR 1), '')           AS seller_account_5,
+    COALESCE(SUBSTRING(p.seller_account FROM 6 FOR 1), '')           AS seller_account_6,
+    COALESCE(SUBSTRING(p.seller_account FROM 7 FOR 1), '')           AS seller_account_7,
+    COALESCE(SUBSTRING(p.seller_account FROM 8 FOR 1), '')           AS seller_account_8,
+    COALESCE(SUBSTRING(p.seller_account FROM 9 FOR 1), '')           AS seller_account_9,
+    COALESCE(SUBSTRING(p.seller_account FROM 10 FOR 1), '')          AS seller_account_10,
+    COALESCE(SUBSTRING(p.seller_account FROM 11 FOR 1), '')          AS seller_account_11,
+    COALESCE(SUBSTRING(p.seller_account FROM 12 FOR 1), '')          AS seller_account_12,
+    COALESCE(SUBSTRING(p.seller_account FROM 13 FOR 1), '')          AS seller_account_13,
+    COALESCE(SUBSTRING(p.seller_account FROM 14 FOR 1), '')          AS seller_account_14,
+    COALESCE(SUBSTRING(p.seller_account FROM 15 FOR 1), '')          AS seller_account_15,
+    COALESCE(SUBSTRING(p.seller_account FROM 16 FOR 1), '')          AS seller_account_16,
+    COALESCE(SUBSTRING(p.seller_account FROM 17 FOR 1), '')          AS seller_account_17,
+    COALESCE(SUBSTRING(p.seller_account FROM 18 FOR 1), '')          AS seller_account_18,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'DD') FROM 1 FOR 1), '')  AS doc_day_1,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'DD') FROM 2 FOR 1), '')  AS doc_day_2,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'MM') FROM 1 FOR 1), '')  AS doc_month_1,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'MM') FROM 2 FOR 1), '')  AS doc_month_2,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'YYYY') FROM 1 FOR 1), '') AS doc_year_1,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'YYYY') FROM 2 FOR 1), '') AS doc_year_2,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'YYYY') FROM 3 FOR 1), '') AS doc_year_3,
+    COALESCE(SUBSTRING(TO_CHAR(p.doc_date, 'YYYY') FROM 4 FOR 1), '') AS doc_year_4,
+    p.item_name,
+    p.unit_name,
+    p.quantity,
+    p.price,
+    p.amount_without_tax,
+    p.vat_rate,
+    p.vat_amount,
+    p.line_total,
+    p.seller_name,
+    p.seller_inn,
+    p.seller_okpo,
+    p.seller_address,
+    p.seller_reg_number,
+    p.seller_bank,
+    p.seller_account,
+    p.seller_bic,
+    p.seller_director,
+    p.seller_accountant,
+    'Р/с: ' || p.seller_account || ' в ' || p.seller_bank               AS seller_bank_text,
+    'СЧЕТ-ФАКТУРА НДС N ' || p.doc_number || ' от '
+        || TO_CHAR(p.doc_date, 'DD.MM.YYYY')                        AS report_title,
+    TO_CHAR(CAST(@PeriodStart AS date), 'DD.MM.YYYY')                AS period_start,
+    TO_CHAR(CAST(@PeriodEnd AS date), 'DD.MM.YYYY')                  AS period_end,
+    COALESCE(p.esf_number, '')                                       AS esf_number,
+    CASE UPPER(p.payment_kind)
+        WHEN '1' THEN 'наличными'
+        WHEN '2' THEN 'картой'
+        WHEN '3' THEN 'перечислением'
+        WHEN '4' THEN 'чеком'
+        ELSE p.payment_kind
+    END                                                              AS payment_kind_text,
+    CASE
+        WHEN COALESCE(p.supply_kind, '') LIKE '%1%' THEN 'поставка по ставке 0 процентов'
+        WHEN COALESCE(p.supply_kind, '') LIKE '%2%' THEN 'поставка, облагаемая НДС'
+        WHEN COALESCE(p.supply_kind, '') LIKE '%3%' THEN 'освобождённый оборот'
+        ELSE COALESCE(p.supply_kind, '')
+    END                                                              AS supply_kind_text,
+    p.buyer_name,
+    p.buyer_inn,
+    p.buyer_address,
+    p.buyer_reg_number,
+    p.buyer_bic,
+    p.buyer_bank,
+    p.buyer_account,
+
+    -- Клетки правой половины и БИК поставщика — по знакам, как ИНН и р/с слева.
+    COALESCE(SUBSTRING(p.seller_bic FROM 1 FOR 1), '')               AS seller_bic_1,
+    COALESCE(SUBSTRING(p.seller_bic FROM 2 FOR 1), '')               AS seller_bic_2,
+    COALESCE(SUBSTRING(p.seller_bic FROM 3 FOR 1), '')               AS seller_bic_3,
+    COALESCE(SUBSTRING(p.seller_bic FROM 4 FOR 1), '')               AS seller_bic_4,
+    COALESCE(SUBSTRING(p.seller_bic FROM 5 FOR 1), '')               AS seller_bic_5,
+    COALESCE(SUBSTRING(p.seller_bic FROM 6 FOR 1), '')               AS seller_bic_6,
+    COALESCE(SUBSTRING(p.buyer_bic FROM 1 FOR 1), '')                AS buyer_bic_1,
+    COALESCE(SUBSTRING(p.buyer_bic FROM 2 FOR 1), '')                AS buyer_bic_2,
+    COALESCE(SUBSTRING(p.buyer_bic FROM 3 FOR 1), '')                AS buyer_bic_3,
+    COALESCE(SUBSTRING(p.buyer_bic FROM 4 FOR 1), '')                AS buyer_bic_4,
+    COALESCE(SUBSTRING(p.buyer_bic FROM 5 FOR 1), '')                AS buyer_bic_5,
+    COALESCE(SUBSTRING(p.buyer_bic FROM 6 FOR 1), '')                AS buyer_bic_6,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 1 FOR 1), '')                AS buyer_inn_1,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 2 FOR 1), '')                AS buyer_inn_2,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 3 FOR 1), '')                AS buyer_inn_3,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 4 FOR 1), '')                AS buyer_inn_4,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 5 FOR 1), '')                AS buyer_inn_5,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 6 FOR 1), '')                AS buyer_inn_6,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 7 FOR 1), '')                AS buyer_inn_7,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 8 FOR 1), '')                AS buyer_inn_8,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 9 FOR 1), '')                AS buyer_inn_9,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 10 FOR 1), '')               AS buyer_inn_10,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 11 FOR 1), '')               AS buyer_inn_11,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 12 FOR 1), '')               AS buyer_inn_12,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 13 FOR 1), '')               AS buyer_inn_13,
+    COALESCE(SUBSTRING(p.buyer_inn FROM 14 FOR 1), '')               AS buyer_inn_14,
+    COALESCE(SUBSTRING(p.buyer_account FROM 1 FOR 1), '')            AS buyer_account_1,
+    COALESCE(SUBSTRING(p.buyer_account FROM 2 FOR 1), '')            AS buyer_account_2,
+    COALESCE(SUBSTRING(p.buyer_account FROM 3 FOR 1), '')            AS buyer_account_3,
+    COALESCE(SUBSTRING(p.buyer_account FROM 4 FOR 1), '')            AS buyer_account_4,
+    COALESCE(SUBSTRING(p.buyer_account FROM 5 FOR 1), '')            AS buyer_account_5,
+    COALESCE(SUBSTRING(p.buyer_account FROM 6 FOR 1), '')            AS buyer_account_6,
+    COALESCE(SUBSTRING(p.buyer_account FROM 7 FOR 1), '')            AS buyer_account_7,
+    COALESCE(SUBSTRING(p.buyer_account FROM 8 FOR 1), '')            AS buyer_account_8,
+    COALESCE(SUBSTRING(p.buyer_account FROM 9 FOR 1), '')            AS buyer_account_9,
+    COALESCE(SUBSTRING(p.buyer_account FROM 10 FOR 1), '')           AS buyer_account_10,
+    COALESCE(SUBSTRING(p.buyer_account FROM 11 FOR 1), '')           AS buyer_account_11,
+    COALESCE(SUBSTRING(p.buyer_account FROM 12 FOR 1), '')           AS buyer_account_12,
+    COALESCE(SUBSTRING(p.buyer_account FROM 13 FOR 1), '')           AS buyer_account_13,
+    COALESCE(SUBSTRING(p.buyer_account FROM 14 FOR 1), '')           AS buyer_account_14,
+    COALESCE(SUBSTRING(p.buyer_account FROM 15 FOR 1), '')           AS buyer_account_15,
+    COALESCE(SUBSTRING(p.buyer_account FROM 16 FOR 1), '')           AS buyer_account_16,
+    COALESCE(SUBSTRING(p.buyer_account FROM 17 FOR 1), '')           AS buyer_account_17,
+
+    'Налог с продаж по ставке ' || TO_CHAR(t.sales_tax_rate, 'FM990.00') || ' %' AS sales_tax_label,
     t.total_without_tax,
     t.total_vat,
     t.total_sales_tax,

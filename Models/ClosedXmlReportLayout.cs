@@ -54,6 +54,18 @@ namespace BIS.ERP.Models
 
         public ClosedXmlPageSetup PageSetup { get; set; } = new();
 
+        /// <summary>
+        /// Узкая сетка листа: сколько узких колонок делят полезную ширину листа.
+        /// 0 — сетка не задана: колонок столько же, сколько графов таблицы.
+        ///
+        /// Нужна бланкам, где в одной строке много мелких клеток (ИНН, расчётный
+        /// счёт, дата по цифрам): графы таблицы занимают по несколько узких колонок.
+        /// </summary>
+        public int GridColumns { get; set; }
+
+        /// <summary>Ширина одной узкой колонки в единицах Excel. 0 — 2,5.</summary>
+        public double GridColumnWidth { get; set; }
+
         public List<ClosedXmlBlock> Blocks { get; set; } = new();
     }
 
@@ -285,6 +297,12 @@ namespace BIS.ERP.Models
 
         /// <summary>Строка «ИТОГО» по всему разделу; null — не выводить.</summary>
         public ClosedXmlTotal? GrandTotal { get; set; }
+
+        /// <summary>
+        /// Дополнительные итоговые строки под общим итогом: бланк печатает
+        /// «Налог с продаж по ставке … %» и «ВСЕГО» отдельными строками.
+        /// </summary>
+        public List<ClosedXmlTotal> ExtraTotals { get; set; } = new();
     }
 
     public class ClosedXmlColumn
@@ -295,6 +313,12 @@ namespace BIS.ERP.Models
         public string Header { get; set; } = string.Empty;
 
         public double Width { get; set; } = 14;
+
+        /// <summary>
+        /// Сколько узких колонок листа занимает графа при заданной узкой сетке.
+        /// 0 или 1 — одна колонка.
+        /// </summary>
+        public int Span { get; set; }
 
         /// <summary>Формат числа/даты Excel, например #,##0.00 или dd.MM.yyyy; пусто — авто.</summary>
         public string NumberFormat { get; set; } = string.Empty;
@@ -365,6 +389,14 @@ namespace BIS.ERP.Models
     public class ClosedXmlTotal
     {
         public string Label { get; set; } = "ИТОГО";
+
+        /// <summary>
+        /// Поле набора, из которого берётся метка строки. Пусто — берётся <see cref="Label"/>.
+        ///
+        /// Нужно бланкам, где в строке итога стоит значение из данных:
+        /// «Налог с продаж по ставке 0.00 %» — ставка приходит из набора.
+        /// </summary>
+        public string LabelField { get; set; } = string.Empty;
 
         /// <summary>Поля (колонки DataTable), по которым считается сумма. Пусто — по всем числовым колонкам.</summary>
         public List<string> SumFields { get; set; } = new();

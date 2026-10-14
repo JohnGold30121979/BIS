@@ -1023,6 +1023,9 @@ namespace BIS.ERP.Views
             if (string.Equals(reportType, "VatInvoiceSt1", StringComparison.OrdinalIgnoreCase))
                 return ReportDataSetService.VatInvoiceSt1DataSetCode;
 
+            if (string.Equals(reportType, "VatInvoiceVatKg", StringComparison.OrdinalIgnoreCase))
+                return ReportDataSetService.VatInvoiceVatKgDataSetCode;
+
             if (IsReconciliationType(reportType))
                 return SystemReportCalculators.ReconciliationActCode;
 
@@ -2709,6 +2712,21 @@ namespace BIS.ERP.Views
                 FormatString = mapping.FormatString,
                 IsVisible = mapping.IsVisible,
                 CustomText = mapping.CustomText
+            }).ToList();
+
+            // Параметры переносятся обязательно: по ним заполняются подстановки
+            // в шапке макета. Без них в шапке печаталось «по счету с по».
+            report.Parameters = source.Parameters.Select(parameter => new ReportParameter
+            {
+                Id = parameter.Id,
+                ReportId = parameter.ReportId,
+                Name = parameter.Name,
+                Title = parameter.Title,
+                ParameterType = parameter.ParameterType,
+                DefaultValue = parameter.DefaultValue,
+                IsRequired = parameter.IsRequired,
+                ReferenceSource = parameter.ReferenceSource,
+                Order = parameter.Order
             }).ToList();
 
             return report;

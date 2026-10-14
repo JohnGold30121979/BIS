@@ -932,6 +932,290 @@ namespace BIS.ERP.Services
             }
         };
 
+        // =============================================================
+        // Счёт-фактура НДС (форма с РНИ/БИК, сомы) — образец бланка на одной странице.
+        //
+        // Раскладка (число колонок = 9, как графы бланка):
+        //   шапка   — заголовок, 102 НОМЕР, 103 ДАТА, пары пунктов 201/301 … 206/306,
+        //             401/403 и 404/405: шапка идёт до строк 404/405, ниже — таблица
+        //             позиций этого документа;
+        //   таблица — позиции счёта-фактуры, двухуровневая шапка НДС («НДС» → «ставка», «сумма»);
+        //   итоги   — «ИТОГО:» по колонкам и «ВСЕГО:»;
+        //   строки  — «Налог с продаж по ставке … %»: и метку, и сумму отдаёт набор данных;
+        //   подписи — М.П., РУКОВОДИТЕЛЬ, ГЛАВНЫЙ БУХГАЛТЕР.
+        //
+        // Реквизитов покупателя и РНИ/БИК в документе нет: они подставляются
+        // параметрами отчёта ({BuyerName}, {BuyerInn}, {SellerRni}, …) — администратор
+        // задаёт их на вкладке «Параметры». Ячейки под цифры рисуются рамками,
+        // а значение печатается целиком: разложить символы по клеткам макет не умеет.
+        // =============================================================
+        public static ClosedXmlReportLayout CreateVatInvoiceVatKg(string? sheetName) => new()
+        {
+            Sheets =
+            {
+                new ClosedXmlSheet
+                {
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Счет-фактура НДС" : sheetName,
+                    LayoutKind = ClosedXmlLayoutKinds.Formatted,
+                    PageSetup = new ClosedXmlPageSetup
+                    {
+                        Orientation = "Portrait",
+                        FitToPagesWide = 1,
+                        ShowGridLines = false,
+                        FontName = "Times New Roman",
+                        FontSize = 8
+                    },
+                    Blocks =
+                    {
+                        // --- Шапка: от заголовка до строк 404/405 ---
+                        new ClosedXmlBlock
+                        {
+                            Type = "TitleRows",
+                            Name = "Шапка бланка",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 1,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 1, MergeToColumn = 9, Text = "СЧЕТ-ФАКТУРА НДС",
+                                            Bold = true, Align = "Center", FontSize = 12
+                                        }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 2,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "102 НОМЕР:", Bold = true, Border = "All" },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 6, TakeFromRow = 1, TakeFromField = "doc_number", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 7, MergeToColumn = 9, Text = "103 ДАТА:", Bold = true, Border = "All" }
+                                    }
+                                },
+                                // Дата печатается по клеткам: восемь клеток — день (2), месяц (2), год (4).
+                                // Значения режет запрос (SUBSTRING), макет только раскладывает их по клеткам.
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 3,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, Text = "дата", Bold = true, Border = "All" },
+                                        new ClosedXmlTextCell { Column = 2, TakeFromRow = 1, TakeFromField = "doc_day_1", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 3, TakeFromRow = 1, TakeFromField = "doc_day_2", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 4, TakeFromRow = 1, TakeFromField = "doc_month_1", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 5, TakeFromRow = 1, TakeFromField = "doc_month_2", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 6, TakeFromRow = 1, TakeFromField = "doc_year_1", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 7, TakeFromRow = 1, TakeFromField = "doc_year_2", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 8, TakeFromRow = 1, TakeFromField = "doc_year_3", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 9, TakeFromRow = 1, TakeFromField = "doc_year_4", Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 4,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 5, Text = "ПОСТАВЩИК", Bold = true, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 9, Text = "ПОКУПАТЕЛЬ", Bold = true, Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 5,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "201 ИНН", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_inn", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "301 ИНН", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerInn}", Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 6,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "202 Ф.И.О/наименование предприятия", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_name", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "302 Ф.И.О/наименование предприятия", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerName}", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 7,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "203 адрес", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_address", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "303 адрес", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerAddress}", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 8,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "204 код и наименование РНИ", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, Text = "{SellerRni}", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "304 код и наименование РНИ", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerRni}", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 9,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "205 код (БИК) и наименование банка", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_bank_text", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "305 код (БИК) и наименование банка", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerBank}", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 10,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "206 расчётный счёт", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_account", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "306 расчётный счёт", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerAccount}", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 11,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "401 ДАТА И ТИП ПОСТАВКИ", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "supply_kind_text", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "403 СПОСОБ ПЛАТЕЖА", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "payment_kind_text", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 12,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "404 КОРРЕКТИРОВКА", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, Text = "к счет-фактуре серии ______ № ______ от ________", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "405 Причины корректировки", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{CorrectionReason}", Border = "All", WrapText = true }
+                                    }
+                                }
+                            }
+                        },
+
+                        // --- Таблица позиций: 9 графов, двухуровневая шапка НДС ---
+                        new ClosedXmlBlock
+                        {
+                            Type = "TabularSection",
+                            Name = "Позиции счёт-фактуры",
+                            Table = new ClosedXmlTableSection
+                            {
+                                HeaderRowHeight = 54,
+                                Columns =
+                                {
+                                    new ClosedXmlColumn { Field = "group_code", Header = "код группы товаров", Width = 9, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "item_name", Header = "наименование товаров, работ(услуг)", Width = 30, Align = "Left" },
+                                    new ClosedXmlColumn { Field = "unit_name", Header = "ед. изм.", Width = 7, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "quantity", Header = "количество (объем)", Width = 10, Align = "Right", NumberFormat = "#,##0.###" },
+                                    new ClosedXmlColumn { Field = "price", Header = "цена (сом)", Width = 11, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "amount_without_tax", Header = "стоимость товаров, работ, услуг без НДС", Width = 16, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "vat_rate", Header = "ставка", Width = 8, Align = "Center", NumberFormat = "#,##0.00" },
+                                    new ClosedXmlColumn { Field = "vat_amount", Header = "сумма(сом)", Width = 12, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = "line_total", Header = "всего стоим. реализации (сом)", Width = 15, Align = "Right", NumberFormat = "#,##0.00" }
+                                },
+                                HeaderLevels =
+                                {
+                                    // Верхний уровень: графы, под которыми второго уровня нет,
+                                    // занимают обе строки шапки — для этого у них RowSpan = 2.
+                                    new ClosedXmlHeaderLevel
+                                    {
+                                        Name = "Уровень 1",
+                                        Cells =
+                                        {
+                                            new ClosedXmlHeaderCell { Column = 1, RowSpan = 2, Text = "код группы товаров" },
+                                            new ClosedXmlHeaderCell { Column = 2, RowSpan = 2, Text = "наименование товаров, работ(услуг)" },
+                                            new ClosedXmlHeaderCell { Column = 3, RowSpan = 2, Text = "ед. изм." },
+                                            new ClosedXmlHeaderCell { Column = 4, RowSpan = 2, Text = "количество (объем)" },
+                                            new ClosedXmlHeaderCell { Column = 5, RowSpan = 2, Text = "цена (сом)" },
+                                            new ClosedXmlHeaderCell { Column = 6, RowSpan = 2, Text = "стоимость товаров, работ, услуг без НДС" },
+                                            new ClosedXmlHeaderCell { Column = 7, MergeToColumn = 8, Text = "НДС" },
+                                            new ClosedXmlHeaderCell { Column = 9, RowSpan = 2, Text = "всего стоим. реализации (сом)" }
+                                        }
+                                    },
+                                    new ClosedXmlHeaderLevel
+                                    {
+                                        Name = "Уровень 2",
+                                        Cells =
+                                        {
+                                            new ClosedXmlHeaderCell { Column = 7, Text = "ставка" },
+                                            new ClosedXmlHeaderCell { Column = 8, Text = "сумма(сом)" }
+                                        }
+                                    }
+                                },
+                                // ИТОГО по колонкам бланка и отдельная строка ВСЕГО.
+                                GrandTotal = new ClosedXmlTotal
+                                {
+                                    Label = "ИТОГО:",
+                                    SumFields = { "amount_without_tax", "vat_amount", "line_total" }
+                                },
+                                ExtraTotals =
+                                {
+                                    new ClosedXmlTotal
+                                    {
+                                        Label = "ВСЕГО:",
+                                        SumFields = { "line_total" }
+                                    }
+                                }
+                            }
+                        },
+
+                        // --- «Налог с продаж по ставке … %»: метку и сумму отдаёт набор ---
+                        new ClosedXmlBlock
+                        {
+                            Type = "FreeRows",
+                            Name = "Налог с продаж",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 1,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 6, TakeFromRow = 1, TakeFromField = "sales_tax_label" },
+                                        new ClosedXmlTextCell { Column = 7, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "total_sales_tax", Align = "Right" }
+                                    }
+                                }
+                            }
+                        },
+
+                        // --- Подписи ---
+                        new ClosedXmlBlock
+                        {
+                            Type = "SignaturesRow",
+                            Name = "Подписи",
+                            Signatures =
+                            {
+                                new ClosedXmlSignature { Text = "М.П.", Column = 1, MergeToColumn = 2 },
+                                new ClosedXmlSignature { Text = "РУКОВОДИТЕЛЬ ______________", Column = 3, MergeToColumn = 5 },
+                                new ClosedXmlSignature { Text = "ГЛАВНЫЙ БУХГАЛТЕР ______________", Column = 6, MergeToColumn = 9 }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
         public static ClosedXmlBlock CreateBlock(string type, int ordinal) => type switch
         {
 

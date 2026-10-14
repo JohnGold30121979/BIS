@@ -60,6 +60,16 @@ public sealed class StandardReportDeletionService
         return result;
     }
 
+    /// <summary>
+    /// Забывает удаления стандартных отчётов: при следующей загрузке они
+    /// создаются заново. Нужно, когда отчёт удалили по ошибке.
+    /// </summary>
+    public async Task RestoreAllAsync()
+    {
+        await EnsureSchemaAsync();
+        await _context.Database.ExecuteSqlRawAsync(@"DELETE FROM ""DeletedStandardReports"";");
+    }
+
     public async Task MarkDeletedAsync(string? code, string? name, string reason = "ConfiguratorDelete")
     {
         if (!IsStandardReportCode(code))

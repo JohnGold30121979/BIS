@@ -95,6 +95,9 @@ namespace BIS.ERP.Services
                     {
                         column.Spacing(2);
 
+                        // Узкая сетка листа: её же используют текстовые блоки и шапка.
+                        _sheetGridColumns = sheetLayout.GridColumns > 0 ? sheetLayout.GridColumns : 0;
+
                         foreach (var block in sheetLayout.Blocks)
                         {
                             switch (block.Type)
@@ -159,7 +162,9 @@ namespace BIS.ERP.Services
             DataTable dataTable,
             IReadOnlyDictionary<string, object?>? parameters = null)
         {
-            var columnCount = Math.Max(1, ResolveColumnCount(block));
+            var columnCount = _sheetGridColumns > 0
+                ? _sheetGridColumns
+                : Math.Max(1, ResolveColumnCount(block));
 
             foreach (var row in block.Rows)
             {
@@ -251,17 +256,15 @@ namespace BIS.ERP.Services
 
             try
             {
-                var lastRow = -1;
-
+                // Позиция каждой ячейки задаётся явно. Без этого QuestPDF ставит
+                // ячейки подряд, и подписи нижних уровней уезжали в первую строку:
+                // «Дебет» и «Кредит» попадали под «Дату» и «Документ».
                 foreach (var placement in header.Placements)
                 {
-                    // Начало новой строки шапки.
-                    if (placement.Row != lastRow)
-                    {
-                        lastRow = placement.Row;
-                    }
+                    var cell = table.Cell()
+                        .Column((uint)Math.Max(1, placement.FromColumn))
+                        .Row((uint)(placement.Row + 1));
 
-                    var cell = table.Cell();
                     if (placement.ToColumn > placement.FromColumn)
                         cell = cell.ColumnSpan((uint)(placement.ToColumn - placement.FromColumn + 1));
                     if (placement.RowSpan > 1)
@@ -281,8 +284,11 @@ namespace BIS.ERP.Services
                         .Element(container => ApplyAlign(container, align));
 
                     if (rotation != 0)
+                    {
                         WriteRotatedText(cellContainer, placement.Text, rotation, bold, false, 0);
+                    }
                     else
+                    {
                         cellContainer.Text(textBlock =>
                         {
                             if (string.IsNullOrWhiteSpace(placement.Text))
@@ -292,6 +298,7 @@ namespace BIS.ERP.Services
                             if (bold)
                                 textSpan.Bold();
                         });
+                    }
                 }
             }
             finally
@@ -368,6 +375,9 @@ namespace BIS.ERP.Services
         /// </summary>
         [ThreadStatic]
         private static double ContainerHeightLimit;
+
+        // Узкая сетка листа объявлена в ClosedXmlReportRenderer.cs: это один класс,
+        // и сетка у обоих выводов общая.
 
         /// <summary>
         /// Готовит картинку с повёрнутым текстом. Результат кэшируется по подписи,
@@ -478,7 +488,9 @@ namespace BIS.ERP.Services
                 return;
 
             var weights = visible
-                .Select(item => item.Width > 0 ? item.Width : 14d)
+                .Select(item => _sheetGridColumns > 0
+                    ? Math.Max(1d, item.Span <= 0 ? 1d : item.Span)
+                    : item.Width > 0 ? item.Width : 14d)
                 .ToList();
 
             var rows = dataTable.Rows.Cast<DataRow>()
@@ -554,6 +566,13 @@ namespace BIS.ERP.Services
 
                 if (section.GrandTotal != null && rows.Count > 0)
                     RenderTotalRow(table, rows, visible, section, section.GrandTotal);
+
+                // Дополнительные итоговые строки бланка: «Налог с продаж по ставке … %», «ВСЕГО».
+                if (rows.Count > 0)
+                {
+                    foreach (var extraTotal in section.ExtraTotals.Where(total => total != null))
+                        RenderTotalRow(table, rows, visible, section, extraTotal);
+                }
             });
         }
 
@@ -720,10 +739,12 @@ namespace BIS.ERP.Services
 
                 if (index == 0)
                 {
+                    var label = ResolveTotalLabel(total, rows);
+
                     // К подытогу группы добавляется её значение: «ИТОГО по 3».
                     text = string.IsNullOrWhiteSpace(groupValue)
-                        ? total.Label
-                        : $"{total.Label} {groupValue}";
+                        ? label
+                        : $"{label} {groupValue}";
                 }
                 else if (IsSumField(sumFields, columnLayout, dataTable))
                 {
@@ -749,6 +770,21 @@ namespace BIS.ERP.Services
                             textSpan.Bold();
                     });
             }
+        }
+
+        /// <summary>
+        /// Метка итоговой строки: из данных, если задано поле метки, иначе из настройки.
+        ///
+        /// Так бланк печатает «Налог с продаж по ставке 0.00 %»: текст строки
+        /// собирает набор данных, а не администратор.
+        /// </summary>
+        private static string ResolveTotalLabel(ClosedXmlTotal total, List<DataRow> rows)
+        {
+            if (string.IsNullOrWhiteSpace(total.LabelField) || rows.Count == 0)
+                return total.Label;
+
+            var value = GetFieldValueText(rows[0], total.LabelField);
+            return string.IsNullOrWhiteSpace(value) ? total.Label : value;
         }
 
         /// <summary>Выводит блок подписей.</summary>

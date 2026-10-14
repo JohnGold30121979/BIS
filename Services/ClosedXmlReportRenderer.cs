@@ -300,6 +300,35 @@ namespace BIS.ERP.Services
             return string.Empty;
         }
 
+        /// <summary>
+        /// Узкая сетка текущего листа: сколько узких колонок и какая у них ширина.
+        /// 0 — сетка не задана, колонок столько же, сколько графов таблицы.
+        ///
+        /// Значения живут на время вывода листа: так одну и ту же сетку используют
+        /// и таблица, и текстовые блоки, и итоговые строки.
+        /// </summary>
+        [ThreadStatic]
+        private static int _sheetGridColumns;
+        private static double _sheetGridColumnWidth = 2.5;
+
+        /// <summary>Сколько узких колонок занимает графа, начиная с этой колонки листа.</summary>
+        private static readonly Dictionary<int, int> _gridSpanByColumn = new();
+
+        /// <summary>Левая колонка каждой видимой графы (по порядку колонок таблицы).</summary>
+        private static readonly List<int> _gridColumnStarts = new();
+
+        /// <summary>
+        /// Ячейка строки с учётом узкой сетки: колонки графы объединяются,
+        /// значение пишется в левую ячейку объединения.
+        /// </summary>
+        private static IXLCell GridCell(IXLWorksheet worksheet, int row, int column)
+        {
+            if (_sheetGridColumns > 0 && _gridSpanByColumn.TryGetValue(column, out var span) && span > 1)
+                worksheet.Range(row, column, row, column + span - 1).Merge();
+
+            return worksheet.Cell(row, column);
+        }
+
         private static void RenderSheet(
             IXLWorksheet worksheet,
             ClosedXmlSheet sheetLayout,
@@ -319,6 +348,13 @@ namespace BIS.ERP.Services
                 worksheet.SheetView.FreezeRows(setup.FreezeRows);
 
             ApplyPageHeader(worksheet, setup, dataTable, parameters);
+
+            // Узкая сетка листа: клетки шапки и текстовых блоков адресуют
+            // те же узкие колонки, что и графы таблицы.
+            _sheetGridColumns = sheetLayout.GridColumns > 0 ? sheetLayout.GridColumns : 0;
+            _sheetGridColumnWidth = sheetLayout.GridColumnWidth > 0 ? sheetLayout.GridColumnWidth : 2.5;
+            _gridSpanByColumn.Clear();
+            _gridColumnStarts.Clear();
 
             var rowCursor = 1;
             foreach (var block in sheetLayout.Blocks)
@@ -662,12 +698,33 @@ namespace BIS.ERP.Services
                 return startRow;
 
             var columnByField = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var excelCursor = 1;
             for (var i = 0; i < visible.Count; i++)
             {
                 var columnLayout = visible[i];
-                var excelColumn = i + 1;
+                var span = _sheetGridColumns > 0 ? Math.Max(1, columnLayout.Span <= 0 ? 1 : columnLayout.Span) : 1;
+                var excelColumn = excelCursor;
                 columnByField[ResolveColumnName(dataTable, columnLayout.Field) ?? columnLayout.Field] = excelColumn;
-                worksheet.Column(excelColumn).Width = columnLayout.Width > 0 ? columnLayout.Width : 14;
+                _gridColumnStarts.Add(excelColumn);
+
+                if (_sheetGridColumns <= 0)
+                {
+                    worksheet.Column(excelColumn).Width = columnLayout.Width > 0 ? columnLayout.Width : 14;
+                }
+                else
+                {
+                    _gridSpanByColumn[excelColumn] = span;
+                }
+
+                excelCursor += span;
+            }
+
+            // Ширину задаёт узкая сетка: лист получает ровные узкие колонки,
+            // а графы таблицы занимают по несколько таких колонок.
+            if (_sheetGridColumns > 0)
+            {
+                for (var column = 1; column <= _sheetGridColumns; column++)
+                    worksheet.Column(column).Width = _sheetGridColumnWidth;
             }
 
             // Шапка таблицы.
@@ -683,7 +740,8 @@ namespace BIS.ERP.Services
             {
                 for (var i = 0; i < visible.Count; i++)
                 {
-                    var cell = worksheet.Cell(headerRow, i + 1);
+                    var headerColumn = _sheetGridColumns > 0 && i < _gridColumnStarts.Count ? _gridColumnStarts[i] : i + 1;
+                    var cell = GridCell(worksheet, headerRow, headerColumn);
                     cell.Value = visible[i].Header;
                     ApplyCellStyle(cell, section.HeaderBold, false, 0, "Center",
                         section.HeaderFill, section.RowBorder);
@@ -718,6 +776,14 @@ namespace BIS.ERP.Services
             if (section.GrandTotal != null && detailRows.Count > 0)
                 currentRow = WriteTotalRow(worksheet, currentRow, section.GrandTotal, visible,
                     columnByField, detailRows, section.RowBorder);
+
+            // Дополнительные итоговые строки бланка: «Налог с продаж по ставке … %», «ВСЕГО».
+            if (detailRows.Count > 0)
+            {
+                foreach (var extraTotal in section.ExtraTotals.Where(total => total != null))
+                    currentRow = WriteTotalRow(worksheet, currentRow, extraTotal, visible,
+                        columnByField, detailRows, section.RowBorder);
+            }
 
             return currentRow;
         }
@@ -860,7 +926,8 @@ namespace BIS.ERP.Services
             for (var i = 0; i < visible.Count; i++)
             {
                 var columnLayout = visible[i];
-                var cell = worksheet.Cell(rowIndex, i + 1);
+                var valueColumn = _sheetGridColumns > 0 && i < _gridColumnStarts.Count ? _gridColumnStarts[i] : i + 1;
+                var cell = GridCell(worksheet, rowIndex, valueColumn);
                 var value = dataRow.Table.Columns.Contains(columnLayout.Field)
                     ? dataRow[columnLayout.Field]
                     : DBNull.Value;
@@ -1025,10 +1092,11 @@ namespace BIS.ERP.Services
         {
             // Метка итога — в первую колонку. К подытогу группы добавляется
             // её значение: «ИТОГО по 2».
-            var labelCell = worksheet.Cell(startRow, 1);
+            var label = ResolveTotalLabel(worksheet, total, columnByField, detailRows);
+            var labelCell = GridCell(worksheet, startRow, 1);
             labelCell.Value = string.IsNullOrWhiteSpace(groupValue)
-                ? total.Label
-                : $"{total.Label} {groupValue}";
+                ? label
+                : $"{label} {groupValue}";
             labelCell.Style.Font.Bold = total.Bold;
 
             var sumFields = total.SumFields.Count > 0
@@ -1047,7 +1115,7 @@ namespace BIS.ERP.Services
                 // заголовки групп и строки подытогов).
                 var ranges = BuildContiguousRanges(detailRows);
                 var formula = $"SUM({string.Join(",", ranges.Select(r => $"{columnName}{r.First}:{columnName}{r.Last}"))})";
-                var cell = worksheet.Cell(startRow, excelColumn);
+                var cell = GridCell(worksheet, startRow, excelColumn);
                 cell.FormulaA1 = $"={formula}";
                 cell.Style.NumberFormat.Format = "#,##0.00";
                 cell.Style.Font.Bold = total.Bold;
@@ -1062,6 +1130,28 @@ namespace BIS.ERP.Services
             }
 
             return startRow + 1;
+        }
+
+        /// <summary>
+        /// Метка итоговой строки: из данных, если задано поле метки, иначе из настройки.
+        ///
+        /// Так бланк печатает «Налог с продаж по ставке 0.00 %»: текст строки
+        /// собирает набор данных, а не администратор.
+        /// </summary>
+        private static string ResolveTotalLabel(
+            IXLWorksheet worksheet,
+            ClosedXmlTotal total,
+            Dictionary<string, int> columnByField,
+            List<int> detailRows)
+        {
+            if (string.IsNullOrWhiteSpace(total.LabelField) || detailRows.Count == 0 ||
+                !columnByField.TryGetValue(total.LabelField, out var excelColumn))
+            {
+                return total.Label;
+            }
+
+            var value = worksheet.Cell(detailRows[0], excelColumn).GetString();
+            return string.IsNullOrWhiteSpace(value) ? total.Label : value;
         }
 
         /// <summary>

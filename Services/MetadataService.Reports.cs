@@ -475,6 +475,7 @@ public partial class MetadataService
                 "TurnoverByAccount" => ClosedXmlLayoutTemplates.CreateTurnoverByAccount(definition.Name),
                 "InvoiceJournal" => ClosedXmlLayoutTemplates.CreateInvoiceJournal(definition.Name),
                 "VatInvoiceSt1" => ClosedXmlLayoutTemplates.CreateVatInvoiceSt1(definition.Name),
+                "VatInvoiceVatKg" => ClosedXmlVatInvoiceNdSTemplate.Create(definition.Name),
                 _ => ClosedXmlLayoutTemplates.CreateReconciliationAct(definition.Name)
             };
 
@@ -828,6 +829,28 @@ public partial class MetadataService
                 "seller_name", "buyer_name", "seller_inn_text", "buyer_inn_text",
                 "seller_address_text", "buyer_address_text", "seller_reg_number",
                 "seller_bank_text", "report_title", "period_start", "period_end", "esf_number"
+            },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
+        new StandardReportDefinition(
+            Code: "standard.finance.vat-invoice-vat-nds",
+            Name: "Счет-фактура НДС (ClosedXML)",
+            Description: "Бланк «СЧЕТ-ФАКТУРА НДС»: шапка по пунктам — 102/103, пары 201/301 … 206/306 и 401–405, — таблица позиций с двухуровневой шапкой НДС, строки ИТОГО и ВСЕГО, подписи. Образец бланка на одной странице.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Счет-фактура НДС: позиции и реквизиты",
+            SourceObjectType: "ReportSource",
+            ReportType: "VatInvoiceVatKg",
+            Icon: "🧾",
+            Order: 155,
+            PageOrientation: "Portrait",
+            Fields: new[]
+            {
+                "line_number", "group_code", "item_name", "unit_name", "quantity", "price",
+                "amount_without_tax", "vat_rate", "vat_amount", "line_total",
+                "seller_name", "seller_inn", "seller_address", "seller_bank_text",
+                "payment_kind_text", "supply_kind_text", "sales_tax_label",
+                "total_without_tax", "total_vat", "total_sales_tax", "total_amount",
+                "report_title", "period_start", "period_end", "esf_number"
             },
             SourceFormat: "ClosedXml",
             SeedClosedXmlLayout: true, ShowInAccountingReports: true),
