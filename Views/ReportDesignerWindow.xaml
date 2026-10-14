@@ -671,6 +671,45 @@
                 </Grid>
             </TabItem>
 
+            <!-- Вкладка: ClosedXML табличный — тот же макет, но листом: строки × колонки -->
+            <TabItem Header="📋 ClosedXML табличный" x:Name="ClosedXmlTableTab">
+                <Grid Background="#F4F6F8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" Background="White" Padding="12" Margin="0,0,0,8">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Лист как таблица:" FontWeight="Bold" VerticalAlignment="Center"/>
+                                <Button Content="Обновить вид" Height="26" Margin="12,0,0,0" Padding="10,0"
+                                        Click="OnRefreshClosedXmlTableClick"/>
+                                <TextBlock Text="Масштаб:" VerticalAlignment="Center" Margin="14,0,6,0"/>
+                                <Slider x:Name="ClosedXmlSheetZoomSlider" Width="160" Minimum="50" Maximum="200"
+                                        Value="100" TickFrequency="10" IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        ToolTip="Масштаб листа: можно тянуть ползунок или крутить колесо с зажатым Ctrl."
+                                        ValueChanged="OnClosedXmlSheetZoomChanged"/>
+                                <TextBlock x:Name="ClosedXmlSheetZoomText" Text="100%" Width="42"
+                                           VerticalAlignment="Center" Margin="6,0,0,0" FontWeight="SemiBold"
+                                           TextAlignment="Right"/>
+                                <TextBlock x:Name="ClosedXmlTableCellInfo" Margin="12,0,0,0" VerticalAlignment="Center"
+                                           Foreground="#3B4A57" FontSize="11" TextWrapping="Wrap"
+                                           Text="Щёлкните по клетке — покажу, что в ней стоит."/>
+                            </StackPanel>
+                            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#5A6B7B" FontSize="11"
+                                       Text="Строки считаются сверху вниз (1 — верх листа), колонки слева направо (1 — левый край). Объединённые клетки растянуты, заливка и текст видны как в бланке. Правка — в списках вкладки «ClosedXML макет»."/>
+                        </StackPanel>
+                    </Border>
+                    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                  PreviewMouseWheel="OnClosedXmlSheetPreviewMouseWheel">
+                        <Border Background="White" Padding="8">
+                            <Grid x:Name="ClosedXmlSheetGridHost"/>
+                        </Border>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
             <!-- Вкладка: ClosedXML макет (визуальный Excel-редактор: строки, шапка, колонки, группы, итоги) -->
             <TabItem Header="📊 ClosedXML макет" x:Name="ClosedXmlDesignerTab">
                 <Grid Background="#F4F6F8">
@@ -733,16 +772,42 @@
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
 
-                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                                <TextBlock Text="Имя блока:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <TextBox x:Name="ClosedXmlBlockNameBox" Width="220" Height="26" VerticalContentAlignment="Center"
-                                         TextChanged="OnClosedXmlBlockNameChanged"/>
-                            </StackPanel>
+                            <!-- Что правится сейчас: подпись слева, имя блока по центру, кнопки справа. -->
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <TextBlock Text="Имя блока:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                    <TextBox x:Name="ClosedXmlBlockNameBox" Width="200" Height="26" VerticalContentAlignment="Center"
+                                             TextChanged="OnClosedXmlBlockNameChanged"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ClosedXmlEditorTargetText" Grid.Column="1"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="#5A6B7B" FontSize="11" TextWrapping="Wrap"
+                                           Text="Выберите блок слева"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <Button x:Name="ClosedXmlAddCellButton" Content="+ Добавить" Height="26" Padding="10,0"
+                                            Click="OnAddClosedXmlCellClick"
+                                            ToolTip="Откроется диалог с названием блока: у заголовка — ячейка, у таблицы — колонка таблицы."/>
+                                    <Button Content="− Удалить строку" Height="26" Margin="6,0,0,0" Padding="10,0"
+                                            Click="OnDeleteClosedXmlCellClick"
+                                            ToolTip="Удаляет выбранную строку таблицы ячеек."/>
+                                </StackPanel>
+                            </Grid>
 
                             <!-- Редактор строк (TitleRows / FreeRows) -->
                             <DataGrid x:Name="ClosedXmlCellsGrid" Grid.Row="1" AutoGenerateColumns="False"
                                       CanUserAddRows="True" CanUserDeleteRows="True" Margin="0,0,0,8"
                                       AddingNewItem="OnClosedXmlCellAddingNewItem">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Добавить строку" Click="OnGridAddRowClick"/>
+                                        <MenuItem Header="Удалить строку" Click="OnGridDeleteRowClick"/>
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Строка" Binding="{Binding Row, Mode=TwoWay}" Width="60"/>
                                     <DataGridTextColumn Header="Колонка" Binding="{Binding Column, Mode=TwoWay}" Width="70"/>
@@ -777,6 +842,12 @@
                                 <TextBlock Grid.Row="0" Text="Колонки таблицы" FontWeight="Bold" Margin="0,0,0,6"/>
                                 <DataGrid x:Name="ClosedXmlColumnsGrid" Grid.Row="1" AutoGenerateColumns="False"
                                           CanUserAddRows="True" CanUserDeleteRows="True" Margin="0,0,0,8">
+                                    <DataGrid.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Добавить строку" Click="OnGridAddRowClick"/>
+                                            <MenuItem Header="Удалить строку" Click="OnGridDeleteRowClick"/>
+                                        </ContextMenu>
+                                    </DataGrid.ContextMenu>
                                     <DataGrid.Columns>
                                         <DataGridTextColumn Header="Поле (DataTable)" Binding="{Binding Field, Mode=TwoWay}" Width="*"/>
                                         <DataGridTextColumn Header="Заголовок" Binding="{Binding Header, Mode=TwoWay}" Width="*"/>
@@ -807,6 +878,12 @@
                                         </WrapPanel>
                                         <DataGrid x:Name="ClosedXmlHeaderCellsGrid" Height="150" AutoGenerateColumns="False"
                                                   CanUserAddRows="True" CanUserDeleteRows="True">
+                                            <DataGrid.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Добавить строку" Click="OnGridAddRowClick"/>
+                                                    <MenuItem Header="Удалить строку" Click="OnGridDeleteRowClick"/>
+                                                </ContextMenu>
+                                            </DataGrid.ContextMenu>
                                             <DataGrid.Columns>
                                                 <DataGridTextColumn Header="Уровень" Binding="{Binding LevelIndex, Mode=TwoWay}" Width="60"
                                                                     ToolTipService.ToolTip="0 — верхний уровень шапки."/>

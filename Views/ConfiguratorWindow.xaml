@@ -250,6 +250,7 @@
                                         <Separator/>
                                         <MenuItem Header="💻 Предпросмотр" Click="OnPreviewReportClick"/>
                                         <Separator/>
+                                        <MenuItem Header="📄 Копировать отчет" Click="OnCopyReportClick"/>
                                         <MenuItem Header="🗑️ Удалить отчет" Click="OnDeleteReportClick" Foreground="#E74C3C"/>
                                     </ContextMenu>
                                 </TreeView.Resources>

@@ -1922,6 +1922,19 @@ namespace BIS.ERP.Views
             editButton.Click += (_, _) => ShowReportEditor(report);
             actionsPanel.Children.Add(editButton);
 
+            var copyButton = new Button
+            {
+                Content = "📄 Копировать",
+                Width = 120,
+                Height = 32,
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = (Brush)new BrushConverter().ConvertFrom("#8E44AD"),
+                Foreground = Brushes.White,
+                ToolTip = "Создать копию отчёта для правки: имя — старое плюс номер копии (_1, _2)."
+            };
+            copyButton.Click += async (_, _) => await CopyReportAsync(report);
+            actionsPanel.Children.Add(copyButton);
+
             var availabilityButton = new Button
             {
                 Content = report.IsActive ? "Отключить" : "Включить",
@@ -2844,6 +2857,21 @@ namespace BIS.ERP.Views
 
             var mainPanel = new StackPanel { MaxWidth = 620 };
             mainPanel.Children.Add(CreateBackToMetadataButton("← К списку отчётов", ShowReportsList));
+
+            // Только системные отчёты выгружаются и загружаются с конфигурацией.
+            // Флаг сохраняется сразу, чтобы не зависеть от кнопки «Сохранить».
+            var systemCheck = new CheckBox
+            {
+                Content = "Выгружать с конфигурацией (системный отчёт)",
+                IsChecked = report.IsSystem,
+                Margin = new Thickness(0, 2, 0, 10),
+                ToolTip = "Служебное: только такие отчёты попадают в выгрузку конфигурации. " +
+                          "При загрузке чужой конфигурации системный отчёт заменяется версией из файла — " +
+                          "локальные правки такого отчёта пропадут. Для своих отчётов держите флаг выключенным."
+            };
+            systemCheck.Checked += async (_, _) => await SetReportSystemFlagAsync(report, true);
+            systemCheck.Unchecked += async (_, _) => await SetReportSystemFlagAsync(report, false);
+            mainPanel.Children.Add(systemCheck);
             mainPanel.Children.Add(new TextBlock
             {
                 Text = $"{report.Description}\nСтатус: {report.AvailabilityDisplay}; формат: {report.SourceFormat}; " +
@@ -2969,6 +2997,168 @@ namespace BIS.ERP.Views
                     report.Id,
                     new { report.Code, report.SourceFormat, report.ReportType });
                 MessageBox.Show($"Ошибка удаления: {GetFullExceptionMessage(ex)}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        /// <summary>
+        /// Копирует отчёт целиком: поля, фильтры, параметры, группировки,
+        /// сопоставления элементов, колонтитулы и макет ClosedXML.
+        ///
+        /// Имя копии — старое плюс номер: «Отчёт_1», «Отчёт_2». Копия —
+        /// пользовательский отчёт: системным (для выгрузки с конфигурацией)
+        /// он становится только по флагу в карточке отчёта.
+        /// </summary>
+        private async Task CopyReportAsync(Report header)
+        {
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+
+                var source = await LoadFullReportAsync(header);
+                var copyId = Guid.NewGuid();
+
+                // Имя копии — старое плюс первый свободный номер: «Отчёт_1», «Отчёт_2».
+                string BuildCopyName()
+                {
+                    var baseName = string.IsNullOrWhiteSpace(source.Name) ? "Отчет" : source.Name.Trim();
+                    var names = new HashSet<string>(
+                        (_reports ?? new List<Report>()).Select(item => item.Name ?? string.Empty),
+                        StringComparer.OrdinalIgnoreCase);
+
+                    var number = 1;
+                    while (names.Contains($"{baseName}_{number}"))
+                        number++;
+
+                    return $"{baseName}_{number}";
+                }
+
+                var copy = new Report
+                {
+                    Id = copyId,
+                    Code = $"user.copy.{Guid.NewGuid():N}",
+                    Name = BuildCopyName(),
+                    Description = source.Description,
+                    ReportType = source.ReportType,
+                    SourceFormat = source.SourceFormat,
+                    DataSourceId = source.DataSourceId,
+                    Template = source.Template,
+                    TemplateVersion = source.TemplateVersion,
+                    IsActive = true,
+                    // Копия не появляется в окне бухгалтерской отчётности,
+                    // пока администратор не поставит отметку сам.
+                    ShowInAccountingReports = false,
+                    IsPrintForm = source.IsPrintForm,
+                    IsDefault = false,
+                    Icon = string.IsNullOrWhiteSpace(source.Icon) ? "📊" : source.Icon,
+                    ClosedXmlLayout = source.ClosedXmlLayout,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                // Связи копии — новые записи: каждой свой Id и ссылка на копию.
+                copy.Fields = (source.Fields ?? new List<ReportField>()).ToList();
+                foreach (var field in copy.Fields)
+                {
+                    field.Id = Guid.NewGuid();
+                    field.ReportId = copyId;
+                }
+
+                copy.Filters = (source.Filters ?? new List<ReportFilter>()).ToList();
+                foreach (var filter in copy.Filters)
+                {
+                    filter.Id = Guid.NewGuid();
+                    filter.ReportId = copyId;
+                }
+
+                copy.Parameters = (source.Parameters ?? new List<ReportParameter>()).ToList();
+                foreach (var parameter in copy.Parameters)
+                {
+                    parameter.Id = Guid.NewGuid();
+                    parameter.ReportId = copyId;
+                }
+
+                copy.ElementMappings = (source.ElementMappings ?? new List<ReportElementMapping>()).ToList();
+                foreach (var mapping in copy.ElementMappings)
+                {
+                    mapping.Id = Guid.NewGuid();
+                    mapping.ReportId = copyId;
+                }
+
+                await _reportService.SaveReportAsync(copy);
+                await RefreshReportsTreeAndListAsync();
+
+                MessageBox.Show($"Создана копия отчёта: «{copy.Name}».", "Копирование отчёта",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось скопировать отчёт: {GetFullExceptionMessage(ex)}", "Ошибка",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+        }
+
+        /// <summary>
+        /// Копирует выбранный в дереве отчёт — то же действие, что кнопка
+        /// «📄 Копировать» в списке, но из контекстного меню дерева.
+        /// </summary>
+        private void OnCopyReportClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedReport == null)
+            {
+                MessageBox.Show("Выберите отчёт в дереве слева.", "Копирование отчёта",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _ = CopyReportAsync(_selectedReport);
+        }
+
+        /// <summary>
+        /// Сохраняет признак «системный отчёт»: только такие отчёты выгружаются
+        /// и загружаются с конфигурацией. Обновляются ровно два поля, дети отчёта
+        /// (поля, параметры, макет) не затрагиваются.
+        /// </summary>
+        private async Task SetReportSystemFlagAsync(Report report, bool isSystem)
+        {
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+
+                if (_context == null)
+                    _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+
+                var entity = await _context.Reports.FirstOrDefaultAsync(item => item.Id == report.Id);
+                if (entity != null)
+                {
+                    entity.IsSystem = isSystem;
+                    entity.UpdatedAt = DateTime.UtcNow;
+                    await _context.SaveChangesAsync();
+                }
+
+                report.IsSystem = isSystem;
+                _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
+                BuildMetadataTree();
+
+                MessageBox.Show(
+                    isSystem
+                        ? "Отчёт будет выгружаться с конфигурацией."
+                        : "Отчёт снова пользовательский: в конфигурацию не выгружается.",
+                    "Признак отчёта",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось сохранить признак: {GetFullExceptionMessage(ex)}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally

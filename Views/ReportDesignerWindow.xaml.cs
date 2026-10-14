@@ -2231,6 +2231,11 @@ namespace BIS.ERP.Views
             ClosedXmlCellsGrid.ItemsSource = _closedXmlCells;
             ClosedXmlColumnsGrid.ItemsSource = _closedXmlColumns;
             ClosedXmlSignaturesGrid.ItemsSource = _closedXmlSignatures;
+
+            // Меню правой кнопки и подсказки про строки/колонки — кодом,
+            // чтобы все четыре таблицы вели себя одинаково.
+            AttachClosedXmlGridMenus();
+            AttachClosedXmlGridHints();
             ClosedXmlHeaderCellsGrid.ItemsSource = _closedXmlHeaderCells;
             ClosedXmlFieldsList.ItemsSource = _reportFields;
             LoadClosedXmlLayout(ClosedXmlLayoutTemplates.CreateBlank());
@@ -2442,6 +2447,22 @@ namespace BIS.ERP.Views
             ClosedXmlCellsGrid.Visibility = !isTable && !isSignatures ? Visibility.Visible : Visibility.Collapsed;
             ClosedXmlTableEditor.Visibility = isTable ? Visibility.Visible : Visibility.Collapsed;
             ClosedXmlSignaturesGrid.Visibility = isSignatures ? Visibility.Visible : Visibility.Collapsed;
+
+            // Подпись над таблицами: что правится сейчас и что добавит кнопка.
+            ClosedXmlEditorTargetText.Text = isTable
+                ? "Правятся: колонки таблицы, уровни шапки и итоги"
+                : isSignatures
+                    ? "Правятся: строки подписей"
+                    : "Правятся: ячейки блока — строка, колонка, объединение, текст";
+
+            if (ClosedXmlAddCellButton != null)
+            {
+                ClosedXmlAddCellButton.Content = isTable
+                    ? "+ Добавить колонку"
+                    : isSignatures
+                        ? "+ Добавить подпись"
+                        : "+ Добавить ячейку";
+            }
 
             ClosedXmlBlockNameBox.Text = block?.Name ?? string.Empty;
             if (block == null)
@@ -2736,6 +2757,658 @@ namespace BIS.ERP.Views
         {
             var layout = BuildClosedXmlLayout();
             ClosedXmlJsonBox.Text = layout == null ? string.Empty : ClosedXmlReportRenderer.SerializeLayout(layout);
+
+            // Табличный вид показывает тот же макет листом — обновляем его вместе с JSON.
+            RefreshClosedXmlSheetViewAllBlocks();
+        }
+
+        /// <summary>
+        /// Добавляет ячейку блока «Заголовок»/«Строки» через диалог.
+        ///
+        /// Таблица-список остаётся для просмотра, а ввод идёт словами:
+        /// «строка сверху вниз», «колонка слева направо», «объединить по колонку».
+        /// Остальное (кегль, поворот, рамка, заливка) правится в таблице после добавления.
+        /// </summary>
+        private void OnAddClosedXmlCellClick(object sender, RoutedEventArgs e)
+        {
+            if (_closedXmlSheet == null)
+                return;
+
+            var nextRow = _closedXmlCells.Count == 0 ? 1 : _closedXmlCells.Max(cell => Math.Max(1, cell.Row));
+            var nextColumn = _closedXmlCells.Count == 0
+                ? 1
+                : _closedXmlCells.Max(cell => Math.Max(1, cell.Column)) + 1;
+
+            var fields = _reportFields
+                .Select(field => field.FieldName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var blockName = string.IsNullOrWhiteSpace(_closedXmlEditingBlock?.Name)
+                ? _closedXmlEditingBlock?.TypeLabel ?? "блок"
+                : _closedXmlEditingBlock!.Name;
+
+            // У таблицы добавляется колонка таблицы, а не ячейка заголовка.
+            if (string.Equals(_closedXmlEditingBlock?.Type, "TabularSection", StringComparison.Ordinal))
+            {
+                var columnDialog = new ClosedXmlColumnDialog(blockName, fields) { Owner = this };
+                if (columnDialog.ShowDialog() == true && columnDialog.Result != null)
+                {
+                    _closedXmlColumns.Add(columnDialog.Result);
+                    StatusText.Text = $"Колонка добавлена в таблицу «{blockName}».";
+                }
+
+                return;
+            }
+
+            var dialog = new ClosedXmlCellDialog(_closedXmlSheet.GridColumns, fields, nextRow, nextColumn, blockName)
+            {
+                Owner = this
+            };
+
+            if (dialog.ShowDialog() != true || dialog.Result == null)
+                return;
+
+            _closedXmlCells.Add(dialog.Result);
+            StatusText.Text = "Ячейка добавлена.";
+        }
+
+        /// <summary>Удаляет выбранную строку таблицы ячеек.</summary>
+        private void OnDeleteClosedXmlCellClick(object sender, RoutedEventArgs e)
+        {
+            if (ClosedXmlCellsGrid.SelectedItem is not ClosedXmlCellEdit cell)
+            {
+                StatusText.Text = "Выберите строку в таблице ячеек.";
+                return;
+            }
+
+            _closedXmlCells.Remove(cell);
+            StatusText.Text = "Строка удалена.";
+        }
+
+        /// <summary>
+        /// Добавляет строку в ту таблицу, по которой щёлкнули правой кнопкой.
+        ///
+        /// Контекстное меню есть у каждой сетки: строка добавляется там,
+        /// где стоит курсор, и не приходится гадать, к чему относится кнопка.
+        /// </summary>
+        private void OnGridAddRowClick(object sender, RoutedEventArgs e)
+        {
+            var grid = GetContextMenuGrid(sender);
+            if (grid == null)
+                return;
+
+            switch (grid.Name)
+            {
+                case "ClosedXmlCellsGrid":
+                    OnAddClosedXmlCellClick(sender, e);
+                    break;
+
+                case "ClosedXmlColumnsGrid":
+                    _closedXmlColumns.Add(new ClosedXmlColumn
+                    {
+                        Field = string.Empty,
+                        Header = "Колонка",
+                        Width = 14,
+                        Align = "Left"
+                    });
+                    StatusText.Text = "Колонка добавлена: заполните поле набора и заголовок.";
+                    break;
+
+                case "ClosedXmlHeaderCellsGrid":
+                    _closedXmlHeaderCells.Add(new ClosedXmlHeaderCellEdit
+                    {
+                        LevelIndex = 0,
+                        Column = 1,
+                        Align = "Center"
+                    });
+                    StatusText.Text = "Строка шапки добавлена: уровень 0 — верхний.";
+                    break;
+
+                case "ClosedXmlSignaturesGrid":
+                    _closedXmlSignatures.Add(new ClosedXmlSignature
+                    {
+                        Text = "Подпись",
+                        Column = 1,
+                        MergeToColumn = 4
+                    });
+                    StatusText.Text = "Строка подписей добавлена.";
+                    break;
+            }
+        }
+
+        /// <summary>Удаляет выбранную строку таблицы — с подтверждением.</summary>
+        private void OnGridDeleteRowClick(object sender, RoutedEventArgs e)
+        {
+            var grid = GetContextMenuGrid(sender);
+            if (grid?.SelectedItem == null)
+            {
+                StatusText.Text = "Выберите строку в таблице.";
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                "Удалить выбранную строку?",
+                "Удаление строки",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            switch (grid.Name)
+            {
+                case "ClosedXmlCellsGrid" when grid.SelectedItem is ClosedXmlCellEdit cell:
+                    _closedXmlCells.Remove(cell);
+                    break;
+
+                case "ClosedXmlColumnsGrid" when grid.SelectedItem is ClosedXmlColumn column:
+                    _closedXmlColumns.Remove(column);
+                    break;
+
+                case "ClosedXmlHeaderCellsGrid" when grid.SelectedItem is ClosedXmlHeaderCellEdit headerCell:
+                    _closedXmlHeaderCells.Remove(headerCell);
+                    break;
+
+                case "ClosedXmlSignaturesGrid" when grid.SelectedItem is ClosedXmlSignature signature:
+                    _closedXmlSignatures.Remove(signature);
+                    break;
+
+                default:
+                    return;
+            }
+
+            StatusText.Text = "Строка удалена.";
+        }
+
+        /// <summary>Таблица, по которой вызвали контекстное меню.</summary>
+        private static DataGrid? GetContextMenuGrid(object sender) =>
+            ((sender as MenuItem)?.Parent as ContextMenu)?.PlacementTarget as DataGrid;
+
+        /// <summary>
+        /// Меню правой кнопки для таблицы подписей: у остальных таблиц меню
+        /// задано в разметке, здесь оно вешается кодом — так одинаково
+        /// для всех четырёх.
+        /// </summary>
+        private void AttachClosedXmlGridMenus()
+        {
+            if (ClosedXmlSignaturesGrid == null || ClosedXmlSignaturesGrid.ContextMenu != null)
+                return;
+
+            var menu = new ContextMenu();
+
+            var addItem = new MenuItem { Header = "Добавить строку" };
+            addItem.Click += OnGridAddRowClick;
+            menu.Items.Add(addItem);
+
+            var deleteItem = new MenuItem { Header = "Удалить строку" };
+            deleteItem.Click += OnGridDeleteRowClick;
+            menu.Items.Add(deleteItem);
+
+            ClosedXmlSignaturesGrid.ContextMenu = menu;
+        }
+
+        /// <summary>
+        /// Подсказки в шапках таблиц: что означают строка и колонка.
+        /// Наводите мышь на таблицу — видно правило чтения координат.
+        /// </summary>
+        private void AttachClosedXmlGridHints()
+        {
+            ToolTipService.SetToolTip(ClosedXmlCellsGrid,
+                "Ячейки блока: Строка — горизонтальная полоса сверху вниз (1 — верх листа), " +
+                "Колонка — вертикальная полоса слева направо (1 — левый край), «До кол.» — объединение.");
+
+            ToolTipService.SetToolTip(ClosedXmlTableEditor,
+                "Таблица: «Колонки таблицы» — графы бланка (поле набора, заголовок, ширина, формат), " +
+                "«Уровни шапки» — подписи графов (Уровень 0 — верхний, Строк — вертикальное объединение).");
+
+            ToolTipService.SetToolTip(ClosedXmlSignaturesGrid,
+                "Подписи: Текст подписи, Колонка — слева направо, До кол. — объединение.");
+        }
+
+        /// <summary>
+        /// Масштаб табличного вида: по лзунку или по Ctrl+колесу.
+        ///
+        /// Увеличивается сам лист (LayoutTransform), поэтому полосы прокрутки
+        /// считают уже увеличенный размер — ничего не обрезается.
+        /// </summary>
+        private void ApplyClosedXmlSheetZoom(double zoomPercent)
+        {
+            if (ClosedXmlSheetGridHost == null)
+                return;
+
+            var clamped = Math.Clamp(zoomPercent, 50, 200);
+            var scale = clamped / 100d;
+
+            ClosedXmlSheetGridHost.LayoutTransform = new System.Windows.Media.ScaleTransform(scale, scale);
+
+            if (ClosedXmlSheetZoomText != null)
+                ClosedXmlSheetZoomText.Text = $"{Math.Round(clamped)}%";
+
+            if (ClosedXmlSheetZoomSlider != null && Math.Abs(ClosedXmlSheetZoomSlider.Value - clamped) > 0.5)
+                ClosedXmlSheetZoomSlider.Value = clamped;
+        }
+
+        private void OnClosedXmlSheetZoomChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+            ApplyClosedXmlSheetZoom(e.NewValue);
+
+        /// <summary>
+        /// Колесо мыши: с зажатым Ctrl — масштаб, без Ctrl — обычная прокрутка листа.
+        /// Так же ведёт себя Excel, поэтому привычка не ломается.
+        /// </summary>
+        private void OnClosedXmlSheetPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control)
+                return;
+
+            ApplyClosedXmlSheetZoom((ClosedXmlSheetZoomSlider?.Value ?? 100) + (e.Delta > 0 ? 10 : -10));
+            e.Handled = true;
+        }
+
+        private void OnRefreshClosedXmlTableClick(object sender, RoutedEventArgs e) => RefreshClosedXmlSheetViewAllBlocks();
+
+        /// <summary>
+        /// Рисует ВЕСЬ лист как таблицу: все блоки сверху вниз, как при печати.
+        ///
+        /// Раньше вид строился по текущему блоку и зависел от выбора в списке блоков —
+        /// теперь рисуется лист целиком: заголовки и строки, шапка таблицы с уровнями и
+        /// графы, итоги, подписи. Строки считаются сверху вниз, колонки слева направо.
+        /// </summary>
+        private void RefreshClosedXmlSheetViewAllBlocks()
+        {
+            if (_closedXmlSheet == null || ClosedXmlSheetGridHost == null)
+                return;
+
+            ClosedXmlSheetGridHost.Children.Clear();
+            ClosedXmlSheetGridHost.ColumnDefinitions.Clear();
+            ClosedXmlSheetGridHost.RowDefinitions.Clear();
+
+            var columns = _closedXmlSheet.GridColumns > 0 ? _closedXmlSheet.GridColumns : 40;
+            var rows = new List<List<(int Column, int Span, string Text, string Info, string Fill, ClosedXmlCellEdit? Edit)>>();
+
+            foreach (var block in _closedXmlSheet.Blocks)
+            {
+                if (block == null)
+                    continue;
+
+                if (string.Equals(block.Type, "TabularSection", StringComparison.Ordinal) && block.Table != null)
+                {
+                    var levelIndex = 0;
+                    foreach (var level in block.Table.HeaderLevels)
+                    {
+                        var levelCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                        foreach (var headerCell in level.Cells)
+                        {
+                            var from = Math.Max(1, headerCell.Column);
+                            var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
+                            levelCells.Add((from, Math.Max(1, to - from + 1), headerCell.Text ?? string.Empty,
+                                $"Шапка таблицы: уровень {levelIndex}, колонки {from}–{to}", headerCell.Fill ?? string.Empty, null));
+                        }
+
+                        rows.Add(levelCells);
+                        levelIndex++;
+                    }
+
+                    // Строка данных: каждая графа на своих узких колонках.
+                    var columnCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                    var position = 1;
+                    foreach (var column in block.Table.Columns)
+                    {
+                        if (column == null)
+                            continue;
+
+                        var span = column.Span > 0 ? column.Span : 1;
+                        columnCells.Add((position, span, column.Header ?? column.Field ?? string.Empty,
+                            $"Графа: поле «{column.Field}», ширина {column.Width:0.#}, формат «{column.NumberFormat}»",
+                            string.Empty, null));
+                        position += span;
+                    }
+
+                    rows.Add(columnCells);
+
+                    if (block.Table.GrandTotal != null)
+                        rows.Add(new List<(int, int, string, string, string, ClosedXmlCellEdit?)>
+                        {
+                            (1, columns, block.Table.GrandTotal.Label, "Общий итог таблицы", "#EEF2F6", null)
+                        });
+
+                    foreach (var total in block.Table.ExtraTotals)
+                        rows.Add(new List<(int, int, string, string, string, ClosedXmlCellEdit?)>
+                        {
+                            (1, columns, total.Label, "Дополнительный итог", "#EEF2F6", null)
+                        });
+
+                    continue;
+                }
+
+                if (string.Equals(block.Type, "SignaturesRow", StringComparison.Ordinal))
+                {
+                    var signatureCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                    foreach (var signature in block.Signatures)
+                    {
+                        if (signature == null)
+                            continue;
+
+                        var from = Math.Max(1, signature.Column);
+                        var to = signature.MergeToColumn > from ? signature.MergeToColumn : from;
+                        signatureCells.Add((from, Math.Max(1, to - from + 1), signature.Text ?? string.Empty,
+                            $"Подпись: колонки {from}–{to}", string.Empty, null));
+                    }
+
+                    rows.Add(signatureCells);
+                    continue;
+                }
+
+                // Текстовые блоки: каждая строка блока — строка листа.
+                foreach (var textRow in block.Rows)
+                {
+                    if (textRow == null)
+                        continue;
+
+                    var textCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                    foreach (var cellLayout in textRow.Cells.OrderBy(item => item.Column))
+                    {
+                        if (cellLayout == null)
+                            continue;
+
+                        var from = Math.Max(1, cellLayout.Column);
+                        var span = cellLayout.MergeToColumn > from ? cellLayout.MergeToColumn - from + 1 : 1;
+                        var hasField = !string.IsNullOrWhiteSpace(cellLayout.TakeFromField);
+                        var text = hasField ? cellLayout.TakeFromField! : cellLayout.Text ?? string.Empty;
+
+                        var editable = _closedXmlCells.FirstOrDefault(item =>
+                            item.Row == textRow.Row && item.Column == from);
+
+                        textCells.Add((from, span, text,
+                            hasField
+                                ? $"Строка {textRow.Row}, колонка {from}: значение из поля «{cellLayout.TakeFromField}» (строка набора {cellLayout.TakeFromRow})"
+                                : $"Строка {textRow.Row}, колонка {from}: текст «{cellLayout.Text}»",
+                            cellLayout.Fill ?? string.Empty, editable));
+                    }
+
+                    rows.Add(textCells);
+                }
+            }
+
+            var rowCount = Math.Max(1, rows.Count);
+
+            // Первая колонка — номера строк, первая строка — номера колонок, как в Excel.
+            ClosedXmlSheetGridHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(26) });
+            for (var index = 0; index < columns; index++)
+                ClosedXmlSheetGridHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+
+            ClosedXmlSheetGridHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
+            for (var index = 0; index < rowCount; index++)
+                ClosedXmlSheetGridHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) });
+
+            // Угол и нумерация: сверху — номера колонок, слева — номера строк.
+            ClosedXmlSheetGridHost.Children.Add(CreateGridHeaderCell(0, 0, string.Empty, "#E8EDF2"));
+            for (var index = 0; index < columns; index++)
+                ClosedXmlSheetGridHost.Children.Add(CreateGridHeaderCell(index + 1, 0, (index + 1).ToString(), "#E8EDF2"));
+
+            for (var index = 0; index < rowCount; index++)
+                ClosedXmlSheetGridHost.Children.Add(CreateGridHeaderCell(0, index + 1, (index + 1).ToString(), "#F3F5F7"));
+
+            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                foreach (var item in rows[rowIndex])
+                {
+                    var column = Math.Clamp(item.Column - 1, 0, columns - 1);
+                    var span = Math.Clamp(item.Span, 1, columns - column);
+
+                    var blockCell = new Border
+                    {
+                        BorderBrush = System.Windows.Media.Brushes.LightGray,
+                        BorderThickness = new Thickness(0.5),
+                        Background = ParseGridCellBrush(item.Fill),
+                        Padding = new Thickness(2, 0, 2, 0),
+                        ToolTip = item.Info,
+                        Child = new TextBlock
+                        {
+                            Text = item.Text,
+                            FontSize = 9,
+                            TextTrimming = TextTrimming.CharacterEllipsis,
+                            VerticalAlignment = VerticalAlignment.Center
+                        }
+                    };
+
+                    var editable = item.Edit;
+                    blockCell.MouseLeftButtonUp += (_, _) => ClosedXmlTableCellInfo.Text = item.Info;
+
+                    if (editable != null)
+                    {
+                        blockCell.MouseLeftButtonDown += (_, args) =>
+                        {
+                            if (args.ClickCount == 2)
+                                EditSheetCell(editable!);
+                        };
+                        blockCell.MouseRightButtonUp += (_, _) => ShowSheetCellMenu(blockCell, editable!);
+                    }
+
+                    // +1 — сдвиг под шапку с нумерацией: колонка 1 листа — вторая на экране.
+                    Grid.SetColumn(blockCell, column + 1);
+                    Grid.SetRow(blockCell, rowIndex + 1);
+                    Grid.SetColumnSpan(blockCell, span);
+                    ClosedXmlSheetGridHost.Children.Add(blockCell);
+                }
+            }
+
+            ClosedXmlTableCellInfo.Text = $"Лист целиком: блоков {_closedXmlSheet.Blocks.Count}, строк {rowCount}, колонок {columns}. Щёлкните по клетке.";
+        }
+
+        /// <summary>
+        /// Рисует лист как таблицу: строки × колонки, клетки с текстом или полем,
+        /// объединения и заливка как в бланке. Это второй вид на тот же макет
+        /// (данные те же — общая модель), поэтому правки в списках видны и здесь.
+        ///
+        /// Щелчок по клетке показывает её координаты и содержимое — новичку
+        /// так понятнее, что такое «строка» и «колонка».
+        /// </summary>
+        private void RefreshClosedXmlSheetView()
+        {
+            if (_closedXmlSheet == null || ClosedXmlSheetGridHost == null)
+                return;
+
+            ClosedXmlSheetGridHost.Children.Clear();
+            ClosedXmlSheetGridHost.ColumnDefinitions.Clear();
+            ClosedXmlSheetGridHost.RowDefinitions.Clear();
+
+            var lastColumn = _closedXmlCells.Count == 0
+                ? 1
+                : _closedXmlCells.Max(cell => Math.Max(1,
+                    cell.MergeToColumn > cell.Column ? cell.MergeToColumn : cell.Column));
+            var lastRow = _closedXmlCells.Count == 0 ? 1 : _closedXmlCells.Max(cell => Math.Max(1, cell.Row));
+
+            // Колонок столько же, сколько у листа: в узкой сетке — её число.
+            var columns = _closedXmlSheet.GridColumns > 0
+                ? _closedXmlSheet.GridColumns
+                : Math.Min(lastColumn, 40);
+            var rows = Math.Min(lastRow, 200);
+
+            for (var index = 0; index < columns; index++)
+                ClosedXmlSheetGridHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+
+            for (var index = 0; index < rows; index++)
+                ClosedXmlSheetGridHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) });
+
+            foreach (var cell in _closedXmlCells)
+            {
+                var column = Math.Clamp(cell.Column - 1, 0, columns - 1);
+                var row = Math.Clamp(cell.Row - 1, 0, rows - 1);
+                var span = cell.MergeToColumn > cell.Column
+                    ? Math.Min(columns - column, cell.MergeToColumn - cell.Column + 1)
+                    : 1;
+
+                var hasField = !string.IsNullOrWhiteSpace(cell.TakeFromField);
+                var text = hasField ? cell.TakeFromField! : cell.Text ?? string.Empty;
+
+                var info = $"Клетка: строка {cell.Row}, колонка {cell.Column}" +
+                           (span > 1 ? $", объединение до {cell.Column + span - 1}" : string.Empty) +
+                           (hasField
+                               ? $", значение из поля «{cell.TakeFromField}» (строка набора {cell.TakeFromRow})"
+                               : $", текст «{cell.Text}»");
+
+                var block = new Border
+                {
+                    BorderBrush = System.Windows.Media.Brushes.LightGray,
+                    BorderThickness = new Thickness(0.5),
+                    Background = ParseGridCellBrush(cell.Fill),
+                    Padding = new Thickness(2, 0, 2, 0),
+                    ToolTip = info,
+                    Child = new TextBlock
+                    {
+                        Text = text,
+                        FontSize = 9,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                };
+
+                block.MouseLeftButtonUp += (_, _) => ClosedXmlTableCellInfo.Text = info;
+                // Этап 2: правка прямо в сетке — двойной щелчок и правая кнопка.
+                block.MouseLeftButtonDown += (_, args) =>
+                {
+                    if (args.ClickCount == 2)
+                        EditSheetCell(cell);
+                };
+                block.MouseRightButtonUp += (_, _) => ShowSheetCellMenu(block, cell);
+
+                Grid.SetColumn(block, column);
+                Grid.SetRow(block, row);
+                Grid.SetColumnSpan(block, span);
+                ClosedXmlSheetGridHost.Children.Add(block);
+            }
+
+            ClosedXmlTableCellInfo.Text = $"Клеток: {_closedXmlCells.Count}; строк видно: {rows}, колонок: {columns}. Щёлкните по клетке.";
+        }
+
+        /// <summary>
+        /// Ячейка нумерации: номера колонок сверху и строк слева, как в Excel.
+        /// </summary>
+        private Border CreateGridHeaderCell(int column, int row, string text, string fill)
+        {
+            var cell = new Border
+            {
+                BorderBrush = System.Windows.Media.Brushes.Silver,
+                BorderThickness = new Thickness(0.5),
+                Background = ParseGridCellBrush(fill),
+                Child = new TextBlock
+                {
+                    Text = text,
+                    FontSize = 9,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = System.Windows.Media.Brushes.DimGray,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                ToolTip = column == 0 && row == 0
+                    ? "Лист: сверху номера колонок, слева номера строк"
+                    : column == 0
+                        ? $"Строка {row} листа"
+                        : $"Колонка {column} листа"
+            };
+
+            Grid.SetColumn(cell, column);
+            Grid.SetRow(cell, row);
+            return cell;
+        }
+
+        /// <summary>Заливка клетки для табличного вида.</summary>
+        private static System.Windows.Media.Brush ParseGridCellBrush(string? fill)
+        {
+            if (string.IsNullOrWhiteSpace(fill))
+                return System.Windows.Media.Brushes.Transparent;
+
+            try
+            {
+                return (System.Windows.Media.Brush)new BrushConverter().ConvertFrom(fill)!;
+            }
+            catch
+            {
+                return System.Windows.Media.Brushes.Transparent;
+            }
+        }
+
+        /// <summary>
+        /// Правка клетки прямо из табличного вида: тот же диалог, что при
+        /// добавлении, но заполненный текущими значениями. Оформление, которого
+        /// нет в диалоге (кегль, поворот, рамка), сохраняется как было.
+        /// </summary>
+        private void EditSheetCell(ClosedXmlCellEdit cell)
+        {
+            if (_closedXmlSheet == null)
+                return;
+
+            var blockName = string.IsNullOrWhiteSpace(_closedXmlEditingBlock?.Name)
+                ? _closedXmlEditingBlock?.TypeLabel ?? "блок"
+                : _closedXmlEditingBlock!.Name;
+
+            var fields = _reportFields
+                .Select(field => field.FieldName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var dialog = new ClosedXmlCellDialog(_closedXmlSheet.GridColumns, fields, cell.Row, cell.Column, blockName)
+            {
+                Owner = this
+            };
+            dialog.LoadForEdit(cell, blockName);
+
+            if (dialog.ShowDialog() != true || dialog.Result == null)
+                return;
+
+            var result = dialog.Result;
+            cell.Row = result.Row;
+            cell.Column = result.Column;
+            cell.MergeToColumn = result.MergeToColumn;
+            cell.Text = result.Text;
+            cell.TakeFromRow = result.TakeFromRow;
+            cell.TakeFromField = result.TakeFromField;
+            cell.Bold = result.Bold;
+            cell.WrapText = result.WrapText;
+
+            RefreshClosedXmlJson();
+            ClosedXmlTableCellInfo.Text = $"Клетка изменена: строка {cell.Row}, колонка {cell.Column}.";
+        }
+
+        /// <summary>Правая кнопка по клетке в табличном виде: изменить или удалить.</summary>
+        private void ShowSheetCellMenu(Border block, ClosedXmlCellEdit cell)
+        {
+            var menu = new ContextMenu();
+
+            var editItem = new MenuItem { Header = "Изменить клетку" };
+            editItem.Click += (_, _) => EditSheetCell(cell);
+            menu.Items.Add(editItem);
+
+            var deleteItem = new MenuItem
+            {
+                Header = "Удалить клетку",
+                Foreground = System.Windows.Media.Brushes.Firebrick
+            };
+            deleteItem.Click += (_, _) => DeleteSheetCell(cell);
+            menu.Items.Add(deleteItem);
+
+            menu.PlacementTarget = block;
+            menu.IsOpen = true;
+        }
+
+        /// <summary>Удаляет клетку из табличного вида — с подтверждением.</summary>
+        private void DeleteSheetCell(ClosedXmlCellEdit cell)
+        {
+            var answer = MessageBox.Show(
+                $"Удалить клетку (строка {cell.Row}, колонка {cell.Column})?",
+                "Удаление клетки",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            _closedXmlCells.Remove(cell);
+            RefreshClosedXmlJson();
+            ClosedXmlTableCellInfo.Text = "Клетка удалена.";
         }
 
         private void OnNewBlankClosedXmlLayoutClick(object sender, RoutedEventArgs e)
@@ -3042,6 +3715,273 @@ namespace BIS.ERP.Views
             TextRotation = TextRotation,
             WrapText = WrapText
         };
+    }
+
+    /// <summary>
+    /// Диалог «Добавление колонки таблицы»: у таблицы добавляется графа,
+    /// а не ячейка заголовка, поэтому и поля другие.
+    /// </summary>
+    public class ClosedXmlColumnDialog : Window
+    {
+        private readonly ComboBox _fieldCombo = new() { Width = 380 };
+        private readonly TextBox _headerBox = new() { Width = 380, Text = "Заголовок" };
+        private readonly TextBox _widthBox = new() { Width = 70, Text = "14" };
+        private readonly TextBox _formatBox = new() { Width = 140, Text = "#,##0.00" };
+
+        public ClosedXmlColumn? Result { get; private set; }
+
+        public ClosedXmlColumnDialog(string blockName, List<string> fields)
+        {
+            var target = string.IsNullOrWhiteSpace(blockName) ? "таблица" : blockName;
+            Title = $"Добавление колонки — {target}";
+            Width = 620;
+            SizeToContent = SizeToContent.Height;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+            var panel = new StackPanel { Margin = new Thickness(16) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"Добавление колонки таблицы — {target}",
+                FontWeight = FontWeights.Bold,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 0, 8)
+            });
+            panel.Children.Add(new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = System.Windows.Media.Brushes.Gray,
+                FontSize = 11,
+                Margin = new Thickness(0, 0, 0, 10),
+                Text = "Колонка — графа бланка. «Поле набора» — откуда берётся значение, «Заголовок» печатается в шапке таблицы. Выравнивание, жирный и поворот правятся в таблице после добавления."
+            });
+
+            foreach (var field in fields)
+                _fieldCombo.Items.Add(field);
+            if (_fieldCombo.Items.Count > 0)
+                _fieldCombo.SelectedIndex = 0;
+
+            AddRow(panel, "Поле набора (значение):", _fieldCombo);
+            AddRow(panel, "Заголовок графы:", _headerBox);
+            AddRow(panel, "Ширина:", _widthBox);
+            AddRow(panel, "Формат числа:", _formatBox);
+
+            var buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 16, 0, 0)
+            };
+            var ok = new Button { Content = "Добавить", Width = 120, Height = 30, IsDefault = true };
+            ok.Click += (_, _) => Accept();
+            var cancel = new Button
+            {
+                Content = "Отмена", Width = 100, Height = 30, Margin = new Thickness(8, 0, 0, 0), IsCancel = true
+            };
+            buttons.Children.Add(ok);
+            buttons.Children.Add(cancel);
+            panel.Children.Add(buttons);
+
+            Content = panel;
+        }
+
+        private static void AddRow(Panel panel, string label, FrameworkElement control)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+            row.Children.Add(new TextBlock
+            {
+                Text = label,
+                Width = 180,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            });
+            row.Children.Add(control);
+            panel.Children.Add(row);
+        }
+
+        private static int ParseInt(string? text, int fallback) =>
+            int.TryParse(text, out var value) ? value : fallback;
+
+        private void Accept()
+        {
+            if (_fieldCombo.SelectedItem is not string field || string.IsNullOrWhiteSpace(field))
+            {
+                MessageBox.Show(
+                    "Выберите поле набора — по нему колонка берёт значение.",
+                    "Колонка таблицы",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            Result = new ClosedXmlColumn
+            {
+                Field = field,
+                Header = string.IsNullOrWhiteSpace(_headerBox.Text) ? field : _headerBox.Text.Trim(),
+                Width = Math.Max(4, ParseInt(_widthBox.Text, 14)),
+                NumberFormat = _formatBox.Text?.Trim() ?? string.Empty,
+                Align = "Right"
+            };
+
+            DialogResult = true;
+        }
+    }
+
+    /// <summary>
+    /// Диалог «Новая ячейка»: те же поля, что в таблице, но словами —
+    /// понятно тому, кто вкладку ClosedXML открыл впервые.
+    /// </summary>
+    public class ClosedXmlCellDialog : Window
+    {
+        private readonly TextBox _rowBox = new() { Width = 70, Text = "1" };
+        private readonly TextBox _columnBox = new() { Width = 70 };
+        private readonly TextBox _mergeBox = new() { Width = 70 };
+        private readonly TextBox _textBox = new() { Width = 380 };
+        private readonly ComboBox _fieldCombo = new() { Width = 380 };
+        private readonly TextBox _takeFromRowBox = new() { Width = 70, Text = "0" };
+        private readonly CheckBox _boldCheck = new() { Content = "Жирный" };
+        private readonly CheckBox _wrapCheck = new() { Content = "Переносить длинный текст" };
+
+        public ClosedXmlCellEdit? Result { get; private set; }
+
+        public ClosedXmlCellDialog(int gridColumns, List<string> fields, int nextRow, int nextColumn,
+            string blockName)
+        {
+            var target = string.IsNullOrWhiteSpace(blockName) ? "блок" : blockName;
+            Title = $"Добавление ячейки — {target}";
+            Width = 620;
+            SizeToContent = SizeToContent.Height;
+            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+
+            _rowBox.Text = Math.Max(1, nextRow).ToString();
+            _columnBox.Text = Math.Max(1, nextColumn).ToString();
+
+            var panel = new StackPanel { Margin = new Thickness(16) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"Добавление ячейки — {target}",
+                FontWeight = FontWeights.Bold,
+                FontSize = 14,
+                Margin = new Thickness(0, 0, 0, 8)
+            });
+            panel.Children.Add(new TextBlock
+            {
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 12),
+                Text = (gridColumns > 0 ? $"Сетка листа: {gridColumns} колонок. " : string.Empty) +
+                       "Колонка — вертикальная полоса листа слева направо (1 — левый край). " +
+                       "Строка — горизонтальная полоса сверху вниз (1 — самая верхняя, где заголовок бланка)."
+            });
+
+            AddRow(panel, "Строка (сверху вниз):", _rowBox);
+            AddRow(panel, "Колонка (слева направо):", _columnBox);
+            AddRow(panel, "Объединить по колонку:", _mergeBox);
+            AddHint(panel, "Пусто или то же число — ячейка в одной колонке. 3 и 5 — ячейка займёт колонки 3–5.");
+            AddRow(panel, "Текст:", _textBox);
+            AddHint(panel, "Можно вписать {Параметр} — он появится на вкладке «Параметры».");
+
+            _fieldCombo.Items.Add("(не подставлять)");
+            foreach (var field in fields)
+                _fieldCombo.Items.Add(field);
+            _fieldCombo.SelectedIndex = 0;
+            AddRow(panel, "Поле набора:", _fieldCombo);
+            AddRow(panel, "Из строки набора:", _takeFromRowBox);
+            AddHint(panel, "1 — первая строка данных, -1 — последняя, 0 — брать текст из поля «Текст».");
+
+            var checks = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+            _wrapCheck.Margin = new Thickness(18, 0, 0, 0);
+            checks.Children.Add(_boldCheck);
+            checks.Children.Add(_wrapCheck);
+            panel.Children.Add(checks);
+
+            var buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 16, 0, 0)
+            };
+            var ok = new Button { Content = "Добавить", Width = 120, Height = 30, IsDefault = true };
+            ok.Click += (_, _) => Accept();
+            var cancel = new Button
+            {
+                Content = "Отмена", Width = 100, Height = 30, Margin = new Thickness(8, 0, 0, 0), IsCancel = true
+            };
+            buttons.Children.Add(ok);
+            buttons.Children.Add(cancel);
+            panel.Children.Add(buttons);
+
+            Content = panel;
+        }
+
+        private static void AddRow(Panel panel, string label, FrameworkElement control)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+            row.Children.Add(new TextBlock
+            {
+                Text = label,
+                Width = 180,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            });
+            row.Children.Add(control);
+            panel.Children.Add(row);
+        }
+
+        private static void AddHint(Panel panel, string text) =>
+            panel.Children.Add(new TextBlock
+            {
+                Text = text,
+                FontSize = 11,
+                Foreground = System.Windows.Media.Brushes.Gray,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(180, 2, 0, 0)
+            });
+
+        private static int ParseInt(string? text, int fallback) =>
+            int.TryParse(text, out var value) ? value : fallback;
+
+        /// <summary>
+        /// Заполняет диалог текущими значениями клетки — для правки
+        /// прямо из табличного вида.
+        /// </summary>
+        public void LoadForEdit(ClosedXmlCellEdit cell, string blockName)
+        {
+            var target = string.IsNullOrWhiteSpace(blockName) ? "блок" : blockName;
+            Title = $"Изменение клетки — {target}";
+
+            _rowBox.Text = Math.Max(1, cell.Row).ToString();
+            _columnBox.Text = Math.Max(1, cell.Column).ToString();
+            _mergeBox.Text = cell.MergeToColumn > cell.Column ? cell.MergeToColumn.ToString() : string.Empty;
+            _textBox.Text = cell.Text ?? string.Empty;
+            _takeFromRowBox.Text = cell.TakeFromRow.ToString();
+            _boldCheck.IsChecked = cell.Bold;
+            _wrapCheck.IsChecked = cell.WrapText;
+
+            var fieldIndex = string.IsNullOrWhiteSpace(cell.TakeFromField)
+                ? 0
+                : _fieldCombo.Items.IndexOf(cell.TakeFromField);
+            _fieldCombo.SelectedIndex = fieldIndex >= 0 ? fieldIndex : 0;
+        }
+
+        private void Accept()
+        {
+            Result = new ClosedXmlCellEdit
+            {
+                Row = ParseInt(_rowBox.Text, 1),
+                Column = ParseInt(_columnBox.Text, 1),
+                MergeToColumn = ParseInt(_mergeBox.Text, 0),
+                Text = _textBox.Text ?? string.Empty,
+                TakeFromRow = ParseInt(_takeFromRowBox.Text, 0),
+                TakeFromField = _fieldCombo.SelectedIndex <= 0
+                    ? string.Empty
+                    : _fieldCombo.SelectedItem?.ToString() ?? string.Empty,
+                Bold = _boldCheck.IsChecked == true,
+                WrapText = _wrapCheck.IsChecked == true,
+                Align = "Left",
+                Border = "None"
+            };
+
+            DialogResult = true;
+        }
     }
 
     /// <summary>
