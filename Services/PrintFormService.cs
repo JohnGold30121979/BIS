@@ -25,12 +25,8 @@ namespace BIS.ERP.Services
         private static readonly HashSet<string> EnsuredSchemaKeys = new(StringComparer.OrdinalIgnoreCase);
         private static readonly string[] CashOrderPrintFormCodes =
         {
-            "cash.receipt.foxpro",
             "cash.receipt.native",
-            "cash.payment.foxpro",
-            "cash.payment.native",
-            "standard.frx.finance.cash-receipt-order",
-            "standard.frx.finance.cash-payment-order"
+            "cash.payment.native"
         };
 
         public PrintFormService(AppDbContext context)
@@ -92,29 +88,11 @@ namespace BIS.ERP.Services
                     CONSTRAINT ""FK_ReportElementMappings_Reports_ReportId"" FOREIGN KEY (""ReportId"")
                         REFERENCES ""Reports"" (""Id"") ON DELETE CASCADE
                 );
-                CREATE TABLE IF NOT EXISTS ""FoxProReportFieldRules"" (
-                    ""Id"" uuid NOT NULL,
-                    ""ProfileCode"" varchar(120) NOT NULL DEFAULT '',
-                    ""SourcePattern"" varchar(300) NOT NULL DEFAULT '',
-                    ""CanonicalField"" varchar(120) NOT NULL DEFAULT '',
-                    ""TargetFieldName"" varchar(300) NOT NULL DEFAULT '',
-                    ""TargetDisplayName"" varchar(300) NOT NULL DEFAULT '',
-                    ""IsRegex"" boolean NOT NULL DEFAULT false,
-                    ""IsActive"" boolean NOT NULL DEFAULT true,
-                    ""Priority"" integer NOT NULL DEFAULT 100,
-                    ""Description"" text NOT NULL DEFAULT '',
-                    ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
-                    ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
-                    CONSTRAINT ""PK_FoxProReportFieldRules"" PRIMARY KEY (""Id"")
-                );
                 CREATE INDEX IF NOT EXISTS ""IX_Reports_PrintForms""
                     ON ""Reports"" (""DataSourceId"", ""IsPrintForm"", ""IsActive"");
                 CREATE INDEX IF NOT EXISTS ""IX_ReportElementMappings_ReportId_ElementOrder""
                     ON ""ReportElementMappings"" (""ReportId"", ""ElementOrder"");
-                CREATE INDEX IF NOT EXISTS ""IX_FoxProReportFieldRules_SourcePattern""
-                    ON ""FoxProReportFieldRules"" (""SourcePattern"");
-                CREATE INDEX IF NOT EXISTS ""IX_FoxProReportFieldRules_ProfileCode_IsActive""
-                    ON ""FoxProReportFieldRules"" (""ProfileCode"", ""IsActive"");";
+                ";
             await _context.Database.ExecuteSqlRawAsync(sql);
             lock (SchemaSyncLock)
             {
@@ -137,6 +115,70 @@ namespace BIS.ERP.Services
             var existingReports = await _context.Reports
                 .Where(item => item.Code.StartsWith("cash.receipt.") || item.Code.StartsWith("cash.payment."))
                 .ToListAsync();
+
+            /// <summary>
+            /// Заводит или обновляет печатную форму кассового ордера на макете ClosedXML.
+            /// Источник — объект набора данных (ReportSource), макет сеется один раз.
+            /// </summary>
+            void UpsertClosedXmlCashOrderForm(
+                string code,
+                string name,
+                string titleText,
+                string description,
+                string reportType,
+                Guid? dataSourceId,
+                ClosedXmlReportLayout layout)
+            {
+                if (dataSourceId == null || deletedReportCodes.Contains(code))
+                    return;
+
+                var report = existingReports.FirstOrDefault(item => item.Code == code);
+                var isNewReport = report == null;
+                if (report == null)
+                {
+                    report = new Report
+                    {
+                        Id = Guid.NewGuid(),
+                        Code = code,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.Reports.Add(report);
+                }
+
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
+                    report.Name = name;
+                if (isNewReport || string.IsNullOrWhiteSpace(report.TitleText))
+                    report.TitleText = titleText;
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
+                    report.Description = description;
+
+                report.DataSourceType = "ReportSource";
+                report.DataSourceId = dataSourceId;
+                report.ReportType = reportType;
+                report.IsPrintForm = true;
+                report.IsSystem = true;
+                report.SourceFormat = "ClosedXml";
+                report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
+                report.IsActive = true;
+                // Основная форма: нативный вариант остаётся в списке и выбирается вручную.
+                report.IsDefault = true;
+                if (isNewReport || string.IsNullOrWhiteSpace(report.Icon))
+                    report.Icon = "🖨";
+                if (isNewReport)
+                {
+                    report.Order = 5;
+                    report.PageOrientation = "Portrait";
+                    report.ShowGridLines = false;
+                    report.ShowHeader = false;
+                    report.ShowFooter = false;
+                    report.ShowPageNumbers = false;
+                }
+
+                if (string.IsNullOrWhiteSpace(report.ClosedXmlLayout))
+                    report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(layout);
+
+                report.UpdatedAt = DateTime.UtcNow;
+            }
 
             void UpsertCashReport(
                 string code,
@@ -200,29 +242,13 @@ namespace BIS.ERP.Services
                 report.UpdatedAt = DateTime.UtcNow;
             }
 
-            UpsertCashReport(
-                "cash.receipt.foxpro",
-                "Приходный кассовый ордер с квитанцией",
-                "Приходный кассовый ордер",
-                "ПКО и отрывная квитанция на одном листе",
-                "FoxProLayout",
-                "FoxProFRX",
-                "Landscape",
-                10,
-                true,
-                JsonSerializer.Serialize(GenerateCashReceiptFrxTemplate(cashOrder), new JsonSerializerOptions { WriteIndented = true }));
+            // Прежний FRX-вариант приходного ордера (cash.receipt.foxpro) не создаётся:
+            // бланк ПКО — «Приходный кассовый ордер (ClosedXML)» ниже. Код помечен удалённым
+            // в DeletedStandardReports, поэтому повторно он не появится.
 
-            UpsertCashReport(
-                "cash.payment.foxpro",
-                "Расходный кассовый ордер",
-                "Расходный кассовый ордер",
-                "Унифицированная печатная форма РКО",
-                "FoxProLayout",
-                "FoxProFRX",
-                "Portrait",
-                10,
-                true,
-                JsonSerializer.Serialize(GenerateCashPaymentFrxTemplate(cashOrder), new JsonSerializerOptions { WriteIndented = true }));
+            // Прежний FRX-вариант расходного ордера (cash.payment.foxpro) не создаётся:
+            // бланк РКО — «Расходный кассовый ордер (ClosedXML)» ниже. Код помечен удалённым
+            // в DeletedStandardReports, поэтому повторно он не появится.
 
             UpsertCashReport(
                 "cash.receipt.native",
@@ -247,6 +273,37 @@ namespace BIS.ERP.Services
                 20,
                 false,
                 JsonSerializer.Serialize(CreateDefaultNativeTemplate("CashPaymentOrder"), new JsonSerializerOptions { WriteIndented = true }));
+
+            // Бланки ClosedXML: шапка (наименование, ОКПО, ИНН, подписи) — из карточки первичной
+            // организации документа, остальные клетки — из набора данных кассовых ордеров.
+            // Набор заводим здесь же: формы ссылаются на его источник (ReportSource), иначе
+            // печать не найдёт данные; в списке печатных форм документа они находятся по кодам
+            // cash.receipt.* и cash.payment.*.
+            var cashOrderDataSet = await new ReportDataSetService(_context).EnsureCashOrderPrintDataSetAsync();
+            var cashOrderSourceId = cashOrderDataSet == null
+                ? (Guid?)null
+                : await _context.ReportDataSets.AsNoTracking()
+                    .Where(item => item.Id == cashOrderDataSet.Id)
+                    .Select(item => item.MetadataObjectId)
+                    .FirstOrDefaultAsync();
+
+            UpsertClosedXmlCashOrderForm(
+                "cash.receipt.closedxml",
+                "Приходный кассовый ордер (ClosedXML)",
+                "Приходный кассовый ордер",
+                "Бланк КО-1 с отрывной квитанцией: шапка — реквизиты организации, данные — из кассового ордера.",
+                "CashReceiptOrder",
+                cashOrderSourceId,
+                ClosedXmlLayoutTemplates.CreateCashReceiptOrder("Приходный кассовый ордер"));
+
+            UpsertClosedXmlCashOrderForm(
+                "cash.payment.closedxml",
+                "Расходный кассовый ордер (ClosedXML)",
+                "Расходный кассовый ордер",
+                "Бланк КО-2: шапка — реквизиты и подписи организации, данные — из кассового ордера.",
+                "CashPaymentOrder",
+                cashOrderSourceId,
+                ClosedXmlLayoutTemplates.CreateCashPaymentOrder("Расходный кассовый ордер"));
 
             await _context.SaveChangesAsync();
         }
@@ -792,7 +849,9 @@ namespace BIS.ERP.Services
                 query = query.Where(item => item.IsActive);
 
             var forms = await query.ToListAsync();
-            foreach (var form in forms.Where(IsKnownCashOrderPrintForm))
+            // Бланкам ClosedXML источник подменять нельзя: их данные берёт набор данных,
+            // а сам объект-источник нужен пути печати.
+            foreach (var form in forms.Where(form => IsKnownCashOrderPrintForm(form) && !IsClosedXmlPrintForm(form)))
             {
                 form.DataSourceType = "Document";
                 form.DataSourceId = metadataId;
@@ -850,6 +909,9 @@ namespace BIS.ERP.Services
         {
             if (!report.IsActive)
                 throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            // Бланк ClosedXML берёт данные из своего набора данных, а не из полей документа.
+            if (IsClosedXmlPrintForm(report))
+                return await ExportClosedXmlDocumentAsync(report, recordId, toPdf: true);
             if (!report.DataSourceId.HasValue)
                 throw new InvalidOperationException("У печатной формы не указан документ-источник.");
 
@@ -881,6 +943,9 @@ namespace BIS.ERP.Services
         {
             if (!report.IsActive)
                 throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            // Бланк ClosedXML берёт данные из своего набора данных, а не из полей документа.
+            if (IsClosedXmlPrintForm(report))
+                return await ExportClosedXmlDocumentAsync(report, recordId, toPdf: false);
             if (!report.DataSourceId.HasValue)
                 throw new InvalidOperationException("У печатной формы не указан документ-источник.");
 
@@ -913,6 +978,9 @@ namespace BIS.ERP.Services
         {
             if (!report.IsActive)
                 throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            // Бланк ClosedXML берёт данные из своего набора данных, а не из документа.
+            if (IsClosedXmlPrintForm(report))
+                return await ExportClosedXmlDocumentAsync(report, invoiceId, toPdf: false, "invoice_id");
             if (!report.DataSourceId.HasValue)
                 throw new InvalidOperationException("У печатной формы не указан документ-источник.");
 
@@ -945,6 +1013,9 @@ namespace BIS.ERP.Services
         {
             if (!report.IsActive)
                 throw new InvalidOperationException("Выбранная печатная форма отключена.");
+            // Бланк ClosedXML берёт данные из своего набора данных, а не из документа.
+            if (IsClosedXmlPrintForm(report))
+                return await ExportClosedXmlDocumentAsync(report, invoiceId, toPdf: true, "invoice_id");
             if (!report.DataSourceId.HasValue)
                 throw new InvalidOperationException("У печатной формы не указан документ-источник.");
 
@@ -973,13 +1044,180 @@ namespace BIS.ERP.Services
             return BuildTemplateLayoutPdf(report, data, mappings);
         }
 
+        /// <summary>
+        /// Печатные формы счёта-фактуры: формы, привязанные к документу, и бланки ClosedXML.
+        ///
+        /// Бланк ClosedXML к документу не привязан: его данные собирает набор данных
+        /// («Счет-фактура НДС: позиции и реквизиты»), поэтому в список печатных форм документа
+        /// он сам не попадал. Для печати счёта-фактуры он показывается вместе с ними.
+        /// </summary>
+        public async Task<List<Report>> GetInvoicePrintFormsAsync(Guid metadataId, bool includeInactive = true)
+        {
+            var forms = await GetPrintFormsAsync(metadataId, includeInactive);
+
+            // Бланки ClosedXML собираются по выданным счетам-фактурам (doc_sales_invoice):
+            // их набор данных читает именно эту таблицу, поэтому в «Регистрации счет-фактур»
+            // они не предлагаются.
+            var document = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == metadataId);
+            if (document == null ||
+                !string.Equals(document.TableName, "doc_sales_invoice", StringComparison.OrdinalIgnoreCase))
+            {
+                return forms;
+            }
+
+            var closedXmlQuery = _context.Reports.AsNoTracking()
+                .Where(item => item.IsPrintForm
+                               && item.SourceFormat == "ClosedXml"
+                               && item.ClosedXmlLayout != null && item.ClosedXmlLayout != ""
+                               && (item.ReportType == "VatInvoiceVatKg" || item.ReportType == "VatInvoiceSt1"));
+            if (!includeInactive)
+                closedXmlQuery = closedXmlQuery.Where(item => item.IsActive);
+
+            var closedXmlForms = await closedXmlQuery.ToListAsync();
+            forms.AddRange(closedXmlForms.Where(candidate => forms.All(form => form.Id != candidate.Id)));
+
+            return forms
+                .OrderByDescending(item => item.IsDefault)
+                .ThenBy(item => item.Order)
+                .ThenBy(item => item.Name)
+                .ToList();
+        }
+
+        /// <summary>Ключевые колонки набора данных по документу: по одной из них печать берёт строки одного документа.</summary>
+        private static readonly string[] DocumentKeyColumns =
+            { "invoice_id", "cash_order_id", "document_id", "record_id" };
+
+        /// <summary>Признак печатной формы на визуальном макете ClosedXML.</summary>
+        private static bool IsClosedXmlPrintForm(Report report) =>
+            string.Equals(report.SourceFormat, "ClosedXml", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(report.ClosedXmlLayout);
+
+        /// <summary>
+        /// Выводит печатную форму документа по макету ClosedXML.
+        ///
+        /// Данные берутся из набора данных отчёта, отфильтрованного по одному документу:
+        /// макет бланка рассчитан на строки этого набора, а не на поля документа.
+        /// </summary>
+        private async Task<byte[]> ExportClosedXmlDocumentAsync(
+            Report report,
+            Guid recordId,
+            bool toPdf,
+            string? keyColumn = null)
+        {
+            var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out var layoutError);
+            if (layout == null)
+                throw new InvalidOperationException(layoutError);
+
+            var data = await BuildClosedXmlDocumentDataAsync(report, recordId, keyColumn);
+            AddClosedXmlComputedColumns(data);
+
+            var prepared = ClosedXmlReportRenderer.PrepareData(data, report);
+            return toPdf
+                ? ClosedXmlReportRenderer.RenderToPdfBytes(layout, prepared)
+                : ClosedXmlReportRenderer.RenderToBytes(layout, prepared);
+        }
+
+        /// <summary>
+        /// Строки набора данных отчёта по одному документу.
+        ///
+        /// Набор отдаёт строки всех документов за период, поэтому его запрос выполняется как
+        /// подзапрос с фильтром по идентификатору документа; период и организация выборку
+        /// не ограничивают. Ключевая колонка определяется по имени или задаётся явно.
+        /// </summary>
+        private async Task<DataTable> BuildClosedXmlDocumentDataAsync(Report report, Guid recordId, string? keyColumn = null)
+        {
+            if (!report.DataSourceId.HasValue)
+                throw new InvalidOperationException($"У отчёта «{report.Name}» не выбран набор данных.");
+
+            var source = await _context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == report.DataSourceId.Value)
+                ?? throw new InvalidOperationException($"Источник данных отчёта «{report.Name}» не найден.");
+
+            var dataSetService = new ReportDataSetService(_context);
+            var dataSet = await dataSetService.GetBySourceAsync(source)
+                ?? throw new InvalidOperationException($"Для отчёта «{report.Name}» не найден набор данных.");
+
+            if (ReportDataSetService.IsSystemDataSet(dataSet))
+                throw new InvalidOperationException(
+                    $"Печатная форма «{report.Name}» не может быть выведена: её данные — системный расчёт.");
+
+            var key = keyColumn ?? DocumentKeyColumns.FirstOrDefault(
+                candidate => dataSet.SqlText.Contains(candidate, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw new InvalidOperationException(
+                    $"В наборе данных отчёта «{report.Name}» нет колонки с идентификатором документа " +
+                    $"({string.Join(", ", DocumentKeyColumns)}).");
+            }
+
+            var documentRows = new ReportDataSet
+            {
+                Id = dataSet.Id,
+                Code = dataSet.Code,
+                Name = dataSet.Name,
+                Description = dataSet.Description,
+                Kind = dataSet.Kind,
+                CalculatorCode = dataSet.CalculatorCode,
+                ParameterDefinitions = dataSet.ParameterDefinitions,
+                IsActive = true,
+                IsSystem = dataSet.IsSystem,
+                MetadataObjectId = dataSet.MetadataObjectId,
+                SqlText = $"SELECT * FROM ({dataSet.SqlText}) AS print_rows WHERE print_rows.{key} = @DocumentId"
+            };
+
+            var parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PeriodStart"] = new DateTime(2000, 1, 1),
+                ["PeriodEnd"] = new DateTime(2100, 1, 1),
+                ["OrganizationId"] = string.Empty,
+                ["DocumentId"] = recordId
+            };
+
+            return await dataSetService.ExecuteAsync(documentRows, parameters);
+        }
+
+        /// <summary>
+        /// Колонки, которых нет в SQL, но которые нужны бланкам: сумма прописью и дата словами.
+        /// Считаются тем же кодом, что и в шаблонной печати (RussianMoneyInWords, месяцы в родительном падеже).
+        /// </summary>
+        private static void AddClosedXmlComputedColumns(DataTable data)
+        {
+            if (data.Rows.Count == 0)
+                return;
+
+            var hasAmount = data.Columns.Contains("amount");
+            var hasDate = data.Columns.Contains("doc_date");
+            if (!hasAmount && !hasDate)
+                return;
+
+            if (hasAmount && !data.Columns.Contains("amount_in_words"))
+                data.Columns.Add("amount_in_words", typeof(string));
+            if (hasDate && !data.Columns.Contains("date_text"))
+                data.Columns.Add("date_text", typeof(string));
+
+            foreach (DataRow row in data.Rows)
+            {
+                if (hasAmount && row["amount"] != DBNull.Value && row["amount"] != null)
+                {
+                    var amount = Convert.ToDecimal(row["amount"], CultureInfo.InvariantCulture);
+                    row["amount_in_words"] = RussianMoneyInWords(Math.Abs(amount));
+                }
+
+                if (hasDate && row["doc_date"] != DBNull.Value && row["doc_date"] != null)
+                {
+                    var date = Convert.ToDateTime(row["doc_date"], CultureInfo.InvariantCulture);
+                    row["date_text"] = $"{date.Day} {GetRussianMonthName(date.Month).ToUpperInvariant()} {date.Year} г.";
+                }
+            }
+        }
+
         public byte[] ExportTemplatePreview(Report report) => ExportTemplatePreview(report, null);
 
         public byte[] ExportTemplatePreview(
             Report report,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
-            EnsureFrxEnabled();
 
             var sample = new CashOrderPrintData
             {
@@ -1002,83 +1240,36 @@ namespace BIS.ERP.Services
 
         public byte[] ExportReportTemplatePreview(DataTable dataTable, Report report)
         {
-            EnsureFrxEnabled();
-            var rules = new FoxProReportFieldRuleService(_context).GetActiveRulesSafe();
-            return ExportReportTemplatePreview(dataTable, report, rules);
+            return ExportReportTemplatePreview(dataTable, report, null);
         }
 
         public byte[] ExportReportTemplatePreview(
             DataTable dataTable,
             Report report,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules)
-        {
-            EnsureFrxEnabled();
-            return ExportReportTemplatePreview(dataTable, report, rules, null);
-        }
-
-        public byte[] ExportReportTemplatePreview(
-            DataTable dataTable,
-            Report report,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
-            EnsureFrxEnabled();
-
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
-            var data = BuildReportPreviewData(
-                dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>(), reportParameters);
-            return BuildTemplateLayoutPdf(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
+            var data = BuildReportPreviewData(dataTable, report, reportParameters);
+            return BuildTemplateLayoutPdf(report, data, report.ElementMappings.ToList(), dataTable);
         }
 
         public byte[] ExportReportTemplateExcel(DataTable dataTable, Report report)
         {
-            EnsureFrxEnabled();
-            var rules = new FoxProReportFieldRuleService(_context).GetActiveRulesSafe();
-            return ExportReportTemplateExcel(dataTable, report, rules);
+            return ExportReportTemplateExcel(dataTable, report, null);
         }
 
         public byte[] ExportReportTemplateExcel(
             DataTable dataTable,
             Report report,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules)
-        {
-            EnsureFrxEnabled();
-            return ExportReportTemplateExcel(dataTable, report, rules, null);
-        }
-
-        public byte[] ExportReportTemplateExcel(
-            DataTable dataTable,
-            Report report,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
-            EnsureFrxEnabled();
-
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
-            var data = BuildReportPreviewData(
-                dataTable, report, rules ?? Array.Empty<FoxProReportFieldRule>(), reportParameters);
-            return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
-        }
-
-        /// <summary>
-        /// Проверяет, что механизм FRX включён.
-        ///
-        /// Вывод по макетам FoxPro отключён на время перехода на ClosedXML.
-        /// Код сохранён полностью: чтобы вернуть механизм, достаточно установить
-        /// <see cref="ReportingFeatures.FrxEnabled"/> в true.
-        /// </summary>
-        private static void EnsureFrxEnabled()
-        {
-            if (!ReportingFeatures.FrxEnabled)
-            {
-                throw new InvalidOperationException(
-                    "Вывод по макетам FoxPro FRX отключён. " +
-                    "Включите ReportingFeatures.FrxEnabled или выберите формат ClosedXML.");
-            }
+            var data = BuildReportPreviewData(dataTable, report, reportParameters);
+            return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList(), dataTable);
         }
 
         public byte[] ExportProgrammaticReconciliationActPreview(DataTable dataTable, Report report)
@@ -1364,7 +1555,6 @@ namespace BIS.ERP.Services
         private static CashOrderPrintData BuildReportPreviewData(
             DataTable dataTable,
             Report report,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules = null,
             IReadOnlyDictionary<string, object>? reportParameters = null)
         {
             var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -1402,7 +1592,6 @@ namespace BIS.ERP.Services
                 // Сначала разбор строки акта сверки — он даёт содержательные значения
                 // под именами ved.*, db_cr.* и другими префиксами наборов данных.
                 AddReconciliationAliases(number, row, Add);
-                AddConfiguredFoxProRuleAliases(number, row, rules ?? Array.Empty<FoxProReportFieldRule>(), Add);
 
                 // Затем колонки данных — они закрывают оставшиеся имена.
                 foreach (DataColumn column in dataTable.Columns)
@@ -1608,7 +1797,6 @@ namespace BIS.ERP.Services
         }
         private static void AddReconciliationAliases(int number, DataRow row, Action<string, object?> add)
         {
-            var prefixes = FoxProReportKnowledgeBase.GetRowDatasetPrefixes(number);
             var name = ReadReconciliationOperation(row);
             var debit = ReadPreviewText(row, "Дебет", "debit_account", "schet", "deb");
             var credit = ReadPreviewText(row, "Кредит", "credit_account", "kor_sch", "korsch", "cred");
@@ -1617,16 +1805,7 @@ namespace BIS.ERP.Services
             var doc = ReadPreviewText(row, "N докум", "Документ", "Номер", "document_number", "nom_dok");
             var date = ReadPreviewText(row, "Дата", "document_date", "datobr");
             var module = ReadPreviewText(row, "Модуль", "module", "prs", "kod_arm");
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "operation_name", name);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "debit_account", debit);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "credit_account", credit);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "debit_amount", debitAmount);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "credit_amount", creditAmount);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "document_number", doc);
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "document_date", date);
-            // В макете колонка АРМ узкая, поэтому выводится первая буква названия модуля.
-            // В экранной таблице полное название модуля сохраняется.
-            FoxProReportKnowledgeBase.AddAliases(add, prefixes, "module", ShortenModuleName(module));
+          
         }
 
         /// <summary>
@@ -1637,44 +1816,6 @@ namespace BIS.ERP.Services
         {
             var value = (moduleName ?? string.Empty).Trim();
             return value.Length == 0 ? string.Empty : value[..1].ToUpperInvariant();
-        }
-
-        private static void AddConfiguredFoxProRuleAliases(
-            int number,
-            DataRow row,
-            IReadOnlyCollection<FoxProReportFieldRule> rules,
-            Action<string, object?> add)
-        {
-            if (rules.Count == 0)
-                return;
-
-            var prefixes = FoxProReportKnowledgeBase.GetRowDatasetPrefixes(number);
-            foreach (var rule in rules.Where(rule => rule.IsActive).OrderBy(rule => rule.Priority))
-            {
-                var candidates = new List<string>();
-                if (!string.IsNullOrWhiteSpace(rule.TargetFieldName))
-                    candidates.Add(rule.TargetFieldName);
-                if (!string.IsNullOrWhiteSpace(rule.TargetDisplayName))
-                    candidates.Add(rule.TargetDisplayName);
-                if (!string.IsNullOrWhiteSpace(rule.CanonicalField))
-                    candidates.AddRange(FoxProReportKnowledgeBase.GetTargetFieldCandidates(rule.CanonicalField));
-
-                var value = ReadPreviewObject(row, candidates.Where(candidate => !string.IsNullOrWhiteSpace(candidate)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
-                if (value == null || value == DBNull.Value)
-                    continue;
-
-                var source = FoxProReportKnowledgeBase.NormalizeRuleSource(rule.SourcePattern);
-                if (string.IsNullOrWhiteSpace(source))
-                    continue;
-
-                add(source, value);
-                add(FoxProReportKnowledgeBase.StripDatasetPrefix(source), value);
-                foreach (var prefix in prefixes)
-                    add(prefix + FoxProReportKnowledgeBase.StripDatasetPrefix(source), value);
-
-                if (!string.IsNullOrWhiteSpace(rule.CanonicalField))
-                    FoxProReportKnowledgeBase.AddAliases(add, prefixes, rule.CanonicalField, value);
-            }
         }
 
         private async Task<IReadOnlyCollection<ReportElementMapping>> LoadElementMappingsAsync(Report report)
@@ -2206,21 +2347,12 @@ namespace BIS.ERP.Services
             Report report,
             CashOrderPrintData data,
             IReadOnlyCollection<ReportElementMapping>? mappings,
-            DataTable? dataTable = null,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules = null)
+            DataTable? dataTable = null)
         {
-            var frxReport = new FrxReport
-            {
-                Id = Guid.NewGuid(),
-                Name = report.Name,
-                OriginalFileName = string.Empty,
-                FrxXml = report.Template
-            };
-            var parser = new FrxParser();
-            var template = parser.GetPrintTemplate(frxReport);
+            var template = DeserializePrintTemplate(report.Template);
             if (template.Elements.Count == 0)
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
-            var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
+            var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable);
             if (layoutTemplate.Elements.Count == 0)
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода.");
 
@@ -2657,22 +2789,13 @@ namespace BIS.ERP.Services
             Report report,
             CashOrderPrintData data,
             IReadOnlyCollection<ReportElementMapping>? mappings,
-            DataTable? dataTable = null,
-            IReadOnlyCollection<FoxProReportFieldRule>? rules = null)
+            DataTable? dataTable = null)
         {
-            var frxReport = new FrxReport
-            {
-                Id = Guid.NewGuid(),
-                Name = report.Name,
-                OriginalFileName = string.Empty,
-                FrxXml = report.Template
-            };
-            var parser = new FrxParser();
-            var template = parser.GetPrintTemplate(frxReport);
+            var template = DeserializePrintTemplate(report.Template);
             if (template.Elements.Count == 0)
                 throw new InvalidOperationException("Макет печатной формы не содержит элементов для вывода в Excel.");
 
-            var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable, rules ?? Array.Empty<FoxProReportFieldRule>());
+            var layoutTemplate = PrepareTemplateForReportRendering(template, report, data, mappings ?? Array.Empty<ReportElementMapping>(), dataTable);
             var mappingByOrder = (mappings ?? Array.Empty<ReportElementMapping>())
                 .GroupBy(item => item.ElementOrder)
                 .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
@@ -2762,18 +2885,17 @@ namespace BIS.ERP.Services
             Report report,
             CashOrderPrintData data,
             IReadOnlyCollection<ReportElementMapping> mappings,
-            DataTable? dataTable,
-            IReadOnlyCollection<FoxProReportFieldRule> rules)
+            DataTable? dataTable)
         {
-            var layoutTemplate = FrxRecognitionProfileService.PrepareForRendering(template);
+            var layoutTemplate = TemplateLayoutNormalizer.PrepareForRendering(template);
             if (!IsFoxProTemplate(layoutTemplate, report))
                 return layoutTemplate;
 
             if (ShouldPackReconciliationFrxTemplate(layoutTemplate, report, dataTable))
-                return BuildPackedReconciliationFrxTemplate(layoutTemplate, report, data, mappings, dataTable!, rules);
+                return BuildPackedReconciliationFrxTemplate(layoutTemplate, report, data, mappings, dataTable!);
 
             if (ShouldPackTabularFrxTemplate(layoutTemplate, report, dataTable))
-                return BuildPackedTabularFrxTemplate(layoutTemplate, report, data, mappings, dataTable!, rules);
+                return BuildPackedTabularFrxTemplate(layoutTemplate, report, data, mappings, dataTable!);
 
             return BuildPackedStaticFrxTemplate(layoutTemplate, report, data, mappings);
         }
@@ -2822,8 +2944,7 @@ namespace BIS.ERP.Services
             Report report,
             CashOrderPrintData summaryData,
             IReadOnlyCollection<ReportElementMapping> mappings,
-            DataTable dataTable,
-            IReadOnlyCollection<FoxProReportFieldRule> rules)
+            DataTable dataTable)
         {
             var bands = BuildEffectiveBands(template);
             if (bands.Count == 0 || template.Elements.Count == 0)
@@ -2860,7 +2981,7 @@ namespace BIS.ERP.Services
                 {
                     foreach (var row in rows)
                     {
-                        var rowData = BuildReportPreviewDataForRow(dataTable, report, row, rules, summaryData);
+                        var rowData = BuildReportPreviewDataForRow(dataTable, report, row, summaryData);
                         AppendPackedBand(template, report, band, bandElements, rowData, mappingByOrder, packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
                         previousBand = band;
                     }
@@ -2935,8 +3056,7 @@ namespace BIS.ERP.Services
             Report report,
             CashOrderPrintData summaryData,
             IReadOnlyCollection<ReportElementMapping> mappings,
-            DataTable dataTable,
-            IReadOnlyCollection<FoxProReportFieldRule> rules)
+            DataTable dataTable)
         {
             var bands = BuildEffectiveBands(template);
             if (bands.Count == 0 || template.Elements.Count == 0)
@@ -3014,7 +3134,7 @@ namespace BIS.ERP.Services
 
                 foreach (var row in detailRows)
                 {
-                    var rowData = BuildReportPreviewDataForRow(dataTable, report, row, rules, summaryData);
+                    var rowData = BuildReportPreviewDataForRow(dataTable, report, row, summaryData);
                     AppendPackedBand(template, report, band, rowElements, rowData, mappingByOrder,
                         packedBands, packedElements, ref currentTop, ref nextOrder, previousBand);
                     previousBand = band;
@@ -3385,7 +3505,6 @@ namespace BIS.ERP.Services
             DataTable dataTable,
             Report report,
             DataRow row,
-            IReadOnlyCollection<FoxProReportFieldRule> rules,
             CashOrderPrintData summaryData)
         {
             var extra = new Dictionary<string, object>(summaryData.ExtraFields, StringComparer.OrdinalIgnoreCase);
@@ -3410,8 +3529,6 @@ namespace BIS.ERP.Services
             // под именами ved.*, db_cr.* и другими префиксами наборов данных.
             AddReconciliationAliases(0, row, Add);
             AddReconciliationAliases(1, row, Add);
-            AddConfiguredFoxProRuleAliases(0, row, rules, Add);
-            AddConfiguredFoxProRuleAliases(1, row, rules, Add);
 
             // Затем колонки данных — они закрывают имена, которые не заполнил разбор.
             foreach (DataColumn column in dataTable.Columns)
@@ -3948,7 +4065,7 @@ namespace BIS.ERP.Services
             int pageNumber = 0,
             int pageCount = 0)
         {
-            var layoutTemplate = templatePrepared ? template : FrxRecognitionProfileService.PrepareForRendering(template);
+            var layoutTemplate = templatePrepared ? template : TemplateLayoutNormalizer.PrepareForRendering(template);
             var width = Math.Max(1000, layoutTemplate.PageWidth);
             var height = Math.Max(1000, layoutTemplate.PageHeight);
             // При постраничном выводе координаты не меняются, поэтому шкала берётся
@@ -4583,8 +4700,14 @@ namespace BIS.ERP.Services
                 ["p4"] = "Главный бухгалтер контрагента"
             };
 
-            foreach (var pair in FrxRecognitionProfileService.GetDefaultVariables())
-                variables[pair.Key] = pair.Value;
+            // Значения, которые подставлял профиль распознавания FoxPro-макетов
+            // (ko1, LL, sha*): профили удалены вместе с FRX, но сами переменные
+            // остаются в макетах — без них на их месте были бы пустые места.
+            variables["ko1"] = "1";
+            variables["LL"] = "70";
+            variables["sha"] = string.Empty;
+            variables["sha1"] = string.Empty;
+            variables["sha2"] = string.Empty;
 
             // Значение переменной «date» уже определено выше по дате строки.
             // Доп. поля не должны его перезаписывать: иначе в макет попадает
@@ -4912,7 +5035,8 @@ namespace BIS.ERP.Services
         private static DateTime GetDate(Dictionary<string, object> row, params string[] names) =>
             DateTime.TryParse(GetString(row, names), out var value) ? value : DateTime.Today;
 
-        private static string RussianMoneyInWords(decimal amount)
+        /// <summary>Сумма прописью: используется бланками и итоговым текстом акта сверки.</summary>
+        internal static string RussianMoneyInWords(decimal amount)
         {
             var whole = (long)Math.Floor(Math.Abs(amount));
             var coins = (int)Math.Round((Math.Abs(amount) - whole) * 100);
@@ -4960,56 +5084,7 @@ namespace BIS.ERP.Services
             return string.Join(" ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
         }
 
-        // Парсинг FRX-файла (макет FoxPro) с использованием FrxParser
-        public async Task<string> ParseFrxFileAsync(byte[] fileData, string fileName)
-        {
-            return await ParseFrxFileTemplateAsync(fileData, fileName);
-        }
-
-        public static async Task<string> ParseFrxFileTemplateAsync(byte[] fileData, string fileName)
-        {
-            try
-            {
-                // Создаем временный файл
-                var extension = Path.GetExtension(fileName);
-                var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}{(string.IsNullOrWhiteSpace(extension) ? ".frx" : extension)}");
-                var tempFrt = Path.ChangeExtension(tempFile, ".FRT");
-                await File.WriteAllBytesAsync(tempFile, fileData);
-                var sourceFrt = Path.ChangeExtension(fileName, ".FRT");
-                if (File.Exists(sourceFrt))
-                    File.Copy(sourceFrt, tempFrt, overwrite: true);
-
-                // Используем FrxParser
-                var parser = new FrxParser();
-                var frxReport = parser.ParseFrxFile(tempFile);
-
-                // Удаляем временный файл
-                if (File.Exists(tempFile))
-                    File.Delete(tempFile);
-                if (File.Exists(tempFrt))
-                    File.Delete(tempFrt);
-
-                // Получаем PrintFormTemplate из FrxReport
-                var template = parser.GetPrintTemplate(frxReport);
-                FrxRecognitionProfileService.ApplyImportProfile(template);
-
-                // Сериализуем в JSON
-                var json = JsonSerializer.Serialize(template, new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                });
-
-                return json;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка парсинга FRX: {ex.Message}");
-                return string.Empty;
-            }
-        }
-
-        // Извлечение полей отчета из PrintFormTemplate (JSON макета FoxPro)
+        // Извлечение полей отчета из PrintFormTemplate (JSON макета)
         public static List<ReportField> ExtractReportFieldsFromTemplate(string templateJson)
         {
             var fields = new List<ReportField>();
@@ -5209,17 +5284,53 @@ namespace BIS.ERP.Services
             };
         }
 
+        /// <summary>
+        /// Читает макет печатной формы из JSON, сохранённого в Report.Template.
+        ///
+        /// Разбором раньше занимался FrxParser: он понимал и формат FoxPro FRX,
+        /// и собственный формат PrintFormTemplate. После отказа от FRX в базе
+        /// встречаются два вида JSON:
+        /// <list type="bullet">
+        ///   <item>сам шаблон — свойства PrintFormTemplate на верхнем уровне;</item>
+        ///   <item>обёртка прежнего разбора FRX — <c>{ "Template": { ... } }</c>: так
+        ///   сохранены стандартные отчёты кассовой книги, реестра и платёжного поручения,
+        ///   загруженные из FRX-файлов.</item>
+        /// </list>
+        /// </summary>
         public static PrintFormTemplate DeserializePrintTemplate(string templateJson)
         {
             if (string.IsNullOrWhiteSpace(templateJson))
                 return new PrintFormTemplate();
-            var template = new FrxParser().GetPrintTemplate(new FrxReport
+
+            try
             {
-                Id = Guid.NewGuid(),
-                Name = "Template",
-                FrxXml = templateJson
-            });
-            return FrxRecognitionProfileService.ApplyImportProfile(template);
+                using var document = JsonDocument.Parse(templateJson);
+                var root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    var hasInner =
+                        root.TryGetProperty("Template", out var inner) ||
+                        root.TryGetProperty("template", out inner);
+                    if (hasInner && inner.ValueKind == JsonValueKind.Object)
+                        return ReadTemplateObject(inner.GetRawText());
+                }
+
+                return ReadTemplateObject(templateJson);
+            }
+            catch (JsonException)
+            {
+                // Повреждённый макет: вызывающий код сам сообщит об отсутствии элементов.
+            }
+
+            return new PrintFormTemplate();
+        }
+
+        /// <summary>Десериализует объект шаблона без учёта регистра имён свойств.</summary>
+        private static PrintFormTemplate ReadTemplateObject(string json)
+        {
+            var template = JsonSerializer.Deserialize<PrintFormTemplate>(
+                json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return template ?? new PrintFormTemplate();
         }
 
         public static string CleanFoxText(string input)

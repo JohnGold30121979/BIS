@@ -724,11 +724,18 @@ namespace BIS.ERP
         /// <summary>
         /// Проверяет, что отчёт доступен для показа в дереве.
         ///
-        /// Отчёты по макетам FoxPro FRX скрываются, пока механизм отключён:
-        /// они не формируются, и в дереве им делать нечего.
+        /// Отчёты по координатным макетам FoxPro скрываются: значения в их макеты
+        /// подставлял слой разбора FoxPro-полей, который удалён вместе с подсистемой
+        /// FRX. Строки таких отчётов ещё есть в базе — их удаляет этап 2 плана;
+        /// после очистки данных проверку можно убрать целиком.
         /// </summary>
         private static bool IsReportAvailableForNavigation(Report report) =>
-            ReportingFeatures.FrxEnabled || !ReportingFeatures.IsFrxReport(report);
+            report != null && !IsFrxLayoutReport(report);
+
+        /// <summary>Признак отчёта по координатному макету FoxPro.</summary>
+        private static bool IsFrxLayoutReport(Report report) =>
+            string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
         /// Создаёт элемент дерева для отчёта.
@@ -2412,19 +2419,6 @@ namespace BIS.ERP
 
         private async Task OpenReport(Report report)
         {
-            // Отчёт с отключённым механизмом остаётся в дереве, но не открывается:
-            // иначе пользователь получил бы непонятную ошибку формирования.
-            if (ReportingFeatures.IsFrxReport(report) && !ReportingFeatures.FrxEnabled)
-            {
-                MessageBox.Show(
-                    $"Отчёт «{report.Name}» построен по макету FoxPro FRX и временно отключён.\n\n" +
-                    "Идёт переход на визуальные макеты ClosedXML. Доступны отчёты " +
-                    "«Акт сверки (ClosedXML)» и «Оборотная ведомость (ClosedXML)» " +
-                    "в разделе «Бухгалтерские отчеты».",
-                    "Отчёт отключён", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
             if (IsReconciliationReport(report))
             {
                 await OpenAccountingReportsAsync("OrganizationReconciliation");

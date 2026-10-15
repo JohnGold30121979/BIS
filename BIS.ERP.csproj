@@ -10,7 +10,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
-    <DefaultItemExcludes>$(DefaultItemExcludes);BIS.ERP.TESTS\**;BIS.ERP.Updater\**;Tests\**;BIS.ERP.FrxMetadataGenerator\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);BIS.ERP.TESTS\**;BIS.ERP.Updater\**;Tests\**</DefaultItemExcludes>
   </PropertyGroup>
   <PropertyGroup Condition="'$(PublishSingleFile)' == 'true' Or '$(SelfContained)' == 'true'">
     <PublishTrimmed>false</PublishTrimmed>

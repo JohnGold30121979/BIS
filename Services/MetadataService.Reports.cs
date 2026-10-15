@@ -1,16 +1,10 @@
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
-using System.IO;
-using System.IO.Compression;
-using System.Text;
 
 namespace BIS.ERP.Services;
 
 public partial class MetadataService
 {
-    private const string PaymentOrderPrPl23ReportCode = "standard.frx.finance.payment-order.pr-pl23";
-    private const string CashBookFrxReportCode = "standard.frx.finance.cash.cash-book";
-    private const string ReceiptExpenseRegisterFrxReportCode = "standard.frx.finance.cash.receipts-expenses-register";
     public const string CashOrderTurnoverReportSourceName = "РКО/ПКО обороты по кассе";
     public const string CashOrderTurnoverReportSourceTableName = "report_cash_order_turnover_source";
 
@@ -28,31 +22,6 @@ public partial class MetadataService
                      .Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code))
                      .Where(definition => !deletedReportCodes.Contains(definition.Code)))
             await EnsureStandardReportAsync(definition);
-        foreach (var definition in StandardFrxReportTemplates.GetDefinitions()
-                     .Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code))
-                     .Where(definition => !deletedReportCodes.Contains(definition.Code)))
-            await EnsureStandardFrxReportAsync(definition);
-
-        await _context.SaveChangesAsync();
-        await MarkReconciliationFrxReportsAsTemplateVariantsAsync();
-        await MarkTrialBalanceFrxReportsAsTemplateVariantsAsync();
-    }
-    public async Task EnsurePaymentOrderPrintFormAsync()
-    {
-        await new PrintFormService(_context).EnsureSchemaAsync();
-        await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
-        _context.ChangeTracker.Clear();
-
-        var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
-        if (deletedReportCodes.Contains(PaymentOrderPrPl23ReportCode))
-            return;
-
-        var definition = StandardFrxReportTemplates.GetDefinitions()
-            .FirstOrDefault(item => item.Code == PaymentOrderPrPl23ReportCode);
-        if (definition == null)
-            return;
-
-        await EnsureStandardFrxReportAsync(definition);
         await _context.SaveChangesAsync();
     }
 
@@ -106,11 +75,8 @@ public partial class MetadataService
     private static List<MetadataField> BuildCashOrderTurnoverReportSourceFields(Guid metadataObjectId) => new()
     {
         CashOrderTurnoverField(metadataObjectId, "Дата", "report_date", "DateTime", 1),
-        CashOrderTurnoverField(metadataObjectId, "Дата FRX", "d_xls", "DateTime", 2),
         CashOrderTurnoverField(metadataObjectId, "Документ", "doc_number", "String", 3),
-        CashOrderTurnoverField(metadataObjectId, "Документ FRX", "dok", "String", 4),
         CashOrderTurnoverField(metadataObjectId, "Номер учета", "nuch", "String", 5),
-        CashOrderTurnoverField(metadataObjectId, "Номер учета FRX", "d_nuch", "String", 6),
         CashOrderTurnoverField(metadataObjectId, "Тип КО", "order_kind", "String", 7),
         CashOrderTurnoverField(metadataObjectId, "Касса", "cash_desk", "String", 8),
         CashOrderTurnoverField(metadataObjectId, "Счет кассы", "cash_account", "String", 9),
@@ -119,8 +85,6 @@ public partial class MetadataService
         CashOrderTurnoverField(metadataObjectId, "Сумма Приход", "sum_debet", "Decimal", 12),
         CashOrderTurnoverField(metadataObjectId, "Сумма Расход", "sum_credit", "Decimal", 13),
         CashOrderTurnoverField(metadataObjectId, "Остаток на конец", "closing_balance", "Decimal", 14),
-        CashOrderTurnoverField(metadataObjectId, "Приход FRX", "deb", "Decimal", 15),
-        CashOrderTurnoverField(metadataObjectId, "Расход FRX", "cred", "Decimal", 16),
         CashOrderTurnoverField(metadataObjectId, "Сумма", "sum", "Decimal", 17),
         CashOrderTurnoverField(metadataObjectId, "Содержание", "tex", "String", 18),
         CashOrderTurnoverField(metadataObjectId, "Наименование", "name_kod", "String", 19),
@@ -164,23 +128,16 @@ public partial class MetadataService
         existing.DisplayFields = desired.DisplayFields;
     }
 
-    private static bool IsCashOrderTurnoverFrxReportCode(string? code) =>
-        string.Equals(code, CashBookFrxReportCode, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(code, ReceiptExpenseRegisterFrxReportCode, StringComparison.OrdinalIgnoreCase);
     private static readonly string[] DeprecatedObjectTreeReportCodes =
     {
         "standard.finance.trial-balance",
-        "standard.finance.general-ledger",
-        "standard.frx.finance.trial-balance",
-        "standard.frx.finance.general-ledger"
+        "standard.finance.general-ledger"
     };
 
     private static readonly string[] DeprecatedObjectTreeReportNames =
     {
         "Оборотно-сальдовая ведомость",
-        "Главная книга",
-        "Оборотно-сальдовая ведомость (FRX FoxPro)",
-        "Главная книга (FRX FoxPro)"
+        "Главная книга"
     };
 
     private static bool IsDeprecatedObjectTreeReportCode(string? code) =>
@@ -194,8 +151,7 @@ public partial class MetadataService
                 DeprecatedObjectTreeReportCodes.Contains(report.Code) ||
                 (DeprecatedObjectTreeReportNames.Contains(report.Name) &&
                  ((report.Code == null || report.Code == string.Empty) ||
-                  report.Code.StartsWith("standard.finance.") ||
-                  report.Code.StartsWith("standard.frx.finance."))))
+                  report.Code.StartsWith("standard.finance."))))
             .Select(report => report.Id)
             .ToListAsync();
 
@@ -215,197 +171,6 @@ public partial class MetadataService
 
         await _context.SaveChangesAsync();
     }
-
-    private async Task MarkReconciliationFrxReportsAsTemplateVariantsAsync()
-    {
-        var candidateReports = await _context.Reports
-            .Where(report =>
-                EF.Functions.Like(report.Code, "standard.frx.finance.reconciliation.%") ||
-                report.SourceFormat == "FoxProFRX" ||
-                report.ReportType == "FoxProLayout")
-            .Select(report => new Report
-            {
-                Id = report.Id,
-                Name = report.Name,
-                Description = report.Description,
-                Code = report.Code,
-                SourceFormat = report.SourceFormat,
-                ReportType = report.ReportType,
-                Template = report.Template
-            })
-            .ToListAsync();
-        var reportIds = candidateReports
-            .Where(ReportClassificationService.IsReconciliationReport)
-            .Select(report => report.Id)
-            .ToList();
-
-        if (reportIds.Count == 0)
-            return;
-
-        var now = DateTime.UtcNow;
-        await _context.Reports
-            .Where(report => reportIds.Contains(report.Id))
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(report => report.IsActive, true)
-                .SetProperty(report => report.IsPrintForm, true)
-                .SetProperty(report => report.IsDefault, false)
-                .SetProperty(report => report.UpdatedAt, now));
-
-        var moduleItems = await _context.MetadataModuleItems
-            .Where(item => item.ObjectType == "Report" && reportIds.Contains(item.ObjectId))
-            .ToListAsync();
-        if (moduleItems.Count > 0)
-        {
-            _context.MetadataModuleItems.RemoveRange(moduleItems);
-            await _context.SaveChangesAsync();
-        }
-    }
-
-
-    private async Task MarkTrialBalanceFrxReportsAsTemplateVariantsAsync()
-    {
-        var reportIds = await _context.Reports
-            .Where(report => EF.Functions.Like(report.Code, "standard.frx.finance.trial-balance.%"))
-            .Select(report => report.Id)
-            .ToListAsync();
-
-        if (reportIds.Count == 0)
-            return;
-
-        var now = DateTime.UtcNow;
-        await _context.Reports
-            .Where(report => reportIds.Contains(report.Id))
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(report => report.IsActive, true)
-                .SetProperty(report => report.IsPrintForm, true)
-                .SetProperty(report => report.IsDefault, false)
-                .SetProperty(report => report.UpdatedAt, now));
-
-        var moduleItems = await _context.MetadataModuleItems
-            .Where(item => item.ObjectType == "Report" && reportIds.Contains(item.ObjectId))
-            .ToListAsync();
-        if (moduleItems.Count > 0)
-        {
-            _context.MetadataModuleItems.RemoveRange(moduleItems);
-            await _context.SaveChangesAsync();
-        }
-    }
-    private async Task EnsureStandardFrxReportAsync(StandardFrxReportTemplateDefinition definition)
-    {
-        var sourceName = IsCashOrderTurnoverFrxReportCode(definition.Code)
-            ? CashOrderTurnoverReportSourceName
-            : definition.SourceName;
-        var sourceObjectType = IsCashOrderTurnoverFrxReportCode(definition.Code)
-            ? "ReportSource"
-            : definition.SourceObjectType;
-
-        var source = await _context.MetadataObjects
-            .AsNoTracking()
-            .Include(metadata => metadata.Fields)
-            .FirstOrDefaultAsync(metadata =>
-                metadata.Name == sourceName &&
-                metadata.ObjectType == sourceObjectType);
-
-        var report = await _context.Reports
-            .FirstOrDefaultAsync(item => item.Code == definition.Code);
-        var isNewReport = report == null;
-        if (report == null)
-        {
-            report = new Report
-            {
-                Id = Guid.NewGuid(),
-                CreatedAt = DateTime.UtcNow
-            };
-            await _context.Reports.AddAsync(report);
-        }
-
-        var templateJson = DecodeStandardFrxTemplate(definition.TemplateCompressedBase64);
-        var shouldSeedTemplate = isNewReport || string.IsNullOrWhiteSpace(report.Template);
-        var isPaymentOrderPrintForm = string.Equals(
-            definition.Code,
-            PaymentOrderPrPl23ReportCode,
-            StringComparison.OrdinalIgnoreCase);
-
-        report.Code = definition.Code;
-        report.IsSystem = true;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.Name))
-            report.Name = definition.Name;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
-            report.Description = definition.Description;
-        report.DataSourceType = sourceObjectType;
-        report.DataSourceId = source?.Id;
-        report.ReportType = definition.ReportType;
-        if (shouldSeedTemplate)
-            report.Template = templateJson;
-        report.Settings = string.IsNullOrWhiteSpace(report.Settings) ? "{}" : report.Settings;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.Icon))
-            report.Icon = definition.Icon;
-        if (isNewReport || isPaymentOrderPrintForm)
-            report.IsActive = source != null || IsStandaloneStandardFrxVariant(definition.Code);
-        report.IsPrintForm = definition.IsPrintForm;
-        if (isNewReport)
-            report.IsDefault = definition.IsDefault && source != null;
-        report.SourceFormat = "FoxProFRX";
-        report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
-        if (isNewReport)
-            report.Order = definition.Order;
-        report.UpdatedAt = DateTime.UtcNow;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.PageTitle))
-            report.PageTitle = definition.Name;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.PageOrientation))
-            report.PageOrientation = definition.PageOrientation;
-        if (isNewReport || report.PageWidth <= 0)
-            report.PageWidth = report.PageOrientation == "Landscape" ? 297 : 210;
-        if (isNewReport || report.PageHeight <= 0)
-            report.PageHeight = report.PageOrientation == "Landscape" ? 210 : 297;
-        if (isNewReport || report.LeftMargin <= 0)
-            report.LeftMargin = 10;
-        if (isNewReport || report.RightMargin <= 0)
-            report.RightMargin = 10;
-        if (isNewReport || report.TopMargin <= 0)
-            report.TopMargin = 12;
-        if (isNewReport || report.BottomMargin <= 0)
-            report.BottomMargin = 12;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.FontName))
-            report.FontName = "Segoe UI";
-        if (isNewReport || report.FontSize <= 0)
-            report.FontSize = 9;
-        if (isNewReport)
-        {
-            report.ShowHeader = false;
-            report.ShowFooter = false;
-            report.ShowPageNumbers = false;
-            report.ShowGridLines = false;
-        }
-        if (isNewReport || string.IsNullOrWhiteSpace(report.TitleText))
-            report.TitleText = definition.Name;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.SubtitleText))
-            report.SubtitleText = definition.Description;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.HeaderTitle))
-            report.HeaderTitle = definition.Name;
-        if (isNewReport || string.IsNullOrWhiteSpace(report.HeaderSubtitle))
-            report.HeaderSubtitle = definition.Description;
-        var hasFields = await _context.ReportFields.AnyAsync(item => item.ReportId == report.Id);
-        if (!hasFields)
-            await AddStandardFrxReportFieldsAsync(report.Id, report.Template);
-
-        await _context.SaveChangesAsync();
-
-        if (report.IsPrintForm && report.IsDefault && report.DataSourceId.HasValue)
-        {
-            await _context.Database.ExecuteSqlInterpolatedAsync($@"
-                UPDATE ""Reports"" SET ""IsDefault"" = false
-                WHERE ""DataSourceId"" = {report.DataSourceId.Value}
-                  AND ""IsPrintForm"" = true AND ""Id"" <> {report.Id}");
-        }
-
-        await AssignStandardReportToModuleAsync(report.Id, definition.ModuleCode, definition.Order);
-    }
-
-    private static bool IsStandaloneStandardFrxVariant(string? code) =>
-        !string.IsNullOrWhiteSpace(code) &&
-        (code.StartsWith("standard.frx.finance.reconciliation.", StringComparison.OrdinalIgnoreCase) ||
-         code.StartsWith("standard.frx.finance.trial-balance.", StringComparison.OrdinalIgnoreCase));
 
     private async Task EnsureStandardReportAsync(StandardReportDefinition definition)
     {
@@ -593,38 +358,6 @@ public partial class MetadataService
 
         if (fields.Count > 0)
             await _context.ReportFields.AddRangeAsync(fields);
-    }
-
-    private async Task AddStandardFrxReportFieldsAsync(Guid reportId, string templateJson)
-    {
-        var fields = PrintFormService.ExtractReportFieldsFromTemplate(templateJson)
-            .GroupBy(field => field.FieldName, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .OrderBy(field => field.Order)
-            .ToList();
-
-        if (fields.Count == 0)
-            return;
-
-        var order = 1;
-        foreach (var field in fields)
-        {
-            field.Id = Guid.NewGuid();
-            field.ReportId = reportId;
-            field.Order = order++;
-        }
-
-        await _context.ReportFields.AddRangeAsync(fields);
-    }
-
-    private static string DecodeStandardFrxTemplate(string compressedBase64)
-    {
-        var compressed = Convert.FromBase64String(compressedBase64);
-        using var input = new MemoryStream(compressed);
-        using var gzip = new GZipStream(input, CompressionMode.Decompress, leaveOpen: false);
-        using var output = new MemoryStream();
-        gzip.CopyTo(output);
-        return Encoding.UTF8.GetString(output.ToArray());
     }
 
     private async Task AssignStandardReportToModuleAsync(Guid reportId, string moduleCode, int order)

@@ -31,8 +31,14 @@
                     Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
             <Button x:Name="AllPostingsButton" Content="📒 Все проводки" Width="130" Height="35" Margin="0,0,10,5"
                     Background="#16A085" Foreground="White" IsEnabled="False" Click="OnAllPostingsClick"/>
-            <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="35" Margin="0,0,10,5"
-                    Background="#34495E" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
+            <CheckBox x:Name="PrintFormsToggle" Content="🖨 Печатные формы" Height="35" Margin="0,0,10,5"
+                      VerticalContentAlignment="Center" FontWeight="Bold" IsEnabled="False"
+                      ToolTip="Включите и выберите печатную форму в появившемся списке"
+                      Checked="OnPrintFormsToggleChanged" Unchecked="OnPrintFormsToggleChanged"/>
+            <Button x:Name="PrintExcelButton" Content="📊 Excel" Width="110" Height="35" Margin="0,0,10,5"
+                    Background="#27AE60" Foreground="White" IsEnabled="False" Click="OnPrintFormExcelClick"/>
+            <Button x:Name="PrintPdfButton" Content="📄 Предпросмотр ПДФ" Width="180" Height="35" Margin="0,0,10,5"
+                    Background="#2980B9" Foreground="White" IsEnabled="False" Click="OnPrintFormPdfClick"/>
             <Button x:Name="ExportEsfButton" Content="📤 Выгрузка ЭСФ" Width="135" Height="35" Margin="0,0,10,5"
                     Background="#8E44AD" Foreground="White" Click="OnExportEsfClick"/>
             <Button x:Name="ImportEsfButton" Content="📥 Загрузка ответа" Width="145" Height="35" Margin="0,0,10,5"

@@ -664,7 +664,6 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "Подготовка печатных форм платежного поручения...";
                 using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                await new MetadataService(context).EnsurePaymentOrderPrintFormAsync();
 
                 var printFormService = new PrintFormService(context);
                 await printFormService.SeedPaymentOrderFormsAsync();

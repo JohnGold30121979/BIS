@@ -90,7 +90,8 @@ namespace BIS.ERP.Views
             EditButton.IsEnabled = hasSelection && selected?.IsPosted != true;
             DeleteButton.IsEnabled = hasSelection && selected?.IsPosted != true;
             PostButton.IsEnabled = hasSelection;
-            PrintButton.IsEnabled = hasSelection;
+            PrintExcelButton.IsEnabled = hasSelection;
+            PrintPdfButton.IsEnabled = hasSelection;
             PostButton.Content = selected?.IsPosted == true ? "↩ Отменить проведение" : "✅ Провести";
             PostButton.Width = selected?.IsPosted == true ? 175 : 100;
 
@@ -1998,14 +1999,11 @@ namespace BIS.ERP.Views
             }
 
             selectedReport.SubtitleText = $"{cashDeskName}; период {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}";
-            var ruleService = new FoxProReportFieldRuleService(context);
-            await ruleService.SeedDefaultRulesAsync();
-            var rules = await ruleService.GetRulesAsync(includeInactive: false);
             var dataSnapshot = dataTable.Copy();
             var printFormService = new PrintFormService(context);
             var output = selectedFormat == PrintFormOutputFormat.Excel
-                ? await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, selectedReport, rules))
-                : await Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, selectedReport, rules));
+                ? await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, selectedReport))
+                : await Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, selectedReport));
 
             var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
             var formatName = PrintFormOutputFileService.GetDisplayName(selectedFormat);
@@ -2462,7 +2460,84 @@ namespace BIS.ERP.Views
             row[columnName] = value ?? DBNull.Value;
         }
 
-        private async void OnPrintClick(object sender, RoutedEventArgs e)
+        /// <summary>Печатная форма, выбранная флажком «Выбрать форму» (иначе берётся форма по умолчанию).</summary>
+        private Report? _chosenPrintForm;
+
+        /// <summary>
+        /// Флажок «Выбрать форму»: диалог со списком печатных форм открывается только здесь.
+        /// Кнопки «Эксель» и «Предпросмотр ПДФ» выводят выбранную форму уже без диалога.
+        /// </summary>
+        private async void OnChoosePrintFormChecked(object sender, RoutedEventArgs e)
+        {
+            if (DataGrid.SelectedItem is not CashOrderRow row)
+            {
+                ChoosePrintFormCheckBox.IsChecked = false;
+                return;
+            }
+
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var printFormService = new PrintFormService(context);
+                await printFormService.SeedCashOrderFormsAsync();
+                var forms = await printFormService.GetCashOrderPrintFormsAsync(
+                    _documentMetadata.Id,
+                    row.IsReceipt,
+                    includeInactive: false);
+
+                if (forms.Count == 0)
+                {
+                    MessageBox.Show("Для выбранного документа не найдены активные печатные формы.", "Печать",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    ChoosePrintFormCheckBox.IsChecked = false;
+                    return;
+                }
+
+                var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
+                if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
+                {
+                    ChoosePrintFormCheckBox.IsChecked = false;
+                    return;
+                }
+
+                _chosenPrintForm = selectionDialog.SelectedReport;
+                StatusText.Text = $"Печатная форма: {_chosenPrintForm.Name}";
+            }
+            catch (Exception ex)
+            {
+                ChoosePrintFormCheckBox.IsChecked = false;
+                MessageBox.Show($"Ошибка выбора печатной формы: {ex.Message}", "Печать",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>Снятый флажок возвращает печать формы по умолчанию.</summary>
+        private void OnChoosePrintFormUnchecked(object sender, RoutedEventArgs e)
+        {
+            _chosenPrintForm = null;
+            StatusText.Text = "Печатная форма: по умолчанию";
+        }
+
+        /// <summary>Кнопка «Эксель» — печать выбранной формы в Excel.</summary>
+        private async void OnPrintFormExcelClick(object sender, RoutedEventArgs e) =>
+            await PrintCashOrderFormAsync(toExcel: true, preview: false);
+
+        /// <summary>Кнопка «Предпросмотр ПДФ» — выбранная форма в окне предпросмотра.</summary>
+        private async void OnPrintFormPdfClick(object sender, RoutedEventArgs e) =>
+            await PrintCashOrderFormAsync(toExcel: false, preview: true);
+
+        /// <summary>Пункт контекстного меню «Печатная форма выбранного документа» — PDF файлом.</summary>
+        private async void OnPrintClick(object sender, RoutedEventArgs e) =>
+            await PrintCashOrderFormAsync(toExcel: false, preview: false);
+
+        /// <summary>
+        /// Готовит и выводит печатную форму выбранного кассового ордера.
+        ///
+        /// toExcel — вывод в Excel, иначе PDF; preview — показать PDF в окне вместо сохранения файла.
+        /// Форма берётся из выбора флажка «Выбрать форму», без него — форма по умолчанию:
+        /// диалог выбора здесь не открывается.
+        /// </summary>
+        private async Task PrintCashOrderFormAsync(bool toExcel, bool preview)
         {
             if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
@@ -2482,34 +2557,42 @@ namespace BIS.ERP.Views
 
                 if (forms.Count == 0)
                 {
-                    MessageBox.Show("Для выбранного документа не найдены активные печатные формы.", "Печать", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Для выбранного документа не найдены активные печатные формы.", "Печать",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
-                Report? selectedReport;
-                var selectedFormat = PrintFormOutputFormat.Pdf;
-                if (ChoosePrintFormCheckBox.IsChecked == true)
-                {
-                    var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
-                    if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
-                        return;
+                // Выбранная форма может относиться к другому типу ордера — тогда берётся форма по умолчанию.
+                var report = forms.FirstOrDefault(form => form.Id == _chosenPrintForm?.Id)
+                             ?? forms.FirstOrDefault(form => form.IsDefault)
+                             ?? forms.FirstOrDefault();
+                if (report == null)
+                    return;
 
-                    selectedReport = selectionDialog.SelectedReport;
-                    selectedFormat = selectionDialog.SelectedFormat;
-                }
-                else
+                if (toExcel)
                 {
-                    selectedReport = forms.FirstOrDefault(form => form.IsDefault) ?? forms.First();
+                    StatusText.Text = "Формирование Excel...";
+                    var output = await printFormService.ExportDocumentExcelAsync(report, selectedRow.Id);
+                    var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(
+                        output, report.Name, PrintFormOutputFormat.Excel);
+                    StatusText.Text = $"Открыт файл печатной формы: {outputPath}";
+                    return;
                 }
 
-                StatusText.Text = selectedFormat == PrintFormOutputFormat.Excel
-                    ? "Формирование Excel..."
-                    : "Формирование PDF...";
-                var output = selectedFormat == PrintFormOutputFormat.Excel
-                    ? await printFormService.ExportDocumentExcelAsync(selectedReport, selectedRow.Id)
-                    : await printFormService.ExportDocumentAsync(selectedReport, selectedRow.Id);
-                var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
-                StatusText.Text = $"Открыт файл печатной формы: {outputPath}";
+                StatusText.Text = "Формирование PDF...";
+                var pdfBytes = await printFormService.ExportDocumentAsync(report, selectedRow.Id);
+
+                if (preview)
+                {
+                    var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name) { Owner = Window.GetWindow(this) };
+                    previewWindow.ShowDialog();
+                    StatusText.Text = "Предпросмотр PDF открыт";
+                    return;
+                }
+
+                var pdfPath = await PrintFormOutputFileService.SaveAndOpenAsync(
+                    pdfBytes, report.Name, PrintFormOutputFormat.Pdf);
+                StatusText.Text = $"Открыт файл печатной формы: {pdfPath}";
             }
             catch (Exception ex)
             {
@@ -2517,6 +2600,7 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка печати: {ex.Message}", "Печать", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
         private void DataGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.OriginalSource is not DependencyObject source)

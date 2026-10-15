@@ -106,8 +106,7 @@ namespace BIS.ERP.Services
                                 continue;
                             }
 
-                            if (TryBuildComputedReportFieldSelect(catalog, field, out var compatibleSelect) ||
-                                TryBuildCompatibleReportFieldSelect(report, catalog, field, out compatibleSelect))
+                            if (TryBuildComputedReportFieldSelect(catalog, field, out var compatibleSelect))
                             {
                                 selectColumns.Add(compatibleSelect);
                                 continue;
@@ -620,88 +619,6 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
 
             return $"'{text.Replace("'", "''")}'";
         }
-        private static bool TryBuildCompatibleReportFieldSelect(
-            Report report,
-            MetadataObject source,
-            ReportField field,
-            out string selectExpression)
-        {
-            selectExpression = string.Empty;
-
-            if (!IsFoxProLayoutReport(report))
-                return false;
-
-            var fieldName = NormalizeLegacyReportFieldName(field.FieldName);
-            var expression = IsPostingsSource(source)
-                ? BuildPostingsCompatibleFieldExpression(fieldName)
-                : IsCashOrderSource(source)
-                    ? BuildCashOrderCompatibleFieldExpression(fieldName)
-                    : null;
-
-            if (expression == null)
-                return false;
-
-            var displayName = string.IsNullOrWhiteSpace(field.DisplayName)
-                ? field.FieldName
-                : field.DisplayName;
-            selectExpression = $"{expression} AS {QuoteIdentifier(displayName)}";
-            return true;
-        }
-
-        private static string BuildPostingsCompatibleFieldExpression(string fieldName) => fieldName switch
-        {
-            "date" or "d_oper" or "d_doc" => QuoteIdentifier("posting_date"),
-            "dok" or "doc" or "nomdok" or "nom_doc" => QuoteIdentifier("doc_number"),
-            "schet" or "sch" or "debet" or "debit" => QuoteIdentifier("debit_account"),
-            "kor_sch" or "korschet" or "credit" or "kredit" => QuoteIdentifier("credit_account"),
-            "debsum" or "sumdt" or "sum_debit" => QuoteIdentifier("amount_kgs"),
-            "credsum" or "sumkt" or "sum_credit" => QuoteIdentifier("amount_kgs"),
-            "debsum_v" or "sumdt_v" or "sum_debit_currency" => QuoteIdentifier("amount_currency"),
-            "credsum_v" or "sumkt_v" or "sum_credit_currency" => QuoteIdentifier("amount_currency"),
-            "tex" or "text" or "txt" or "sod" or "note" => QuoteIdentifier("description"),
-            "prs" or "module" or "module_code" => QuoteIdentifier("module_code"),
-            "name_kod" or "name_sch" or "account_name" => BuildPostingAccountDisplayExpression(),
-            _ => "NULL::text"
-        };
-
-        private static string BuildCashOrderCompatibleFieldExpression(string fieldName) => fieldName switch
-        {
-            "date" or "d_xls" or "d_oper" or "d_doc" => QuoteIdentifier("doc_date"),
-            "dok" or "doc" or "nuch" or "d_nuch" or "nomdok" or "nom_doc" => QuoteIdentifier("doc_number"),
-            "schet" or "sch" or "debet" or "debit" => QuoteIdentifier("debit_account"),
-            "kor_sch" or "korsch" or "korschet" or "credit" or "kredit" => QuoteIdentifier("credit_account"),
-            "deb" or "debsum" or "sumdt" or "sum_debet" or "sum_debit" => BuildCashOrderAmountByKindExpression(receipt: true),
-            "cred" or "credsum" or "sumkt" or "sum_credit" => BuildCashOrderAmountByKindExpression(receipt: false),
-            "sum" or "amount" => QuoteIdentifier("amount"),
-            "debsum_v" or "credsum_v" or "sum_v" or "sumdt_v" or "sumkt_v" or "sum_debit_currency" or "sum_credit_currency" => QuoteIdentifier("amount_currency"),
-            "tex" or "text" or "txt" or "sod" or "note" => QuoteIdentifier("description"),
-            "basis" or "osn" or "osnov" => QuoteIdentifier("basis"),
-            "prs" or "module" or "module_code" => "'Финансы'::text",
-            "name_kod" or "dovf" or "cash_desk" or "cashdesk" => "CAST(" + QuoteIdentifier("cash_desk_id") + " AS text)",
-            _ => "NULL::text"
-        };
-
-        private static string BuildCashOrderAmountByKindExpression(bool receipt)
-        {
-            var orderKind = QuoteIdentifier("order_kind");
-            var amount = QuoteIdentifier("amount");
-            var receiptCondition = $"LOWER(COALESCE({orderKind}::text, '')) = 'receipt' OR LOWER(COALESCE({orderKind}::text, '')) LIKE '%приход%'";
-            return receipt
-                ? $"CASE WHEN {receiptCondition} THEN COALESCE({amount}, 0) ELSE 0 END"
-                : $"CASE WHEN {receiptCondition} THEN 0 ELSE COALESCE({amount}, 0) END";
-        }
-
-        private static bool IsFoxProLayoutReport(Report report) =>
-            string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase);
-
-        private static bool IsPostingsSource(MetadataObject source) =>
-            string.Equals(source.Name, "Проводки", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(source.TableName, "doc_postings", StringComparison.OrdinalIgnoreCase);
-
-        private static bool IsCashOrderSource(MetadataObject source) =>
-            string.Equals(source.Name, "Расходный/Приходный КО", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(source.TableName, "doc_cash_orders", StringComparison.OrdinalIgnoreCase);
         private static string NormalizeLegacyReportFieldName(string fieldName)
         {
             var normalized = (fieldName ?? string.Empty)

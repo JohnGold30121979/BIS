@@ -278,26 +278,41 @@ namespace BIS.ERP.Services
             DataTable dataTable,
             IReadOnlyDictionary<string, object?>? parameters)
         {
-            foreach (var name in new[] { "report_org", "organization_name", "Организация", "organization_id" })
+            // Источники по порядку: имя организации, затем её идентификатор.
+            // our_organization — поле акта сверки: наша (первичная) организация.
+            foreach (var name in new[]
+                     {
+                         "report_org", "organization_name", "our_organization", "Организация", "organization_id"
+                     })
             {
                 if (!dataTable.Columns.Contains(name) || dataTable.Rows.Count == 0)
                     continue;
 
                 var value = dataTable.Rows[0][name]?.ToString();
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value.Trim();
+                if (IsPrintableOrganization(value))
+                    return value!.Trim();
             }
 
-            foreach (var pair in parameters ?? new Dictionary<string, object?>())
-            {
-                if (pair.Key.Contains("Organization", StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(pair.Value?.ToString()))
-                {
-                    return pair.Value!.ToString()!;
-                }
-            }
+            // Идентификатор организации — это GUID: в колонтитуле он не читается,
+            // поэтому такие значения пропускаем и берём любое другое с «Organization».
+            var candidates = (parameters ?? new Dictionary<string, object?>())
+                .Where(pair => pair.Key.Contains("Organization", StringComparison.OrdinalIgnoreCase) &&
+                               IsPrintableOrganization(pair.Value?.ToString()))
+                .OrderBy(pair => pair.Key.EndsWith("Id", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+                .ToList();
 
-            return string.Empty;
+            return candidates.Count == 0
+                ? string.Empty
+                : candidates[0].Value!.ToString()!.Trim();
+        }
+
+        /// <summary>Годится ли значение для колонтитула: пустое и GUID не печатаем.</summary>
+        private static bool IsPrintableOrganization(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            return !Guid.TryParse(value.Trim(), out _);
         }
 
         /// <summary>

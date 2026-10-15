@@ -208,7 +208,14 @@ namespace BIS.ERP.Services
                     new SystemCalculatorField("document_number", "Номер документа (макет)"),
                     new SystemCalculatorField("report_summary", "Сводка отчёта"),
                     new SystemCalculatorField("period_start", "Начало периода"),
-                    new SystemCalculatorField("period_end", "Конец периода")
+                    new SystemCalculatorField("period_end", "Конец периода"),
+                    // Стороны акта — для блока подписей макета.
+                    new SystemCalculatorField("our_organization", "Наша организация"),
+                    new SystemCalculatorField("our_director", "Руководитель (наш)"),
+                    new SystemCalculatorField("our_accountant", "Главный бухгалтер (наш)"),
+                    new SystemCalculatorField("counterparty", "Контрагент"),
+                    new SystemCalculatorField("counterparty_director", "Руководитель контрагента"),
+                    new SystemCalculatorField("counterparty_accountant", "Главный бухгалтер контрагента")
                 },
                 BuildReconciliationActAsync)
         };
@@ -471,7 +478,13 @@ namespace BIS.ERP.Services
 
             var builder = new ReconciliationActBuilder(context);
             var movements = await builder.LoadMovementsAsync(organizationId, start, end);
-            var act = builder.BuildTable(pairs, totals, movements, start, end, organizationId.HasValue, "Все организации");
+            var parties = await builder.LoadPartiesAsync(organizationId, null);
+            // В акте по одной организации в заголовке печатается её наименование,
+            // иначе — общий заголовок по всем организациям.
+            var actTitle = string.IsNullOrWhiteSpace(parties.CounterpartyName)
+                ? "Все организации"
+                : parties.CounterpartyName;
+            var act = builder.BuildTable(pairs, totals, movements, start, end, organizationId.HasValue, actTitle, parties);
 
             FillReportColumns(act.Table, start, end, act.Summary);
 

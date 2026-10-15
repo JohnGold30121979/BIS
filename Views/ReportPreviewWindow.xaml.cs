@@ -199,12 +199,9 @@ namespace BIS.ERP.Views
                 if (HasFoxProTemplate(_report))
                 {
                     var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                    var ruleService = new FoxProReportFieldRuleService(context);
-                    await ruleService.SeedDefaultRulesAsync();
-                    var rules = await ruleService.GetRulesAsync(includeInactive: false);
                     var dataSnapshot = _data.Copy();
                     var printFormService = new PrintFormService(context);
-                    data = await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, _report, rules));
+                    data = await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, _report));
                 }
                 else
                 {
@@ -222,13 +219,9 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Признак наличия макета FoxPro FRX.
-        ///
-        /// При отключённом FRX всегда возвращает false: вывод по макетам FoxPro
-        /// недоступен, и предпросмотр идёт обычным путём.
+        /// Признак наличия координатного макета печатной формы у отчёта.
         /// </summary>
         private static bool HasFoxProTemplate(Report report) =>
-            ReportingFeatures.FrxEnabled &&
             !string.IsNullOrWhiteSpace(report.Template) &&
             (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));

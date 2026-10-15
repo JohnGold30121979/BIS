@@ -81,7 +81,6 @@ public class AppDbContext : DbContext
     public DbSet<LocalizationEntry> LocalizationEntries { get; set; }
     public DbSet<SystemConfiguration> SystemConfigurations { get; set; }
     public DbSet<RegulatedReportTemplate> RegulatedReportTemplates { get; set; }
-    public DbSet<FoxProReportFieldRule> FoxProReportFieldRules { get; set; }
     public DbSet<UserAccessPermission> UserAccessPermissions { get; set; }
     public DbSet<MetadataModule> MetadataModules { get; set; }
     public DbSet<MetadataModuleItem> MetadataModuleItems { get; set; }
@@ -235,9 +234,6 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<LocalizationEntry>().HasIndex(entry => new { entry.Culture, entry.Key }).IsUnique();
         modelBuilder.Entity<RegulatedReportTemplate>().HasIndex(template => new { template.Code, template.Version }).IsUnique();
         modelBuilder.Entity<RegulatedReportTemplate>().HasIndex(template => new { template.Code, template.IsActive });
-        modelBuilder.Entity<FoxProReportFieldRule>().HasKey(rule => rule.Id);
-        modelBuilder.Entity<FoxProReportFieldRule>().HasIndex(rule => rule.SourcePattern);
-        modelBuilder.Entity<FoxProReportFieldRule>().HasIndex(rule => new { rule.ProfileCode, rule.IsActive });
     }
 
 

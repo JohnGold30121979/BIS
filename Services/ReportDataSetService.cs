@@ -113,6 +113,7 @@ public sealed class ReportDataSetService
         await EnsureInvoiceJournalDataSetAsync();
         await EnsureVatInvoiceSt1DataSetAsync();
         await EnsureVatInvoiceVatKgDataSetAsync();
+        await EnsureCashOrderPrintDataSetAsync();
         await EnsureSystemCalculatorDataSetsAsync();
     }
 
@@ -303,6 +304,148 @@ ORDER BY (CASE WHEN COALESCE(p.seller_name, '') = '' THEN 1 ELSE 0 END),
     /// и готовая метка строки «Налог с продаж по ставке … %»: метку собирает
     /// запрос, чтобы в макете не было формул.
     /// </summary>
+    /// <summary>Код набора данных бланков кассовых ордеров (код в базе оставлен прежним).</summary>
+    private const string CashOrderPrintDataSetCode = "cash.receipt-order.print";
+
+    /// <summary>Имя и описание набора: обслуживает оба бланка — ПКО (КО-1) и РКО (КО-2).</summary>
+    private const string CashOrderPrintDataSetName = "Кассовый ордер: реквизиты и суммы";
+
+    private const string CashOrderPrintDataSetDescription =
+        "SQL-набор данных бланков кассовых ордеров (ПКО КО-1 и РКО КО-2): реквизиты первичной организации для шапки, номер и дата, дебет/кредит, сумма, получатель или плательщик, основание.";
+
+    /// <summary>
+    /// Заводит набор данных бланков кассовых ордеров — приходного (КО-1) и расходного (КО-2).
+    ///
+    /// Одна строка — один кассовый ордер: номер, дата, дебет/кредит, сумма и сумма с валютой,
+    /// получатель или плательщик (организация либо сотрудник с табельным номером), касса,
+    /// основание и реквизиты шапки бланков — наименование, ОКПО, ИНН, подписи руководителя
+    /// и главного бухгалтера первичной организации документа (catalog_organizations по GUID).
+    /// Сумма прописью и дата словами добавляются при печати: в SQL их не собрать.
+    /// </summary>
+    public async Task<ReportDataSet?> EnsureCashOrderPrintDataSetAsync()
+    {
+        var refreshFields = false;
+        var dataSet = await _context.ReportDataSets
+            .Include(item => item.Fields)
+            .FirstOrDefaultAsync(item => item.Code == CashOrderPrintDataSetCode);
+
+        if (dataSet == null)
+        {
+            dataSet = new ReportDataSet
+            {
+                Id = Guid.NewGuid(),
+                Code = CashOrderPrintDataSetCode,
+                Name = CashOrderPrintDataSetName,
+                Description = CashOrderPrintDataSetDescription,
+                Kind = ReportDataSetKinds.Sql,
+                SqlText = BuildCashOrderPrintSql(),
+                IsActive = true,
+                IsSystem = true
+            };
+            await _context.ReportDataSets.AddAsync(dataSet);
+            await _context.SaveChangesAsync();
+        }
+        else if (string.Equals(dataSet.Kind, ReportDataSetKinds.Sql, StringComparison.OrdinalIgnoreCase))
+        {
+            dataSet.IsActive = true;
+            dataSet.IsSystem = true;
+            // Имя и описание держим актуальными: набор обслуживает и ПКО, и РКО.
+            dataSet.Name = CashOrderPrintDataSetName;
+            dataSet.Description = CashOrderPrintDataSetDescription;
+
+            // Запрос обновляем только тогда, когда администратор его не менял.
+            // Переписали запрос — пересобираем и поля: иначе новых колонок (подписи,
+            // получатель) не будет видно в конструкторе.
+            var untouched = dataSet.SqlText.Contains("cash_order_rows", StringComparison.OrdinalIgnoreCase);
+            if (untouched)
+            {
+                dataSet.SqlText = BuildCashOrderPrintSql();
+                refreshFields = true;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        try
+        {
+            if (!dataSet.Fields.Any() || refreshFields)
+            {
+                await RefreshFieldsFromSqlAsync(dataSet);
+                dataSet = await _context.ReportDataSets
+                    .Include(item => item.Fields)
+                    .FirstAsync(item => item.Id == dataSet.Id);
+            }
+
+            await SyncMetadataSourceAsync(dataSet);
+        }
+        catch (Exception ex)
+        {
+            _context.ChangeTracker.Clear();
+            System.Diagnostics.Debug.WriteLine($"Набор данных ПКО: {ex.Message}");
+            return null;
+        }
+
+        return dataSet;
+    }
+
+    /// <summary>Запрос бланков кассовых ордеров: одна строка на ордер.</summary>
+    private static string BuildCashOrderPrintSql() => @"
+WITH cash_order_rows AS (
+    SELECT
+        o.""Id""                             AS cash_order_id,
+        COALESCE(o.""order_kind"", '')       AS order_kind,
+        COALESCE(o.""doc_number"", '')       AS doc_number,
+        o.""doc_date""                       AS doc_date,
+        COALESCE(o.""amount"", 0)            AS amount,
+        COALESCE(o.""amount_currency"", 0)   AS amount_currency,
+        COALESCE(o.""debit_account"", '')    AS debit_account,
+        COALESCE(o.""credit_account"", '')   AS credit_account,
+        COALESCE(o.""basis"", '')            AS basis,
+        COALESCE(o.""description"", '')      AS description,
+        o.""primary_organization_id""        AS primary_organization_id,
+        o.""organization_id""                AS organization_id,
+        o.""employee_id""                    AS employee_id,
+        o.""cash_desk_id""                   AS cash_desk_id
+    FROM ""doc_cash_orders"" o
+    WHERE o.""doc_date""::date >= CAST(@PeriodStart AS date)
+      AND o.""doc_date""::date <= CAST(@PeriodEnd AS date)
+)
+SELECT
+    r.cash_order_id,
+    r.order_kind,
+    r.doc_number,
+    r.doc_date,
+    TO_CHAR(r.doc_date, 'DD.MM.YYYY')          AS doc_date_text,
+    r.amount,
+    TO_CHAR(r.amount, 'FM999999999999990.00')  AS amount_text,
+    r.amount_currency,
+    r.debit_account,
+    r.credit_account,
+    r.basis,
+    r.description,
+    -- Шапка бланка: реквизиты нашей организации — первичная организация документа.
+    COALESCE(NULLIF(company.""full_name"", ''), company.""name"", '')   AS company_name,
+    COALESCE(company.""okpo"", '')               AS company_okpo,
+    COALESCE(company.""inn"", '')                AS company_inn,
+    COALESCE(company.""registration_number"", '') AS company_reg_number,
+    COALESCE(company.""legal_address"", '')      AS company_address,
+    -- Принято от (ПКО) и Выдать (РКО): организация, если пусто — сотрудник.
+    COALESCE(NULLIF(payer.""full_name"", ''), payer.""name"", '')       AS payer_name,
+    COALESCE(NULLIF(payer.""full_name"", ''), payer.""name"",
+             NULLIF(employee.""full_name"", ''), employee.""name"", '') AS recipient_name,
+    COALESCE(NULLIF(employee.""full_name"", ''), employee.""name"", '') AS employee_name,
+    COALESCE(employee.""personnel_number"", '')  AS recipient_number,
+    COALESCE(desk.""name"", '')                  AS cash_desk_name,
+    -- Подписи в бланке РКО — из карточки первичной организации.
+    COALESCE(company.""director"", '')           AS director_name,
+    COALESCE(company.""chief_accountant"", '')   AS accountant_name
+FROM cash_order_rows r
+LEFT JOIN ""catalog_organizations"" company ON company.""Id""::text = r.primary_organization_id::text
+LEFT JOIN ""catalog_organizations"" payer   ON payer.""Id""::text = r.organization_id::text
+LEFT JOIN ""catalog_employees"" employee    ON employee.""Id""::text = r.employee_id::text
+LEFT JOIN ""catalog_cash_desks"" desk       ON desk.""Id""::text = r.cash_desk_id::text
+ORDER BY r.doc_date DESC, r.doc_number DESC";
+
     private async Task EnsureVatInvoiceVatKgDataSetAsync()
     {
         var dataSet = await _context.ReportDataSets
@@ -446,6 +589,9 @@ totals AS (
     FROM invoice_positions
 )
 SELECT
+    -- Идентификатор документа: по нему печатная форма берёт строки одного счёта-фактуры
+    -- (PrintFormService.BuildClosedXmlInvoiceDataAsync).
+    p.invoice_id,
     CAST(p.line_number AS text)                                     AS line_number,
     p.account_code,
     -- Код группы товаров — первые три знака счёта учёта строки: цифру

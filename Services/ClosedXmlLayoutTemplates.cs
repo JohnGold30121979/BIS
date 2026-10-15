@@ -96,6 +96,12 @@ namespace BIS.ERP.Services
             if (IsVatInvoiceSt1(report))
                 return CreateVatInvoiceSt1(report!.Name);
 
+            if (IsCashReceiptOrder(report))
+                return CreateCashReceiptOrder(report!.Name);
+
+            if (IsCashPaymentOrder(report))
+                return CreateCashPaymentOrder(report!.Name);
+
             return CreateBlank();
         }
 
@@ -112,6 +118,16 @@ namespace BIS.ERP.Services
         //   строки 6+ — тело: строки набора без «АКТ…», «Период…» и без итоговой фразы
         //   2 пустые строки и итоговая фраза задолженности (последняя строка набора), A:H, жирный
         // =============================================================
+        /// <summary>Признак бланка расходного кассового ордера (КО-2).</summary>
+        private static bool IsCashPaymentOrder(Report? report) =>
+            report != null &&
+            (report.Code ?? string.Empty).StartsWith("cash.payment.", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Признак бланка приходного кассового ордера (КО-1).</summary>
+        private static bool IsCashReceiptOrder(Report? report) =>
+            report != null &&
+            (report.Code ?? string.Empty).StartsWith("cash.receipt.", StringComparison.OrdinalIgnoreCase);
+
         public static ClosedXmlReportLayout CreateReconciliationAct(string? sheetName) => new()
         {
             Sheets =
@@ -244,6 +260,117 @@ namespace BIS.ERP.Services
                                             Column = 1, MergeToColumn = 8,
                                             TakeFromRow = -1, TakeFromField = ActLabelField,
                                             Bold = true
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        // Подписи сторон: слева — наша первичная организация, справа — контрагент.
+                        // Наименования и расшифровки подписей приходят из карточек организаций,
+                        // поэтому в макете стоят привязки, а не текст.
+                        new ClosedXmlBlock
+                        {
+                            Type = "FreeRows",
+                            Name = "Подписи сторон",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 1,
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 8, Text = string.Empty } }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 2,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "Руководитель", Bold = true },
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 3, MergeToColumn = 4, Bold = true,
+                                            TakeFromRow = 1, TakeFromField = "our_organization"
+                                        },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 6, Text = "Руководитель", Bold = true },
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 7, MergeToColumn = 8, Bold = true,
+                                            TakeFromRow = 1, TakeFromField = "counterparty"
+                                        }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 3,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 4, Text = "___________________________ подпись" },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 8, Text = "___________________________ подпись" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 4,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 1, MergeToColumn = 4, Align = "Center",
+                                            TakeFromRow = 1, TakeFromField = "our_director"
+                                        },
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 5, MergeToColumn = 8, Align = "Center",
+                                            TakeFromRow = 1, TakeFromField = "counterparty_director"
+                                        }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 5,
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 8, Text = string.Empty } }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 6,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "Гл. бухгалтер", Bold = true },
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 3, MergeToColumn = 4, Bold = true,
+                                            TakeFromRow = 1, TakeFromField = "our_organization"
+                                        },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 6, Text = "Гл. бухгалтер", Bold = true },
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 7, MergeToColumn = 8, Bold = true,
+                                            TakeFromRow = 1, TakeFromField = "counterparty"
+                                        }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 7,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 4, Text = "___________________________ подпись" },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 8, Text = "___________________________ подпись" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 8,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 1, MergeToColumn = 4, Align = "Center",
+                                            TakeFromRow = 1, TakeFromField = "our_accountant"
+                                        },
+                                        new ClosedXmlTextCell
+                                        {
+                                            Column = 5, MergeToColumn = 8, Align = "Center",
+                                            TakeFromRow = 1, TakeFromField = "counterparty_accountant"
                                         }
                                     }
                                 }
@@ -1031,7 +1158,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "201 ИНН", Border = "All" },
                                         new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_inn", Align = "Center", Border = "All" },
                                         new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "301 ИНН", Border = "All" },
-                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerInn}", Align = "Center", Border = "All" }
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "buyer_inn", Align = "Center", Border = "All" }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -1042,7 +1169,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "202 Ф.И.О/наименование предприятия", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_name", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "302 Ф.И.О/наименование предприятия", Border = "All", WrapText = true },
-                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerName}", Border = "All", WrapText = true }
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "buyer_name", Border = "All", WrapText = true }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -1053,7 +1180,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "203 адрес", Border = "All" },
                                         new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_address", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "303 адрес", Border = "All" },
-                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerAddress}", Border = "All", WrapText = true }
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "buyer_address", Border = "All", WrapText = true }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -1064,7 +1191,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "204 код и наименование РНИ", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, Text = "{SellerRni}", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "304 код и наименование РНИ", Border = "All", WrapText = true },
-                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerRni}", Border = "All", WrapText = true }
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "buyer_reg_number", Border = "All", WrapText = true }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -1075,7 +1202,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "205 код (БИК) и наименование банка", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_bank_text", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "305 код (БИК) и наименование банка", Border = "All", WrapText = true },
-                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerBank}", Border = "All", WrapText = true }
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "buyer_bank", Border = "All", WrapText = true }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -1086,7 +1213,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "206 расчётный счёт", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 3, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "seller_account", Border = "All", WrapText = true },
                                         new ClosedXmlTextCell { Column = 6, MergeToColumn = 7, Text = "306 расчётный счёт", Border = "All", WrapText = true },
-                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, Text = "{BuyerAccount}", Border = "All", WrapText = true }
+                                        new ClosedXmlTextCell { Column = 8, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "buyer_account", Border = "All", WrapText = true }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -1283,7 +1410,457 @@ namespace BIS.ERP.Services
                         }
                     }
                 }
+
+
             }
         };
+
+        /// <summary>
+        /// Бланк «ПРИХОДНЫЙ КАССОВЫЙ ОРДЕР» (КО-1) с отрывной квитанцией.
+        ///
+        /// Левая половина — сам ордер, правая — квитанция. Шапка бланка (наименование, ОКПО, ИНН)
+        /// берётся из карточки первичной организации документа, остальные клетки — из полей набора
+        /// данных ПКО: номер, дата, дебет/кредит, сумма, сумма прописью, принято от, основание;
+        /// для квитанции дополнительно дата словами. Разметку удобно доводить в конструкторе.
+        /// </summary>
+        public static ClosedXmlReportLayout CreateCashReceiptOrder(string? sheetName) => new()
+        {
+            Sheets =
+            {
+                new ClosedXmlSheet
+                {
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Приходный кассовый ордер" : sheetName,
+                    LayoutKind = ClosedXmlLayoutKinds.Formatted,
+                    PageSetup = new ClosedXmlPageSetup
+                    {
+                        Orientation = "Portrait",
+                        FitToPagesWide = 1,
+                        ShowGridLines = false,
+                        FontName = "Times New Roman",
+                        FontSize = 8
+                    },
+                    Blocks =
+                    {
+                        new ClosedXmlBlock
+                        {
+                            Type = "TitleRows",
+                            Name = "Бланк КО-1",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 1,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = "Унифицированная форма №КО-1", FontSize = 7, Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 14, Text = "Код", FontSize = 7, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 19, Text = "0310001", FontSize = 7, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "company_name", Bold = true, FontSize = 9, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 2,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = "Утверждена постановлением Госкомстата КР", FontSize = 6 },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 14, Text = "Форма по ОКУД", FontSize = 7, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 19, Text = "0310001", FontSize = 7, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 25, Text = "ОКПО", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 26, MergeToColumn = 32, TakeFromRow = 1, TakeFromField = "company_okpo" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 3,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "company_name", Bold = true, WrapText = true },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 14, Text = "по ОКПО", FontSize = 7, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "company_okpo", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 25, Text = "ИНН", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 26, MergeToColumn = 32, TakeFromRow = 1, TakeFromField = "company_inn" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 4,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = "" },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 14, Text = "ИНН", FontSize = 7, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "company_inn", Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 5,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 19, Text = "ПРИХОДНЫЙ КАССОВЫЙ ОРДЕР", Bold = true, FontSize = 11, Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, Text = "КВИТАНЦИЯ", Bold = true, FontSize = 12, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 6,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 14, Text = "Номер документа", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 19, Text = "Дата составления", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 37, Text = "к приходному кассовому ордеру №", FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 7,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 14, TakeFromRow = 1, TakeFromField = "doc_number", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "doc_date_text", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "doc_number", Bold = true, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 8,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 5, Text = "ДЕБЕТ", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 10, Text = "КРЕДИТ", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 11, MergeToColumn = 19, Text = "СУММА", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, Text = "Принято от", Bold = true, FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 9,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 5, TakeFromRow = 1, TakeFromField = "debit_account", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 10, TakeFromRow = 1, TakeFromField = "credit_account", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 11, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "amount_text", Align = "Right", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "payer_name", Bold = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 10,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Принято от", Bold = true, FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "payer_name", Bold = true, WrapText = true },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, Text = "Основание", Bold = true, FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 11,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Основание", Bold = true, FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "basis", Italic = true, WrapText = true },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "basis", Italic = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 12,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "amount_in_words", Italic = true, WrapText = true },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "amount_in_words", Italic = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 13,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 19, TakeFromRow = 1, TakeFromField = "amount_text", Italic = true },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "amount_text", Italic = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 14,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 19, Text = "Приложение ____________________________________", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, Text = "" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 15,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 19, Text = "Главный бухгалтер _______________________________", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 30, MergeToColumn = 40, Text = "М. П.", FontSize = 7, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 16,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 19, Text = "Получил кассир __________________________________", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, TakeFromRow = 1, TakeFromField = "date_text", Bold = true, Italic = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 17,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, Text = "Главный бухгалтер ______________________", FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 18,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 22, MergeToColumn = 40, Text = "Получил кассир __________________________", FontSize = 7 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+
+        /// <summary>
+        /// Бланк «РАСХОДНЫЙ КАССОВЫЙ ОРДЕР» (КО-2).
+        ///
+        /// Шапка бланка (наименование, ОКПО, подписи руководителя и главного бухгалтера) берётся
+        /// из карточки первичной организации документа, остальные клетки — из полей набора данных
+        /// кассовых ордеров: номер, дата, дебет/кредит, сумма, сумма прописью, получатель и основание.
+        /// Разметку удобно доводить в конструкторе.
+        /// </summary>
+        public static ClosedXmlReportLayout CreateCashPaymentOrder(string? sheetName) => new()
+        {
+            Sheets =
+            {
+                new ClosedXmlSheet
+                {
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Расходный кассовый ордер" : sheetName,
+                    LayoutKind = ClosedXmlLayoutKinds.Formatted,
+                    PageSetup = new ClosedXmlPageSetup
+                    {
+                        Orientation = "Portrait",
+                        FitToPagesWide = 1,
+                        ShowGridLines = false,
+                        FontName = "Times New Roman",
+                        FontSize = 8
+                    },
+                    Blocks =
+                    {
+                        new ClosedXmlBlock
+                        {
+                            Type = "TitleRows",
+                            Name = "Бланк КО-2",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 1,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 7, TakeFromRow = 1, TakeFromField = "company_name", Bold = true, FontSize = 9, WrapText = true },
+                                        new ClosedXmlTextCell { Column = 9, MergeToColumn = 12, Text = "Код", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 13, MergeToColumn = 16, Text = "", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 2,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 9, MergeToColumn = 12, Text = "формы по ОКУД", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 13, MergeToColumn = 16, Text = "0310002", FontSize = 6, Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 3,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 9, MergeToColumn = 12, Text = "по ОКПО", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 13, MergeToColumn = 16, TakeFromRow = 1, TakeFromField = "company_okpo", Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 4,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 17, Text = "РАСХОДНЫЙ КАССОВЫЙ ОРДЕР", Bold = true, FontSize = 11, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 5,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 12, MergeToColumn = 14, Text = "Номер документа", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 17, Text = "Дата составления", FontSize = 6, Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 6,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 12, MergeToColumn = 14, TakeFromRow = 1, TakeFromField = "doc_number", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 17, TakeFromRow = 1, TakeFromField = "doc_date_text", Align = "Center", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 7,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 5, Text = "Дебет: Код структурного подразделения", FontSize = 5, Align = "Center", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 9, Text = "Корреспондирующий счёт", FontSize = 5, Align = "Center", Border = "All", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 12, Text = "Кредит", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 13, MergeToColumn = 15, Text = "Сумма", FontSize = 6, Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 16, MergeToColumn = 18, Text = "Код целевого назначения", FontSize = 5, Align = "Center", Border = "All", WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 8,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 5, Text = "", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 6, MergeToColumn = 9, TakeFromRow = 1, TakeFromField = "debit_account", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 12, TakeFromRow = 1, TakeFromField = "credit_account", Align = "Center", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 13, MergeToColumn = 15, TakeFromRow = 1, TakeFromField = "amount_text", Align = "Right", Border = "All" },
+                                        new ClosedXmlTextCell { Column = 16, MergeToColumn = 18, Text = "", Border = "All" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 9,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "Выдать", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 4, TakeFromRow = 1, TakeFromField = "recipient_number", Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 20, TakeFromRow = 1, TakeFromField = "recipient_name", Bold = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 10,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Основание", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 20, TakeFromRow = 1, TakeFromField = "basis", Italic = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 11,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Сумма", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 20, TakeFromRow = 1, TakeFromField = "amount_in_words", Italic = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 12,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = "№ довер. ______________________ от", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 10, MergeToColumn = 12, TakeFromRow = 1, TakeFromField = "doc_date_text", Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 13, MergeToColumn = 20, Text = "на имя ______________________________", FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 13,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 4, Text = "Руководитель", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 10, Text = "________________ подпись", FontSize = 6, Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 11, MergeToColumn = 14, TakeFromRow = 1, TakeFromField = "director_name", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 20, Text = "расшифровка подписи", FontSize = 5, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 14,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 4, Text = "Гл. бухгалтер", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 10, Text = "________________ подпись", FontSize = 6, Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 11, MergeToColumn = 14, TakeFromRow = 1, TakeFromField = "accountant_name", WrapText = true },
+                                        new ClosedXmlTextCell { Column = 15, MergeToColumn = 20, Text = "расшифровка подписи", FontSize = 5, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 15,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Получил", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 20, TakeFromRow = 1, TakeFromField = "amount_in_words", Italic = true, WrapText = true }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 16,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 20, Text = "(сумма прописью)", FontSize = 5, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 17,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 10, Text = "«____» ____________________ 20___ г.", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 11, MergeToColumn = 20, Text = "Получил ______________________________", FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 18,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 2, Text = "По", FontSize = 7 },
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 20, Text = "______________________________________________________________________________________________", FontSize = 7 }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 19,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 3, MergeToColumn = 20, Text = "(наименование, номер, дата и место выдачи документа, удостоверяющего личность получателя)", FontSize = 5, Align = "Center" }
+                                    }
+                                },
+                                new ClosedXmlTextRow
+                                {
+                                    Row = 20,
+                                    Cells =
+                                    {
+                                        new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Выдал кассир", FontSize = 8 },
+                                        new ClosedXmlTextCell { Column = 4, MergeToColumn = 10, Text = "________________ подпись", FontSize = 6, Align = "Center" },
+                                        new ClosedXmlTextCell { Column = 11, MergeToColumn = 20, Text = "__________________________ расшифровка подписи", FontSize = 5 }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
     }
 }

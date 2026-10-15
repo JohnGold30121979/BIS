@@ -1237,7 +1237,8 @@ namespace BIS.ERP.Views
             // диагностическим инструментом, поэтому поведение можно проверить без окна.
             var builder = new ReconciliationActBuilder(_context);
             var movements = await builder.LoadMovementsAsync(selectedFilterId, start, end);
-            var act = builder.BuildTable(pairs, totals, movements, start, end, scoped, titleName);
+            var parties = await builder.LoadPartiesAsync(scoped ? selectedFilterId : null, scoped ? titleName : null);
+            var act = builder.BuildTable(pairs, totals, movements, start, end, scoped, titleName, parties);
             var table = act.Table;
 
             WriteReconciliationTrace(start, end, scoped, titleName, filterName, selectedFilterId,
@@ -1487,87 +1488,12 @@ namespace BIS.ERP.Views
                 }
             };
 
-            // При отключённом FRX список вариантов не заполняется: остаётся только
-            // стандартный расчётный вариант, который выводится через ClosedXML.
-            if (!ReportingFeatures.FrxEnabled)
-            {
-                ReconciliationVariantCombo.ItemsSource = variants;
-                ReconciliationVariantCombo.SelectedIndex = 0;
-                ReconciliationVariantCombo.IsEnabled = false;
-                return;
-            }
-
-            var variantsLoadError = string.Empty;
-
-            try
-            {
-                var reports = await _context.Reports.AsNoTracking()
-                    .Where(report => report.IsActive)
-                    .OrderBy(report => report.Order)
-                    .ThenBy(report => report.Name)
-                    .Select(report => new
-                    {
-                        report.Id,
-                        report.Name,
-                        report.Description,
-                        report.Code,
-                        report.SourceFormat,
-                        report.ReportType,
-                        report.Template
-                    })
-                    .ToListAsync();
-
-                var candidateReports = reports
-                    // Отчёты с визуальным макетом ClosedXML — это отдельные отчёты,
-                    // а не варианты FRX-акта, поэтому в списке вариантов их нет.
-                    .Where(report => !string.Equals(report.SourceFormat, "ClosedXml", StringComparison.OrdinalIgnoreCase))
-                    .Where(report => ReportClassificationService.IsReconciliationReport(new Report
-                    {
-                        Id = report.Id,
-                        Name = report.Name,
-                        Description = report.Description,
-                        Code = report.Code,
-                        SourceFormat = report.SourceFormat,
-                        ReportType = report.ReportType,
-                        Template = report.Template
-                    }))
-                    .ToList();
-                if (candidateReports.Count == 0)
-                    candidateReports = reports
-                        .Where(report =>
-                            string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase))
-                        .ToList();
-
-                foreach (var report in candidateReports)
-                {
-                    var displayName = BuildReconciliationVariantDisplayName(report.Name, report.SourceFormat, report.ReportType);
-                    if (variants.Any(item => item.ReportId == report.Id))
-                        continue;
-
-                    variants.Add(new ReconciliationReportVariant
-                    {
-                        ReportId = report.Id,
-                        DisplayName = displayName,
-                        Description = report.Description,
-                        Code = report.Code,
-                        IsStandard = false
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                variantsLoadError = $"Макеты акта сверки не загружены: {ex.Message}";
-            }
-
+            // Варианты расчёта по макетам FoxPro FRX удалены вместе с подсистемой:
+            // остаётся только стандартный расчётный вариант (вывод через ClosedXML).
             ReconciliationVariantCombo.ItemsSource = variants;
             ReconciliationVariantCombo.SelectedIndex = 0;
-            ReconciliationVariantHint.Text = !string.IsNullOrWhiteSpace(variantsLoadError)
-                ? variantsLoadError
-                : variants.Count == 1
-                    ? "Макеты акта сверки в метаданных не найдены"
-                    : $"Доступно вариантов: {variants.Count}";
-            UpdateReconciliationVariantVisibility();
+            ReconciliationVariantCombo.IsEnabled = false;
+
         }
 
         private void OnReportTypeSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1989,13 +1915,9 @@ namespace BIS.ERP.Views
         }
 
         /// <summary>
-        /// Признак наличия макета FoxPro FRX.
-        ///
-        /// При отключённом FRX всегда false: вывод по макетам FoxPro недоступен,
-        /// и отчёт формируется другими механизмами.
+        /// Признак наличия координатного макета печатной формы у отчёта.
         /// </summary>
         private static bool HasFoxProTemplate(Report report) =>
-            ReportingFeatures.FrxEnabled &&
             !string.IsNullOrWhiteSpace(report.Template) &&
             (string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase));
@@ -2598,6 +2520,14 @@ namespace BIS.ERP.Views
                     throw new InvalidOperationException(layoutError);
 
                 var renderParameters = await _reportService.ResolveParametersForPreviewAsync(reportSnapshot);
+                // Период берётся из окна и передаётся всегда: иначе подстановки {PeriodStart}
+                // и {PeriodEnd} в макете берут значения по умолчанию и шапка расходится с данными.
+                // Организация необязательна: пусто значит «все организации».
+                var (renderPeriodStart, renderPeriodEnd) = GetPeriod();
+                renderParameters["PeriodStart"] = renderPeriodStart;
+                renderParameters["PeriodEnd"] = renderPeriodEnd;
+                renderParameters["OrganizationId"] = _selectedOrganizationId?.ToString() ?? string.Empty;
+
                 var preparedData = ClosedXmlReportRenderer.PrepareData(dataSnapshot, reportSnapshot);
                 var typedParameters = renderParameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
                 var pdfBytes = await Task.Run(() =>
@@ -2856,11 +2786,8 @@ namespace BIS.ERP.Views
 
                 var dataSnapshot = _currentData.Copy();
                 var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
-                var ruleService = new FoxProReportFieldRuleService(_context);
-                await ruleService.SeedDefaultRulesAsync();
-                var rules = await ruleService.GetRulesAsync(includeInactive: false);
                 var printFormService = new PrintFormService(_context);
-                var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot, rules));
+                var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot));
                 var completedTask = await Task.WhenAny(pdfTask, Task.Delay(TimeSpan.FromSeconds(20)));
                 if (completedTask != pdfTask)
                 {
@@ -2972,12 +2899,9 @@ namespace BIS.ERP.Views
                 }
                 else if (useFoxProExcelLayout || useNativeExcelLayout)
                 {
-                    var ruleService = new FoxProReportFieldRuleService(_context);
-                    await ruleService.SeedDefaultRulesAsync();
-                    var rules = await ruleService.GetRulesAsync(includeInactive: false);
                     var printFormService = new PrintFormService(_context);
                     excelBytes = await Task.Run(() =>
-                        printFormService.ExportReportTemplateExcel(dataSnapshot, reportSnapshot, rules));
+                        printFormService.ExportReportTemplateExcel(dataSnapshot, reportSnapshot));
                 }
                 else if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
                 {

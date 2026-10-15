@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Пробник: рендерит акт сверки и показывает, что попадает в вывод.
+       Путь к сборке можно подменить: -p:BisErpDll=... (когда bin занят запущенным приложением).
+       Лежит в .tools — в сборку проекта не входит. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>ActLayoutProbe</AssemblyName>
+    <RootNamespace>ActLayoutProbe</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <BisErpDll Condition="'$(BisErpDll)' == ''">..\..\bin\Debug\net8.0-windows\BIS.ERP.dll</BisErpDll>
+    <BisErpDeps Condition="'$(BisErpDeps)' == ''">..\..\bin\Debug\net8.0-windows</BisErpDeps>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BIS.ERP">
+      <HintPath>$(BisErpDll)</HintPath>
+    </Reference>
+    <!-- Зависимости приложения (QuestPDF, ClosedXML и прочие) берём из bin: пробник
+         запускается как отдельный процесс и должен их видеть. Саму BIS.ERP.dll
+         исключаем: её подставляет BisErpDll (чтобы можно было взять свежую из obj). -->
+    <Reference Include="$(BisErpDeps)\*.dll" Exclude="$(BisErpDeps)\BIS.ERP.dll" />
+  </ItemGroup>
+
+</Project>

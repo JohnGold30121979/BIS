@@ -868,9 +868,16 @@ namespace BIS.ERP.Services
             if (!string.IsNullOrWhiteSpace(field))
             {
                 var rowNumber = cell.TakeFromRow;
-                if (rowNumber > 0 && rowNumber <= dataTable.Rows.Count)
+                // Номер строки 1-based; отрицательный считается с конца: -1 — последняя
+                // строка набора. Так итог акта сверки берёт свою строку. Логика та же,
+                // что в Excel-выводе (PickFieldValue), иначе PDF расходится с Excel.
+                var index = rowNumber > 0
+                    ? rowNumber - 1
+                    : dataTable.Rows.Count + rowNumber;
+
+                if (rowNumber != 0 && index >= 0 && index < dataTable.Rows.Count)
                 {
-                    var row = dataTable.Rows[rowNumber - 1];
+                    var row = dataTable.Rows[index];
                     var resolved = ResolveColumnName(dataTable, field);
                     if (resolved != null)
                         return FormatValueText(row[resolved]);

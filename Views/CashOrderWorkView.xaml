@@ -185,10 +185,15 @@
                     <TextBlock Text="Отчеты по кассе:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
                     <Button x:Name="CashBookButton" Content="Кассовая книга" Width="125" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
                     <Button x:Name="ReceiptExpenseRegisterButton" Content="Реестр приходов/расходов" Width="185" Height="32" Margin="0,0,8,0" Background="#34495E" Foreground="White" Click="OnReceiptExpenseRegisterClick"/>
-                    <Button x:Name="PrintButton" Content="🖨 Печатная форма" Width="145" Height="32" Margin="10,0,8,0"
-                            Background="#2C3E50" Foreground="White" IsEnabled="False" Click="OnPrintClick"/>
+                    <Button x:Name="PrintExcelButton" Content="📊 Excel" Width="110" Height="32" Margin="0,0,8,0"
+                            Background="#27AE60" Foreground="White" IsEnabled="False" Click="OnPrintFormExcelClick"
+                            ToolTip="Печать в Excel выбранной формы (или основной, если флажок «Выбрать форму» снят)"/>
+                    <Button x:Name="PrintPdfButton" Content="📄 Предпросмотр ПДФ" Width="180" Height="32" Margin="0,0,8,0"
+                            Background="#2980B9" Foreground="White" IsEnabled="False" Click="OnPrintFormPdfClick"
+                            ToolTip="Предпросмотр PDF в окне программы"/>
                     <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,0"
-                              ToolTip="Если выключено, сразу открывается активная форма по умолчанию. Если включено, можно выбрать вариант печатной формы."/>
+                              Checked="OnChoosePrintFormChecked" Unchecked="OnChoosePrintFormUnchecked"
+                              ToolTip="Включите — откроется список печатных форм, и выбранная будет печататься кнопками «Эксель» и «Предпросмотр ПДФ». Выключено — печатается форма по умолчанию."/>
                 </WrapPanel>
             </Border>
         </StackPanel>

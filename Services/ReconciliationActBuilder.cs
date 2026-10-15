@@ -36,6 +36,21 @@ namespace BIS.ERP.Services
     }
 
     /// <summary>
+    /// Стороны акта сверки: наша организация и контрагент.
+    ///
+    /// Наша — запись с is_primary = true в справочнике организаций; контрагент — организация,
+    /// по которой строится акт. Руководитель и главный бухгалтер берутся из карточек
+    /// (поля director и chief_accountant) и печатаются в подписях.
+    /// </summary>
+    public sealed record ReconciliationActParties(
+        string OurName,
+        string OurDirector,
+        string OurAccountant,
+        string CounterpartyName,
+        string CounterpartyDirector,
+        string CounterpartyAccountant);
+
+    /// <summary>
     /// Построение таблицы акта сверки: строки данных для макета FRX.
     ///
     /// Логика вынесена из AccountingReportsView в отдельный сервис, чтобы
@@ -49,6 +64,93 @@ namespace BIS.ERP.Services
         {
             _context = context;
         }
+
+        /// <summary>
+        /// Читает стороны акта из справочника организаций: наша — первичная,
+        /// контрагент — по идентификатору, иначе по наименованию.
+        /// Пустые значения допустимы: карточка может быть не заполнена.
+        /// </summary>
+        public async Task<ReconciliationActParties> LoadPartiesAsync(Guid? counterpartyId, string? counterpartyName)
+        {
+            var ours = await LoadOrganizationCardAsync(null, primaryOnly: true);
+            var counterparty = await LoadOrganizationCardAsync(
+                counterpartyId, primaryOnly: false, organizationName: counterpartyName);
+
+            return new ReconciliationActParties(
+                ours.Name,
+                ours.Director,
+                ours.Accountant,
+                string.IsNullOrWhiteSpace(counterparty.Name) ? counterpartyName ?? string.Empty : counterparty.Name,
+                counterparty.Director,
+                counterparty.Accountant);
+        }
+
+        /// <summary>Карточка организации: наименование, руководитель и главный бухгалтер.</summary>
+        private async Task<(string Name, string Director, string Accountant)> LoadOrganizationCardAsync(
+            Guid? organizationId,
+            bool primaryOnly,
+            string? organizationName = null)
+        {
+            var empty = (Name: string.Empty, Director: string.Empty, Accountant: string.Empty);
+
+            try
+            {
+                const string columns = @"SELECT COALESCE(NULLIF(""full_name"", ''), ""name"", '') AS card_name,
+                                                COALESCE(""director"", '')           AS card_director,
+                                                COALESCE(""chief_accountant"", '')   AS card_accountant
+                                           FROM ""catalog_organizations""";
+
+                string sql;
+                object? value = null;
+                if (primaryOnly)
+                {
+                    sql = columns + " WHERE COALESCE(\"is_primary\", false) = true ORDER BY \"CreatedAt\" LIMIT 1";
+                }
+                else if (organizationId.HasValue && organizationId.Value != Guid.Empty)
+                {
+                    sql = columns + " WHERE \"Id\" = @value LIMIT 1";
+                    value = organizationId.Value;
+                }
+                else if (!string.IsNullOrWhiteSpace(organizationName))
+                {
+                    sql = columns + " WHERE COALESCE(NULLIF(\"full_name\", ''), \"name\", '') = @value LIMIT 1";
+                    value = organizationName.Trim();
+                }
+                else
+                {
+                    return empty;
+                }
+
+                var connection = _context.Database.GetDbConnection();
+                if (connection.State != ConnectionState.Open)
+                    await connection.OpenAsync();
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                if (value != null)
+                {
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = "value";
+                    parameter.Value = value;
+                    command.Parameters.Add(parameter);
+                }
+
+                await using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return empty;
+
+                return (
+                    reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
+                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Стороны акта сверки: {ex.Message}");
+                return empty;
+            }
+        }
+
 
         /// <summary>
         /// Колонки, которые нужны только механизму подстановки FRX-макета.
@@ -94,6 +196,13 @@ namespace BIS.ERP.Services
             AddAliasColumn(table, "report_summary", typeof(string));
             AddAliasColumn(table, "period_start", typeof(string));
             AddAliasColumn(table, "period_end", typeof(string));
+            // Стороны акта: их читает блок подписей макета.
+            AddAliasColumn(table, "our_organization", typeof(string));
+            AddAliasColumn(table, "our_director", typeof(string));
+            AddAliasColumn(table, "our_accountant", typeof(string));
+            AddAliasColumn(table, "counterparty", typeof(string));
+            AddAliasColumn(table, "counterparty_director", typeof(string));
+            AddAliasColumn(table, "counterparty_accountant", typeof(string));
             return table;
         }
 
@@ -219,13 +328,16 @@ namespace BIS.ERP.Services
             DateTime start,
             DateTime end,
             bool scoped,
-            string titleName)
+            string titleName,
+            ReconciliationActParties? parties = null)
         {
             var table = CreateTable();
             var trace = new List<string>();
 
+            // Наша сторона — первичная организация: её наименование печатается в заголовке.
+            var ourName = string.IsNullOrWhiteSpace(parties?.OurName) ? "нашей организацией" : parties!.OurName;
             AddRow(table, scoped
-                ? $"АКТ СВЕРКИ между нашей организацией и \"{titleName}\""
+                ? $"АКТ СВЕРКИ между {ourName} и \"{titleName}\""
                 : "АКТЫ СВЕРКИ ПО ВСЕМ ОРГАНИЗАЦИЯМ");
             AddRow(table, $"Период: {start:dd/MM/yyyy} - {end:dd/MM/yyyy}");
             AddRow(table, string.Empty);
@@ -275,6 +387,7 @@ namespace BIS.ERP.Services
                 : BuildAllOrganizationsDebtSummary(totals.Count, balance);
             AddRow(table, summary);
             ApplyHeaderFields(table, start, end, summary);
+            ApplyPartyFields(table, parties);
 
             trace.Add($"строк в таблице: {table.Rows.Count}");
             return new ReconciliationActTable(table, summary, trace);
@@ -471,6 +584,25 @@ namespace BIS.ERP.Services
             }
         }
 
+        /// <summary>
+        /// Проставляет стороны акта во все строки: их читает блок подписей макета.
+        /// </summary>
+        internal static void ApplyPartyFields(DataTable table, ReconciliationActParties? parties)
+        {
+            if (parties == null)
+                return;
+
+            foreach (DataRow row in table.Rows)
+            {
+                SetServiceValue(row, "our_organization", text: parties.OurName);
+                SetServiceValue(row, "our_director", text: parties.OurDirector);
+                SetServiceValue(row, "our_accountant", text: parties.OurAccountant);
+                SetServiceValue(row, "counterparty", text: parties.CounterpartyName);
+                SetServiceValue(row, "counterparty_director", text: parties.CounterpartyDirector);
+                SetServiceValue(row, "counterparty_accountant", text: parties.CounterpartyAccountant);
+            }
+        }
+
         public static bool AccountInPair(string accountCode, OrganizationBalanceRow pair) =>
             SameAccount(accountCode, pair.AccountCode) || SameAccount(accountCode, pair.CounterAccountCode);
 
@@ -520,16 +652,24 @@ namespace BIS.ERP.Services
             return separatorIndex >= 0 ? text[(separatorIndex + 3)..].Trim() : text;
         }
 
+        /// <summary>
+        /// Итоговая фраза акта. Сумма печатается числом и прописью: в бланке
+        /// пропись обязательна, а число нужно бухгалтеру для сверки с таблицей.
+        /// </summary>
         private static string BuildDebtSummary(string organizationName, decimal balance)
         {
             var direction = balance >= 0 ? "перед нами" : "за нами";
-            return $"Задолженность \"{organizationName}\" {direction} составляет {Math.Abs(balance):N2}";
+            var amount = Math.Abs(balance);
+            return $"Задолженность {organizationName} {direction} составляет {amount:N2} " +
+                   $"({PrintFormService.RussianMoneyInWords(amount)})";
         }
 
         private static string BuildAllOrganizationsDebtSummary(int organizationCount, decimal balance)
         {
             var direction = balance >= 0 ? "перед нами" : "за нами";
-            return $"Задолженность по {organizationCount} организациям {direction} составляет {Math.Abs(balance):N2}";
+            var amount = Math.Abs(balance);
+            return $"Задолженность по {organizationCount} организациям {direction} составляет {amount:N2} " +
+                   $"({PrintFormService.RussianMoneyInWords(amount)})";
         }
     }
 

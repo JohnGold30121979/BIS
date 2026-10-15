@@ -87,7 +87,8 @@ namespace BIS.ERP.Views
             ViewButton.IsEnabled = hasSelection;
             DeleteButton.IsEnabled = hasSelection; // && selected?.IsPosted == false;
             AllPostingsButton.IsEnabled = hasSelection;
-            PrintButton.IsEnabled = hasSelection;
+            PrintFormsToggle.IsEnabled = hasSelection;
+            UpdatePrintFormsButtonsState();
             ExportEsfButton.IsEnabled = _isSalesMode;
             ImportEsfButton.IsEnabled = _isSalesMode;
         }
@@ -216,6 +217,9 @@ namespace BIS.ERP.Views
         private async void OnInvoiceSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateButtonsState();
+            // Список печатных форм нужен до первой печати: по умолчанию выбирается основная,
+            // поэтому кнопки Excel и ПДФ доступны сразу после выбора счёт-фактуры.
+            await EnsurePrintFormsLoadedAsync();
             var selected = SelectedInvoice;
             if (selected == null || _invoiceService == null)
             {
@@ -339,49 +343,187 @@ namespace BIS.ERP.Views
             }
         }
 
-        private async void OnPrintClick(object sender, RoutedEventArgs e)
+        private List<Report> _printForms = new();
+        private Report? _selectedPrintForm;
+        private bool _printFormsLoading;
+
+        /// <summary>
+        /// Переключатель печатных форм: при включении открывается диалоговое окно выбора
+        /// формы из списка доступных, при выключении возвращается основная форма.
+        /// </summary>
+        private async void OnPrintFormsToggleChanged(object sender, RoutedEventArgs e)
         {
-            var selected = SelectedInvoice;
-            if (selected == null)
+            await EnsurePrintFormsLoadedAsync();
+
+            if (PrintFormsToggle.IsChecked != true)
             {
-                MessageBox.Show("Выберите счет-фактуру для печати.", "Печатная форма",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                SetSelectedPrintForm(DefaultPrintForm(), showStatus: true);
                 return;
             }
 
+            var chosen = await SelectPrintFormAsync();
+            SetSelectedPrintForm(chosen ?? DefaultPrintForm(), showStatus: true);
+
+            // Выбор отменён — переключатель возвращается в исходное состояние.
+            if (chosen == null)
+                PrintFormsToggle.IsChecked = false;
+        }
+
+        /// <summary>Основная печатная форма из загруженного списка.</summary>
+        private Report? DefaultPrintForm() =>
+            _printForms.FirstOrDefault(form => form.IsDefault) ?? _printForms.FirstOrDefault();
+
+        /// <summary>
+        /// Загружает список печатных форм один раз на окно и выбирает основную.
+        /// Печатать можно сразу: переключатель нужен только чтобы выбрать другую форму.
+        /// </summary>
+        private async Task EnsurePrintFormsLoadedAsync()
+        {
+            if (_printForms.Count > 0 || _printFormsLoading)
+                return;
+
+            _printFormsLoading = true;
             try
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var printFormService = new PrintFormService(context);
                 await printFormService.SeedInvoiceFormsAsync();
-                var forms = await printFormService.GetPrintFormsAsync(_documentMetadata.Id, includeInactive: false);
+                _printForms = await printFormService.GetInvoicePrintFormsAsync(_documentMetadata.Id, includeInactive: false);
+
+                if (_selectedPrintForm == null)
+                    SetSelectedPrintForm(DefaultPrintForm(), showStatus: false);
+                else
+                    UpdatePrintFormsButtonsState();
+
+                // Пустой список — это не ошибка: у документа просто нет настроенных форм.
+                if (_printForms.Count == 0)
+                    StatusText.Text = "Для счёта-фактуры не настроены печатные формы";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"Печатные формы недоступны: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки печатных форм: {ex.Message}");
+            }
+            finally
+            {
+                _printFormsLoading = false;
+            }
+        }
+
+        /// <summary>Запоминает выбранную форму и обновляет доступность кнопок вывода.</summary>
+        private void SetSelectedPrintForm(Report? report, bool showStatus)
+        {
+            _selectedPrintForm = report;
+
+            if (showStatus)
+            {
+                StatusText.Text = report == null
+                    ? "Для счёта-фактуры не настроены печатные формы"
+                    : $"Печатная форма: {report.Name}";
+            }
+
+            UpdatePrintFormsButtonsState();
+        }
+
+        /// <summary>
+        /// Диалог выбора печатной формы из списка доступных: формы документа и бланки
+        /// ClosedXML (их данные собирает набор данных, а не документ).
+        /// </summary>
+        private async Task<Report?> SelectPrintFormAsync()
+        {
+            try
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var printFormService = new PrintFormService(context);
+                await printFormService.SeedInvoiceFormsAsync();
+                var forms = await printFormService.GetInvoicePrintFormsAsync(_documentMetadata.Id, includeInactive: false);
                 if (forms.Count == 0)
                 {
                     MessageBox.Show("Для счет-фактуры не настроены печатные формы.", "Печатная форма",
                         MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
+                    return null;
                 }
 
                 var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
-                if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
-                    return;
+                return selectionDialog.ShowDialog() == true ? selectionDialog.SelectedReport : null;
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Не удалось получить печатные формы";
+                MessageBox.Show($"Ошибка получения печатных форм: {ex.Message}", "Печатные формы",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return null;
+            }
+        }
 
-                var selectedReport = selectionDialog.SelectedReport;
-                var selectedFormat = selectionDialog.SelectedFormat;
-                StatusText.Text = selectedFormat == PrintFormOutputFormat.Excel
-                    ? "Формирование Excel..."
-                    : "Формирование PDF...";
-                var output = selectedFormat == PrintFormOutputFormat.Excel
-                    ? await printFormService.ExportInvoiceDocumentExcelAsync(selectedReport, selected.Id)
-                    : await printFormService.ExportInvoiceDocumentAsync(selectedReport, selected.Id);
-                var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
+        /// <summary>Кнопки вывода доступны, когда выбраны и счёт-фактура, и печатная форма.</summary>
+        private void UpdatePrintFormsButtonsState()
+        {
+            var ready = _selectedPrintForm != null && SelectedInvoice != null;
+            PrintExcelButton.IsEnabled = ready;
+            PrintPdfButton.IsEnabled = ready;
+        }
+
+        /// <summary>Печать выбранной формы в Excel.</summary>
+        private async void OnPrintFormExcelClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedPrintForm is not { } report || SelectedInvoice is not { } invoice)
+                return;
+
+            try
+            {
+                PrintExcelButton.IsEnabled = false;
+                StatusText.Text = "Формирование Excel...";
+
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var printFormService = new PrintFormService(context);
+                var output = await printFormService.ExportInvoiceDocumentExcelAsync(report, invoice.Id);
+                var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(
+                    output, report.Name, PrintFormOutputFormat.Excel);
+
                 StatusText.Text = $"Открыт файл печатной формы: {outputPath}";
             }
             catch (Exception ex)
             {
-                StatusText.Text = "Ошибка печати";
+                StatusText.Text = "Ошибка формирования Excel";
                 MessageBox.Show($"Ошибка формирования печатной формы: {ex.Message}", "Печать",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                UpdatePrintFormsButtonsState();
+            }
+        }
+
+        /// <summary>Предпросмотр PDF выбранной формы — окно предпросмотра, как в конфигураторе.</summary>
+        private async void OnPrintFormPdfClick(object sender, RoutedEventArgs e)
+        {
+            if (_selectedPrintForm is not { } report || SelectedInvoice is not { } invoice)
+                return;
+
+            try
+            {
+                PrintPdfButton.IsEnabled = false;
+                StatusText.Text = "Формирование PDF...";
+
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var printFormService = new PrintFormService(context);
+                var pdfBytes = await printFormService.ExportInvoiceDocumentAsync(report, invoice.Id);
+
+                var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name) { Owner = Window.GetWindow(this) };
+                previewWindow.ShowDialog();
+
+                StatusText.Text = "Предпросмотр PDF открыт";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка формирования PDF";
+                MessageBox.Show($"Ошибка формирования печатной формы: {ex.Message}", "Печать",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                UpdatePrintFormsButtonsState();
             }
         }
 

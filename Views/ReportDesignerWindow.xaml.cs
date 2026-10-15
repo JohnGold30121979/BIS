@@ -22,7 +22,6 @@ namespace BIS.ERP.Views
         private ReportService _reportService;
         private PrintFormService _printFormService;
         private MetadataService _metadataService;
-        private FoxProReportFieldRuleService _foxProRuleService;
         private Report _currentReport;
         private List<MetadataObject> _availableCatalogs;
         private ObservableCollection<ReportField> _reportFields;
@@ -33,8 +32,6 @@ namespace BIS.ERP.Views
         public ObservableCollection<FieldDef> AvailableSourceFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableComputedFields { get; } = new();
         public ObservableCollection<FieldDef> AvailableLayoutFields { get; } = new();
-        public ObservableCollection<FoxProReportFieldRule> FoxProRules { get; } = new();
-        private ObservableCollection<FrXElementMappingViewModel> _frxElementMappings = new();
 
         public ReportDesignerWindow(Report report = null)
         {
@@ -48,10 +45,8 @@ namespace BIS.ERP.Views
             ReportFieldsGrid.ItemsSource = _reportFields;
             FiltersList.ItemsSource = _reportFilters;
             ReportParametersGrid.ItemsSource = _reportParameters;
-            ElementMappingGrid.ItemsSource = _frxElementMappings;
             ConfigureFieldColumns();
             ConfigureParameterColumns();
-            InitializeNativeDesignerState();
             InitializeClosedXmlDesignerState();
             ApplyLayoutKindVisibility();
 
@@ -66,9 +61,6 @@ namespace BIS.ERP.Views
                 _reportService = new ReportService(context);
                 _printFormService = new PrintFormService(context);
                 _metadataService = new MetadataService(context);
-                _foxProRuleService = new FoxProReportFieldRuleService(context);
-                await _foxProRuleService.SeedDefaultRulesAsync();
-                await LoadFoxProRulesAsync();
 
                 await LoadDataSources();
 
@@ -134,7 +126,6 @@ namespace BIS.ERP.Views
                     _currentReport ?? new Report { ReportType = GetSelectedReportType() },
                     catalog);
                 await LoadAvailableFields(catalog);
-                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
             else
             {
@@ -144,7 +135,6 @@ namespace BIS.ERP.Views
                 AvailableDataFields.Clear();
                 AvailableFilterFields.Clear();
                 AvailableLayoutFields.Clear();
-                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
 
             UpdateClosedXmlSourceText();
@@ -185,8 +175,7 @@ namespace BIS.ERP.Views
         {
             MessageBox.Show(
                 "Тип отчета определяет способ построения печатной формы.\n\n" +
-                "Для FRX выберите «Макет Visual FoxPro FRX» и укажите источник данных в поле «Источник».\n" +
-                "Поля во вкладках «Поля» и «FRX» берутся из одного выбранного источника.\n\n" +
+                "Выберите источник данных в поле «Источник».\n" +
                 "Чтобы добавить SQL-набор данных, нажмите «+» рядом с источником.",
                 "Тип отчета",
                 MessageBoxButton.OK,
@@ -344,9 +333,6 @@ namespace BIS.ERP.Views
         private void CommitDesignerGridEdits()
         {
             TryCommitGrid(ReportFieldsGrid);
-            TryCommitGrid(ElementMappingGrid);
-            TryCommitGrid(FoxProRulesGrid);
-            TryCommitGrid(NativeElementsGrid);
         }
 
         private static void TryCommitGrid(DataGrid grid)
@@ -737,7 +723,6 @@ namespace BIS.ERP.Views
                 if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                 {
                     await LoadAvailableFields(catalog);
-                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 }
             }
         }
@@ -753,7 +738,6 @@ namespace BIS.ERP.Views
                 if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
                 {
                     await LoadAvailableFields(catalog);
-                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 }
             }
         }
@@ -903,8 +887,8 @@ namespace BIS.ERP.Views
         {
             _currentReport = report;
 
-            // Сначала способ макета: от него зависит, какие вкладки и поля видны.
-            SelectLayoutKindFromReport(report);
+            // Способ макета один — ClosedXML: координатные макеты FRX/native удалены.
+            SetLayoutKind(ClosedXmlLayoutKind);
 
             ReportNameBox.Text = report.Name;
             ReportDescBox.Text = report.Description;
@@ -914,7 +898,6 @@ namespace BIS.ERP.Views
             HeaderTextBox.Text = report.HeaderText ?? "";
             FooterTextBox.Text = report.FooterText ?? "";
             SummaryTextBox.Text = report.SummaryText ?? "";
-            TemplateTextBox.Text = report.Template ?? "";
 
             // Ориентация
             OrientationCombo.SelectedIndex = report.PageOrientation == "Landscape" ? 1 : 0;
@@ -965,7 +948,6 @@ namespace BIS.ERP.Views
                 {
                     SyncReportFieldsWithSourceIfStale(report, catalog);
                     await LoadAvailableFields(catalog);
-                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                 }
             }
             else
@@ -976,7 +958,6 @@ namespace BIS.ERP.Views
                 AvailableDataFields.Clear();
                 AvailableFilterFields.Clear();
                 AvailableLayoutFields.Clear();
-                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
             }
             // Загрузка фильтров
             _reportFilters.Clear();
@@ -986,17 +967,6 @@ namespace BIS.ERP.Views
             }
 
             LoadReportParameters(report);
-
-            if (!string.IsNullOrWhiteSpace(report.Template))
-            {
-                await LoadFrxElementMappings(report.Template, report.ElementMappings);
-                RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
-                LoadNativeTemplateFromReport(report);
-            }
-            else
-            {
-                LoadNativeTemplateFromReport(report);
-            }
 
             LoadClosedXmlLayoutFromReport(report);
 
@@ -1195,9 +1165,6 @@ namespace BIS.ERP.Views
 
                 CommitDesignerGridEdits();
 
-                SyncNativeTemplateToTemplateBoxIfNeeded();
-
-                SyncFrxElementMappingsFromNativeTemplate();
                 // Заполняем данные
                 _currentReport.Name = ReportNameBox.Text;
                 _currentReport.Description = ReportDescBox.Text;
@@ -1216,7 +1183,8 @@ namespace BIS.ERP.Views
                 _currentReport.SourceFormat = GetSelectedLayoutKind() == FoxProLayoutKind
                     ? (_currentReport.ReportType == "FoxProLayout" ? "FoxProFRX" : "Native")
                     : ClosedXmlSourceFormat;
-                _currentReport.Template = TemplateTextBox?.Text ?? "";
+                // Шаблон печатной формы в конструкторе не редактируется: вкладка
+                // FRX/native удалена, а отчёты ClosedXML хранят макет в ClosedXmlLayout.
                 _currentReport.TemplateVersion = Math.Max(_currentReport.TemplateVersion, 2);
                 _currentReport.ClosedXmlLayout = BuildClosedXmlLayoutJson();
                 _currentReport.Icon = "📊";
@@ -1263,15 +1231,14 @@ namespace BIS.ERP.Views
                         Order = f.Order
                     }).ToList();
 
-                var mappingsToAdd = BuildReportElementMappings(_currentReport.Id);
-
+                // Привязки элементов берутся из открытого отчёта: вкладки FRX-полей,
+                // которая их собирала, больше нет.
                 _currentReport.Fields = fieldsToAdd;
                 _currentReport.Filters = filtersToAdd;
                 _currentReport.Parameters = _reportParameters
                     .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Name))
                     .OrderBy(parameter => parameter.Order)
                     .ToList();
-                _currentReport.ElementMappings = mappingsToAdd;
 
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var reportService = new ReportService(context);
@@ -1420,9 +1387,6 @@ namespace BIS.ERP.Views
 
             CommitDesignerGridEdits();
 
-            SyncNativeTemplateToTemplateBoxIfNeeded();
-
-            SyncFrxElementMappingsFromNativeTemplate();
             var report = new Report
             {
                 Name = string.IsNullOrWhiteSpace(ReportNameBox.Text) ? "Новый отчет" : ReportNameBox.Text.Trim(),
@@ -1457,11 +1421,11 @@ namespace BIS.ERP.Views
                 ShowGridLines = ShowGridLinesCheck.IsChecked ?? true,
                 ShowGrandTotal = ShowGrandTotalCheck.IsChecked ?? true,
                 ShowPageNumbers = ShowPageNumbersCheck.IsChecked ?? true,
-                Template = TemplateTextBox.Text,
+                Template = _currentReport?.Template ?? string.Empty,
                 ClosedXmlLayout = BuildClosedXmlLayoutJson()
             };
 
-            report.ElementMappings = BuildReportElementMappings(report.Id);
+            report.ElementMappings = _currentReport?.ElementMappings ?? new List<ReportElementMapping>();
             return report;
         }
 
@@ -1487,8 +1451,6 @@ namespace BIS.ERP.Views
         /// <summary>Признак «макет этого отчёта — ClosedXML» в поле Report.SourceFormat.</summary>
         private const string ClosedXmlSourceFormat = "ClosedXml";
 
-        private ComboBoxItem? _foxProReportTypeItem;
-
         private void OnLayoutKindChanged(object sender, SelectionChangedEventArgs e)
         {
             ApplyLayoutKindVisibility();
@@ -1502,12 +1464,9 @@ namespace BIS.ERP.Views
             if (LayoutKindCombo == null)
                 return;
 
-            // При отключённом FRX способ макета всегда ClosedXML.
-            if (!ReportingFeatures.FrxEnabled &&
-                string.Equals(kind, FoxProLayoutKind, StringComparison.OrdinalIgnoreCase))
-            {
+            // Координатного способа макета (FRX/native) больше нет, остался ClosedXML.
+            if (string.Equals(kind, FoxProLayoutKind, StringComparison.OrdinalIgnoreCase))
                 kind = ClosedXmlLayoutKind;
-            }
 
             foreach (var item in LayoutKindCombo.Items.OfType<ComboBoxItem>())
             {
@@ -1523,37 +1482,16 @@ namespace BIS.ERP.Views
 
         private void ApplyLayoutKindVisibility()
         {
-            // При отключённом FRX способ макета всегда ClosedXML: вкладки FRX/native,
-            // блок FRX-шаблона и тип отчёта «Макет Visual FoxPro FRX» скрываются.
-            var isFrx = ReportingFeatures.FrxEnabled &&
-                        string.Equals(GetSelectedLayoutKind(), FoxProLayoutKind, StringComparison.OrdinalIgnoreCase);
-
-            // Пункт выбора способа FRX скрывается, если механизм отключён.
-            HideFrxLayoutKindItem();
-
-            // Вкладки: FRX-ветка и ветка ClosedXML никогда не показываются вместе.
-            if (FrXFieldsTab != null)
-                FrXFieldsTab.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
-            if (NativeDesignerTab != null)
-                NativeDesignerTab.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
+            // Способ макета один — ClosedXML: вкладки FRX/native, блок FRX-шаблона
+            // и тип отчёта «Макет Visual FoxPro FRX» удалены вместе с подсистемой FRX.
             if (ClosedXmlDesignerTab != null)
-                ClosedXmlDesignerTab.Visibility = isFrx ? Visibility.Collapsed : Visibility.Visible;
+                ClosedXmlDesignerTab.Visibility = Visibility.Visible;
 
-            // Блок FRX-шаблона на вкладке «Общие».
-            if (FrxTemplateLabel != null)
-                FrxTemplateLabel.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
-            if (FrxTemplatePanel != null)
-                FrxTemplatePanel.Visibility = isFrx ? Visibility.Visible : Visibility.Collapsed;
-
-            ApplyInactiveTabsVisibility(isFrx);
-
-            SyncFoxProReportTypeItem(isFrx);
+            ApplyInactiveTabsVisibility(isFrx: false);
 
             if (LayoutKindHint != null)
             {
-                LayoutKindHint.Text = isFrx
-                    ? "FRX/native: макет задаётся координатами — работают вкладки «🔗 FRX поля» и «🧱 Нативный макет», вкладка ClosedXML скрыта."
-                    : "ClosedXML: макет собирается визуально на вкладке «📊 ClosedXML макет». Вкладки FRX/native, «Оформление» и «Фильтры» скрыты — оформление и отбор задаются в самом макете.";
+                LayoutKindHint.Text = "ClosedXML: макет собирается визуально на вкладке «📊 ClosedXML макет». Вкладки «Оформление» и «Фильтры» скрыты — оформление и отбор задаются в самом макете.";
             }
         }
 
@@ -1629,11 +1567,9 @@ namespace BIS.ERP.Views
             if (isFormatted)
                 SelectTableBlockIfNeeded();
 
-            // Панель выбора вида нужна только для ClosedXML: у FRX своя механика.
+            // Панель выбора вида: ClosedXML — единственный способ макета.
             if (LayoutShapePanel != null)
-                LayoutShapePanel.Visibility = ReportingFeatures.FrxEnabled
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
+                LayoutShapePanel.Visibility = Visibility.Visible;
         }
 
         /// <summary>
@@ -1659,83 +1595,6 @@ namespace BIS.ERP.Views
             ClosedXmlBlocksList.SelectedItem = tableBlock;
         }
 
-        /// <summary>
-        /// Скрывает пункт «FRX — макет FoxPro» в списке способа макета,
-        /// когда механизм FRX отключён.
-        /// </summary>
-        private void HideFrxLayoutKindItem()
-        {
-            if (LayoutKindCombo == null)
-                return;
-
-            foreach (var item in LayoutKindCombo.Items.OfType<ComboBoxItem>())
-            {
-                if (!string.Equals(item.Tag?.ToString(), FoxProLayoutKind, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                item.Visibility = ReportingFeatures.FrxEnabled ? Visibility.Visible : Visibility.Collapsed;
-                return;
-            }
-        }
-
-        /// <summary>
-        /// Тип отчёта «Макет Visual FoxPro FRX» доступен только в способе FRX.
-        ///
-        /// В режиме ClosedXML поле «Тип отчета» скрывается целиком: вид отчёта
-        /// там задаёт макет, а тип на вывод не влияет. Источник занимает всю строку.
-        /// </summary>
-        private void SyncFoxProReportTypeItem(bool show)
-        {
-            if (ReportTypeCombo == null)
-                return;
-
-            // Поле нужно только там, где отчёт выводится кодом или FRX-макетом.
-            var visible = show ? Visibility.Visible : Visibility.Collapsed;
-            if (ReportTypeLabel != null)
-                ReportTypeLabel.Visibility = visible;
-            if (ReportTypeGrid != null)
-                ReportTypeGrid.Visibility = visible;
-
-            if (DataSourceGrid != null)
-            {
-                Grid.SetColumnSpan(DataSourceGrid, show ? 1 : 3);
-                Grid.SetColumn(DataSourceGrid, show ? 1 : 1);
-            }
-
-            _foxProReportTypeItem ??= ReportTypeCombo.Items.OfType<ComboBoxItem>()
-                .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), "FoxProLayout", StringComparison.OrdinalIgnoreCase));
-
-            if (_foxProReportTypeItem == null)
-                return;
-
-            var isPresent = ReportTypeCombo.Items.Contains(_foxProReportTypeItem);
-            if (show && !isPresent)
-            {
-                ReportTypeCombo.Items.Add(_foxProReportTypeItem);
-            }
-            else if (!show && isPresent)
-            {
-                if (ReferenceEquals(ReportTypeCombo.SelectedItem, _foxProReportTypeItem))
-                    ReportTypeCombo.SelectedIndex = 0;
-
-                ReportTypeCombo.Items.Remove(_foxProReportTypeItem);
-            }
-        }
-
-        private void SelectLayoutKindFromReport(Report report)
-        {
-            // FRX/native-режим — только если у отчёта действительно координатный макет:
-            // помечен как FRX, загружен FRX-шаблон, это печатная форма или задан макет
-            // конструктора. Стандартные отчёты без макета открываются в ClosedXML.
-            var looksLikeFrx = string.Equals(report.SourceFormat, "FoxProFRX", StringComparison.OrdinalIgnoreCase)
-                               || string.Equals(report.ReportType, "FoxProLayout", StringComparison.OrdinalIgnoreCase)
-                               || report.IsPrintForm
-                               || !string.IsNullOrWhiteSpace(report.Template);
-
-            var isFrx = looksLikeFrx && string.IsNullOrWhiteSpace(report.ClosedXmlLayout);
-            SetLayoutKind(isFrx ? FoxProLayoutKind : ClosedXmlLayoutKind);
-        }
-
         private void SelectColorInCombo(ComboBox combo, string colorHex)
         {
             if (string.IsNullOrEmpty(colorHex)) return;
@@ -1757,443 +1616,6 @@ namespace BIS.ERP.Views
             Close();
         }
        
-        // Загрузка FRX-файла в поле шаблона
-        private async void OnLoadFrxClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var openDialog = new OpenFileDialog
-                {
-                    Title = "Выберите файл макета FoxPro (.frx)",
-                    Filter = "FoxPro макеты (*.frx)|*.frx|Все файлы (*.*)|*.*",
-                    DefaultExt = ".frx",
-                    CheckFileExists = true
-                };
-
-                if (openDialog.ShowDialog() != true)
-                    return;
-
-                StatusText.Text = $"Загрузка: {Path.GetFileName(openDialog.FileName)}...";
-
-                // Читаем файл
-                var fileBytes = File.ReadAllBytes(openDialog.FileName);
-
-                // Парсим FRX
-                var templateJson = await PrintFormService.ParseFrxFileTemplateAsync(fileBytes, openDialog.FileName);
-
-                if (!string.IsNullOrEmpty(templateJson))
-                {
-                    CommitDesignerGridEdits();
-
-                    // ЗАПОЛНЯЕМ ПОЛЕ
-                    TemplateTextBox.Text = templateJson;
-
-                    // Автоматически выбираем тип "Макет Visual FoxPro FRX"
-                    foreach (ComboBoxItem item in ReportTypeCombo.Items)
-                    {
-                        if (item.Tag?.ToString() == "FoxProLayout")
-                        {
-                            ReportTypeCombo.SelectedItem = item;
-                            break;
-                        }
-                    }
-
-                    // Устанавливаем флаг печатной формы
-                    IsPrintFormCheck.IsChecked = true;
-
-                    // ЗАПОЛНЯЕМ ТАБЛИЦУ СООТВЕТСТВИЙ ЭЛЕМЕНТОВ МАКЕТА
-                    await LoadFrxElementMappings(templateJson);
-                    DeferNativeTemplate(templateJson, showWarning: true);
-
-                    if (DataSourceCombo.SelectedItem is ComboBoxItem selected && selected.Tag is MetadataObject catalog)
-                    {
-                        await LoadAvailableFields(catalog);
-                        RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
-                    }
-                    else
-                    {
-                        RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
-                    }
-
-                    StatusText.Text = $"✅ Загружено: {Path.GetFileName(openDialog.FileName)}, полей источника: {AvailableDataFields.Count}";
-
-                    // Макет уже загружен в конструктор: модальное подтверждение только отвлекает.
-                }
-                else
-                {
-                    StatusText.Text = "❌ Ошибка парсинга FRX";
-                    MessageBox.Show("Не удалось распарсить FRX-файл.", "Ошибка",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"❌ Ошибка: {ex.Message}";
-                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private async Task LoadFrxElementMappings(
-            string templateJson,
-            IEnumerable<ReportElementMapping>? savedMappings = null)
-        {
-            try
-            {
-                var template = PrintFormService.DeserializePrintTemplate(templateJson);
-                if (template == null || template.Elements == null)
-                {
-                    MappingPreviewText.Text = "Нет элементов для отображения.";
-                    return;
-                }
-
-                try
-                {
-                    ElementMappingGrid.ItemsSource = null;
-                    _frxElementMappings.Clear();
-                    var savedByElementOrder = (savedMappings ?? Array.Empty<ReportElementMapping>())
-                        .GroupBy(item => item.ElementOrder)
-                        .ToDictionary(group => group.Key, group => group.OrderBy(item => item.Order).First());
-                    int order = 0;
-                    foreach (var element in template.Elements.OrderBy(e => e.Order))
-                    {
-                        // Пропускаем линии, рамки и пустые тексты
-                        if (element.Type is "Line" or "Box" or "Picture")
-                            continue;
-
-                        var elementText = string.IsNullOrWhiteSpace(element.Expression)
-                            ? PrintFormService.CleanFoxText(element.Text)
-                            : element.Expression;
-
-                        if (string.IsNullOrWhiteSpace(elementText) || elementText == "+" || elementText == "-")
-                            continue;
-
-                        savedByElementOrder.TryGetValue(element.Order, out var saved);
-                        _frxElementMappings.Add(new FrXElementMappingViewModel
-                        {
-                            Id = saved?.Id ?? Guid.NewGuid(),
-                            ElementOrder = element.Order,
-                            ElementType = element.Type,
-                            ElementText = elementText,
-                            ElementExpression = element.Expression,
-                            BandType = element.BandType,
-                            Left = element.Left,
-                            Top = element.Top,
-                            Width = element.Width,
-                            Height = element.Height,
-                            FontName = element.FontName,
-                            FontSize = element.FontSize,
-                            Bold = element.Bold,
-                            Italic = element.Italic,
-                            Alignment = element.Alignment,
-                            Order = order++,
-                            MappedFieldName = saved?.MappedFieldName ?? string.Empty,
-                            MappedDisplayName = saved?.MappedDisplayName ?? string.Empty,
-                            DataSource = saved?.DataSource ?? string.Empty,
-                            FormatString = saved?.FormatString ?? string.Empty,
-                            IsVisible = saved?.IsVisible ?? true,
-                            CustomText = saved?.CustomText ?? string.Empty
-                        });
-                    }
-                }
-                finally
-                {
-                    ElementMappingGrid.ItemsSource = _frxElementMappings;
-                }
-
-                var autoApplied = ApplyFoxProRulesToEmptyMappings();
-                UpdateMappingPreview();
-
-                if (autoApplied > 0)
-                    StatusText.Text = $"FRX поля: автоматически применены правила: {autoApplied}.";
-
-                if (_frxElementMappings.Count > 0)
-                    FrXFieldsTab.IsEnabled = true;
-            }
-            catch (Exception ex)
-            {
-                MappingPreviewText.Text = $"Ошибка загрузки элементов: {ex.Message}";
-            }
-        }
-
-        private async Task LoadFoxProRulesAsync()
-        {
-            if (_foxProRuleService == null)
-                return;
-
-            FoxProRules.Clear();
-            foreach (var rule in await _foxProRuleService.GetRulesAsync())
-                FoxProRules.Add(rule);
-        }
-
-        private void OnApplyFoxProRulesClick(object sender, RoutedEventArgs e)
-        {
-            CommitDesignerGridEdits();
-            var applied = ApplyFoxProRulesToEmptyMappings();
-            UpdateMappingPreview();
-            StatusText.Text = applied == 0
-                ? "Общие правила не нашли новых соответствий."
-                : $"Общие правила применены: {applied}.";
-        }
-
-        private int ApplyFoxProRulesToEmptyMappings()
-        {
-            var applied = 0;
-            foreach (var mapping in _frxElementMappings)
-            {
-                if (!string.IsNullOrWhiteSpace(mapping.MappedFieldName))
-                    continue;
-
-                var source = GetMappingSource(mapping);
-                var target = FindRuleTargetField(source);
-                if (string.IsNullOrWhiteSpace(target))
-                    continue;
-
-                mapping.MappedFieldName = target;
-                mapping.MappedDisplayName = ResolveFieldDisplayName(target);
-                applied++;
-            }
-
-            return applied;
-        }
-
-        private async void OnSaveMappedFoxProRulesClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                CommitDesignerGridEdits();
-                var profileCode = GetCurrentRecognitionProfileCode();
-                var added = 0;
-                foreach (var mapping in _frxElementMappings.Where(item => !string.IsNullOrWhiteSpace(item.MappedFieldName)))
-                {
-                    var source = FoxProReportKnowledgeBase.NormalizeRuleSource(GetMappingSource(mapping));
-                    if (string.IsNullOrWhiteSpace(source))
-                        continue;
-
-                    var existing = FoxProRules.FirstOrDefault(rule =>
-                        !rule.IsRegex &&
-                        FoxProReportKnowledgeBase.RuleMatches(rule, source));
-                    if (existing == null)
-                    {
-                        existing = new FoxProReportFieldRule
-                        {
-                            Id = Guid.NewGuid(),
-                            SourcePattern = source,
-                            Priority = 100,
-                            IsActive = true
-                        };
-                        FoxProRules.Add(existing);
-                        added++;
-                    }
-
-                    existing.ProfileCode = profileCode;
-                    existing.SourcePattern = source;
-                    existing.CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
-                    existing.TargetFieldName = mapping.MappedFieldName;
-                    existing.TargetDisplayName = ResolveFieldDisplayName(mapping.MappedFieldName);
-                    existing.Description = string.IsNullOrWhiteSpace(existing.Description)
-                        ? "Создано из визуального конструктора отчетов."
-                        : existing.Description;
-                    existing.IsActive = true;
-                }
-
-                await SaveFoxProRulesAsync();
-                StatusText.Text = added == 0
-                    ? "Общие правила обновлены."
-                    : $"Общие правила сохранены. Новых: {added}.";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка сохранения правил FoxPro: {ex.Message}", "Ошибка",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void OnAddFoxProRuleClick(object sender, RoutedEventArgs e)
-        {
-            CommitDesignerGridEdits();
-            var mapping = ElementMappingGrid.SelectedItem as FrXElementMappingViewModel;
-            var source = mapping == null ? string.Empty : FoxProReportKnowledgeBase.NormalizeRuleSource(GetMappingSource(mapping));
-            var target = mapping?.MappedFieldName ?? string.Empty;
-            FoxProRules.Add(new FoxProReportFieldRule
-            {
-                Id = Guid.NewGuid(),
-                ProfileCode = GetCurrentRecognitionProfileCode(),
-                SourcePattern = source,
-                CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source),
-                TargetFieldName = target,
-                TargetDisplayName = ResolveFieldDisplayName(target),
-                Priority = 100,
-                IsActive = true,
-                Description = "Пользовательское правило распознавания."
-            });
-        }
-
-        private void OnDeleteFoxProRuleClick(object sender, RoutedEventArgs e)
-        {
-            CommitDesignerGridEdits();
-            if (FoxProRulesGrid.SelectedItem is FoxProReportFieldRule rule)
-                FoxProRules.Remove(rule);
-        }
-
-        private async void OnSaveFoxProRulesClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                CommitDesignerGridEdits();
-                await SaveFoxProRulesAsync();
-                StatusText.Text = "Список общих правил FoxPro сохранен.";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка сохранения списка правил FoxPro: {ex.Message}", "Ошибка",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private async Task SaveFoxProRulesAsync()
-        {
-            if (_foxProRuleService == null)
-                return;
-
-            foreach (var rule in FoxProRules)
-            {
-                rule.SourcePattern = FoxProReportKnowledgeBase.NormalizeRuleSource(rule.SourcePattern);
-                if (string.IsNullOrWhiteSpace(rule.CanonicalField))
-                    rule.CanonicalField = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(rule.SourcePattern);
-                rule.TargetDisplayName = ResolveFieldDisplayName(rule.TargetFieldName);
-                rule.UpdatedAt = DateTime.UtcNow;
-            }
-
-            await _foxProRuleService.SaveRulesAsync(FoxProRules);
-            await LoadFoxProRulesAsync();
-        }
-
-        private string FindRuleTargetField(string source)
-        {
-            var savedRule = FoxProRules
-                .Where(rule => rule.IsActive)
-                .OrderBy(rule => rule.Priority)
-                .FirstOrDefault(rule => FoxProReportKnowledgeBase.RuleMatches(rule, source));
-            if (!string.IsNullOrWhiteSpace(savedRule?.TargetFieldName))
-            {
-                var savedField = FindAvailableDataField(savedRule.TargetFieldName);
-                if (savedField != null)
-                    return savedField.DbColumnName;
-            }
-
-            var canonical = FoxProReportKnowledgeBase.GetCanonicalFieldForSource(source);
-            foreach (var candidate in FoxProReportKnowledgeBase.GetTargetFieldCandidates(canonical))
-            {
-                var field = FindAvailableDataField(candidate);
-                if (field != null)
-                    return field.DbColumnName;
-            }
-
-            return string.Empty;
-        }
-
-        private FieldDef? FindAvailableDataField(string candidate)
-        {
-            if (string.IsNullOrWhiteSpace(candidate))
-                return null;
-
-            var normalized = NormalizeDesignerFieldName(candidate);
-            return AvailableDataFields.FirstOrDefault(field =>
-                field.DbColumnName.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
-                field.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase) ||
-                NormalizeDesignerFieldName(field.DbColumnName) == normalized ||
-                NormalizeDesignerFieldName(field.Name) == normalized);
-        }
-
-        private string ResolveFieldDisplayName(string fieldName)
-        {
-            return FindAvailableDataField(fieldName)?.Name ?? string.Empty;
-        }
-
-        private void RefreshFrxMappingsForCurrentSource(bool clearMissingFields)
-        {
-            if (_frxElementMappings.Count == 0)
-                return;
-
-            var availableFieldNames = AvailableDataFields
-                .SelectMany(field => new[] { field.Name, field.DbColumnName })
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var mapping in _frxElementMappings)
-            {
-                if (clearMissingFields &&
-                    !string.IsNullOrWhiteSpace(mapping.MappedFieldName) &&
-                    !availableFieldNames.Contains(mapping.MappedFieldName))
-                {
-                    mapping.MappedFieldName = string.Empty;
-                }
-
-                mapping.MappedDisplayName = ResolveFieldDisplayName(mapping.MappedFieldName);
-            }
-
-            ApplyFoxProRulesToEmptyMappings();
-            UpdateMappingPreview();
-        }
-
-        private string GetCurrentRecognitionProfileCode()
-        {
-            try
-            {
-                var template = PrintFormService.DeserializePrintTemplate(TemplateTextBox.Text);
-                return template.RecognitionProfileCode;
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        private static string GetMappingSource(FrXElementMappingViewModel mapping)
-        {
-            return string.IsNullOrWhiteSpace(mapping.ElementExpression)
-                ? mapping.ElementText
-                : mapping.ElementExpression;
-        }
-
-        private static string NormalizeDesignerFieldName(string value)
-        {
-            return System.Text.RegularExpressions.Regex.Replace((value ?? string.Empty).Trim().ToLowerInvariant(), @"[\s\.\-]+", "_");
-        }
-        private void UpdateMappingPreview()
-        {
-            if (_frxElementMappings.Count == 0)
-            {
-                MappingPreviewText.Text = "Нет элементов для отображения.";
-                return;
-            }
-
-            var preview = new System.Text.StringBuilder();
-            preview.AppendLine("=== Соответствия элементов макета ===");
-            preview.AppendLine();
-
-            foreach (var mapping in _frxElementMappings.OrderBy(m => m.Order))
-            {
-                var status = string.IsNullOrWhiteSpace(mapping.MappedFieldName)
-                    ? "⏳ не назначено"
-                    : $"✅ {mapping.MappedFieldName}";
-                preview.AppendLine($"{mapping.Order + 1}. [{mapping.ElementType}] \"{mapping.ElementText}\" → {status}");
-            }
-
-            MappingPreviewText.Text = preview.ToString();
-        }
-
-        private void OnElementMappingChanged(object sender, EventArgs e)
-        {
-            UpdateMappingPreview();
-        }
-
-        private void OnElementMappingCellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
-        {
-            Dispatcher.BeginInvoke(new Action(UpdateMappingPreview));
-        }
-
         // ===================================================================
         // Вкладка «📊 ClosedXML макет»: визуальный конструктор Excel-макета.
         // Модель — ClosedXmlReportLayout, интерпретатор — ClosedXmlReportRenderer.
@@ -2270,7 +1692,6 @@ namespace BIS.ERP.Views
                 {
                     CommitDesignerGridEdits();
                     await LoadAvailableFields(catalog);
-                    RefreshFrxMappingsForCurrentSource(clearMissingFields: true);
                     StatusText.Text = $"Поля источника «{catalog.Name}» обновлены";
                 }
                 else
@@ -3025,7 +2446,8 @@ namespace BIS.ERP.Views
             ClosedXmlSheetGridHost.RowDefinitions.Clear();
 
             var columns = _closedXmlSheet.GridColumns > 0 ? _closedXmlSheet.GridColumns : 40;
-            var rows = new List<List<(int Column, int Span, string Text, string Info, string Fill, ClosedXmlCellEdit? Edit)>>();
+            var rows = new List<List<(int Column, int Span, string Text, string Info, string Fill,
+                ClosedXmlSheetTarget? Target)>>();
 
             foreach (var block in _closedXmlSheet.Blocks)
             {
@@ -3037,13 +2459,20 @@ namespace BIS.ERP.Views
                     var levelIndex = 0;
                     foreach (var level in block.Table.HeaderLevels)
                     {
-                        var levelCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                        var levelCells = new List<(int, int, string, string, string, ClosedXmlSheetTarget?)>();
                         foreach (var headerCell in level.Cells)
                         {
                             var from = Math.Max(1, headerCell.Column);
                             var to = headerCell.MergeToColumn > from ? headerCell.MergeToColumn : from;
                             levelCells.Add((from, Math.Max(1, to - from + 1), headerCell.Text ?? string.Empty,
-                                $"Шапка таблицы: уровень {levelIndex}, колонки {from}–{to}", headerCell.Fill ?? string.Empty, null));
+                                $"Шапка таблицы: уровень {levelIndex}, колонки {from}–{to}", headerCell.Fill ?? string.Empty,
+                                new ClosedXmlSheetTarget
+                                {
+                                    Block = block,
+                                    HeaderCell = headerCell,
+                                    HeaderLevelIndex = levelIndex,
+                                    Info = $"Ячейка шапки: уровень {levelIndex + 1}, колонки {from}–{to}"
+                                }));
                         }
 
                         rows.Add(levelCells);
@@ -3051,7 +2480,7 @@ namespace BIS.ERP.Views
                     }
 
                     // Строка данных: каждая графа на своих узких колонках.
-                    var columnCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                    var columnCells = new List<(int, int, string, string, string, ClosedXmlSheetTarget?)>();
                     var position = 1;
                     foreach (var column in block.Table.Columns)
                     {
@@ -3061,22 +2490,36 @@ namespace BIS.ERP.Views
                         var span = column.Span > 0 ? column.Span : 1;
                         columnCells.Add((position, span, column.Header ?? column.Field ?? string.Empty,
                             $"Графа: поле «{column.Field}», ширина {column.Width:0.#}, формат «{column.NumberFormat}»",
-                            string.Empty, null));
+                            string.Empty,
+                            new ClosedXmlSheetTarget
+                            {
+                                Block = block,
+                                Column = column,
+                                Info = $"Графа таблицы: поле «{column.Field}»"
+                            }));
                         position += span;
                     }
 
                     rows.Add(columnCells);
 
                     if (block.Table.GrandTotal != null)
-                        rows.Add(new List<(int, int, string, string, string, ClosedXmlCellEdit?)>
+                        rows.Add(new List<(int, int, string, string, string, ClosedXmlSheetTarget?)>
                         {
-                            (1, columns, block.Table.GrandTotal.Label, "Общий итог таблицы", "#EEF2F6", null)
+                            (1, columns, block.Table.GrandTotal.Label, "Общий итог таблицы", "#EEF2F6",
+                                new ClosedXmlSheetTarget
+                                {
+                                    Block = block, Total = block.Table.GrandTotal, Info = "Общий итог таблицы"
+                                })
                         });
 
                     foreach (var total in block.Table.ExtraTotals)
-                        rows.Add(new List<(int, int, string, string, string, ClosedXmlCellEdit?)>
+                        rows.Add(new List<(int, int, string, string, string, ClosedXmlSheetTarget?)>
                         {
-                            (1, columns, total.Label, "Дополнительный итог", "#EEF2F6", null)
+                            (1, columns, total.Label, "Дополнительный итог", "#EEF2F6",
+                                new ClosedXmlSheetTarget
+                                {
+                                    Block = block, Total = total, Info = "Дополнительный итог"
+                                })
                         });
 
                     continue;
@@ -3084,7 +2527,7 @@ namespace BIS.ERP.Views
 
                 if (string.Equals(block.Type, "SignaturesRow", StringComparison.Ordinal))
                 {
-                    var signatureCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                    var signatureCells = new List<(int, int, string, string, string, ClosedXmlSheetTarget?)>();
                     foreach (var signature in block.Signatures)
                     {
                         if (signature == null)
@@ -3093,7 +2536,11 @@ namespace BIS.ERP.Views
                         var from = Math.Max(1, signature.Column);
                         var to = signature.MergeToColumn > from ? signature.MergeToColumn : from;
                         signatureCells.Add((from, Math.Max(1, to - from + 1), signature.Text ?? string.Empty,
-                            $"Подпись: колонки {from}–{to}", string.Empty, null));
+                            $"Подпись: колонки {from}–{to}", string.Empty,
+                            new ClosedXmlSheetTarget
+                            {
+                                Block = block, Signature = signature, Info = $"Подпись: колонки {from}–{to}"
+                            }));
                     }
 
                     rows.Add(signatureCells);
@@ -3106,7 +2553,7 @@ namespace BIS.ERP.Views
                     if (textRow == null)
                         continue;
 
-                    var textCells = new List<(int, int, string, string, string, ClosedXmlCellEdit?)>();
+                    var textCells = new List<(int, int, string, string, string, ClosedXmlSheetTarget?)>();
                     foreach (var cellLayout in textRow.Cells.OrderBy(item => item.Column))
                     {
                         if (cellLayout == null)
@@ -3117,14 +2564,20 @@ namespace BIS.ERP.Views
                         var hasField = !string.IsNullOrWhiteSpace(cellLayout.TakeFromField);
                         var text = hasField ? cellLayout.TakeFromField! : cellLayout.Text ?? string.Empty;
 
-                        var editable = _closedXmlCells.FirstOrDefault(item =>
-                            item.Row == textRow.Row && item.Column == from);
-
-                        textCells.Add((from, span, text,
-                            hasField
+                        // Клетка хранится моделью: диалог откроется и тогда, когда списки
+                        // показывают другой блок — их переключит OpenTextCellEditor.
+                        var rowTarget = new ClosedXmlSheetTarget
+                        {
+                            Block = block,
+                            TextCell = cellLayout,
+                            TextRow = textRow.Row,
+                            Info = hasField
                                 ? $"Строка {textRow.Row}, колонка {from}: значение из поля «{cellLayout.TakeFromField}» (строка набора {cellLayout.TakeFromRow})"
-                                : $"Строка {textRow.Row}, колонка {from}: текст «{cellLayout.Text}»",
-                            cellLayout.Fill ?? string.Empty, editable));
+                                : $"Строка {textRow.Row}, колонка {from}: текст «{cellLayout.Text}»"
+                        };
+
+                        textCells.Add((from, span, text, rowTarget.Info,
+                            cellLayout.Fill ?? string.Empty, rowTarget));
                     }
 
                     rows.Add(textCells);
@@ -3173,17 +2626,19 @@ namespace BIS.ERP.Views
                         }
                     };
 
-                    var editable = item.Edit;
-                    blockCell.MouseLeftButtonUp += (_, _) => ClosedXmlTableCellInfo.Text = item.Info;
+                    var target = item.Target;
+                    blockCell.MouseLeftButtonUp += (_, _) => SelectSheetTarget(target, item.Info);
 
-                    if (editable != null)
+                    if (target != null && target.HasEditor)
                     {
+                        // Двойной щелчок и повторный щелчок по уже выбранной клетке
+                        // открывают диалог того элемента, который стоит на этом месте.
                         blockCell.MouseLeftButtonDown += (_, args) =>
                         {
-                            if (args.ClickCount == 2)
-                                EditSheetCell(editable!);
+                            if (args.ClickCount == 2 || ReferenceEquals(_sheetSelectedTarget, target))
+                                OpenSheetTargetEditor(target);
                         };
-                        blockCell.MouseRightButtonUp += (_, _) => ShowSheetCellMenu(blockCell, editable!);
+                        blockCell.MouseRightButtonUp += (_, _) => ShowSheetTargetMenu(blockCell, target);
                     }
 
                     // +1 — сдвиг под шапку с нумерацией: колонка 1 листа — вторая на экране.
@@ -3371,6 +2826,181 @@ namespace BIS.ERP.Views
 
             RefreshClosedXmlJson();
             ClosedXmlTableCellInfo.Text = $"Клетка изменена: строка {cell.Row}, колонка {cell.Column}.";
+        }
+
+        /// <summary>Клетка, выбранная щелчком в табличном виде (повторный щелчок открывает правку).</summary>
+        private ClosedXmlSheetTarget? _sheetSelectedTarget;
+
+        /// <summary>
+        /// Один щелчок по клетке выбирает её и показывает, что в ней стоит; если у клетки
+        /// есть диалог, подсказка говорит, что он откроется.
+        /// </summary>
+        private void SelectSheetTarget(ClosedXmlSheetTarget? target, string info)
+        {
+            _sheetSelectedTarget = target;
+            ClosedXmlTableCellInfo.Text = target != null && target.HasEditor
+                ? $"{info} — двойной щелчок откроет правку"
+                : info;
+        }
+
+        /// <summary>
+        /// Открывает диалог правки по клетке макета. У каждого элемента он свой:
+        /// у шапки — диалог шапки, у графы — графы, у клетки — клетки, у итога — итога.
+        /// </summary>
+        private void OpenSheetTargetEditor(ClosedXmlSheetTarget? target)
+        {
+            if (_closedXmlSheet == null || target == null)
+                return;
+
+            if (target.TextCell != null)
+            {
+                OpenTextCellEditor(target);
+                return;
+            }
+
+            if (target.HeaderCell != null)
+            {
+                var headerDialog = new ClosedXmlHeaderCellDialog(
+                    target.HeaderCell,
+                    target.HeaderLevelIndex,
+                    _closedXmlSheet.GridColumns)
+                {
+                    Owner = this
+                };
+
+                if (headerDialog.ShowDialog() == true)
+                    RefreshSheetAfterElementEdit(target.Block, "Ячейка шапки изменена.");
+                return;
+            }
+
+            if (target.Column != null)
+            {
+                var columnDialog = new ClosedXmlColumnDialog(
+                    target.Block?.Name ?? "таблица",
+                    _reportFields
+                        .Select(field => field.FieldName)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList())
+                {
+                    Owner = this
+                };
+
+                columnDialog.LoadForEdit(target.Column, target.Block?.Name ?? "таблица");
+                if (columnDialog.ShowDialog() == true)
+                    RefreshSheetAfterElementEdit(target.Block, $"Графа «{target.Column.Field}» изменена.");
+                return;
+            }
+
+            if (target.Total != null)
+            {
+                var totalDialog = new ClosedXmlTotalDialog(target.Total, "строка итога") { Owner = this };
+                if (totalDialog.ShowDialog() == true)
+                    RefreshSheetAfterElementEdit(target.Block, "Итоговая строка изменена.");
+                return;
+            }
+
+            if (target.Signature != null)
+            {
+                var signatureDialog = new ClosedXmlSignatureDialog(target.Signature, _closedXmlSheet.GridColumns)
+                {
+                    Owner = this
+                };
+
+                if (signatureDialog.ShowDialog() == true)
+                    RefreshSheetAfterElementEdit(target.Block, "Строка подписей изменена.");
+            }
+        }
+
+        /// <summary>
+        /// Клетка текстового блока: правка идёт через списки блока, поэтому сначала
+        /// показываем списки того блока, которому клетка принадлежит.
+        /// </summary>
+        private void OpenTextCellEditor(ClosedXmlSheetTarget target)
+        {
+            if (target.TextCell == null)
+                return;
+
+            if (!ReferenceEquals(_closedXmlEditingBlock, target.Block))
+            {
+                if (target.Block != null && ClosedXmlBlocksList != null &&
+                    ClosedXmlBlocksList.Items.Contains(target.Block))
+                {
+                    ClosedXmlBlocksList.SelectedItem = target.Block;
+                }
+                else
+                {
+                    LoadClosedXmlBlockEditors(target.Block);
+                }
+            }
+
+            var cell = _closedXmlCells.FirstOrDefault(item =>
+                item.Row == target.TextRow && item.Column == target.TextCell.Column);
+            if (cell == null)
+            {
+                ClosedXmlTableCellInfo.Text =
+                    "Клетка не найдена в списке блока — выберите блок на вкладке «ClosedXML макет».";
+                return;
+            }
+
+            EditSheetCell(cell);
+        }
+
+        /// <summary>
+        /// Правая кнопка по клетке макета: изменить элемент (пункт называет его) или
+        /// удалить клетку текстового блока.
+        /// </summary>
+        private void ShowSheetTargetMenu(Border block, ClosedXmlSheetTarget target)
+        {
+            var menu = new ContextMenu();
+
+            var editItem = new MenuItem
+            {
+                Header = target.HeaderCell != null ? "Изменить ячейку шапки"
+                    : target.Column != null ? "Изменить графу"
+                    : target.Total != null ? "Изменить итог"
+                    : target.Signature != null ? "Изменить подпись"
+                    : "Изменить клетку"
+            };
+            editItem.Click += (_, _) => OpenSheetTargetEditor(target);
+            menu.Items.Add(editItem);
+
+            if (target.TextCell != null)
+            {
+                var cell = _closedXmlCells.FirstOrDefault(item =>
+                    item.Row == target.TextRow && item.Column == target.TextCell.Column);
+                if (cell != null)
+                {
+                    var deleteItem = new MenuItem
+                    {
+                        Header = "Удалить клетку",
+                        Foreground = System.Windows.Media.Brushes.Firebrick
+                    };
+                    deleteItem.Click += (_, _) =>
+                    {
+                        _closedXmlCells.Remove(cell);
+                        RefreshClosedXmlJson();
+                        ClosedXmlTableCellInfo.Text = "Клетка удалена.";
+                    };
+                    menu.Items.Add(deleteItem);
+                }
+            }
+
+            block.ContextMenu = menu;
+            menu.IsOpen = true;
+        }
+
+        /// <summary>
+        /// После правки элемента макета: списки блока (они держат те же модели),
+        /// JSON и табличный вид листа.
+        /// </summary>
+        private void RefreshSheetAfterElementEdit(ClosedXmlBlock? block, string message)
+        {
+            if (block != null)
+                LoadClosedXmlBlockEditors(block);
+
+            RefreshClosedXmlJson();
+            ClosedXmlTableCellInfo.Text = message;
         }
 
         /// <summary>Правая кнопка по клетке в табличном виде: изменить или удалить.</summary>
@@ -3727,6 +3357,17 @@ namespace BIS.ERP.Views
         private readonly TextBox _headerBox = new() { Width = 380, Text = "Заголовок" };
         private readonly TextBox _widthBox = new() { Width = 70, Text = "14" };
         private readonly TextBox _formatBox = new() { Width = 140, Text = "#,##0.00" };
+        private readonly TextBox _spanBox = new() { Width = 70, Text = "0" };
+        private readonly ComboBox _alignCombo = ClosedXmlDialogParts.CreateCombo("Left", "Center", "Right");
+        private readonly ComboBox _rotationCombo = ClosedXmlDialogParts.CreateCombo("0", "45", "90", "270");
+        private readonly CheckBox _boldCheck = new() { Content = "Жирный", VerticalAlignment = VerticalAlignment.Center };
+        private readonly CheckBox _suppressZeroCheck = new()
+        {
+            Content = "Не выводить нули", VerticalAlignment = VerticalAlignment.Center
+        };
+        private readonly TextBlock _titleBlock = new() { FontWeight = FontWeights.Bold, FontSize = 14 };
+        private readonly Button _acceptButton = new() { Width = 120, Height = 30, IsDefault = true };
+        private ClosedXmlColumn? _editTarget;
 
         public ClosedXmlColumn? Result { get; private set; }
 
@@ -3739,31 +3380,33 @@ namespace BIS.ERP.Views
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
             var panel = new StackPanel { Margin = new Thickness(16) };
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"Добавление колонки таблицы — {target}",
-                FontWeight = FontWeights.Bold,
-                FontSize = 14,
-                Margin = new Thickness(0, 0, 0, 8)
-            });
+            _titleBlock.Text = $"Добавление колонки таблицы — {target}";
+            _titleBlock.Margin = new Thickness(0, 0, 0, 8);
+            panel.Children.Add(_titleBlock);
             panel.Children.Add(new TextBlock
             {
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = System.Windows.Media.Brushes.Gray,
                 FontSize = 11,
                 Margin = new Thickness(0, 0, 0, 10),
-                Text = "Колонка — графа бланка. «Поле набора» — откуда берётся значение, «Заголовок» печатается в шапке таблицы. Выравнивание, жирный и поворот правятся в таблице после добавления."
+                Text = "Колонка — графа бланка. «Поле набора» — откуда берётся значение, «Заголовок» печатается в шапке таблицы. Выравнивание, жирный, поворот и подавление нулей правятся здесь же."
             });
 
             foreach (var field in fields)
                 _fieldCombo.Items.Add(field);
             if (_fieldCombo.Items.Count > 0)
                 _fieldCombo.SelectedIndex = 0;
+            ClosedXmlDialogParts.SelectCombo(_alignCombo, "Right");
 
             AddRow(panel, "Поле набора (значение):", _fieldCombo);
             AddRow(panel, "Заголовок графы:", _headerBox);
             AddRow(panel, "Ширина:", _widthBox);
             AddRow(panel, "Формат числа:", _formatBox);
+            AddRow(panel, "Колонок листа (0 — одна):", _spanBox);
+            AddRow(panel, "Выравнивание:", _alignCombo);
+            AddRow(panel, "Поворот подписи:", _rotationCombo);
+            AddRow(panel, string.Empty, _boldCheck);
+            AddRow(panel, string.Empty, _suppressZeroCheck);
 
             var buttons = new StackPanel
             {
@@ -3771,17 +3414,48 @@ namespace BIS.ERP.Views
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Margin = new Thickness(0, 16, 0, 0)
             };
-            var ok = new Button { Content = "Добавить", Width = 120, Height = 30, IsDefault = true };
-            ok.Click += (_, _) => Accept();
+            _acceptButton.Content = "Добавить";
+            _acceptButton.Click += (_, _) => Accept();
             var cancel = new Button
             {
                 Content = "Отмена", Width = 100, Height = 30, Margin = new Thickness(8, 0, 0, 0), IsCancel = true
             };
-            buttons.Children.Add(ok);
+            buttons.Children.Add(_acceptButton);
             buttons.Children.Add(cancel);
             panel.Children.Add(buttons);
 
             Content = panel;
+        }
+
+        /// <summary>
+        /// Правка существующей графы: те же поля, что при добавлении, заполненные
+        /// значениями. Результат пишется прямо в графу — вторая модель не нужна.
+        /// </summary>
+        public void LoadForEdit(ClosedXmlColumn column, string blockName)
+        {
+            if (column == null)
+                throw new ArgumentNullException(nameof(column));
+
+            _editTarget = column;
+            var target = string.IsNullOrWhiteSpace(blockName) ? "таблица" : blockName;
+            Title = $"Правка графы — {target}";
+            _titleBlock.Text = $"Графа таблицы — {target}";
+            _acceptButton.Content = "Сохранить";
+
+            ClosedXmlDialogParts.SelectCombo(_fieldCombo, column.Field);
+            if (_fieldCombo.SelectedItem == null && !string.IsNullOrWhiteSpace(column.Field))
+                _fieldCombo.Items.Add(column.Field);
+            if (_fieldCombo.SelectedItem == null && _fieldCombo.Items.Count > 0)
+                _fieldCombo.SelectedIndex = 0;
+
+            _headerBox.Text = column.Header ?? string.Empty;
+            _widthBox.Text = (column.Width > 0 ? column.Width : 14).ToString("0.#");
+            _formatBox.Text = column.NumberFormat ?? string.Empty;
+            _spanBox.Text = Math.Max(0, column.Span).ToString();
+            ClosedXmlDialogParts.SelectCombo(_alignCombo, column.Align);
+            ClosedXmlDialogParts.SelectCombo(_rotationCombo, column.TextRotation.ToString());
+            _boldCheck.IsChecked = column.Bold;
+            _suppressZeroCheck.IsChecked = column.SuppressZero;
         }
 
         private static void AddRow(Panel panel, string label, FrameworkElement control)
@@ -3813,13 +3487,41 @@ namespace BIS.ERP.Views
                 return;
             }
 
+            var header = string.IsNullOrWhiteSpace(_headerBox.Text) ? field : _headerBox.Text.Trim();
+            var width = Math.Max(4, ParseInt(_widthBox.Text, 14));
+            var format = _formatBox.Text?.Trim() ?? string.Empty;
+            var span = Math.Max(0, ParseInt(_spanBox.Text, 0));
+            var align = _alignCombo.SelectedItem?.ToString() ?? "Right";
+            var rotation = ParseInt(_rotationCombo.SelectedItem?.ToString(), 0);
+            var bold = _boldCheck.IsChecked == true;
+            var suppressZero = _suppressZeroCheck.IsChecked == true;
+
+            if (_editTarget != null)
+            {
+                _editTarget.Field = field;
+                _editTarget.Header = header;
+                _editTarget.Width = width;
+                _editTarget.NumberFormat = format;
+                _editTarget.Span = span;
+                _editTarget.Align = align;
+                _editTarget.TextRotation = rotation;
+                _editTarget.Bold = bold;
+                _editTarget.SuppressZero = suppressZero;
+                DialogResult = true;
+                return;
+            }
+
             Result = new ClosedXmlColumn
             {
                 Field = field,
-                Header = string.IsNullOrWhiteSpace(_headerBox.Text) ? field : _headerBox.Text.Trim(),
-                Width = Math.Max(4, ParseInt(_widthBox.Text, 14)),
-                NumberFormat = _formatBox.Text?.Trim() ?? string.Empty,
-                Align = "Right"
+                Header = header,
+                Width = width,
+                NumberFormat = format,
+                Span = span,
+                Align = align,
+                TextRotation = rotation,
+                Bold = bold,
+                SuppressZero = suppressZero
             };
 
             DialogResult = true;
@@ -4051,69 +3753,4 @@ namespace BIS.ERP.Views
         public string DbColumnName { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
     }
-
-    public class FrXElementMappingViewModel : System.ComponentModel.INotifyPropertyChanged
-    {
-        public Guid Id { get; set; }
-        public int ElementOrder { get; set; }
-        public string ElementType { get; set; } = "Text";
-        public string ElementText { get; set; } = string.Empty;
-        public string ElementExpression { get; set; } = string.Empty;
-        public string BandType { get; set; } = "Detail";
-        public double Left { get; set; }
-        public double Top { get; set; }
-        public double Width { get; set; }
-        public double Height { get; set; }
-        public string FontName { get; set; } = "Arial";
-        public double FontSize { get; set; } = 9;
-        public bool Bold { get; set; }
-        public bool Italic { get; set; }
-        public string Alignment { get; set; } = "Left";
-        public int Order { get; set; }
-
-        private string _mappedFieldName = string.Empty;
-        public string MappedFieldName
-        {
-            get => _mappedFieldName;
-            set { _mappedFieldName = value; OnPropertyChanged(nameof(MappedFieldName)); }
-        }
-
-        public string MappedDisplayName { get; set; } = string.Empty;
-        public string DataSource { get; set; } = string.Empty;
-
-        private string _formatString = string.Empty;
-        public string FormatString
-        {
-            get => _formatString;
-            set { _formatString = value; OnPropertyChanged(nameof(FormatString)); }
-        }
-
-        private bool _isVisible = true;
-        public bool IsVisible
-        {
-            get => _isVisible;
-            set { _isVisible = value; OnPropertyChanged(nameof(IsVisible)); }
-        }
-
-        private string _customText = string.Empty;
-        public string CustomText
-        {
-            get => _customText;
-            set { _customText = value; OnPropertyChanged(nameof(CustomText)); }
-        }
-        public string LeftTop => $"{(int)Left}/{(int)Top}";
-
-        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
-        private void OnPropertyChanged(string name) =>
-            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(name));
-    }
 }
-
-
-
-
-
-
-
-
-

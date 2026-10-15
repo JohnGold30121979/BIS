@@ -1,0 +1,13 @@
+<Project>
+  <Target Name="DumpCompileInfo" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <RdwFiles Include="@(Compile)" Condition="$([System.String]::Copy('%(Compile.Identity)').Contains('ReportDesignerWindow'))" />
+      <AccFiles Include="@(Compile)" Condition="$([System.String]::Copy('%(Compile.Identity)').Contains('AccountingReportsView'))" />
+    </ItemGroup>
+    <Message Importance="high" Text="DUMP_COMPILE_TOTAL=@(Compile->Count())" />
+    <Message Importance="high" Text="DUMP_RDW_FILES=@(RdwFiles)" />
+    <Message Importance="high" Text="DUMP_ACC_FILES=@(AccFiles)" />
+    <Message Importance="high" Text="DUMP_RDW_FILE_HAS_FOXPRO=$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\Views\ReportDesignerWindow.xaml.cs').Contains('FoxProReportFieldRule'))" />
+    <Message Importance="high" Text="DUMP_RDW_FILE_LEN=$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\Views\ReportDesignerWindow.xaml.cs').Length)" />
+  </Target>
+</Project>

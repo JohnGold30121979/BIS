@@ -222,8 +222,6 @@ namespace BIS.ERP.Views
                 SystemNameText.Text = systemConfiguration.SystemName;
                 VersionText.Text = $"версия {AppVersion.DisplayShort}";
 
-                // Импорт FRX-макетов скрыт, пока механизм FRX отключён.
-                ApplyReportingFeaturesVisibility();
                 LogoDisplayHelper.Apply(SystemLogoImage, SystemIconText, systemConfiguration.LogoImage, GetSystemIcon(systemConfiguration.Icon));
                 var currentInfoBase = await ServiceLocator.InfoBaseManager.GetCurrentInfoBaseAsync();
                 if (currentInfoBase != null)
@@ -253,7 +251,6 @@ namespace BIS.ERP.Views
                 await new LocalizationService(_context, AppSettings.Instance.Language).InitializeAsync();
                 var printFormService = new PrintFormService(_context);
                 await printFormService.EnsureSchemaAsync();
-                await new FoxProReportFieldRuleService(_context).EnsureSchemaAsync();
                 _regulatedTemplateService = new RegulatedReportTemplateService(_context);
                 await _regulatedTemplateService.EnsureSchemaAsync();
                 await new DocumentationMetadataSeedService(_context).EnsureAsync();
@@ -3406,7 +3403,8 @@ namespace BIS.ERP.Views
 
             var builder = new ReconciliationActBuilder(_context);
             var movements = await builder.LoadMovementsAsync(null, start, end);
-            var act = builder.BuildTable(pairs, totals, movements, start, end, false, "Все организации");
+            var parties = await builder.LoadPartiesAsync(null, null);
+            var act = builder.BuildTable(pairs, totals, movements, start, end, false, "Все организации", parties);
 
             // Макет обращается к дате как posting_date, к модулю — как module_code.
             foreach (System.Data.DataRow row in act.Table.Rows)
@@ -3439,38 +3437,6 @@ namespace BIS.ERP.Views
             var designer = new ReportDesignerWindow { Owner = this };
             if (designer.ShowDialog() == true)
                 await LoadMetadata();
-        }
-
-        /// <summary>
-        /// Скрывает элементы интерфейса, относящиеся к механизму FRX,
-        /// пока он отключён (<see cref="ReportingFeatures.FrxEnabled"/> = false).
-        ///
-        /// Код импорта и анализа сохранён полностью — возврат к FRX не требует
-        /// восстановления логики.
-        /// </summary>
-        private void ApplyReportingFeaturesVisibility()
-        {
-            var frxVisibility = ReportingFeatures.FrxEnabled ? Visibility.Visible : Visibility.Collapsed;
-
-            if (ImportFrxButton != null)
-                ImportFrxButton.Visibility = frxVisibility;
-
-            if (FoxProAnalysisButton != null)
-                FoxProAnalysisButton.Visibility = frxVisibility;
-        }
-
-        private async void OnImportFrxClick(object sender, RoutedEventArgs e)
-        {
-            // Импорт FRX недоступен, пока механизм FRX отключён.
-            if (!ReportingFeatures.FrxEnabled)
-                return;
-
-            var dialog = new FrxImportWindow();
-            dialog.Owner = this;
-            if (dialog.ShowDialog() == true)
-            {
-                await LoadMetadata();
-            }
         }
 
         /// <summary>
@@ -3620,20 +3586,6 @@ namespace BIS.ERP.Views
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка открытия обновлений программы: {GetFullExceptionMessage(ex)}", "Обновления программы",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void OnFoxProAnalysisClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var dialog = new FoxProAnalysisDialog { Owner = this };
-                dialog.ShowDialog();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Ошибка открытия анализа FoxPro: {GetFullExceptionMessage(ex)}", "Анализ FoxPro",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
