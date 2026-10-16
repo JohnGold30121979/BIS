@@ -291,7 +291,7 @@ namespace BIS.ERP.Services
 
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 "Проводки", "Расходный/Приходный КО", "Платежное поручение",
-                "Авансовые платежи", "Расчет курсовой разницы",
+                "Авансовые платежи", "Платежная ведомость", "Расчет курсовой разницы",
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
             await AssignMissingByNameAsync(modules[FinanceCode].Id, "Catalog", catalogs.Select(item => (item.Id, item.Name)),
                 FinanceCatalogNames);

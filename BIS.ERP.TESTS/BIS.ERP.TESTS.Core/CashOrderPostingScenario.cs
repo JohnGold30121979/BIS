@@ -9,18 +9,21 @@ namespace BIS.ERP.Testing;
 
 public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
 {
-    private const string TestDocumentPrefix = "";
+    // Номера документов в системе — только цифры; префикс отделяет тестовые данные.
+    private const string TestDocumentPrefix = "999800";
     private const string CashOrderDocumentName = "Расходный/Приходный КО";
     private const string CashOrderReceiptKind = "Receipt";
     private const string CashOrderPaymentKind = "Payment";
     private const string CashOrderReceiptPostingType = "Приходный кассовый ордер";
     private const string CashOrderPaymentPostingType = "Расходный кассовый ордер";
-    private static readonly string[] TestAccountCodes = ["3010", "4010", "6010", "6810", "6850"];
+    private static readonly string[] TestAccountCodes = ["30100000", "40100000", "60100000", "68100000", "68500000"];
+    private const string TestCashDeskName = "Касса (автотест)";
+    private const string TestAccountDescription = "Временный счет для smoke-теста проводок кассовых ордеров";
 
     public override string Code => "cash-order-posting";
     public override string Name => "Касса: проводки ПКО/РКО";
     public override string Category => "Финансы";
-    public override string Description => "Проверяет формирование проводок приходных и расходных кассовых ордеров. Тестовые документы удаляются после проверки.";
+    public override string Description => "Проверяет формирование проводок приходных и расходных кассовых ордеров. Тестовые документы остаются в системе, удаляются командой «Очистить».";
 
     public override async Task<SmokeTestResult> ExecuteAsync(
         SmokeTestRunOptions options,
@@ -54,8 +57,13 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                     return SmokeTestResult.Success("Очистка тестовых кассовых документов выполнена.", details.ToArray());
                 }
 
+                // Документы создаются штатным механизмом и увеличивают счетчики
+                // нумерации: снимаем состояние и возвращаем его после проверки.
+                var numberingState = await LoadDocumentNumberingStateAsync(context, cancellationToken);
                 await RunCashOrderPostingTestsAsync(context, testContext, progress, cancellationToken);
-                details.Add($"{candidate.DatabaseName}: проверены проводки ПКО/РКО, тестовые документы удалены.");
+                var restoredCounters = await RestoreDocumentNumberingStateAsync(context, numberingState, cancellationToken);
+                details.Add($"{candidate.DatabaseName}: проверены проводки ПКО/РКО, тестовые документы сохранены в системе; " +
+                            $"счётчики нумерации восстановлены: {restoredCounters}.");
                 return SmokeTestResult.Success("Проверка проводок кассовых ордеров завершена успешно.", details.ToArray());
             }
             catch (Exception ex)
@@ -79,8 +87,9 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
         CancellationToken cancellationToken)
     {
         var metadataService = new MetadataService(context);
-        var runPrefix = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-        var createdRecords = new List<(MetadataObject Document, Guid RecordId, string Number, string PostingDocumentType)>();
+        // Колонка doc_number кассовых ордеров — varchar(20):
+        // префикс 999800 + yyMMddHHmmss + номер случая = ровно 20 знаков.
+        var runPrefix = DateTime.UtcNow.ToString("yyMMddHHmmss", CultureInfo.InvariantCulture);
 
         var cases = new[]
         {
@@ -89,67 +98,63 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderReceiptKind,
                 PostingDocumentType: CashOrderReceiptPostingType,
-                Number: $"{runPrefix}01",
+                Number: $"{TestDocumentPrefix}{runPrefix}01",
                 Amount: 15000m,
-                CorrespondentAccount: "6010",
-                ExpectedDebit: "3010",
-                ExpectedCredit: "6010"),
+                CorrespondentAccount: "60100000",
+                ExpectedDebit: "30100000",
+                ExpectedCredit: "60100000"),
             new PostingCase(
                 Name: "РКО: оплата поставщикам",
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderPaymentKind,
                 PostingDocumentType: CashOrderPaymentPostingType,
-                Number: $"{runPrefix}02",
+                Number: $"{TestDocumentPrefix}{runPrefix}02",
                 Amount: 8000m,
-                CorrespondentAccount: "4010",
-                ExpectedDebit: "4010",
-                ExpectedCredit: "3010"),
+                CorrespondentAccount: "40100000",
+                ExpectedDebit: "40100000",
+                ExpectedCredit: "30100000"),
             new PostingCase(
                 Name: "РКО: выплата заработной платы",
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderPaymentKind,
                 PostingDocumentType: CashOrderPaymentPostingType,
-                Number: $"{runPrefix}03",
+                Number: $"{TestDocumentPrefix}{runPrefix}03",
                 Amount: 25000m,
-                CorrespondentAccount: "6810",
-                ExpectedDebit: "6810",
-                ExpectedCredit: "3010"),
+                CorrespondentAccount: "68100000",
+                ExpectedDebit: "68100000",
+                ExpectedCredit: "30100000"),
             new PostingCase(
                 Name: "РКО: выдача подотчетному лицу",
                 Document: testContext.CashOrderDocument,
                 OrderKind: CashOrderPaymentKind,
                 PostingDocumentType: CashOrderPaymentPostingType,
-                Number: $"{runPrefix}04",
+                Number: $"{TestDocumentPrefix}{runPrefix}04",
                 Amount: 5000m,
-                CorrespondentAccount: "6850",
-                ExpectedDebit: "6850",
-                ExpectedCredit: "3010")
+                CorrespondentAccount: "68500000",
+                ExpectedDebit: "68500000",
+                ExpectedCredit: "30100000")
         };
 
-        try
+        // Тестовые документы и проводки после проверки сохраняются в системе:
+        // удаление выполняется только командой «Очистить» (cleanup).
+        foreach (var item in cases)
         {
-            foreach (var item in cases)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var accountId = testContext.AccountIds[item.CorrespondentAccount];
-                var data = BuildDocumentData(item.Document, item.Number, item.OrderKind, item.Amount, accountId, item.Name);
-                var recordId = await metadataService.CreateDynamicRecordAsync(item.Document.Id, data);
-                createdRecords.Add((item.Document, recordId, item.Number, item.PostingDocumentType));
+            cancellationToken.ThrowIfCancellationRequested();
+            var accountId = testContext.AccountIds[item.CorrespondentAccount];
+            var data = BuildDocumentData(item.Document, item.Number, item.OrderKind, item.Amount,
+                accountId, item.Name, testContext.CashDeskId);
+            var recordId = await metadataService.CreateDynamicRecordAsync(item.Document.Id, data);
 
-                await metadataService.PostDocumentAsync(item.Document.Id, recordId);
-                var posting = await LoadPostingAsync(context, item.Number, item.PostingDocumentType, cancellationToken);
+            await metadataService.PostDocumentAsync(item.Document.Id, recordId);
+            var posting = await LoadPostingAsync(context, item.Number, item.PostingDocumentType, cancellationToken);
 
-                AssertEqual(item.ExpectedDebit, posting.Debit, $"{item.Name}: дебет");
-                AssertEqual(item.ExpectedCredit, posting.Credit, $"{item.Name}: кредит");
-                AssertEqualDecimal(item.Amount, posting.Amount, $"{item.Name}: сумма");
+            AssertEqual(item.ExpectedDebit, posting.Debit, $"{item.Name}: дебет");
+            AssertEqual(item.ExpectedCredit, posting.Credit, $"{item.Name}: кредит");
+            AssertEqualDecimal(item.Amount, posting.Amount, $"{item.Name}: сумма");
+            AssertAccountCodeFormat(posting.Debit, $"{item.Name}: дебет");
+            AssertAccountCodeFormat(posting.Credit, $"{item.Name}: кредит");
 
-                Report(progress, $"OK: {item.Name} -> Дт {posting.Debit} / Кт {posting.Credit}, {posting.Amount:N2}");
-            }
-        }
-        finally
-        {
-            await CleanupRecordsAsync(context, createdRecords, cancellationToken);
-            await CleanupAccountsAsync(context, testContext.ChartOfAccounts, testContext.CreatedAccountIds, cancellationToken);
+            Report(progress, $"OK: {item.Name} -> Дт {posting.Debit} / Кт {posting.Credit}, {posting.Amount:N2}");
         }
     }
 
@@ -159,7 +164,8 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
         string orderKind,
         decimal amount,
         Guid correspondentAccountId,
-        string description)
+        string description,
+        Guid cashDeskId)
     {
         var data = new Dictionary<string, object>();
 
@@ -180,6 +186,8 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 value = false;
             else if (IsCorrespondentAccountField(field))
                 value = correspondentAccountId.ToString();
+            else if (IsCashDeskField(field))
+                value = cashDeskId.ToString();
 
             if (value != null)
                 data[field.Name] = value;
@@ -194,6 +202,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
         data.TryAdd("Основание", $"Автотест: {description}");
         data.TryAdd("Проведён", false);
         data.TryAdd("Корр. счет", correspondentAccountId.ToString());
+        data.TryAdd("Касса", cashDeskId.ToString());
 
         return data;
     }
@@ -272,6 +281,16 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                field.Name.Contains("корр", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Поле «Касса» (cash_desk_id). Проверять только точное имя: у поля
+    /// «Счет кассы» тоже есть слово «касс», но оно ссылается на план счетов.
+    /// </summary>
+    private static bool IsCashDeskField(MetadataField field)
+    {
+        return field.DbColumnName.Equals("cash_desk_id", StringComparison.OrdinalIgnoreCase) ||
+               field.Name.Equals("Касса", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<PostingResult> LoadPostingAsync(
         AppDbContext context,
         string number,
@@ -304,50 +323,6 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
                 throw new InvalidOperationException($"Проводка для документа {documentType} N {number} не найдена.");
 
             return new PostingResult(reader.GetString(0), reader.GetString(1), reader.GetDecimal(2));
-        }
-        finally
-        {
-            if (opened)
-                await connection.CloseAsync();
-        }
-    }
-
-    private static async Task CleanupRecordsAsync(
-        AppDbContext context,
-        IReadOnlyCollection<(MetadataObject Document, Guid RecordId, string Number, string PostingDocumentType)> records,
-        CancellationToken cancellationToken)
-    {
-        if (records.Count == 0)
-            return;
-
-        var connection = (NpgsqlConnection)context.Database.GetDbConnection();
-        var opened = false;
-
-        if (connection.State != System.Data.ConnectionState.Open)
-        {
-            await connection.OpenAsync(cancellationToken);
-            opened = true;
-        }
-
-        try
-        {
-            foreach (var record in records)
-            {
-                await using (var deletePostings = connection.CreateCommand())
-                {
-                    deletePostings.CommandText = "DELETE FROM doc_postings WHERE doc_number = @number AND document_type = @type;";
-                    deletePostings.Parameters.AddWithValue("@number", record.Number);
-                    deletePostings.Parameters.AddWithValue("@type", record.PostingDocumentType);
-                    await deletePostings.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                await using (var deleteDocument = connection.CreateCommand())
-                {
-                    deleteDocument.CommandText = $@"DELETE FROM {SqlNames.QuoteIdentifier(record.Document.TableName)} WHERE ""Id"" = @id;";
-                    deleteDocument.Parameters.AddWithValue("@id", record.RecordId);
-                    await deleteDocument.ExecuteNonQueryAsync(cancellationToken);
-                }
-            }
         }
         finally
         {
@@ -398,8 +373,42 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
     {
         var deleted = 0;
         deleted += await DeleteByNumberPrefixAsync(context, testContext.CashOrderDocument, cancellationToken);
+        deleted += await DeleteTestAccountsAsync(context, testContext, cancellationToken);
+        deleted += await DeleteTestCashDesksAsync(context, testContext, cancellationToken);
         deleted += await CleanupLegacyInitialPostingArtifactsAsync(context, cancellationToken);
         return deleted;
+    }
+
+    /// <summary>
+    /// Убирает временные кассы, оставшиеся от прерванных запусков проверки.
+    /// </summary>
+    private static async Task<int> DeleteTestCashDesksAsync(
+        AppDbContext context,
+        CashOrderTestContext testContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = "DELETE FROM " + SqlNames.QuoteIdentifier(testContext.CashDeskCatalog.TableName) +
+                  " WHERE \"name\" = @name;";
+        return await context.Database.ExecuteSqlRawAsync(
+            sql,
+            [new NpgsqlParameter("@name", TestCashDeskName)],
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Убирает временные счета, созданные smoke-тестом проводок ПКО/РКО.
+    /// </summary>
+    private static async Task<int> DeleteTestAccountsAsync(
+        AppDbContext context,
+        CashOrderTestContext testContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = "DELETE FROM " + SqlNames.QuoteIdentifier(testContext.ChartOfAccounts.TableName) +
+                  " WHERE \"description\" = @description;";
+        return await context.Database.ExecuteSqlRawAsync(
+            sql,
+            [new NpgsqlParameter("@description", TestAccountDescription)],
+            cancellationToken);
     }
 
     private static async Task<int> DeleteByNumberPrefixAsync(
@@ -512,6 +521,20 @@ END $$;", cancellationToken);
             throw new InvalidOperationException($"{subject}: ожидалось {expected}, получено {actual}.");
     }
 
+    /// <summary>
+    /// По ТЗ счета ведутся 8-значными кодами вида 0000.0000 (точка разделяет
+    /// группы разрядов); в проводке сохраняются 8 цифр без точки.
+    /// </summary>
+    private static void AssertAccountCodeFormat(string accountCode, string subject)
+    {
+        var isValid = accountCode.Length == 8 && accountCode.All(char.IsDigit);
+        if (!isValid)
+        {
+            throw new InvalidOperationException(
+                $"{subject}: счёт '{accountCode}' должен быть 8-значным (формат 0000.0000).");
+        }
+    }
+
     private sealed record PostingCase(
         string Name,
         MetadataObject Document,
@@ -531,18 +554,27 @@ END $$;", cancellationToken);
             MetadataObject cashOrderDocument,
             MetadataObject chartOfAccounts,
             IReadOnlyCollection<Guid> createdAccountIds,
-            Dictionary<string, Guid> accountIds)
+            Dictionary<string, Guid> accountIds,
+            MetadataObject cashDeskCatalog,
+            Guid cashDeskId,
+            bool cashDeskCreated)
         {
             CashOrderDocument = cashOrderDocument;
             ChartOfAccounts = chartOfAccounts;
             CreatedAccountIds = createdAccountIds;
             AccountIds = accountIds;
+            CashDeskCatalog = cashDeskCatalog;
+            CashDeskId = cashDeskId;
+            CashDeskCreated = cashDeskCreated;
         }
 
         public MetadataObject CashOrderDocument { get; }
         public MetadataObject ChartOfAccounts { get; }
         public IReadOnlyCollection<Guid> CreatedAccountIds { get; }
         public Dictionary<string, Guid> AccountIds { get; }
+        public MetadataObject CashDeskCatalog { get; }
+        public Guid CashDeskId { get; }
+        public bool CashDeskCreated { get; }
 
         public static async Task<CashOrderTestContext?> TryCreateAsync(
             AppDbContext context,
@@ -564,6 +596,16 @@ END $$;", cancellationToken);
             if (cashOrder == null || chart == null)
                 return null;
 
+            var cashDeskCatalog = await context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" &&
+                    (item.Name == "Кассы" || item.TableName == "catalog_cash_desks"), cancellationToken);
+            if (cashDeskCatalog == null)
+            {
+                Report(progress, $"INFO: в базе '{candidateName}' не найден справочник касс — проверка ПКО/РКО пропущена.");
+                return null;
+            }
+
             await new MetadataService(context).EnsureCashOrderPostingAccountsAsync();
 
             var (accounts, createdAccountIds) = await EnsureAccountIdsAsync(context, chart, TestAccountCodes, cancellationToken);
@@ -573,7 +615,21 @@ END $$;", cancellationToken);
                     $"INFO: в базе '{candidateName}' временно созданы счета для smoke-теста: {string.Join(", ", createdAccountIds.Select(id => id.ToString()[..8]))}.");
             }
 
-            return new CashOrderTestContext(cashOrder, chart, createdAccountIds, accounts);
+            var (cashDeskId, cashDeskCreated) = await EnsureCashDeskAsync(context, cashDeskCatalog, cancellationToken);
+            if (cashDeskId == Guid.Empty)
+            {
+                await CleanupAccountsAsync(context, chart, createdAccountIds, cancellationToken);
+                Report(progress, $"INFO: в базе '{candidateName}' не удалось подготовить кассу — проверка ПКО/РКО пропущена.");
+                return null;
+            }
+
+            if (cashDeskCreated)
+            {
+                Report(progress,
+                    $"INFO: в базе '{candidateName}' временно создана касса для smoke-теста: {cashDeskId.ToString()[..8]}.");
+            }
+
+            return new CashOrderTestContext(cashOrder, chart, createdAccountIds, accounts, cashDeskCatalog, cashDeskId, cashDeskCreated);
         }
 
         private static async Task<Dictionary<string, Guid>> LoadAccountIdsAsync(
@@ -686,7 +742,7 @@ END $$;", cancellationToken);
                 "code" => code,
                 "name" => GetAccountName(code),
                 "account_type" => GetAccountType(code),
-                "description" => "Временный счет для smoke-теста проводок кассовых ордеров",
+                "description" => TestAccountDescription,
                 "level" => 1,
                 "is_active" => true,
                 _ => field.FieldType switch
@@ -700,15 +756,151 @@ END $$;", cancellationToken);
             };
         }
 
+        /// <summary>
+        /// Возвращает кассу с тестовым счетом. Если подходящей кассы нет,
+        /// создает временную и помечает её для удаления после проверки.
+        /// </summary>
+        private static async Task<(Guid CashDeskId, bool Created)> EnsureCashDeskAsync(
+            AppDbContext context,
+            MetadataObject cashDeskCatalog,
+            CancellationToken cancellationToken)
+        {
+            var cashAccountCode = TestAccountCodes[0];
+            var connection = (NpgsqlConnection)context.Database.GetDbConnection();
+            var opened = false;
+
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                await connection.OpenAsync(cancellationToken);
+                opened = true;
+            }
+
+            try
+            {
+                await using (var findCommand = connection.CreateCommand())
+                {
+                    findCommand.CommandText = $@"
+                        SELECT ""Id"" FROM {SqlNames.QuoteIdentifier(cashDeskCatalog.TableName)}
+                        WHERE ""code"" = @code
+                        ORDER BY ""CreatedAt"" DESC
+                        LIMIT 1;";
+                    findCommand.Parameters.AddWithValue("@code", cashAccountCode);
+                    var existing = await findCommand.ExecuteScalarAsync(cancellationToken);
+                    if (existing is Guid existingId && existingId != Guid.Empty)
+                        return (existingId, false);
+                }
+
+                var currencyId = await LoadAnyCurrencyIdAsync(context, connection, cashDeskCatalog, cancellationToken);
+                if (currencyId == Guid.Empty)
+                    return (Guid.Empty, false);
+
+                var cashDeskId = Guid.NewGuid();
+                var columns = new List<string> { "\"Id\"", "\"CreatedAt\"", "\"UpdatedAt\"" };
+                var values = new List<string> { "@id", "NOW()", "NOW()" };
+                var parameters = new List<NpgsqlParameter> { new("@id", cashDeskId) };
+
+                foreach (var field in cashDeskCatalog.Fields.OrderBy(item => item.Order))
+                {
+                    if (string.IsNullOrWhiteSpace(field.DbColumnName))
+                        continue;
+
+                    columns.Add(SqlNames.QuoteIdentifier(field.DbColumnName));
+                    var parameterName = $"@{field.DbColumnName}";
+                    values.Add(parameterName);
+                    parameters.Add(new NpgsqlParameter(parameterName,
+                        BuildCashDeskFieldValue(field, currencyId)));
+                }
+
+                await using var insertCommand = connection.CreateCommand();
+                insertCommand.CommandText = $@"
+                    INSERT INTO {SqlNames.QuoteIdentifier(cashDeskCatalog.TableName)}
+                    ({string.Join(", ", columns)})
+                    VALUES ({string.Join(", ", values)});";
+                insertCommand.Parameters.AddRange(parameters.ToArray());
+                await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+                return (cashDeskId, true);
+            }
+            finally
+            {
+                if (opened)
+                    await connection.CloseAsync();
+            }
+        }
+
+        private static object BuildCashDeskFieldValue(MetadataField field, Guid currencyId)
+        {
+            return field.DbColumnName switch
+            {
+                "name" => TestCashDeskName,
+                "code" => TestAccountCodes[0],
+                "cash_number" => "AUTO",
+                "currency_id" => currencyId.ToString(),
+                "initial_balance" or "current_balance" => 0m,
+                "is_active" => true,
+                _ => field.FieldType switch
+                {
+                    "Bool" => false,
+                    "Int" => 0,
+                    "Decimal" => 0m,
+                    "DateTime" => DateTime.Today,
+                    _ => string.Empty
+                }
+            };
+        }
+
+        /// <summary>
+        /// У кассы валюта обязательна: берем валюту существующей кассы,
+        /// иначе — первую запись справочника валют.
+        /// </summary>
+        private static async Task<Guid> LoadAnyCurrencyIdAsync(
+            AppDbContext context,
+            NpgsqlConnection connection,
+            MetadataObject cashDeskCatalog,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await using var cashDeskCommand = connection.CreateCommand();
+                cashDeskCommand.CommandText = $@"
+                    SELECT ""currency_id"" FROM {SqlNames.QuoteIdentifier(cashDeskCatalog.TableName)}
+                    WHERE ""currency_id"" IS NOT NULL AND ""currency_id"" <> ''
+                    LIMIT 1;";
+                var cashDeskValue = await cashDeskCommand.ExecuteScalarAsync(cancellationToken);
+                if (cashDeskValue != null && Guid.TryParse(cashDeskValue.ToString(), out var existing))
+                    return existing;
+            }
+            catch
+            {
+                // Структура справочника касс может отличаться — пробуем справочник валют.
+            }
+
+            var currenciesCatalog = await context.MetadataObjects
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" &&
+                    (item.Name == "Справочник валют" || item.TableName == "catalog_currencies"), cancellationToken);
+            if (currenciesCatalog == null || string.IsNullOrWhiteSpace(currenciesCatalog.TableName))
+                return Guid.Empty;
+
+            await using var currencyCommand = connection.CreateCommand();
+            currencyCommand.CommandText = $@"SELECT ""Id"" FROM {SqlNames.QuoteIdentifier(currenciesCatalog.TableName)} LIMIT 1;";
+            var currencyValue = await currencyCommand.ExecuteScalarAsync(cancellationToken);
+            if (currencyValue is Guid currencyId && currencyId != Guid.Empty)
+                return currencyId;
+
+            return currencyValue != null && Guid.TryParse(currencyValue.ToString(), out var parsed)
+                ? parsed
+                : Guid.Empty;
+        }
+
         private static string GetAccountName(string code)
         {
             return code switch
             {
-                "3010" => "Касса",
-                "4010" => "Расчеты с поставщиками",
-                "6010" => "Доходы от реализации",
-                "6810" => "Расчеты с персоналом по оплате труда",
-                "6850" => "Расчеты с подотчетными лицами",
+                "30100000" => "Касса",
+                "40100000" => "Расчеты с поставщиками",
+                "60100000" => "Доходы от реализации",
+                "68100000" => "Расчеты с персоналом по оплате труда",
+                "68500000" => "Расчеты с подотчетными лицами",
                 _ => $"Счет {code}"
             };
         }
@@ -717,7 +909,7 @@ END $$;", cancellationToken);
         {
             return code switch
             {
-                "3010" or "6850" => "Active",
+                "30100000" or "68500000" => "Active",
                 _ => "Passive"
             };
         }

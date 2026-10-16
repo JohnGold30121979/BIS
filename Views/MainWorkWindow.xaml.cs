@@ -81,8 +81,7 @@ namespace BIS.ERP
 
         private static readonly HashSet<string> RemovedDocumentNames = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Доверенность",
-            "Платежная ведомость"
+            "Доверенность"
         };
 
         private const string ModuleCatalogsGroupKey = "ModuleCatalogs";

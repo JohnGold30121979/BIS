@@ -353,6 +353,8 @@ namespace BIS.ERP.Services
             // doc_sales_invoice / doc_purchase_invoice), вместо прежних doc_fin_<hash>.
             await EnsureObjectAsync("Авансовые платежи", AdvancePaymentService.DefaultHeaderTableName, "Document",
                 "Документ финансового учета: Авансовые платежи", "💰", FinanceDocumentFields("Авансовые платежи"));
+            await EnsureObjectAsync("Платежная ведомость", "doc_payroll_statement", "Document",
+                "Документ финансового учета: Платежная ведомость", "💰", FinanceDocumentFields("Платежная ведомость"));
             await EnsureObjectAsync("Расчет курсовой разницы", "doc_exchange_rate_diff", "Document",
                 "Документ финансового учета: Расчет курсовой разницы", "💰", FinanceDocumentFields("Расчет курсовой разницы"));
 

@@ -33,6 +33,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _connectionSettingsFilePath = string.Empty;
     private string _logsDirectoryPath = string.Empty;
     private bool _isBusy;
+    private bool _suppressDatabaseSettingsSync;
+    private const string FinanceCategoryName = "Финансы";
 
     public MainWindow()
     {
@@ -51,8 +53,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         get => _selectedCategory;
         set
         {
-            if (SetProperty(ref _selectedCategory, value) && value != null && SelectedScenario == null)
+            if (!SetProperty(ref _selectedCategory, value))
+                return;
+
+            if (value == null)
+            {
+                SelectedScenario = null;
+                return;
+            }
+
+            // При переключении вкладки в таблице должна быть выбрана строка
+            // именно этой категории, иначе кнопки действуют на сценарий
+            // из ранее открытой вкладки.
+            var currentScenario = SelectedScenario?.Scenario;
+            if (currentScenario == null ||
+                !value.Scenarios.Any(item => ReferenceEquals(item.Scenario, currentScenario)))
+            {
                 SelectedScenario = value.Scenarios.FirstOrDefault();
+            }
         }
     }
 
@@ -69,7 +87,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public DatabaseCandidate? SelectedDatabase
     {
         get => _selectedDatabase;
-        set => SetProperty(ref _selectedDatabase, value);
+        set
+        {
+            if (!SetProperty(ref _selectedDatabase, value))
+                return;
+
+            // Выбор базы в списке переносит её строку подключения в настройки,
+            // иначе сценарии и SQL-консоль продолжат работать с прежней базой.
+            if (value != null && !_suppressDatabaseSettingsSync)
+                ApplyDatabaseCandidate(value);
+        }
     }
 
     public DataView? SqlResultView
@@ -203,7 +230,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Categories.Add(viewModel);
         }
 
-        SelectedCategory = Categories.FirstOrDefault();
+        // По умолчанию открывается вкладка «Финансы» — основной контур проверки.
+        SelectedCategory = Categories.FirstOrDefault(item =>
+                                string.Equals(item.Name, FinanceCategoryName, StringComparison.CurrentCultureIgnoreCase))
+                            ?? Categories.FirstOrDefault();
         SelectedScenario = SelectedCategory?.Scenarios.FirstOrDefault();
         AppendLog($"Загружено сценариев: {Categories.Sum(item => item.Scenarios.Count)}.");
     }
@@ -217,7 +247,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         foreach (var candidate in candidates)
             SqlCandidates.Add(candidate);
 
-        SelectedDatabase = SqlCandidates.FirstOrDefault();
+        // База выбирается по строке подключения: подсвечиваем ту, которая уже
+        // настроена в файле конфигурации, а не первую в списке.
+        var connectionSettings = BuildConnectionSettings();
+        _suppressDatabaseSettingsSync = true;
+        try
+        {
+            SelectedDatabase = SqlCandidates.FirstOrDefault(candidate =>
+                                    connectionSettings.MatchesConnectionString(candidate.ConnectionString))
+                                ?? SqlCandidates.FirstOrDefault();
+        }
+        finally
+        {
+            _suppressDatabaseSettingsSync = false;
+        }
+
         SqlStatus = SelectedDatabase == null
             ? "Базы данных не найдены."
             : $"Выбрана база: {SelectedDatabase.DatabaseName}.";
@@ -393,6 +437,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         ConnectionSettingsFilePath = TestEnvironment.GetSettingsFilePath();
         LogsDirectoryPath = TestEnvironment.GetLogsDirectory();
         ConnectionSettingsStatus = "Настройки подключения загружены.";
+    }
+
+    private void ApplyDatabaseCandidate(DatabaseCandidate candidate)
+    {
+        if (!TestSettings.TryParseConnectionString(candidate.ConnectionString, out var settings))
+        {
+            SqlStatus = $"Не удалось разобрать строку подключения базы {candidate.DatabaseName}.";
+            AppendLog(SqlStatus);
+            return;
+        }
+
+        // Настройки выбранной базы сохраняются в файл, а поля ввода
+        // перечитываются тем же путём, что и при загрузке конфигурации.
+        TestEnvironment.SaveSettings(settings);
+        LoadConnectionSettingsFromStore();
+        SqlStatus = $"Выбрана база: {settings.DatabaseName}. Строка подключения обновлена.";
+        AppendLog($"{SqlStatus} {settings.Host}:{settings.Port}/{settings.DatabaseName}");
     }
 
     private TestSettings BuildConnectionSettings()

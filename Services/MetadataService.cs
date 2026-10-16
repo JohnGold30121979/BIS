@@ -34,7 +34,12 @@ namespace BIS.ERP.Services
         private const string AdvancePaymentsNumberingKey = "advance_payment_document";
         private const long MaxDocumentNumberUsedForCounter = 999_999_999;
         private readonly string _connectionString;
-        private readonly System.Threading.SemaphoreSlim _contextAccess = new(1, 1);
+        /// <summary>
+        /// Ворота доступа к общему контексту базы: он один на приложение и не переносит
+        /// параллельных команд. Ворота статические — иначе разные окна и экземпляры
+        /// сервиса не координируются между собой.
+        /// </summary>
+        private static readonly System.Threading.SemaphoreSlim _contextAccess = new(1, 1);
 
         // Лог 09:43/09:59/10:45: DbContext/NpgsqlConnection НЕ потокобезопасны,
         // параллельные команды на одном соединении дают

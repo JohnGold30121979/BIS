@@ -732,7 +732,30 @@ namespace BIS.ERP.Views
             currencyId = Guid.Empty;
             return false;
         }
+        /// <summary>Очередь загрузок: контекст базы один на приложение, параллельные операции недопустимы.</summary>
+        private readonly SemaphoreSlim _loadGate = new(1, 1);
+
+        /// <summary>
+        /// Загрузка данных справочника.
+        ///
+        /// Вызовы сериализуются: Loaded срабатывает при каждом показе вкладки (и повторно —
+        /// пока открыт модальный диалог карточки), поэтому две загрузки могли идти
+        /// одновременно и роняли контекст с «A second operation was started on this context».
+        /// </summary>
         private async Task LoadData()
+        {
+            await _loadGate.WaitAsync();
+            try
+            {
+                await LoadDataCore();
+            }
+            finally
+            {
+                _loadGate.Release();
+            }
+        }
+
+        private async Task LoadDataCore()
         {
             try
             {

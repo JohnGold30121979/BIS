@@ -135,6 +135,13 @@ namespace BIS.ERP.Views
                 return "Расходный/Приходный КО";
             }
 
+            // Прежнее название авансового документа — «Авансовый отчет»:
+            // старые проводки должны открывать текущий документ «Авансовые платежи».
+            if (documentType.Equals("Авансовый отчет", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Авансовые платежи";
+            }
+
             return documentType;
         }
 

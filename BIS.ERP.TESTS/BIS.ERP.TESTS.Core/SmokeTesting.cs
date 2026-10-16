@@ -293,6 +293,92 @@ public abstract class SmokeTestScenarioBase : ISmokeTestScenario
             // Служебный файл не должен ронять тесты.
         }
     }
+
+    /// <summary>
+    /// Снимок счетчиков нумерации документов (doc_numbering). Тесты создают
+    /// документы штатным механизмом, а он увеличивает счетчики; после проверки
+    /// счетчики возвращаются к прежним значениям, чтобы тестовые номера не
+    /// «накручивали» нумерацию реальных документов.
+    /// </summary>
+    internal static async Task<Dictionary<Guid, int>> LoadDocumentNumberingStateAsync(
+        AppDbContext context,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<Guid, int>();
+        var connection = (NpgsqlConnection)context.Database.GetDbConnection();
+        var opened = false;
+
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+            opened = true;
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id, current_number FROM doc_numbering;";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                result[reader.GetGuid(0)] = reader.GetInt32(1);
+        }
+        catch
+        {
+            // Таблицы нумерации может не быть в старых базах — тест продолжается.
+        }
+        finally
+        {
+            if (opened)
+                await connection.CloseAsync();
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Возвращает счетчики нумерации к снятым значениям. Возвращает число
+    /// восстановленных строк.
+    /// </summary>
+    internal static async Task<int> RestoreDocumentNumberingStateAsync(
+        AppDbContext context,
+        IReadOnlyDictionary<Guid, int> state,
+        CancellationToken cancellationToken = default)
+    {
+        if (state.Count == 0)
+            return 0;
+
+        var connection = (NpgsqlConnection)context.Database.GetDbConnection();
+        var opened = false;
+
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+            opened = true;
+        }
+
+        var restored = 0;
+        try
+        {
+            foreach (var pair in state)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    UPDATE doc_numbering
+                    SET current_number = @currentNumber, UpdatedAt = NOW()
+                    WHERE id = @id AND current_number <> @currentNumber;";
+                command.Parameters.AddWithValue("@currentNumber", pair.Value);
+                command.Parameters.AddWithValue("@id", pair.Key);
+                restored += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        finally
+        {
+            if (opened)
+                await connection.CloseAsync();
+        }
+
+        return restored;
+    }
 }
 
 public sealed class SqlQueryConsoleService
@@ -412,6 +498,78 @@ public sealed record TestSettings(
     public string ConnectionString(string databaseName)
     {
         return $"Host={Host};Port={Port};Database={databaseName};Username={Username};Password={Password}";
+    }
+
+    /// <summary>
+    /// Разбирает строку подключения того же формата, что создаёт ConnectionString.
+    /// </summary>
+    public static bool TryParseConnectionString(string? connectionString, out TestSettings settings)
+    {
+        settings = new TestSettings();
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return false;
+
+        string? host = null;
+        int? port = null;
+        string? databaseName = null;
+        string? username = null;
+        string? credential = null;
+
+        foreach (var part in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separatorIndex = part.IndexOf('=');
+            if (separatorIndex <= 0)
+                continue;
+
+            var key = part[..separatorIndex].Trim();
+            var value = part[(separatorIndex + 1)..].Trim();
+            switch (key.ToLowerInvariant())
+            {
+                case "host":
+                case "server":
+                    host = value;
+                    break;
+                case "port":
+                    if (int.TryParse(value, out var parsedPort))
+                        port = parsedPort;
+                    break;
+                case "database":
+                case "db":
+                    databaseName = value;
+                    break;
+                case "username":
+                case "user id":
+                case "userid":
+                    username = value;
+                    break;
+                case "password":
+                    credential = value;
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(databaseName))
+            return false;
+
+        settings = new TestSettings(
+            host!,
+            port ?? 5432,
+            databaseName!,
+            string.IsNullOrWhiteSpace(username) ? "postgres" : username!,
+            credential ?? string.Empty);
+        return true;
+    }
+
+    /// <summary>
+    /// Строка подключения указывает на те же хост, порт, базу и пользователя.
+    /// </summary>
+    public bool MatchesConnectionString(string? connectionString)
+    {
+        return TryParseConnectionString(connectionString, out var other) &&
+               string.Equals(Host, other.Host, StringComparison.OrdinalIgnoreCase) &&
+               Port == other.Port &&
+               string.Equals(DatabaseName, other.DatabaseName, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(Username, other.Username, StringComparison.OrdinalIgnoreCase);
     }
 }
 

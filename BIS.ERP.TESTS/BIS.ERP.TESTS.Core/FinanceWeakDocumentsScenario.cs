@@ -11,7 +11,7 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
     private static readonly IReadOnlyDictionary<string, string[]> ExpectedDocumentColumns =
         new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Авансовый отчет"] =
+            ["Авансовые платежи"] =
             [
                 "employee_id",
                 "advance_payment_id",
@@ -142,7 +142,7 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
             var notReadyBlock = notReadyBlockEnd > notReadyBlockStart
                 ? mainWorkWindowSource[notReadyBlockStart..notReadyBlockEnd]
                 : string.Empty;
-            foreach (var documentName in new[] { "Авансовый отчет", "Платежная ведомость" })
+            foreach (var documentName in new[] { "Авансовый отчет", "Авансовые платежи", "Платежная ведомость" })
             {
                 if (notReadyBlock.Contains(documentName, StringComparison.OrdinalIgnoreCase))
                     errors.Add($"Документ '{documentName}' все еще скрыт в NotReadyFinanceDocuments.");
@@ -298,6 +298,18 @@ public sealed class FinanceWeakDocumentsScenario : SmokeTestScenarioBase
                 .FirstOrDefaultAsync(
                     item => item.ObjectType == "Document" && item.Name == documentName,
                     cancellationToken);
+
+            // Документ «Авансовые платежи» ранее назывался «Авансовый отчет»:
+            // базы, где переименование сида ещё не прошло, должны проверяться.
+            if (document == null && string.Equals(documentName, "Авансовые платежи", StringComparison.OrdinalIgnoreCase))
+            {
+                document = await context.MetadataObjects
+                    .Include(item => item.Fields)
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        item => item.ObjectType == "Document" && item.Name == "Авансовый отчет",
+                        cancellationToken);
+            }
 
             if (document == null)
             {
