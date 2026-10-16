@@ -85,6 +85,22 @@ namespace BIS.ERP.Services
 
             var normalizedMessage = message.Trim();
 
+            // Известный шум WPF: при закрытии окна MDI вкладка отрывается от TabControl,
+            // и её шаблон жалуется на TabStripPlacement. К нашему коду это не относится,
+            // поэтому в журнал не пишем — иначе настоящие ошибки тонут в этих строках.
+            if (normalizedMessage.Contains("TabStripPlacement", StringComparison.OrdinalIgnoreCase) &&
+                normalizedMessage.Contains("TabControl", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            // Ошибки привязок приложение не роняют: держим их предупреждениями.
+            if (string.Equals(_logSource, "WPF Binding", StringComparison.OrdinalIgnoreCase))
+            {
+                SystemLogService.Warning(normalizedMessage, _logSource);
+                return;
+            }
+
             if (eventType is TraceEventType.Critical or TraceEventType.Error ||
                 normalizedMessage.Contains("error", StringComparison.OrdinalIgnoreCase) ||
                 normalizedMessage.Contains("ошибка", StringComparison.OrdinalIgnoreCase))

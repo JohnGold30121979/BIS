@@ -1165,6 +1165,10 @@ inputControl = AccountPickerControlFactory.Create(
                 System.Diagnostics.Debug.WriteLine($"AutoFillFromEmployee error: {ex.Message}");
             }
         }
+        /// <summary>
+        /// Проверка и сбор значений карточки. Саму запись выполняет вызывающая сторона
+        /// (MetadataService.AddCatalogItemAsync), она и запирает контекст.
+        /// </summary>
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
             try

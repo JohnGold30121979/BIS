@@ -34,29 +34,19 @@ namespace BIS.ERP.Services
         private const string AdvancePaymentsNumberingKey = "advance_payment_document";
         private const long MaxDocumentNumberUsedForCounter = 999_999_999;
         private readonly string _connectionString;
-        /// <summary>
-        /// Ворота доступа к общему контексту базы: он один на приложение и не переносит
-        /// параллельных команд. Ворота статические — иначе разные окна и экземпляры
-        /// сервиса не координируются между собой.
-        /// </summary>
-        private static readonly System.Threading.SemaphoreSlim _contextAccess = new(1, 1);
 
+        /// <summary>
+        /// Ворота доступа к общему контексту: он один на приложение и не переносит
+        /// параллельных команд. Это тот же семафор, что у DbContextGate, поэтому
+        /// здешние блокировки координируются с загрузками окон и записью карточек.
+        /// </summary>
+        private static readonly System.Threading.SemaphoreSlim _contextAccess = DbContextGate.Gate;
         // Лог 09:43/09:59/10:45: DbContext/NpgsqlConnection НЕ потокобезопасны,
         // параллельные команды на одном соединении дают
         // "A command is already in progress" и валят транзакции/процесс.
         // Сериализуем ВЕСЬ доступ к общему _context через ворота ниже.
-        public async Task<T> WithContextLockAsync<T>(Func<Task<T>> action)
-        {
-            await _contextAccess.WaitAsync();
-            try
-            {
-                return await action();
-            }
-            finally
-            {
-                _contextAccess.Release();
-            }
-        }
+        public Task<T> WithContextLockAsync<T>(Func<Task<T>> action) =>
+            DbContextGate.RunAsync(action);
 
         public async Task WithContextLockAsync(Func<Task> action)
         {
@@ -487,7 +477,18 @@ namespace BIS.ERP.Services
 
         // Добавление записи в справочник. Возвращает Id созданной записи,
         // чтобы вызывающий раздел мог выделить её в списке после закрытия диалога.
-        public async Task<Guid> AddCatalogItemAsync(Guid catalogId, Dictionary<string, object> itemData)
+        /// <summary>
+        /// Добавление записи справочника.
+        ///
+        /// Идёт под общими воротами контекста: без них вставка падала с
+        /// «A command is already in progress: INSERT INTO …», если в этот момент другое
+        /// окно догружало данные. Так же закрыт родственный путь записи документа
+        /// (CreateDynamicRecordAsync).
+        /// </summary>
+        public Task<Guid> AddCatalogItemAsync(Guid catalogId, Dictionary<string, object> itemData) =>
+            WithContextLockAsync(() => AddCatalogItemCoreAsync(catalogId, itemData));
+
+        private async Task<Guid> AddCatalogItemCoreAsync(Guid catalogId, Dictionary<string, object> itemData)
         {
             var catalog = await _context.MetadataObjects
                 .Include(c => c.Fields)

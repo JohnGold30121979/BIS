@@ -57,28 +57,13 @@ namespace BIS.ERP.Views
             UpdateButtonsState();
         }
 
-        /// <summary>Очередь загрузок: контекст базы один на приложение, параллельные операции недопустимы.</summary>
-        private readonly SemaphoreSlim _loadGate = new(1, 1);
-
         /// <summary>
         /// Загрузка данных документа.
         ///
-        /// Вызовы сериализуются: Loaded срабатывает при каждом показе вкладки, поэтому
-        /// две загрузки могли идти одновременно и роняли контекст с
-        /// «A second operation was started on this context instance».
+        /// Внешний замок не берём: методы сервиса запирают контекст сами, а внешний замок
+        /// дал бы взаимную блокировку. Повторные вызовы (Loaded) безопасны.
         /// </summary>
-        private async Task LoadData()
-        {
-            await _loadGate.WaitAsync();
-            try
-            {
-                await LoadDataCore();
-            }
-            finally
-            {
-                _loadGate.Release();
-            }
-        }
+        private Task LoadData() => LoadDataCore();
 
         private async Task LoadDataCore()
         {
