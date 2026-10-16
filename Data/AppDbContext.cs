@@ -68,7 +68,10 @@ public class AppDbContext : DbContext
    
     public DbSet<MetadataCalculation> MetadataCalculations { get; set; }
     public DbSet<MetadataPostingRule> MetadataPostingRules { get; set; }
-    public DbSet<Organization> Organizations { get; set; }   
+    // LEGACY (только чтение, таблица пуста в боевых базах): боевой справочник — catalog_organizations.
+    // Новые ссылки запрещены. См. Docs/План_нормализации_модели_данных.md §3.1.
+    [System.Obsolete("Legacy, только чтение. Боевой справочник — catalog_organizations.")]
+    public DbSet<Organization> Organizations { get; set; }
     public DbSet<Posting> Postings { get; set; }  
     public DbSet<AccountingPeriod> AccountingPeriods { get; set; }
     public DbSet<AccountingPeriodModuleState> AccountingPeriodModuleStates { get; set; }

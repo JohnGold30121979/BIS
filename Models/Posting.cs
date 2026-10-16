@@ -45,6 +45,10 @@ namespace BIS.ERP.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         // Навигационные свойства
+        // LEGACY: Posting.Organization ведет в пустую статичную таблицу Organizations.
+        // Боевой справочник — catalog_organizations (см. Docs/План_нормализации_модели_данных.md §3.1).
+        // Новые ссылки запрещены; организацию читать из catalog_organizations по OrganizationId.
+        [Obsolete("Legacy, только чтение. Боевой справочник — catalog_organizations.")]
         [ForeignKey("OrganizationId")]
         public virtual Organization? Organization { get; set; }
 

@@ -5,8 +5,12 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace BIS.ERP.Models
 {
     /// <summary>
-    /// Организация (юридическое лицо)
+    /// LEGACY. Статичная таблица Organizations (EF, 0 строк в боевых базах).
+    /// Боевой справочник — динамический catalog_organizations (is_primary/director/chief_accountant).
+    /// Только чтение для совместимости. Новые ссылки запрещены — использовать catalog_organizations
+    /// через MetadataService.GetCatalogDataAsync. См. Docs/План_нормализации_модели_данных.md §3.1.
     /// </summary>
+    [System.Obsolete("Legacy, только чтение. Боевой справочник — catalog_organizations.")]
     public class Organization
     {
         [Key]
