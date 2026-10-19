@@ -45,8 +45,7 @@ namespace BIS.ERP.Services
                     ""IsAllowed"" boolean NOT NULL DEFAULT true,
                     ""UpdatedAt"" timestamp with time zone NOT NULL
                 );
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_UserAccessPermissions_User_Key""
-                    ON ""UserAccessPermissions"" (""UserId"", ""NavigationKey"");
+                -- IX_UserAccessPermissions_User_Key: владелец — EF (план §4.1)
             ");
             await _context.Database.ExecuteSqlRawAsync(@"
                 ALTER TABLE ""Users""

@@ -1,166 +1,190 @@
 using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace BIS.ERP.Services
 {
+    /// <summary>
+    /// Детектор дрейфа схемы (план §2.2, п. 5).
+    ///
+    /// Раньше сервис молча правил старые базы через ALTER TABLE. Теперь он только
+    /// сравнивает ожидаемые колонки с фактическими в information_schema и пишет
+    /// расхождения в лог: чинить схему должна миграция, а не старт приложения.
+    /// </summary>
     public sealed class RuntimeSchemaFixService
     {
         private readonly AppDbContext _context;
         private static readonly object SyncLock = new();
-        private static readonly HashSet<string> EnsuredConnections = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> ReportedConnections = new(StringComparer.OrdinalIgnoreCase);
 
         public RuntimeSchemaFixService(AppDbContext context)
         {
             _context = context;
         }
 
+        /// <summary>
+        /// Ожидаемые колонки: перенесены из прежнего DDL один в один.
+        /// </summary>
+        private static readonly (string Table, string Column)[] ExpectedColumns =
+        {
+            ("Reports", "Code"),
+            ("Reports", "IsActive"),
+            ("Reports", "IsPrintForm"),
+            ("Reports", "IsDefault"),
+            ("Reports", "IsSystem"),
+            ("Reports", "SourceFormat"),
+            ("Reports", "TemplateVersion"),
+            ("Reports", "ClosedXmlLayout"),
+            ("Reports", "ShowInAccountingReports"),
+            ("LocalizationEntries", "Category"),
+            ("LocalizationEntries", "IsActive"),
+            ("LocalizationEntries", "UpdatedAt"),
+            ("MetadataObjects", "UsePostings"),
+            ("MetadataObjects", "UseBalances"),
+            ("MetadataObjects", "UseMovements"),
+            ("MetadataObjects", "BalanceTable"),
+            ("MetadataObjects", "MovementTable"),
+            ("MetadataObjects", "ReferenceFields"),
+            ("MetadataFields", "ReferenceCatalog"),
+            ("MetadataFields", "Formula"),
+            ("MetadataFields", "DisplayPattern"),
+            ("MetadataFields", "DisplayFields"),
+            ("catalog_taxes", "is_active"),
+            ("catalog_taxes", "sort_order"),
+            ("catalog_taxes", "esf_vat_code"),
+            ("catalog_taxes", "esf_sales_tax_code"),
+            ("catalog_taxes", "is_default_vat"),
+            ("catalog_taxes", "is_default_sales_tax"),
+            ("catalog_taxes", "vat_payable_account"),
+            ("catalog_taxes", "vat_recoverable_account"),
+            ("catalog_taxes", "sales_tax_account"),
+            ("catalog_taxes", "tax_kind"),
+            ("catalog_taxes", "valid_from"),
+            ("catalog_taxes", "valid_to"),
+            ("catalog_taxes", "is_system"),
+            ("catalog_payment_kinds", "is_active"),
+            ("catalog_payment_kinds", "rate"),
+            ("catalog_payment_kinds", "esf_code"),
+            ("catalog_payment_kinds", "is_default"),
+            ("catalog_supply_kinds", "is_active"),
+            ("catalog_supply_kinds", "sort_order"),
+            ("catalog_supply_kinds", "esf_code"),
+            ("catalog_supply_kinds", "is_default"),
+            ("catalog_delivery_types", "is_active"),
+            ("catalog_delivery_types", "sort_order"),
+            ("catalog_delivery_types", "esf_code"),
+            ("catalog_delivery_types", "is_default"),
+        };
+
+        private const int MinFreeTextLength = 80;
+
         public async Task EnsureAsync()
         {
             var connectionKey = _context.Database.GetConnectionString() ?? "default";
             lock (SyncLock)
             {
-                if (EnsuredConnections.Contains(connectionKey))
+                if (ReportedConnections.Contains(connectionKey))
                     return;
             }
 
-            await _context.Database.ExecuteSqlRawAsync(@"
-                DO $$
-                DECLARE
-                    short_column record;
-                BEGIN
-                    FOR short_column IN
-                        SELECT table_schema, table_name, column_name
-                        FROM information_schema.columns
-                        WHERE table_schema = 'public'
-                          AND data_type = 'character varying'
-                          AND character_maximum_length <= 10
-                    LOOP
-                        EXECUTE format(
-                            'ALTER TABLE %I.%I ALTER COLUMN %I TYPE varchar(80)',
-                            short_column.table_schema,
-                            short_column.table_name,
-                            short_column.column_name);
-                    END LOOP;
+            try
+            {
+                await DetectDriftAsync();
+            }
+            catch (Exception ex)
+            {
+                // Диагностика не должна мешать запуску приложения.
+                System.Diagnostics.Debug.WriteLine($"[schema] детектор дрейфа не отработал: {ex.Message}");
+            }
 
-                    IF to_regclass('public.""Reports""') IS NOT NULL THEN
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""Code"" varchar(160) NOT NULL DEFAULT '';
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT true;
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsPrintForm"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsDefault"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""IsSystem"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""SourceFormat"" varchar(80) NOT NULL DEFAULT 'Native';
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""TemplateVersion"" integer NOT NULL DEFAULT 1;
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""ClosedXmlLayout"" text NOT NULL DEFAULT '';
-                        ALTER TABLE ""Reports"" ADD COLUMN IF NOT EXISTS ""ShowInAccountingReports"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""Name"" TYPE varchar(500);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""Description"" TYPE varchar(2000);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""DataSourceType"" TYPE varchar(80);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""ReportType"" TYPE varchar(120);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""SourceFormat"" TYPE varchar(80);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""PageOrientation"" TYPE varchar(40);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""Icon"" TYPE varchar(40);
-                        ALTER TABLE ""Reports"" ALTER COLUMN ""Code"" TYPE varchar(160);
-                    END IF;
-
-                    IF to_regclass('public.""LocalizationEntries""') IS NOT NULL THEN
-                        ALTER TABLE ""LocalizationEntries"" ADD COLUMN IF NOT EXISTS ""Category"" varchar(120) NOT NULL DEFAULT 'System';
-                        ALTER TABLE ""LocalizationEntries"" ADD COLUMN IF NOT EXISTS ""IsActive"" boolean NOT NULL DEFAULT true;
-                        ALTER TABLE ""LocalizationEntries"" ADD COLUMN IF NOT EXISTS ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW();
-                        ALTER TABLE ""LocalizationEntries"" ALTER COLUMN ""Culture"" TYPE varchar(40);
-                        ALTER TABLE ""LocalizationEntries"" ALTER COLUMN ""Category"" TYPE varchar(120);
-                    END IF;
-
-                    IF to_regclass('public.""Materials""') IS NOT NULL THEN
-                        ALTER TABLE ""Materials"" ALTER COLUMN ""Unit"" TYPE varchar(50);
-                    END IF;
-
-                    IF to_regclass('public.""MetadataModules""') IS NOT NULL THEN
-                        ALTER TABLE ""MetadataModules"" ALTER COLUMN ""Icon"" TYPE varchar(40);
-                        ALTER TABLE ""MetadataModules"" ALTER COLUMN ""Code"" TYPE varchar(120);
-                    END IF;
-
-                    IF to_regclass('public.""MetadataObjects""') IS NOT NULL THEN
-                        ALTER TABLE ""MetadataObjects"" ADD COLUMN IF NOT EXISTS ""UsePostings"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""MetadataObjects"" ADD COLUMN IF NOT EXISTS ""UseBalances"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""MetadataObjects"" ADD COLUMN IF NOT EXISTS ""UseMovements"" boolean NOT NULL DEFAULT false;
-                        ALTER TABLE ""MetadataObjects"" ADD COLUMN IF NOT EXISTS ""BalanceTable"" varchar(120);
-                        ALTER TABLE ""MetadataObjects"" ADD COLUMN IF NOT EXISTS ""MovementTable"" varchar(120);
-                        ALTER TABLE ""MetadataObjects"" ADD COLUMN IF NOT EXISTS ""ReferenceFields"" text;
-                        ALTER TABLE ""MetadataObjects"" ALTER COLUMN ""ObjectType"" TYPE varchar(200);
-                        ALTER TABLE ""MetadataObjects"" ALTER COLUMN ""TableName"" TYPE varchar(120);
-                        ALTER TABLE ""MetadataObjects"" ALTER COLUMN ""Name"" TYPE varchar(160);
-                    END IF;
-
-                    IF to_regclass('public.""MetadataFields""') IS NOT NULL THEN
-                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""ReferenceCatalog"" varchar(50);
-                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""Formula"" text;
-                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""DisplayPattern"" text;
-                        ALTER TABLE ""MetadataFields"" ADD COLUMN IF NOT EXISTS ""DisplayFields"" text;
-                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""Name"" TYPE varchar(100);
-                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""DbColumnName"" TYPE varchar(100);
-                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""FieldType"" TYPE varchar(40);
-                        ALTER TABLE ""MetadataFields"" ALTER COLUMN ""ReferenceCatalog"" TYPE varchar(50);
-                    END IF;
-
-                    IF to_regclass('public.""MetadataModuleItems""') IS NOT NULL THEN
-                        ALTER TABLE ""MetadataModuleItems"" ALTER COLUMN ""ObjectType"" TYPE varchar(80);
-                    END IF;
-                    IF to_regclass('public.catalog_taxes') IS NOT NULL THEN
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS sort_order integer;
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS esf_vat_code varchar(20);
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS esf_sales_tax_code varchar(20);
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_default_vat boolean NOT NULL DEFAULT false;
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_default_sales_tax boolean NOT NULL DEFAULT false;
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS vat_payable_account varchar(50);
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS vat_recoverable_account varchar(50);
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS sales_tax_account varchar(50);
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS tax_kind varchar(20);
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS valid_from timestamp;
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS valid_to timestamp;
-                        ALTER TABLE catalog_taxes ADD COLUMN IF NOT EXISTS is_system boolean;
-                        ALTER TABLE catalog_taxes ALTER COLUMN code TYPE varchar(80);
-                    END IF;
-
-                    IF to_regclass('public.catalog_payment_kinds') IS NOT NULL THEN
-                        ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
-                        ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS rate decimal(18, 2);
-                        ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS esf_code varchar(20);
-                        ALTER TABLE catalog_payment_kinds ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
-                        ALTER TABLE catalog_payment_kinds ALTER COLUMN code TYPE varchar(80);
-                    END IF;
-
-                    IF to_regclass('public.catalog_supply_kinds') IS NOT NULL THEN
-                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
-                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS sort_order integer;
-                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS esf_code varchar(20);
-                        ALTER TABLE catalog_supply_kinds ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
-                        ALTER TABLE catalog_supply_kinds ALTER COLUMN code TYPE varchar(80);
-                    END IF;
-
-                    IF to_regclass('public.catalog_delivery_types') IS NOT NULL THEN
-                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
-                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS sort_order integer;
-                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS esf_code varchar(20);
-                        ALTER TABLE catalog_delivery_types ADD COLUMN IF NOT EXISTS is_default boolean NOT NULL DEFAULT false;
-                        ALTER TABLE catalog_delivery_types ALTER COLUMN code TYPE varchar(80);
-                    END IF;
-
-                    IF to_regclass('public.catalog_cash_desks') IS NOT NULL THEN
-                        ALTER TABLE catalog_cash_desks ALTER COLUMN code TYPE varchar(80);
-                    END IF;
-                END $$;");
-
+            // Схему этих таблиц пока создают их сервисы (до перехода на миграции, план §2).
             await new CashDayClosureService(_context).EnsureSchemaAsync();
             await new ReportDataSetService(_context).EnsureSchemaAsync();
 
             // Разово отмечаем рабочие отчёты для окна «Бухгалтерская отчётность».
             await MarkAccountingReportsOnceAsync();
 
+            // Разовая чистка FRX-отчётов (Docs/FRX_удаление_план_и_скрипты.md, этап 2).
+            // Выполняется один раз на базу, помечает себя в DataFixJournal.
+            try
+            {
+                await new FrxReportsCleanupService(_context).RunOnceAsync();
+            }
+            catch (Exception ex)
+            {
+                // Чистка данных не должна мешать запуску приложения.
+                System.Diagnostics.Debug.WriteLine($"[frx] разовая чистка не выполнена: {ex.Message}");
+            }
+
             lock (SyncLock)
             {
-                EnsuredConnections.Add(connectionKey);
+                ReportedConnections.Add(connectionKey);
             }
+        }
+
+        /// <summary>
+        /// Сверяет ожидаемые колонки с information_schema. Ничего не меняет.
+        /// </summary>
+        private async Task DetectDriftAsync()
+        {
+            var actual = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var shortColumns = new List<string>();
+
+            var connection = _context.Database.GetDbConnection();
+            if (connection.State != ConnectionState.Open)
+                await connection.OpenAsync();
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+                    SELECT table_name, column_name, character_maximum_length
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'";
+
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var tableName = reader.GetString(0);
+                    var columnName = reader.GetString(1);
+
+                    if (!actual.TryGetValue(tableName, out var columns))
+                    {
+                        columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        actual[tableName] = columns;
+                    }
+
+                    columns.Add(columnName);
+
+                    if (!reader.IsDBNull(2) && reader.GetInt32(2) <= 10)
+                        shortColumns.Add($"{tableName}.{columnName} ({reader.GetInt32(2)})");
+                }
+            }
+
+            var missing = new List<string>();
+            foreach (var (table, column) in ExpectedColumns)
+            {
+                // Отсутствие самой таблицы — не дрейф: её может ещё не быть в этой базе.
+                if (!actual.TryGetValue(table, out var columns))
+                    continue;
+
+                if (!columns.Contains(column))
+                    missing.Add($"{table}.{column}");
+            }
+
+            if (missing.Count == 0 && shortColumns.Count == 0)
+            {
+                System.Diagnostics.Debug.WriteLine("[schema] дрейфа не обнаружено");
+                return;
+            }
+
+            foreach (var item in missing)
+                System.Diagnostics.Debug.WriteLine($"[schema drift] нет колонки: {item}");
+
+            foreach (var item in shortColumns)
+                System.Diagnostics.Debug.WriteLine($"[schema drift] короткая строка (<= 10): {item}");
+
+            System.Diagnostics.Debug.WriteLine(
+                $"[schema drift] всего расхождений: {missing.Count + shortColumns.Count} (чинится миграцией, не в рантайме)");
         }
 
         /// <summary>
@@ -209,6 +233,6 @@ namespace BIS.ERP.Services
                     $"Не удалось отметить отчеты для бухгалтерской отчетности: {ex.Message}");
             }
         }
-    }
-}
 
+}
+}

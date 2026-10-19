@@ -24,6 +24,7 @@ namespace BIS.ERP.Services
             await ExtendFixedAssetCardAsync();
             await EnsureFixedAssetCanonicalModelAsync();
             await EnsureDocumentsAsync();
+            await EnsureDocumentLineForeignKeysAsync();
             await RemoveDeletedDocumentsAsync();
             await EnsureFixedAssetPeriodBalanceReportSourceAsync();
             await EnsureFixedAssetReportsAsync();
@@ -31,6 +32,58 @@ namespace BIS.ERP.Services
             await EnsureInventoryReportsAsync();
             await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
             await _metadataService.EnsureStandardReportsAsync();
+        }
+
+        /// <summary>
+        /// План §1.2: FK строк на шапку — безусловный, отдельной идемпотентной
+        /// операцией, чтобы старые базы догоняли канон. Имена таблиц берём из
+        /// метаданных (правило §0.3), отсутствующие таблицы просто пропускаем.
+        /// </summary>
+        private async Task EnsureDocumentLineForeignKeysAsync()
+        {
+            var targets = new (string Document, string Column, string Constraint)[]
+            {
+                ("Выписка счет-фактур", "invoice_id", "fk_sales_invoice_lines_header"),
+                ("Регистрация счет-фактур", "invoice_id", "fk_purchase_invoice_lines_header"),
+                ("Авансовые платежи", "advance_id", "fk_advance_payment_lines_header")
+            };
+
+            foreach (var (documentName, column, constraint) in targets)
+            {
+                var headerTable = await _context.MetadataObjects.AsNoTracking()
+                    .Where(item => item.ObjectType == "Document" && item.Name == documentName)
+                    .Select(item => item.TableName)
+                    .FirstOrDefaultAsync();
+
+                if (string.IsNullOrWhiteSpace(headerTable))
+                    continue;
+
+                try
+                {
+                    await _context.Database.ExecuteSqlRawAsync(@"
+                        DO $$
+                        DECLARE lines_table text := {0}::text || '_lines';
+                        BEGIN
+                            IF to_regclass(format('public.%I', lines_table)) IS NOT NULL
+                               AND to_regclass(format('public.%I', {0}::text)) IS NOT NULL
+                               AND NOT EXISTS (
+                                   SELECT 1 FROM pg_constraint
+                                   WHERE conname = {1}::text
+                                     AND conrelid = to_regclass(format('public.%I', lines_table)))
+                            THEN
+                                EXECUTE format(
+                                    'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES public.%I(""Id"") ON DELETE CASCADE',
+                                    lines_table, {1}::text, {2}::text, {0}::text);
+                            END IF;
+                        END $$;", headerTable, constraint, column);
+                }
+                catch (Exception ex)
+                {
+                    // FK не должен валить старт: пишем в лог, починим следующей попыткой.
+                    System.Diagnostics.Debug.WriteLine(
+                        $"Не удалось создать FK строк для {headerTable}: {ex.Message}");
+                }
+            }
         }
 
         private async Task EnsureFixedAssetCatalogsAsync()
@@ -343,9 +396,8 @@ namespace BIS.ERP.Services
 
         private async Task EnsureDocumentsAsync()
         {
-            foreach (var name in ModuleMetadataService.FixedAssetDocumentNames)
-                await EnsureObjectAsync(name, $"doc_asset_{Slug(name)}", "Document",
-                    $"Документ модуля основных средств: {name}", "🏗", FixedAssetDocumentFields(name));
+            // Документы модуля ОС с хешем в имени таблицы (doc_asset_<hash>) не сидируются:
+            // метаданные и таблицы удалены 17.10.2026, см. план §0.3.
 
             await RenameMetadataObjectAsync("Авансовый отчет", "Авансовые платежи");
 
@@ -361,13 +413,8 @@ namespace BIS.ERP.Services
             // Миграция существующих баз: переименование doc_fin_<hash> -> понятные имена.
             await EnsureFinanceDocumentTableNamesAsync();
 
-            foreach (var name in new[]
-            {
-                "Внутреннее перемещение ТМЦ", "Приход из производства ТМЦ", "Расход в производство",
-                "Передача ТМЦ в подотчет", "Инвентаризация ТМЦ"
-            })
-                await EnsureObjectAsync(name, $"doc_inventory_{Slug(name)}", "Document",
-                    $"Документ учета материальных ценностей: {name}", "📦", InventoryDocumentFields());
+            // Документы ТМЦ с хешем в имени таблицы (doc_inventory_<hash>) не сидируются:
+            // метаданные и таблицы удалены 17.10.2026, см. план §0.3.
         }
 /// <summary>
         /// Миграция имён таблиц финансовых документов на существующих базах:
@@ -424,17 +471,38 @@ namespace BIS.ERP.Services
 
             var oldTable = document.TableName;
 
-            // Переименовываем физическую таблицу только если она существует и
-            // целевое имя ещё не занято.
-            await _context.Database.ExecuteSqlRawAsync($@"
+            // Идентификаторы не склеиваем в строку: имя приходит из метаданных
+            // (редактируется в конфигураторе), поэтому только параметры и format(%I).
+            // Переименовываем таблицу лишь если старая существует, а целевая свободна.
+            await _context.Database.ExecuteSqlRawAsync(@"
                 DO $$
                 BEGIN
-                    IF to_regclass('public.{oldTable}') IS NOT NULL
-                       AND to_regclass('public.{targetTableName}') IS NULL
+                    IF to_regclass(format('public.%I', {0}::text)) IS NOT NULL
+                       AND to_regclass(format('public.%I', {1}::text)) IS NULL
                     THEN
-                        ALTER TABLE ""{oldTable}"" RENAME TO ""{targetTableName}"";
+                        EXECUTE format('ALTER TABLE public.%I RENAME TO %I', {0}::text, {1}::text);
                     END IF;
-                END $$;");
+                END $$;", oldTable, targetTableName);
+
+            // Postgres сохраняет имя PK-индекса при переименовании таблицы — доводим
+            // его до канона <table>_pkey (образец: CashDayClosureService.cs:130).
+            await _context.Database.ExecuteSqlRawAsync(@"
+                DO $$
+                DECLARE pk_name text; wanted text;
+                BEGIN
+                    SELECT conname INTO pk_name
+                    FROM pg_constraint
+                    WHERE conrelid = to_regclass(format('public.%I', {0}::text))
+                      AND contype = 'p';
+
+                    wanted := {1}::text || '_pkey';
+
+                    IF pk_name IS NOT NULL AND pk_name <> wanted
+                       AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = wanted)
+                    THEN
+                        EXECUTE format('ALTER INDEX public.%I RENAME TO %I', pk_name, wanted);
+                    END IF;
+                END $$;", targetTableName, targetTableName);
 
             document.TableName = targetTableName;
             await _context.SaveChangesAsync();

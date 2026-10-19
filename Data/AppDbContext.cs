@@ -87,7 +87,6 @@ public class AppDbContext : DbContext
     public DbSet<UserAccessPermission> UserAccessPermissions { get; set; }
     public DbSet<MetadataModule> MetadataModules { get; set; }
     public DbSet<MetadataModuleItem> MetadataModuleItems { get; set; }
-    public DbSet<SystemPatchRecord> SystemPatches { get; set; }
     
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -114,9 +113,8 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<MetadataModuleItem>().HasKey(item => item.Id);
         modelBuilder.Entity<MetadataModuleItem>()
             .HasIndex(item => new { item.ObjectType, item.ObjectId }).IsUnique();
-        modelBuilder.Entity<SystemPatchRecord>().HasKey(patch => patch.PatchId);
-        modelBuilder.Entity<SystemPatchRecord>().HasIndex(patch => patch.Status);
-        modelBuilder.Entity<SystemPatchRecord>().HasIndex(patch => patch.AppliedAt);
+        // История патчей живёт в system_patches (raw SQL, BisPatchService): EF её не маппит,
+        // иначе EnsureCreated создаёт вторую таблицу "SystemPatches" (план §3.5).
         modelBuilder.Entity<Material>().HasIndex(x => x.Code).IsUnique();
         modelBuilder.Entity<FixedAsset>().HasIndex(x => x.InventoryNumber).IsUnique();       
 

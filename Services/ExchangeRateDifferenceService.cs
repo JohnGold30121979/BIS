@@ -620,13 +620,19 @@ namespace BIS.ERP.Services
         {
             const string sql = @"
                 INSERT INTO doc_postings
-                    (""Id"", posting_date, doc_number, document_type, module_code,
+                    (""Id"", posting_date, doc_number, document_type, document_table, document_id, module_code,
                      debit_account, credit_account, amount_kgs, amount_currency, currency_id, exchange_rate,
                      debit_report_line, credit_report_line, description, is_active, ""CreatedAt"", ""UpdatedAt"")
                 VALUES
-                    (@id, @postingDate, @documentNumber, @documentType, @moduleName,
-                     @debitAccount, @creditAccount, @amount, 0, @currencyId, @exchangeRate,
+                    (@id, @postingDate, @documentNumber, @documentType, @documentTable, @documentId, @moduleName,
+                     @debitAccount, @creditAccount, @amount, 0, NULLIF(@currencyId, '')::uuid, @exchangeRate,
                      @debitReportLine, @creditReportLine, @description, true, NOW(), NOW());";
+
+            // План §3.4: пара (таблица, id) — второй писатель проводок.
+            var documentTable = await _metadataService.ResolvePostingDocumentTableAsync(CalculationDocumentType);
+            Guid? documentId = string.IsNullOrWhiteSpace(documentTable)
+                ? null
+                : await _metadataService.ResolvePostingDocumentIdAsync(documentTable, documentNumber);
 
             var description = BuildPostingDescription(posting);
 
@@ -636,6 +642,8 @@ namespace BIS.ERP.Services
                 new NpgsqlParameter("@postingDate", posting.PostingDate),
                 new NpgsqlParameter("@documentNumber", documentNumber),
                 new NpgsqlParameter("@documentType", CalculationDocumentType),
+                new NpgsqlParameter("@documentTable", (object?)documentTable ?? DBNull.Value),
+                new NpgsqlParameter("@documentId", (object?)documentId ?? DBNull.Value),
                 new NpgsqlParameter("@moduleName", string.IsNullOrWhiteSpace(posting.ModuleName) ? FinanceModuleName : posting.ModuleName),
                 new NpgsqlParameter("@debitAccount", posting.DebitAccount),
                 new NpgsqlParameter("@creditAccount", posting.CreditAccount),

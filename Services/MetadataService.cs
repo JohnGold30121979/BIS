@@ -504,13 +504,19 @@ namespace BIS.ERP.Services
             var values = new List<string>();
             var parameters = new Dictionary<string, object>();
 
+            // Типы колонок: без приведения строка уйдёт в integer/uuid как text (42804).
+            await _context.Database.OpenConnectionAsync();
+            var columnTypes = await DbValueConverter.LoadColumnTypesAsync(
+                _context.Database.GetDbConnection(), catalog.TableName);
+
             foreach (var field in SelectFieldsForWrite(catalog, itemData))
             {
                 if (itemData.ContainsKey(field.Name) && itemData[field.Name] != null)
                 {
                     columns.Add($"\"{field.DbColumnName}\"");
                     values.Add($"@{field.DbColumnName}");
-                    parameters[$"@{field.DbColumnName}"] = itemData[field.Name];
+                    parameters[$"@{field.DbColumnName}"] =
+                        DbValueConverter.Convert(itemData[field.Name], columnTypes.GetValueOrDefault(field.DbColumnName));
                 }
             }
 
@@ -557,6 +563,11 @@ namespace BIS.ERP.Services
                     throw new Exception("Справочник не найден");
                 }
 
+                // Тип и Id нужны валидатору: он проверяет колонки только у физических объектов.
+                catalog.Id = existingCatalog.Id;
+                catalog.ObjectType = existingCatalog.ObjectType;
+                await ValidateMetadataAsync(catalog);
+
                 existingCatalog.Name = catalog.Name;
                 existingCatalog.Description = catalog.Description;
                 existingCatalog.Icon = catalog.Icon;
@@ -602,6 +613,86 @@ namespace BIS.ERP.Services
             }
         }
 
+        /// <summary>
+        /// План §1.3: запрет удаления справочника (или отдельной записи), на которую
+        /// ссылаются документы. В БД уже ON DELETE RESTRICT — здесь даём понятный текст.
+        /// </summary>
+        private async Task EnsureCatalogReferenceNotUsedAsync(MetadataObject catalog, Guid? recordId)
+        {
+            if (string.IsNullOrWhiteSpace(catalog.TableName))
+                return;
+
+            var connection = _context.Database.GetDbConnection();
+            var openedHere = connection.State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await connection.OpenAsync();
+
+            try
+            {
+                var references = new List<(string Table, string Columns)>();
+
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = @"
+                        SELECT child.relname,
+                               (SELECT string_agg(quote_ident(a.attname), ', ')
+                                FROM pg_attribute a
+                                WHERE a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey))
+                        FROM pg_constraint con
+                        JOIN pg_class parent ON parent.oid = con.confrelid
+                        JOIN pg_class child ON child.oid = con.conrelid
+                        JOIN pg_namespace pn ON pn.oid = parent.relnamespace
+                        WHERE con.contype = 'f' AND pn.nspname = 'public' AND parent.relname = @table";
+                    var tableParameter = command.CreateParameter();
+                    tableParameter.ParameterName = "table";
+                    tableParameter.Value = catalog.TableName;
+                    command.Parameters.Add(tableParameter);
+
+                    await using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        if (!reader.IsDBNull(0) && !reader.IsDBNull(1))
+                            references.Add((reader.GetString(0), reader.GetString(1)));
+                    }
+                }
+
+                var used = new List<string>();
+                foreach (var (table, columns) in references)
+                {
+                    var firstColumn = columns.Split(',')[0].Trim();
+
+                    await using var countCommand = connection.CreateCommand();
+                    countCommand.CommandText = recordId == null
+                        ? $"SELECT count(*) FROM public.\"{table}\" WHERE ({columns}) IS NOT NULL"
+                        : $"SELECT count(*) FROM public.\"{table}\" WHERE {firstColumn} = @id";
+
+                    if (recordId != null)
+                    {
+                        var idParameter = countCommand.CreateParameter();
+                        idParameter.ParameterName = "id";
+                        idParameter.Value = recordId.Value;
+                        countCommand.Parameters.Add(idParameter);
+                    }
+
+                    var count = Convert.ToInt64(await countCommand.ExecuteScalarAsync() ?? 0);
+                    if (count > 0)
+                        used.Add($"{table} — {count}");
+                }
+
+                if (used.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Нельзя удалить «{catalog.Name}»: на неё ссылаются документы ({string.Join("; ", used)}). " +
+                        "Сначала удалите или переназначьте эти документы.");
+                }
+            }
+            finally
+            {
+                if (openedHere)
+                    await connection.CloseAsync();
+            }
+        }
+
         public async Task DeleteCatalogAsync(Guid catalogId)
         {
             var catalog = await _context.MetadataObjects
@@ -609,6 +700,8 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(c => c.Id == catalogId);
 
             if (catalog == null) return;
+
+            await EnsureCatalogReferenceNotUsedAsync(catalog, null);
 
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -865,6 +958,23 @@ namespace BIS.ERP.Services
             }
         }
 
+        /// <summary>
+        /// Имя физической таблицы объекта метаданных. По плану §0.3 имя задают метаданные:
+        /// таблица создаётся автоматически по TableName, поэтому код не хардкодит catalog_*/doc_*.
+        /// </summary>
+        public async Task<string?> GetTableNameAsync(string objectName, string objectType = "Document")
+        {
+            if (string.IsNullOrWhiteSpace(objectName))
+                return null;
+
+            var tableName = await _context.MetadataObjects.AsNoTracking()
+                .Where(item => item.Name == objectName && item.ObjectType == objectType)
+                .Select(item => item.TableName)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(tableName) ? null : tableName;
+        }
+
         public async Task<List<Dictionary<string, object>>> GetChartOfAccountsSelectionDataAsync(
             string? moduleCodeOrName = null)
         {
@@ -968,6 +1078,8 @@ namespace BIS.ERP.Services
                 "Decimal" => $"DECIMAL({field.Precision}, {field.Scale})",
                 "DateTime" => "TIMESTAMP",
                 "Bool" => "BOOLEAN",
+                // План §3.3: ссылки на справочники — uuid, а не TEXT (иначе FK невозможен).
+                "Reference" => "uuid",
                 _ => "TEXT"
             };
         }
@@ -1030,6 +1142,10 @@ namespace BIS.ERP.Services
                 "Bool" => Convert.ToBoolean(value) ? "TRUE" : "FALSE",
                 "Int" => Convert.ToInt32(value).ToString(),
                 "Decimal" => Convert.ToDecimal(value).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                // Ссылки хранятся в uuid-колонках: пустая строка недопустима, пишем NULL.
+                "Reference" => value is string reference && reference.Trim().Length == 0
+                    ? "NULL"
+                    : $"'{value.ToString()?.Replace("'", "''")}'",
                 _ => $"'{value}'"
             };
         }
@@ -1300,6 +1416,10 @@ namespace BIS.ERP.Services
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);
+
+            // Касса/расчётный счёт не должны оставаться без валюты: подставляем базовую.
+            if (IsCashDesksCatalog(metadata) || IsBankAccountsCatalog(metadata))
+                await ApplyDefaultCurrencyAsync(metadata, data);
             var previousRecord = IsPostingsDocument(metadata) || IsCashDeskCatalog(metadata)
                 ? await GetRecordDataAsync(metadata.TableName, recordId)
                 : null;
@@ -1388,7 +1508,7 @@ namespace BIS.ERP.Services
 
         private async Task ApplyCreateRecordDefaultsAsync(MetadataObject metadata, Dictionary<string, object> data)
         {
-            if (!IsBankAccountsCatalog(metadata))
+            if (!IsBankAccountsCatalog(metadata) && !IsCashDesksCatalog(metadata))
                 return;
 
             SetDefaultIfMissing(data, metadata, "is_active", true);
@@ -1495,6 +1615,13 @@ namespace BIS.ERP.Services
             return string.Equals(metadata.ObjectType, "Catalog", StringComparison.OrdinalIgnoreCase) &&
                    (string.Equals(metadata.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(metadata.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsCashDesksCatalog(MetadataObject metadata)
+        {
+            return string.Equals(metadata.ObjectType, "Catalog", StringComparison.OrdinalIgnoreCase) &&
+                   (string.Equals(metadata.Name, "Кассы", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(metadata.TableName, "catalog_cash_desks", StringComparison.OrdinalIgnoreCase));
         }
         private static List<MetadataField> SelectFieldsForWrite(
             MetadataObject metadata,
@@ -1860,6 +1987,9 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(m => m.Id == metadataId);
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
+
+            if (metadata.ObjectType == "Catalog")
+                await EnsureCatalogReferenceNotUsedAsync(metadata, recordId);
 
             Dictionary<string, object>? documentRecord = null;
             if (metadata.ObjectType == "Document")
@@ -2245,6 +2375,8 @@ namespace BIS.ERP.Services
 
         public async Task UpdateMetadataObjectAsync(MetadataObject obj)
         {
+            await ValidateMetadataAsync(obj);
+
             try
             {
                 // Загружаем существующий объект
@@ -2520,8 +2652,94 @@ namespace BIS.ERP.Services
             return objects;
         }
 
+        /// <summary>
+        /// Проверка метаданных перед сохранением (план §5.1): имена таблиц и колонок —
+        /// только буквы, цифры и подчёркивание (блокирует кавычки, пробелы и «;»),
+        /// имена уникальны, справочник-ссылка существует.
+        /// </summary>
+        private async Task ValidateMetadataAsync(MetadataObject obj)
+        {
+            var tableName = obj.TableName?.Trim();
+            if (!string.IsNullOrEmpty(tableName))
+            {
+                if (!IsSafeIdentifier(tableName))
+                    throw new InvalidOperationException(
+                        $"Недопустимое имя таблицы «{tableName}»: разрешены буквы, цифры и подчёркивание, до 63 символов.");
+
+                var lowered = tableName.ToLowerInvariant();
+                var busy = await _context.MetadataObjects.AsNoTracking()
+                    .AnyAsync(item => item.Id != obj.Id && item.TableName != null && item.TableName.ToLower() == lowered);
+                if (busy)
+                    throw new InvalidOperationException(
+                        $"Имя таблицы «{tableName}» уже занято другим объектом метаданных.");
+            }
+
+            if (obj.ObjectType != "Catalog" && obj.ObjectType != "Document")
+                return;
+
+            var fields = obj.Fields;
+            if (fields == null || fields.Count == 0)
+                return;
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var field in fields)
+            {
+                var column = field.DbColumnName?.Trim();
+                if (string.IsNullOrEmpty(column))
+                    continue;
+
+                if (!IsSafeIdentifier(column))
+                    throw new InvalidOperationException(
+                        $"Недопустимое имя колонки «{column}» (поле «{field.Name}»).");
+
+                if (!seen.Add(column))
+                {
+                    // Уже существующий в базе дубль не блокируем: иначе объект нельзя
+                    // сохранить до ручной чистки. Новые дубли запрещены.
+                    var existingCount = await _context.MetadataFields.AsNoTracking()
+                        .CountAsync(field => field.MetadataObjectId == obj.Id &&
+                                             field.DbColumnName != null &&
+                                             field.DbColumnName.ToLower() == column.ToLower());
+
+                    if (existingCount <= 1)
+                        throw new InvalidOperationException(
+                            $"Колонка «{column}» указана у нескольких полей объекта.");
+
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[metadata] колонка {column} уже задублирована в базе — сохранение не блокируем");
+                }
+            }
+
+            var references = fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.ReferenceCatalog))
+                .Select(field => field.ReferenceCatalog!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (references.Count == 0)
+                return;
+
+            var catalogs = await _context.MetadataObjects.AsNoTracking()
+                .Where(item => item.ObjectType == "Catalog")
+                .Select(item => item.Name)
+                .ToListAsync();
+            var known = new HashSet<string>(catalogs, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var reference in references)
+            {
+                if (!known.Contains(reference))
+                    throw new InvalidOperationException(
+                        $"Справочник «{reference}» не найден — поле не может на него ссылаться.");
+            }
+        }
+
+        private static bool IsSafeIdentifier(string value)
+            => System.Text.RegularExpressions.Regex.IsMatch(value, @"^[\p{L}_][\p{L}\p{N}_]{0,62}$");
+
         public async Task CreateMetadataObjectAsync(MetadataObject obj)
         {
+            await ValidateMetadataAsync(obj);
+
             await _context.MetadataObjects.AddAsync(obj);
             await _context.SaveChangesAsync();
 
@@ -3938,6 +4156,62 @@ namespace BIS.ERP.Services
             }
         }
 
+        /// <summary>
+        /// План §3.4: таблица документа по имени типа (MetadataObjects.ObjectType = 'Document').
+        /// </summary>
+        internal async Task<string?> ResolvePostingDocumentTableAsync(string documentType)
+        {
+            if (string.IsNullOrWhiteSpace(documentType))
+                return null;
+
+            var tableName = await _context.MetadataObjects.AsNoTracking()
+                .Where(item => item.ObjectType == "Document" && item.Name == documentType)
+                .Select(item => item.TableName)
+                .FirstOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(tableName) ? null : tableName;
+        }
+
+        /// <summary>
+        /// План §3.4: id документа по номеру в конкретной таблице — до введения
+        /// document_id связь держалась только на номере.
+        /// </summary>
+        internal async Task<Guid?> ResolvePostingDocumentIdAsync(string tableName, string documentNumber)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var openedHere = connection.State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await connection.OpenAsync();
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    $"SELECT \"Id\" FROM public.{QuoteIdentifier(tableName)} WHERE doc_number = @number LIMIT 1";
+
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = "number";
+                parameter.Value = documentNumber;
+                command.Parameters.Add(parameter);
+
+                var result = await command.ExecuteScalarAsync();
+                if (result is Guid id)
+                    return id;
+
+                return result is null or DBNull ? null : Guid.Parse(result.ToString()!);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[postings] не удалось определить document_id: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                if (openedHere)
+                    await connection.CloseAsync();
+            }
+        }
+
         private async Task CreatePosting(
             string docNumber,
             DateTime postingDate,
@@ -3962,23 +4236,36 @@ namespace BIS.ERP.Services
                 await EnsurePostingModuleColumnAsync();
                 var moduleName = await ResolvePostingModuleNameAsync(documentType);
 
+                // План §3.4: проводка хранит явную пару (таблица, id), а не только номер.
+                var documentTable = await ResolvePostingDocumentTableAsync(documentType);
+                Guid? documentId = null;
+                if (!string.IsNullOrWhiteSpace(documentTable) && !string.IsNullOrWhiteSpace(docNumber))
+                {
+                    documentId = await ResolvePostingDocumentIdAsync(documentTable, docNumber);
+                    if (documentId == null)
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[postings] документ {documentType} №{docNumber} не найден — проводка без document_id");
+                }
+
                 var sql = @"
                     INSERT INTO doc_postings 
-                    (""Id"", posting_date, doc_number, document_type, module_code, debit_account, credit_account, 
+                    (""Id"", posting_date, doc_number, document_type, document_table, document_id, module_code, debit_account, credit_account, 
                      amount_kgs, amount_currency, currency_id, organization_id, employee_id, description, is_active, ""CreatedAt"", ""UpdatedAt"") 
                     VALUES (
                         @id,
                         @postingDate,
                         @docNumber,
                         @documentType,
+                        @documentTable,
+                        @documentId,
                         @moduleCode,
                         @debitAccount,
                         @creditAccount,
                         @amount,
                         @amountCurrency,
-                        @currencyId,
-                        @organizationId,
-                        @employeeId,
+                        NULLIF(@currencyId, '')::uuid,
+                        NULLIF(@organizationId, '')::uuid,
+                        NULLIF(@employeeId, '')::uuid,
                         @description,
                         @isActive,
                         NOW(),
@@ -4000,6 +4287,8 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@employeeId", (object?)employeeId ?? DBNull.Value),
                     new NpgsqlParameter("@description", (object?)description ?? DBNull.Value),
                     new NpgsqlParameter("@documentType", documentType),
+                    new NpgsqlParameter("@documentTable", (object?)documentTable ?? DBNull.Value),
+                    new NpgsqlParameter("@documentId", (object?)documentId ?? DBNull.Value),
                     new NpgsqlParameter("@isActive", true));
                 System.Diagnostics.Debug.WriteLine($"✅ Проводка создана: {documentType} | {docNumber} | {amount}");
             }
@@ -4184,7 +4473,7 @@ namespace BIS.ERP.Services
                 SET ""debit_account"" = CASE WHEN ""order_kind"" = @receiptKind THEN @accountCode ELSE ""debit_account"" END,
                     ""credit_account"" = CASE WHEN ""order_kind"" = @paymentKind THEN @accountCode ELSE ""credit_account"" END,
                     ""UpdatedAt"" = NOW()
-                WHERE ""cash_desk_id"" = @cashDeskId;",
+                WHERE ""cash_desk_id"" = @cashDeskId::uuid;",
                 new NpgsqlParameter("@accountCode", accountCode),
                 new NpgsqlParameter("@cashDeskId", cashDeskId.ToString()),
                 new NpgsqlParameter("@receiptKind", CashOrderReceiptKind),
@@ -4201,7 +4490,7 @@ namespace BIS.ERP.Services
                         WHEN document.""order_kind"" = @receiptKind THEN @receiptDocumentType
                         ELSE @paymentDocumentType
                       END
-                  AND document.""cash_desk_id"" = @cashDeskId;",
+                  AND document.""cash_desk_id"" = @cashDeskId::uuid;",
                 new NpgsqlParameter("@accountCode", accountCode),
                 new NpgsqlParameter("@cashDeskId", cashDeskId.ToString()),
                 new NpgsqlParameter("@receiptKind", CashOrderReceiptKind),

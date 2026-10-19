@@ -1265,6 +1265,11 @@ namespace BIS.ERP.Views.Dialogs
                 FocusLineCell(LinesGrid.Items[nextRow], firstEditable);
                 return;
             }
+
+            // Последняя редактируемая ячейка последней строки: Enter добавляет
+            // новую строку и ставит курсор в поле суммы (как в табличных редакторах).
+            if (!_isReadOnlyMode)
+                AddNewInvoiceLine();
         }
 
         /// <summary>

@@ -592,6 +592,10 @@ namespace BIS.ERP.Services
             await connection.OpenAsync();
             try
             {
+                // Типы колонок нужны, чтобы не отправлять integer/uuid/даты текстом:
+                // иначе PostgreSQL отвечает 42804 "выражение — text".
+                var columnTypes = await LoadColumnTypesAsync(connection, tableName);
+
                 await using var command = connection.CreateCommand();
                 var columns = row.Keys.ToList();
                 var parameterNames = columns.Select((_, index) => $"@p{index}").ToList();
@@ -599,7 +603,9 @@ namespace BIS.ERP.Services
                     $"INSERT INTO {Quote(tableName)} ({string.Join(", ", columns.Select(Quote))}) VALUES ({string.Join(", ", parameterNames)})";
 
                 for (var i = 0; i < columns.Count; i++)
-                    command.Parameters.AddWithValue(parameterNames[i], NormalizeValue(row[columns[i]]) ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        parameterNames[i],
+                        ConvertForColumn(row[columns[i]], columnTypes.GetValueOrDefault(columns[i])));
 
                 await command.ExecuteNonQueryAsync();
             }
@@ -622,6 +628,10 @@ namespace BIS.ERP.Services
 
             try
             {
+                // Типы колонок нужны, чтобы не отправлять integer/uuid/даты текстом:
+                // иначе PostgreSQL отвечает 42804 "выражение — text".
+                var columnTypes = await LoadColumnTypesAsync(connection, tableName);
+
                 await using var command = connection.CreateCommand();
                 var columns = row.Keys.ToList();
                 var parameterNames = columns.Select((_, index) => $"@p{index}").ToList();
@@ -629,7 +639,9 @@ namespace BIS.ERP.Services
                     $"INSERT INTO {Quote(tableName)} ({string.Join(", ", columns.Select(Quote))}) VALUES ({string.Join(", ", parameterNames)})";
 
                 for (var i = 0; i < columns.Count; i++)
-                    command.Parameters.AddWithValue(parameterNames[i], NormalizeValue(row[columns[i]]) ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        parameterNames[i],
+                        ConvertForColumn(row[columns[i]], columnTypes.GetValueOrDefault(columns[i])));
 
                 await command.ExecuteNonQueryAsync();
             }
@@ -672,6 +684,79 @@ namespace BIS.ERP.Services
             parameter.ParameterName = name;
             parameter.Value = value;
             command.Parameters.Add(parameter);
+        }
+
+        /// <summary>
+        /// Типы колонок таблицы (integer, uuid, timestamp…).
+        /// </summary>
+        private static async Task<Dictionary<string, string>> LoadColumnTypesAsync(
+            NpgsqlConnection connection, string tableName)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = @table";
+            command.Parameters.Add(new NpgsqlParameter("@table", tableName));
+
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                result[reader.GetString(0)] = reader.GetString(1);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Приводит значение из пакета к типу колонки.
+        /// </summary>
+        private static object ConvertForColumn(object? value, string? dataType)
+        {
+            var normalized = NormalizeValue(value);
+            if (normalized is null)
+                return DBNull.Value;
+
+            var text = normalized as string ??
+                       Convert.ToString(normalized, CultureInfo.InvariantCulture) ??
+                       string.Empty;
+            if (string.IsNullOrWhiteSpace(text))
+                return DBNull.Value;
+
+            switch ((dataType ?? string.Empty).ToLowerInvariant())
+            {
+                case "integer":
+                case "smallint":
+                case "bigint":
+                    return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number)
+                        ? number
+                        : DBNull.Value;
+
+                case "numeric":
+                case "real":
+                case "double precision":
+                    return decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var dec)
+                        ? dec
+                        : DBNull.Value;
+
+                case "boolean":
+                    if (text is "1" or "true" or "True" or "t" or "TRUE") return true;
+                    if (text is "0" or "false" or "False" or "f" or "FALSE") return false;
+                    return DBNull.Value;
+
+                case "uuid":
+                    return Guid.TryParse(text, out var guid) ? guid : DBNull.Value;
+
+                case "timestamp with time zone":
+                case "timestamp without time zone":
+                case "date":
+                    return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+                        ? date
+                        : DBNull.Value;
+
+                default:
+                    return text;
+            }
         }
 
         private static object? NormalizeValue(object? value)

@@ -52,7 +52,7 @@ namespace BIS.ERP.Models
         [ForeignKey("OrganizationId")]
         public virtual Organization? Organization { get; set; }
 
-        [ForeignKey("EmployeeId")]
-        public virtual Employee? Employee { get; set; }
+        // План §3.1: навигация на статичную Employee убрана — таблица пустая,
+        // сотрудники живут в catalog_employees, а EmployeeId остаётся простым Guid.
     }
 }

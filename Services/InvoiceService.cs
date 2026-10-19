@@ -20,6 +20,10 @@ namespace BIS.ERP.Services
         private const string DefaultVatRecoverableAccount = "15400000";
         private const string DefaultSalesTaxAccount = "34004000";
 
+        // Имена таблиц по умолчанию — только для баз, где метаданные ещё не созданы.
+        private const string DefaultSalesInvoiceTable = "doc_sales_invoice";
+        private const string DefaultPurchaseInvoiceTable = "doc_purchase_invoice";
+
         private readonly AppDbContext _context;
         private readonly MetadataService _metadataService;
 
@@ -42,8 +46,15 @@ namespace BIS.ERP.Services
 
         public async Task EnsureSchemaAsync()
         {
-            await _context.Database.ExecuteSqlRawAsync(@"
-                CREATE TABLE IF NOT EXISTS ""doc_sales_invoice"" (
+            // Имена таблиц — из метаданных (план §0.3): если объект переименован,
+            // литеральный CREATE создал бы пустую таблицу-двойник.
+            var salesTable = await ResolveInvoiceTableNameAsync("Выписка счет-фактур", DefaultSalesInvoiceTable);
+            var purchaseTable = await ResolveInvoiceTableNameAsync("Регистрация счет-фактур", DefaultPurchaseInvoiceTable);
+            var salesLinesTable = salesTable + "_lines";
+            var purchaseLinesTable = purchaseTable + "_lines";
+
+            await _context.Database.ExecuteSqlRawAsync($@"
+                CREATE TABLE IF NOT EXISTS ""{salesTable}"" (
                     ""Id"" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                     ""doc_number"" varchar(50) NOT NULL,
                     ""doc_date"" timestamp NOT NULL,
@@ -71,9 +82,9 @@ namespace BIS.ERP.Services
                     ""CreatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     ""UpdatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE TABLE IF NOT EXISTS ""doc_sales_invoice_lines"" (
+                CREATE TABLE IF NOT EXISTS ""{salesLinesTable}"" (
                     ""Id"" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-                    ""invoice_id"" uuid NOT NULL REFERENCES ""doc_sales_invoice""(""Id"") ON DELETE CASCADE,
+                    ""invoice_id"" uuid NOT NULL REFERENCES ""{salesTable}""(""Id"") ON DELETE CASCADE,
                     ""line_number"" integer NOT NULL,
                     ""name"" varchar(500) NOT NULL,
                     ""unit_name"" varchar(50),
@@ -90,7 +101,7 @@ namespace BIS.ERP.Services
                     ""CreatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     ""UpdatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE TABLE IF NOT EXISTS ""doc_purchase_invoice"" (
+                CREATE TABLE IF NOT EXISTS ""{purchaseTable}"" (
                     ""Id"" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                     ""doc_number"" varchar(50) NOT NULL,
                     ""doc_date"" timestamp NOT NULL,
@@ -118,9 +129,9 @@ namespace BIS.ERP.Services
                     ""CreatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     ""UpdatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE TABLE IF NOT EXISTS ""doc_purchase_invoice_lines"" (
+                CREATE TABLE IF NOT EXISTS ""{purchaseLinesTable}"" (
                     ""Id"" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-                    ""invoice_id"" uuid NOT NULL REFERENCES ""doc_purchase_invoice""(""Id"") ON DELETE CASCADE,
+                    ""invoice_id"" uuid NOT NULL REFERENCES ""{purchaseTable}""(""Id"") ON DELETE CASCADE,
                     ""line_number"" integer NOT NULL,
                     ""name"" varchar(500) NOT NULL,
                     ""unit_name"" varchar(50),
@@ -137,34 +148,34 @@ namespace BIS.ERP.Services
                     ""CreatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     ""UpdatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
-                CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_lines_invoice"" ON ""doc_sales_invoice_lines"" (""invoice_id"");
-                CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_lines_invoice"" ON ""doc_purchase_invoice_lines"" (""invoice_id"");
-                ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
-                ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
-                ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
-                ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""currency_id"" uuid;
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0;
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0;
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
-                ALTER TABLE ""doc_sales_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""currency_id"" uuid;
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0;
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0;
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
-                ALTER TABLE ""doc_purchase_invoice"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
-                ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
-                ALTER TABLE ""doc_sales_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
-                ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
-                ALTER TABLE ""doc_purchase_invoice_lines"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
+                CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_lines_invoice"" ON ""{salesLinesTable}"" (""invoice_id"");
+                CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_lines_invoice"" ON ""{purchaseLinesTable}"" (""invoice_id"");
+                ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
+                ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
+                ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
+                ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""currency_id"" uuid;
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0;
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0;
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
+                ALTER TABLE ""{salesTable}"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""tax_blank_number"" varchar(100);
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""module_code"" varchar(50);
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""exchange_code"" varchar(100);
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""tax_status"" varchar(100);
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""currency_id"" uuid;
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" numeric(18,4) NOT NULL DEFAULT 0;
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""amount_currency"" numeric(18,2) NOT NULL DEFAULT 0;
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""exported_at"" timestamp;
+                ALTER TABLE ""{purchaseTable}"" ADD COLUMN IF NOT EXISTS ""tax_status_date"" timestamp;
+                ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
+                ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
+                ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""unit_name"" varchar(50);
+                ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""quantity"" numeric(18,3) NOT NULL DEFAULT 1;
                 DO $$
                 BEGIN
                     IF to_regclass('public.doc_postings') IS NOT NULL THEN
@@ -179,9 +190,9 @@ namespace BIS.ERP.Services
                         SELECT 1
                         FROM information_schema.columns
                         WHERE table_schema = 'public'
-                          AND table_name = 'doc_sales_invoice'
+                          AND table_name = '{salesTable}'
                           AND column_name = 'arm_code') THEN
-                        UPDATE ""doc_sales_invoice""
+                        UPDATE ""{salesTable}""
                         SET ""module_code"" = COALESCE(NULLIF(""module_code"", ''), ""arm_code"")
                         WHERE COALESCE(NULLIF(""arm_code"", ''), '') <> '';
                     END IF;
@@ -190,16 +201,36 @@ namespace BIS.ERP.Services
                         SELECT 1
                         FROM information_schema.columns
                         WHERE table_schema = 'public'
-                          AND table_name = 'doc_purchase_invoice'
+                          AND table_name = '{purchaseTable}'
                           AND column_name = 'arm_code') THEN
-                        UPDATE ""doc_purchase_invoice""
+                        UPDATE ""{purchaseTable}""
                         SET ""module_code"" = COALESCE(NULLIF(""module_code"", ''), ""arm_code"")
                         WHERE COALESCE(NULLIF(""arm_code"", ''), '') <> '';
                     END IF;
                 END $$;
-                CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_exchange_code"" ON ""doc_sales_invoice"" (""exchange_code"");
-                CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_exchange_code"" ON ""doc_purchase_invoice"" (""exchange_code"");
+                CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_exchange_code"" ON ""{salesTable}"" (""exchange_code"");
+                CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_exchange_code"" ON ""{purchaseTable}"" (""exchange_code"");
             ");
+        }
+
+        /// <summary>
+        /// Имя таблицы документа: из метаданных, иначе — значение по умолчанию.
+        /// Результат попадает в DDL, поэтому пропускаем только безопасный идентификатор.
+        /// </summary>
+        private async Task<string> ResolveInvoiceTableNameAsync(string documentName, string fallback)
+        {
+            var tableName = await _metadataService.GetTableNameAsync(documentName);
+            if (string.IsNullOrWhiteSpace(tableName))
+                return fallback;
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[a-z_][a-z0-9_]{0,62}$"))
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"InvoiceService: имя таблицы '{tableName}' ({documentName}) не прошло валидацию — используем {fallback}");
+                return fallback;
+            }
+
+            return tableName;
         }
 
         public async Task<List<InvoiceListRow>> GetInvoicesAsync()
@@ -1045,7 +1076,7 @@ namespace BIS.ERP.Services
                 new NpgsqlParameter("@credit", credit),
                 new NpgsqlParameter("@amount", amount),
                 new NpgsqlParameter("@amountCurrency", amountCurrency),
-                new NpgsqlParameter("@currencyId", invoice.CurrencyId.HasValue ? invoice.CurrencyId.Value.ToString() : (object)DBNull.Value),
+                new NpgsqlParameter("@currencyId", invoice.CurrencyId.HasValue ? (object)invoice.CurrencyId.Value : DBNull.Value),
                 new NpgsqlParameter("@description", description),
                 new NpgsqlParameter("@org", (object?)invoice.OrganizationId ?? DBNull.Value));
             return true;

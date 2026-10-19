@@ -877,7 +877,7 @@ FROM invoice_rows
 WHERE doc_date >= CAST(@PeriodStart AS date)
   AND doc_date <= CAST(@PeriodEnd AS date)
   -- Типы приводим явно: без этого PostgreSQL не сравнивает text с uuid.
-  AND (CAST(@OrganizationId AS text) = '' OR organization_id = CAST(@OrganizationId AS text))
+  AND (CAST(@OrganizationId AS text) = '' OR organization_id = NULLIF(CAST(@OrganizationId AS text), '')::uuid)
 ORDER BY doc_date DESC, doc_number DESC";
 
     /// <summary>

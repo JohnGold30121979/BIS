@@ -556,12 +556,15 @@ inputControl = AccountPickerControlFactory.Create(
             var options = new List<object>();
             var usedValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            // closing_module_code — целое поле: храним НОМЕР модуля (3 — финансы, 6 — материалы,
+            // 7 — ОС, 4 — сбыт), который NormalizeModuleKey сопоставляет модулю.
             foreach (var module in modules)
             {
-                if (string.IsNullOrWhiteSpace(module.Name) || !usedValues.Add(module.Name))
+                var number = GetClosingModuleNumber(module.Code);
+                if (string.IsNullOrWhiteSpace(number) || !usedValues.Add(number))
                     continue;
 
-                options.Add(new ChoiceItem(module.Name, module.Name, module.Code));
+                options.Add(new ChoiceItem(number, module.Name, module.Code, module.Name));
             }
 
             foreach (var option in GetFoxClosingModuleChoices())
@@ -573,15 +576,29 @@ inputControl = AccountPickerControlFactory.Create(
             return options;
         }
 
+        /// <summary>
+        /// Номер модуля для целочисленного closing_module_code.
+        /// </summary>
+        private static string GetClosingModuleNumber(string? moduleCode) => moduleCode switch
+        {
+            ModuleMetadataService.FinanceCode => "3",
+            ModuleMetadataService.FixedAssetsCode => "7",
+            ModuleMetadataService.InventoryCode => "6",
+            ModuleMetadataService.SalesCode => "4",
+            ModuleMetadataService.RawMaterialsCode => "12",
+            ModuleMetadataService.CostAccountingCode => "8",
+            _ => string.Empty
+        };
+
         private static IEnumerable<ChoiceItem> GetFoxClosingModuleChoices()
         {
-            yield return new ChoiceItem("Финансы", "Финансы", "3", "Finance");
-            yield return new ChoiceItem("Сбыт", "Сбыт", "4", "Продажи", "Реализация", "Регистратура");
-            yield return new ChoiceItem("Учет материальных ценностей", "Учет материальных ценностей", "6", "Inventory", "УМЦ", "ТМЦ", "Материалы");
-            yield return new ChoiceItem("Основные средства", "Основные средства", "7", "FixedAssets", "ОС");
-            yield return new ChoiceItem("Вспомогательное производство", "Вспомогательное производство", "8");
-            yield return new ChoiceItem("Сырье", "Сырье", "12");
-            yield return new ChoiceItem("Меню", "Меню", "66");
+            yield return new ChoiceItem("3", "Финансы", "2", "9", "Finance", "Финансы");
+            yield return new ChoiceItem("4", "Сбыт", "Sales", "Продажи", "Реализация", "Регистратура");
+            yield return new ChoiceItem("6", "Учет материальных ценностей", "Inventory", "УМЦ", "ТМЦ", "Материалы");
+            yield return new ChoiceItem("7", "Основные средства", "FixedAssets", "ОС");
+            yield return new ChoiceItem("8", "Вспомогательное производство");
+            yield return new ChoiceItem("12", "Сырье", "Сырьё", "RawMaterials");
+            yield return new ChoiceItem("66", "Меню");
         }
 
         private static string NormalizeChartOfAccountsChoice(string fieldName, string? value)
@@ -1364,13 +1381,13 @@ inputControl = AccountPickerControlFactory.Create(
 
         private static string NormalizeClosingModuleChoice(string? value) => value?.Trim() switch
         {
-            "3" or "Finance" => "Финансы",
-            "4" => "Сбыт",
-            "6" or "Inventory" => "Учет материальных ценностей",
-            "7" or "FixedAssets" => "Основные средства",
-            "8" => "Вспомогательное производство",
-            "12" => "Сырье",
-            "66" => "Меню",
+            "2" or "3" or "9" or "Finance" or "Финансы" => "3",
+            "4" or "Sales" or "Сбыт" => "4",
+            "6" or "Inventory" or "Учет материальных ценностей" or "УМЦ" or "ТМЦ" or "Материалы" => "6",
+            "7" or "FixedAssets" or "Основные средства" or "ОС" => "7",
+            "8" or "Вспомогательное производство" => "8",
+            "12" or "Сырье" or "Сырьё" or "RawMaterials" => "12",
+            "66" or "Меню" => "66",
             _ => value?.Trim() ?? string.Empty
         };
 

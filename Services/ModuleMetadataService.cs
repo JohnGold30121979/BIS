@@ -55,8 +55,7 @@ namespace BIS.ERP.Services
                     ""ObjectType"" varchar(30) NOT NULL,
                     ""Order"" integer NOT NULL DEFAULT 0
                 );
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_MetadataModuleItems_Object""
-                    ON ""MetadataModuleItems"" (""ObjectType"", ""ObjectId"");
+                -- IX_MetadataModuleItems_Object: владелец — EF (план §4.1)
                 CREATE INDEX IF NOT EXISTS ""IX_MetadataModuleItems_Module"" ON ""MetadataModuleItems"" (""ModuleId"");
                 CREATE TABLE IF NOT EXISTS ""NavigationGroupOrders"" (
                     ""Id"" uuid PRIMARY KEY,

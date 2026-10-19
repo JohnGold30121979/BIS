@@ -187,7 +187,7 @@ public partial class MetadataService
     {
         return new List<MetadataField>
         {
-            new MetadataField { Id = Guid.NewGuid(), Name = "Закрывает модуль", DbColumnName = "closing_module_code", FieldType = "String", Length = 50, Order = 7, MetadataObjectId = metadataObjectId },
+            new MetadataField { Id = Guid.NewGuid(), Name = "Закрывает модуль", DbColumnName = "closing_module_code", FieldType = "Int", Order = 7, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Группа аналитических статей", DbColumnName = "analytic_group", FieldType = "String", Length = 100, Order = 8, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Признак печати", DbColumnName = "print_mode", FieldType = "String", Length = 50, Order = 9, MetadataObjectId = metadataObjectId },
             new MetadataField { Id = Guid.NewGuid(), Name = "Сохранять остатки", DbColumnName = "balance_mode", FieldType = "String", Length = 50, Order = 10, MetadataObjectId = metadataObjectId },

@@ -24,11 +24,79 @@ public class InfoBaseManager
         EnsureMasterSchema();
     }
 
+    /// <summary>
+    /// План §2: базы, созданные через EnsureCreated(), не имеют истории миграций.
+    /// Перед Migrate() помечаем baseline применённым, иначе EF попытается создать
+    /// уже существующие таблицы. Пустая база — ничего не делаем: Migrate создаст всё сам.
+    /// </summary>
+    private static void EnsureMigrationBaseline(AppDbContext context)
+    {
+        var connection = context.Database.GetDbConnection();
+        var openedHere = connection.State != System.Data.ConnectionState.Open;
+        if (openedHere)
+            connection.Open();
+
+        try
+        {
+            using var check = connection.CreateCommand();
+            check.CommandText = @"
+                SELECT (SELECT count(*) FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = '__EFMigrationsHistory'),
+                       (SELECT count(*) FROM information_schema.tables
+                        WHERE table_schema = 'public')";
+
+            bool hasHistory;
+            bool hasTables;
+            using (var reader = check.ExecuteReader())
+            {
+                reader.Read();
+                hasHistory = Convert.ToInt64(reader.GetValue(0)) > 0;
+                hasTables = Convert.ToInt64(reader.GetValue(1)) > 0;
+            }
+
+            if (hasHistory || !hasTables)
+                return;
+
+            var baseline = context.Database.GetMigrations().FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(baseline))
+                return;
+
+            using var adopt = connection.CreateCommand();
+            adopt.CommandText = @"
+                CREATE TABLE IF NOT EXISTS ""__EFMigrationsHistory"" (
+                    ""MigrationId"" character varying(150) NOT NULL PRIMARY KEY,
+                    ""ProductVersion"" character varying(32) NOT NULL);
+                INSERT INTO ""__EFMigrationsHistory""(""MigrationId"", ""ProductVersion"")
+                VALUES (@id, @version) ON CONFLICT DO NOTHING;";
+
+            var idParameter = adopt.CreateParameter();
+            idParameter.ParameterName = "id";
+            idParameter.Value = baseline;
+            adopt.Parameters.Add(idParameter);
+
+            var versionParameter = adopt.CreateParameter();
+            versionParameter.ParameterName = "version";
+            versionParameter.Value = "8.0.0";
+            adopt.Parameters.Add(versionParameter);
+
+            adopt.ExecuteNonQuery();
+            System.Diagnostics.Debug.WriteLine(
+                $"[schema] база усыновлена миграциями: baseline {baseline} помечен применённым");
+        }
+        finally
+        {
+            if (openedHere)
+                connection.Close();
+        }
+    }
+
     private void EnsureMasterDatabaseExists()
     {
         try
         {
-            // Пытаемся использовать мастер-базу
+            // Мастер-база — системная: в ней только часть модели (InfoBases, Users, …),
+            // поэтому она по-прежнему создаётся EnsureCreated. Миграции применяются
+            // к базам инфобаз, где схема полная (план §2).
             _masterContext.Database.EnsureCreated();
         }
         catch (NpgsqlException ex) when (ex.SqlState == "3D000") // База не существует
@@ -128,7 +196,8 @@ public class InfoBaseManager
             var connectionString = AppDbContext.BuildConnectionString(host, port, dbName, username, password);
             using var dbContext = new AppDbContext(connectionString);
             LogInfoBaseCreation(dbName, "Создание базовой схемы EF");
-            await dbContext.Database.EnsureCreatedAsync();
+            EnsureMigrationBaseline(dbContext);
+            await dbContext.Database.MigrateAsync();
             LogInfoBaseCreation(dbName, "Базовая схема EF создана");
 
             LogInfoBaseCreation(dbName, "Применение runtime-исправлений схемы");

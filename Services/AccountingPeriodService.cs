@@ -72,28 +72,24 @@ namespace BIS.ERP.Services
                     ""CollectedAt"" timestamp with time zone NULL, ""ClosedAt"" timestamp with time zone NULL,
                     ""IsLocked"" boolean NOT NULL DEFAULT false,
                     ""CreatedAt"" timestamp with time zone NOT NULL, ""UpdatedAt"" timestamp with time zone NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountingPeriods_StartDate_EndDate""
-                    ON ""AccountingPeriods"" (""StartDate"", ""EndDate"");
+                -- IX_AccountingPeriods_StartDate_EndDate: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""AccountingPeriodModuleStates"" (
                     ""Id"" uuid PRIMARY KEY, ""PeriodId"" uuid NOT NULL, ""ModuleId"" uuid NOT NULL,
                     ""IsClosed"" boolean NOT NULL DEFAULT false, ""ClosedAt"" timestamp with time zone NULL,
                     ""CreatedAt"" timestamp with time zone NOT NULL, ""UpdatedAt"" timestamp with time zone NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountingPeriodModuleStates_Period_Module""
-                    ON ""AccountingPeriodModuleStates"" (""PeriodId"", ""ModuleId"");
+                -- IX_AccountingPeriodModuleStates_Period_Module: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""AccountOpeningBalances"" (
                     ""Id"" uuid PRIMARY KEY, ""BalanceDate"" timestamp with time zone NOT NULL,
                     ""AccountCode"" varchar(50) NOT NULL, ""Debit"" numeric(18,2) NOT NULL,
                     ""Credit"" numeric(18,2) NOT NULL, ""UpdatedAt"" timestamp with time zone NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountOpeningBalances_Date_Account""
-                    ON ""AccountOpeningBalances"" (""BalanceDate"", ""AccountCode"");
+                -- IX_AccountOpeningBalances_Date_Account: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""AccountTurnoverSnapshots"" (
                     ""Id"" uuid PRIMARY KEY, ""PeriodId"" uuid NOT NULL, ""AccountCode"" varchar(50) NOT NULL,
                     ""AccountName"" varchar(300) NOT NULL, ""OpeningDebit"" numeric(18,2) NOT NULL,
                     ""OpeningCredit"" numeric(18,2) NOT NULL, ""TurnoverDebit"" numeric(18,2) NOT NULL,
                     ""TurnoverCredit"" numeric(18,2) NOT NULL, ""ClosingDebit"" numeric(18,2) NOT NULL,
                     ""ClosingCredit"" numeric(18,2) NOT NULL, ""CreatedAt"" timestamp with time zone NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_AccountTurnoverSnapshots_Period_Account""
-                    ON ""AccountTurnoverSnapshots"" (""PeriodId"", ""AccountCode"");
+                -- IX_AccountTurnoverSnapshots_Period_Account: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""FixedAssetPeriodBalances"" (
                     ""Id"" uuid PRIMARY KEY, ""PeriodId"" uuid NOT NULL,
                     ""PeriodStart"" timestamp with time zone NOT NULL, ""PeriodEnd"" timestamp with time zone NOT NULL,
@@ -137,8 +133,7 @@ namespace BIS.ERP.Services
                 ALTER TABLE ""FixedAssetPeriodBalances"" ADD COLUMN IF NOT EXISTS ""OpeningMileage"" numeric(18,2) NOT NULL DEFAULT 0;
                 ALTER TABLE ""FixedAssetPeriodBalances"" ADD COLUMN IF NOT EXISTS ""PeriodMileage"" numeric(18,2) NOT NULL DEFAULT 0;
                 ALTER TABLE ""FixedAssetPeriodBalances"" ADD COLUMN IF NOT EXISTS ""ClosingMileage"" numeric(18,2) NOT NULL DEFAULT 0;
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_FixedAssetPeriodBalances_Period_Asset""
-                    ON ""FixedAssetPeriodBalances"" (""PeriodId"", ""AssetId"");
+                -- IX_FixedAssetPeriodBalances_Period_Asset: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""FinancialReportLines"" (
                     ""Id"" uuid PRIMARY KEY, ""ReportCode"" varchar(30) NOT NULL, ""LineCode"" varchar(30) NOT NULL,
                     ""SectionCode"" varchar(30) NOT NULL, ""Name"" varchar(300) NOT NULL,
@@ -147,12 +142,10 @@ namespace BIS.ERP.Services
                     ""IsActive"" boolean NOT NULL);
                 ALTER TABLE ""FinancialReportLines"" ADD COLUMN IF NOT EXISTS ""Formula"" varchar(500) NOT NULL DEFAULT '';
                 ALTER TABLE ""FinancialReportLines"" ADD COLUMN IF NOT EXISTS ""FixedAmount"" numeric(18,2) NOT NULL DEFAULT 0;
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_FinancialReportLines_Report_Line""
-                    ON ""FinancialReportLines"" (""ReportCode"", ""LineCode"");
+                -- IX_FinancialReportLines_Report_Line: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""FinancialReportLineAccounts"" (
                     ""Id"" uuid PRIMARY KEY, ""LineId"" uuid NOT NULL, ""AccountCode"" varchar(50) NOT NULL);
-                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_FinancialReportLineAccounts_Line_Account""
-                    ON ""FinancialReportLineAccounts"" (""LineId"", ""AccountCode"");
+                -- IX_FinancialReportLineAccounts_Line_Account: владелец индекса — EF (AppDbContext.OnModelCreating), здесь не дублируем (план §4.1)
                 CREATE TABLE IF NOT EXISTS ""TaxJournalRecords"" (
                     ""Id"" uuid PRIMARY KEY, ""JournalType"" varchar(20) NOT NULL,
                     ""Date"" timestamp with time zone NOT NULL, ""DocumentNumber"" varchar(50) NOT NULL,

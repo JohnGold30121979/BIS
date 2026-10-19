@@ -663,6 +663,7 @@ namespace BIS.ERP
                     financeTools.Children.Add(new NavigationItem { Id = "PostingsJournal", Name = "Журнал проводок", Icon = "📋", Type = "PostingsJournal" });
                     financeTools.Children.Add(new NavigationItem { Id = "EsfExport", Name = "Выгрузка ЭСФ", Icon = "📤", Type = "EsfExport" });
                     financeTools.Children.Add(new NavigationItem { Id = "AccountingReports", Name = "Бухгалтерские отчеты", Icon = "📈", Type = "AccountingReports" });
+                    financeTools.Children.Add(new NavigationItem { Id = "PeriodClosing", Name = "Закрытие периодов", Icon = "🔒", Type = "PeriodClosing" });
                     financeTools.Children.Add(new NavigationItem { Id = "MutualSettlements", Name = "Взаиморасчеты с организациями", Icon = "🤝", Type = "MutualSettlements" });
                     moduleGroups.Add(financeTools);
                 }
@@ -1206,6 +1207,13 @@ namespace BIS.ERP
                 Name = "Бухгалтерские отчеты",
                 Icon = "📈",
                 Type = "AccountingReports"
+            });
+            accountingSection.Children.Add(new NavigationItem
+            {
+                Id = "PeriodClosing",
+                Name = "Закрытие периодов",
+                Icon = "🔒",
+                Type = "PeriodClosing"
             });
             NavigationItems.Add(accountingSection);
 
@@ -1922,6 +1930,10 @@ namespace BIS.ERP
                     await OpenAccountingReportsAsync();
                     break;
 
+                case "PeriodClosing":
+                    await OpenPeriodClosingAsync();
+                    break;
+
                 case "Profile":
                     OnProfileClick(null, null);
                     break;
@@ -2021,6 +2033,7 @@ namespace BIS.ERP
                 "DbfDocuments" => "Импортированные документы",
                 "PostingsJournal" => "Журнал",
                 "AccountingReports" => "Отчетность",
+                "PeriodClosing" => "Закрытие периода",
                 "MutualSettlements" => "Отчет",
                 "Profile" or "Settings" or "SystemLogs" or "UserAccessManagement" or "SwitchMode" or "Logout" or "AboutSystem" => "Сервисная команда",
                 _ => item.Type
@@ -2403,6 +2416,12 @@ namespace BIS.ERP
             return Guid.TryParse(ownerItem.Id[prefix.Length..], out moduleId);
         }
         #endregion
+
+        private async Task OpenPeriodClosingAsync()
+        {
+            var context = await _infoBaseManager.GetCurrentDbContextAsync();
+            _navigation.NavigateTo(new PeriodClosingView(context), "Закрытие периодов", "PeriodClosing");
+        }
 
         private async Task OpenAccountingReportsAsync(string? selectedReportType = null)
         {

@@ -1811,7 +1811,6 @@ namespace BIS.ERP.Services
                 await _context.Database.ExecuteSqlRawAsync($@"
                     UPDATE ""{catalog.TableName}""
                     SET
-                        ""closing_module_code"" = COALESCE(""closing_module_code"", ''),
                         ""analytic_group"" = COALESCE(""analytic_group"", ''),
                         ""print_mode"" = COALESCE(""print_mode"", ''),
                         ""balance_mode"" = COALESCE(""balance_mode"", ''),
@@ -1824,7 +1823,6 @@ namespace BIS.ERP.Services
                         ""link_sites"" = COALESCE(""link_sites"", false),
                         ""tax_code"" = COALESCE(""tax_code"", '')
                     WHERE
-                        ""closing_module_code"" IS NULL OR
                         ""analytic_group"" IS NULL OR
                         ""print_mode"" IS NULL OR
                         ""balance_mode"" IS NULL OR
@@ -2039,7 +2037,6 @@ namespace BIS.ERP.Services
             ChartOfAccount account,
             IReadOnlyCollection<MetadataModule> modules)
         {
-            var closingModuleName = ResolveClosingModuleValue(account.ClosingSubsystemCode, modules);
 
             return new Dictionary<string, object?>
             {
@@ -2050,7 +2047,8 @@ namespace BIS.ERP.Services
                 ["description"] = string.IsNullOrWhiteSpace(account.Description) ? null : account.Description,
                 ["level"] = account.Level,
                 ["is_active"] = account.IsActive,
-                ["closing_module_code"] = string.IsNullOrWhiteSpace(closingModuleName) ? null : closingModuleName,
+                // Поле целочисленное: номер модуля (3 — финансы, 6 — материалы, 7 — ОС…).
+                ["closing_module_code"] = account.ClosingSubsystemCode == 0 ? null : (int?)account.ClosingSubsystemCode,
                 ["analytic_group"] = account.AnalyticsGroupCode == 0 ? null : account.AnalyticsGroupCode.ToString(CultureInfo.InvariantCulture),
                 ["print_mode"] = ChartOfAccountsSelectionMetadata.NormalizePrintModeValue(
                     account.PrintModeCode == 0 ? null : account.PrintModeCode.ToString(CultureInfo.InvariantCulture)),
@@ -2144,15 +2142,18 @@ namespace BIS.ERP.Services
             return codes;
         }
 
+        /// <summary>
+        /// Приводит closing_module_code к канону: поле целочисленное,
+        /// 2/9 → 3 (финансы), 12 → 6 (материалы), пусто → NULL.
+        /// </summary>
         private async Task NormalizeChartOfAccountsClosingModulesAsync(MetadataObject catalog)
         {
-            var modules = await GetAvailableModulesAsync();
-            var updates = new List<(Guid Id, string Value)>();
+            var updates = new List<(Guid Id, int? Value)>();
 
             using (var selectCommand = _context.Database.GetDbConnection().CreateCommand())
             {
                 selectCommand.CommandText = $@"
-                    SELECT ""Id"", COALESCE(""closing_module_code"", '')
+                    SELECT ""Id"", ""closing_module_code""
                     FROM ""{catalog.TableName}""";
 
                 await _context.Database.OpenConnectionAsync();
@@ -2165,10 +2166,12 @@ namespace BIS.ERP.Services
                             continue;
 
                         var id = reader.GetGuid(0);
-                        var currentValue = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-                        var normalizedValue = NormalizeClosingModuleValue(currentValue, modules);
+                        int? currentValue = reader.IsDBNull(1)
+                            ? null
+                            : Convert.ToInt32(reader.GetValue(1));
+                        var normalizedValue = NormalizeClosingModuleNumber(currentValue);
 
-                        if (string.Equals(currentValue?.Trim(), normalizedValue, StringComparison.Ordinal))
+                        if (currentValue == normalizedValue)
                             continue;
 
                         updates.Add((id, normalizedValue));
@@ -2196,13 +2199,12 @@ namespace BIS.ERP.Services
 
                     var valueParameter = updateCommand.CreateParameter();
                     valueParameter.ParameterName = "@value";
-                    valueParameter.Value = update.Value;
+                    valueParameter.Value = update.Value.HasValue ? (object)update.Value.Value : DBNull.Value;
+                    updateCommand.Parameters.Add(valueParameter);
 
                     var idParameter = updateCommand.CreateParameter();
                     idParameter.ParameterName = "@id";
                     idParameter.Value = update.Id;
-
-                    updateCommand.Parameters.Add(valueParameter);
                     updateCommand.Parameters.Add(idParameter);
 
                     await updateCommand.ExecuteNonQueryAsync();
@@ -2213,6 +2215,21 @@ namespace BIS.ERP.Services
                 await _context.Database.CloseConnectionAsync();
             }
         }
+
+        /// <summary>
+        /// Канон номера модуля для closing_module_code.
+        /// </summary>
+        private static int? NormalizeClosingModuleNumber(int? rawValue) => rawValue switch
+        {
+            null or 0 => null,
+            2 or 3 or 9 => 3,
+            4 => 4,
+            6 or 12 => 6,
+            7 => 7,
+            8 => 8,
+            66 => 66,
+            _ => rawValue
+        };
 
         private async Task NormalizeChartOfAccountsModeFieldsAsync(MetadataObject catalog)
         {
@@ -2418,7 +2435,7 @@ namespace BIS.ERP.Services
             }
 
             await _context.Database.ExecuteSqlRawAsync($@"
-                ALTER TABLE ""{catalog.TableName}"" ADD COLUMN IF NOT EXISTS ""closing_module_code"" varchar(50);
+                ALTER TABLE ""{catalog.TableName}"" ADD COLUMN IF NOT EXISTS ""closing_module_code"" integer;
                 DO $$
                 BEGIN
                     IF EXISTS (
@@ -2428,8 +2445,9 @@ namespace BIS.ERP.Services
                           AND table_name = '{catalog.TableName}'
                           AND column_name = 'closing_arm') THEN
                         UPDATE ""{catalog.TableName}""
-                        SET ""closing_module_code"" = COALESCE(NULLIF(""closing_module_code"", ''), ""closing_arm"")
-                        WHERE COALESCE(NULLIF(""closing_arm"", ''), '') <> '';
+                        SET ""closing_module_code"" = NULLIF(btrim(""closing_arm""), '')::integer
+                        WHERE ""closing_module_code"" IS NULL
+                          AND NULLIF(btrim(""closing_arm""), '') ~ '^[0-9]+$';
                     END IF;
                 END $$;");
         }
@@ -2609,7 +2627,14 @@ namespace BIS.ERP.Services
             else
             {
                 document.Name = CashOrderDocumentName;
-                document.TableName = "doc_cash_orders";
+
+                // Имя таблицы — из метаданных (план §0.3): перезаписываем только пустое
+                // или legacy-имя (объединение «Приходный/Расходный КО» в один журнал).
+                var isLegacyCashTable =
+                    string.Equals(document.TableName, "doc_cash_receipt", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(document.TableName, "doc_cash_payment", StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrWhiteSpace(document.TableName) || isLegacyCashTable)
+                    document.TableName = "doc_cash_orders";
                 document.Description = "Единый журнал приходных и расходных кассовых ордеров";
                 document.Icon = "💵";
                 document.Order = document.Order == 0 ? 4 : document.Order;
@@ -2622,7 +2647,7 @@ namespace BIS.ERP.Services
 
             await EnsureCashOrderMetadataFieldsAsync(document);
             await CreateTableForCatalogAsync(document);
-            await MigrateLegacyCashOrderRowsAsync();
+            await MigrateLegacyCashOrderRowsAsync(document.TableName);
             await ReassignCashOrderRelatedMetadataAsync(document, legacyIds);
             await RemoveLegacyCashOrderMetadataAsync(legacyDocuments);
             await DropLegacyCashOrderTablesAsync();
@@ -2667,32 +2692,34 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
-        private async Task MigrateLegacyCashOrderRowsAsync()
+        private async Task MigrateLegacyCashOrderRowsAsync(string targetTable)
         {
-            await _context.Database.ExecuteSqlRawAsync(@"
+            // Имя целевой таблицы — из метаданных (правило §0.3); legacy-имена
+            // doc_cash_receipt / doc_cash_payment остаются как источники миграции.
+            await _context.Database.ExecuteSqlRawAsync($@"
                 DO $$
                 BEGIN
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""doc_number"" varchar(20) NOT NULL DEFAULT '';
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""doc_date"" timestamp NOT NULL DEFAULT NOW();
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""order_kind"" varchar(20) NOT NULL DEFAULT 'Payment';
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""primary_organization_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""counterparty_organization_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""amount"" decimal(18,2) NOT NULL DEFAULT 0;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""basis"" varchar(500);
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""correspondent_account"" varchar(50);
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_flow_item"" varchar(100);
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""cash_account"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""description"" varchar(500);
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""is_posted"" boolean DEFAULT false;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""currency_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""employee_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""material_id"" text;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""debit_account"" varchar(50);
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
-                    ALTER TABLE ""doc_cash_orders"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" decimal(18,4) DEFAULT 0;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""doc_number"" varchar(20) NOT NULL DEFAULT '';
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""doc_date"" timestamp NOT NULL DEFAULT NOW();
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""order_kind"" varchar(20) NOT NULL DEFAULT 'Payment';
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""primary_organization_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""counterparty_organization_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""amount"" decimal(18,2) NOT NULL DEFAULT 0;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""basis"" varchar(500);
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""correspondent_account"" varchar(50);
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""cash_flow_item"" varchar(100);
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""cash_account"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""description"" varchar(500);
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""is_posted"" boolean DEFAULT false;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""currency_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""employee_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""material_id"" text;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""debit_account"" varchar(50);
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
+                    ALTER TABLE ""{targetTable}"" ADD COLUMN IF NOT EXISTS ""exchange_rate"" decimal(18,4) DEFAULT 0;
                     IF to_regclass('public.doc_cash_receipt') IS NOT NULL THEN
                         ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""organization_id"" text;
                         ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""cash_desk_id"" text;
@@ -2709,10 +2736,10 @@ namespace BIS.ERP.Services
                         ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
                         ALTER TABLE ""doc_cash_receipt"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
 
-                        INSERT INTO ""doc_cash_orders"" (""Id"", ""doc_number"", ""doc_date"", ""order_kind"", ""organization_id"", ""cash_desk_id"", ""amount"", ""basis"", ""correspondent_account"", ""cash_flow_item"", ""cash_account"", ""description"", ""is_posted"", ""currency_id"", ""employee_id"", ""material_id"", ""debit_account"", ""credit_account"", ""amount_currency"", ""CreatedAt"", ""UpdatedAt"")
+                        INSERT INTO ""{targetTable}"" (""Id"", ""doc_number"", ""doc_date"", ""order_kind"", ""organization_id"", ""cash_desk_id"", ""amount"", ""basis"", ""correspondent_account"", ""cash_flow_item"", ""cash_account"", ""description"", ""is_posted"", ""currency_id"", ""employee_id"", ""material_id"", ""debit_account"", ""credit_account"", ""amount_currency"", ""CreatedAt"", ""UpdatedAt"")
                         SELECT source.""Id"", COALESCE(source.""doc_number"", ''), COALESCE(source.""doc_date"", NOW()), 'Receipt', source.""organization_id"", source.""cash_desk_id"", COALESCE(source.""amount"", 0), source.""basis"", source.""correspondent_account"", source.""cash_flow_item"", source.""cash_account"", source.""description"", COALESCE(source.""is_posted"", false), source.""currency_id"", source.""employee_id"", source.""material_id"", source.""debit_account"", source.""credit_account"", COALESCE(source.""amount_currency"", 0), COALESCE(source.""CreatedAt"", NOW()), COALESCE(source.""UpdatedAt"", NOW())
                         FROM ""doc_cash_receipt"" source
-                        WHERE NOT EXISTS (SELECT 1 FROM ""doc_cash_orders"" target WHERE target.""Id"" = source.""Id"");
+                        WHERE NOT EXISTS (SELECT 1 FROM ""{targetTable}"" target WHERE target.""Id"" = source.""Id"");
                     END IF;
 
                     IF to_regclass('public.doc_cash_payment') IS NOT NULL THEN
@@ -2731,10 +2758,10 @@ namespace BIS.ERP.Services
                         ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""credit_account"" varchar(50);
                         ALTER TABLE ""doc_cash_payment"" ADD COLUMN IF NOT EXISTS ""amount_currency"" decimal(18,2) DEFAULT 0;
 
-                        INSERT INTO ""doc_cash_orders"" (""Id"", ""doc_number"", ""doc_date"", ""order_kind"", ""organization_id"", ""cash_desk_id"", ""amount"", ""basis"", ""correspondent_account"", ""cash_flow_item"", ""cash_account"", ""description"", ""is_posted"", ""currency_id"", ""employee_id"", ""material_id"", ""debit_account"", ""credit_account"", ""amount_currency"", ""CreatedAt"", ""UpdatedAt"")
+                        INSERT INTO ""{targetTable}"" (""Id"", ""doc_number"", ""doc_date"", ""order_kind"", ""organization_id"", ""cash_desk_id"", ""amount"", ""basis"", ""correspondent_account"", ""cash_flow_item"", ""cash_account"", ""description"", ""is_posted"", ""currency_id"", ""employee_id"", ""material_id"", ""debit_account"", ""credit_account"", ""amount_currency"", ""CreatedAt"", ""UpdatedAt"")
                         SELECT source.""Id"", COALESCE(source.""doc_number"", ''), COALESCE(source.""doc_date"", NOW()), 'Payment', source.""organization_id"", source.""cash_desk_id"", COALESCE(source.""amount"", 0), source.""basis"", source.""correspondent_account"", source.""cash_flow_item"", source.""cash_account"", source.""description"", COALESCE(source.""is_posted"", false), source.""currency_id"", source.""employee_id"", source.""material_id"", source.""debit_account"", source.""credit_account"", COALESCE(source.""amount_currency"", 0), COALESCE(source.""CreatedAt"", NOW()), COALESCE(source.""UpdatedAt"", NOW())
                         FROM ""doc_cash_payment"" source
-                        WHERE NOT EXISTS (SELECT 1 FROM ""doc_cash_orders"" target WHERE target.""Id"" = source.""Id"");
+                        WHERE NOT EXISTS (SELECT 1 FROM ""{targetTable}"" target WHERE target.""Id"" = source.""Id"");
                     END IF;
                 END $$;");
         }
@@ -2820,7 +2847,14 @@ namespace BIS.ERP.Services
                 return;
 
             document.Name = CashOrderDocumentName;
-            document.TableName = "doc_cash_orders";
+
+            // Имя таблицы — из метаданных (план §0.3): каноничное имя не перезаписываем.
+            var isLegacyCashTable =
+                string.Equals(document.TableName, "doc_cash_receipt", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(document.TableName, "doc_cash_payment", StringComparison.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(document.TableName) || isLegacyCashTable)
+                document.TableName = "doc_cash_orders";
+
             document.UsePostings = true;
             NormalizeCashDeskReferenceFields(document);
             await EnsureCashOrderMetadataFieldsAsync(document);

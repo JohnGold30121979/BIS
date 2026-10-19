@@ -7,11 +7,28 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BIS.ERP.Migrations
 {
     /// <inheritdoc />
-    public partial class AddDebitCreditFieldsToCashReceipt : Migration
+    public partial class InitialBaseline : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.CreateTable(
+                name: "AccountingPeriodModuleStates",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    PeriodId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ModuleId = table.Column<Guid>(type: "uuid", nullable: false),
+                    IsClosed = table.Column<bool>(type: "boolean", nullable: false),
+                    ClosedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_AccountingPeriodModuleStates", x => x.Id);
+                });
+
             migrationBuilder.CreateTable(
                 name: "AccountingPeriods",
                 columns: table => new
@@ -129,14 +146,26 @@ namespace BIS.ERP.Migrations
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     PersonnelNumber = table.Column<string>(type: "text", nullable: false),
                     FullName = table.Column<string>(type: "text", nullable: false),
+                    PositionId = table.Column<Guid>(type: "uuid", nullable: true),
+                    PositionText = table.Column<string>(type: "text", nullable: false),
+                    PositionDisplay = table.Column<string>(type: "text", nullable: false),
                     Position = table.Column<string>(type: "text", nullable: false),
+                    DepartmentId = table.Column<Guid>(type: "uuid", nullable: true),
                     Department = table.Column<string>(type: "text", nullable: false),
+                    Gender = table.Column<string>(type: "text", nullable: false),
+                    MaritalStatus = table.Column<string>(type: "text", nullable: false),
+                    BirthDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     HireDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     TerminationDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    Address = table.Column<string>(type: "text", nullable: false),
+                    Notes = table.Column<string>(type: "text", nullable: false),
                     Status = table.Column<string>(type: "text", nullable: false),
                     Phone = table.Column<string>(type: "text", nullable: false),
                     Email = table.Column<string>(type: "text", nullable: false),
                     TaxId = table.Column<string>(type: "text", nullable: false),
+                    PassportNumber = table.Column<string>(type: "text", nullable: false),
+                    PassportIssuedBy = table.Column<string>(type: "text", nullable: false),
+                    PassportIssueDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -168,12 +197,72 @@ namespace BIS.ERP.Migrations
                     Name = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
                     SortOrder = table.Column<int>(type: "integer", nullable: false),
                     Sign = table.Column<int>(type: "integer", nullable: false),
+                    Formula = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
+                    FixedAmount = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
                     IsTotal = table.Column<bool>(type: "boolean", nullable: false),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_FinancialReportLines", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "FixedAssetPeriodBalances",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    PeriodId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PeriodStart = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    PeriodEnd = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    AssetId = table.Column<Guid>(type: "uuid", nullable: false),
+                    InventoryNumber = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
+                    AssetName = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
+                    OrganizationId = table.Column<Guid>(type: "uuid", nullable: true),
+                    OrganizationName = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
+                    ResponsiblePersonId = table.Column<Guid>(type: "uuid", nullable: true),
+                    ResponsiblePersonName = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
+                    SiteId = table.Column<Guid>(type: "uuid", nullable: true),
+                    SiteName = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
+                    AssetAccount = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    DepreciationAccount = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    ExpenseAccount = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    AcquisitionDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CommissioningDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    DepreciationStartDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    InitialCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    SalvageValue = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    AccumulatedDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    CarryingAmount = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    MonthlyDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    OpeningCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    OpeningDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    OpeningCarryingAmount = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    AcquisitionCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    DisposalCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    TransferInCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    TransferOutCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    RevaluationCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    AutomaticDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    ManualDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    DepreciationAdjustment = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    DepreciationWriteOff = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    DisposalDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    TransferInDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    TransferOutDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    ClosingCost = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    ClosingDepreciation = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    ClosingCarryingAmount = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    OpeningMileage = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    PeriodMileage = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    ClosingMileage = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
+                    IsActive = table.Column<bool>(type: "boolean", nullable: false),
+                    LifecycleStatus = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_FixedAssetPeriodBalances", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -191,7 +280,11 @@ namespace BIS.ERP.Migrations
                     Password = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false),
-                    Version = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: true)
+                    Version = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
+                    Icon = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    LogoImage = table.Column<byte[]>(type: "bytea", nullable: true),
+                    LogoContentType = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
+                    LogoFileName = table.Column<string>(type: "character varying(260)", maxLength: 260, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -203,7 +296,7 @@ namespace BIS.ERP.Migrations
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    Culture = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
+                    Culture = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                     Key = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
                     Value = table.Column<string>(type: "text", nullable: false),
                     Category = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
@@ -256,7 +349,10 @@ namespace BIS.ERP.Migrations
                     Description = table.Column<string>(type: "character varying(600)", maxLength: 600, nullable: false),
                     Icon = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     Order = table.Column<int>(type: "integer", nullable: false),
+                    CloseOrder = table.Column<int>(type: "integer", nullable: false),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false),
+                    ParticipatesInPeriodClose = table.Column<bool>(type: "boolean", nullable: false),
+                    RequirePreviousModulesClosed = table.Column<bool>(type: "boolean", nullable: false),
                     IsSystem = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
@@ -293,23 +389,73 @@ namespace BIS.ERP.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "RegulatedReportTemplates",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Code = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: false),
+                    Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    Version = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: false),
+                    OriginalFileName = table.Column<string>(type: "character varying(260)", maxLength: 260, nullable: false),
+                    FileExtension = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    MimeType = table.Column<string>(type: "character varying(150)", maxLength: 150, nullable: false),
+                    TemplateData = table.Column<byte[]>(type: "bytea", nullable: false),
+                    Description = table.Column<string>(type: "text", nullable: false),
+                    IsActive = table.Column<bool>(type: "boolean", nullable: false),
+                    EffectiveFrom = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    Sha256 = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RegulatedReportTemplates", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ReportDataSets",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    Code = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: false),
+                    Name = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
+                    Description = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
+                    Kind = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    CalculatorCode = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    ParameterDefinitions = table.Column<string>(type: "text", nullable: false),
+                    SqlText = table.Column<string>(type: "text", nullable: false),
+                    IsActive = table.Column<bool>(type: "boolean", nullable: false),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false),
+                    MetadataObjectId = table.Column<Guid>(type: "uuid", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ReportDataSets", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Reports",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    Description = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
+                    Name = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false),
+                    Description = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: false),
                     DataSourceType = table.Column<string>(type: "text", nullable: false),
                     DataSourceId = table.Column<Guid>(type: "uuid", nullable: true),
                     ReportType = table.Column<string>(type: "text", nullable: false),
                     Template = table.Column<string>(type: "text", nullable: false),
+                    ClosedXmlLayout = table.Column<string>(type: "text", nullable: false),
                     Settings = table.Column<string>(type: "text", nullable: false),
                     Icon = table.Column<string>(type: "text", nullable: false),
-                    Code = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    Code = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: false),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false),
                     IsPrintForm = table.Column<bool>(type: "boolean", nullable: false),
                     IsDefault = table.Column<bool>(type: "boolean", nullable: false),
-                    SourceFormat = table.Column<string>(type: "character varying(30)", maxLength: 30, nullable: false),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false),
+                    ShowInAccountingReports = table.Column<bool>(type: "boolean", nullable: false),
+                    SourceFormat = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: false),
                     TemplateVersion = table.Column<int>(type: "integer", nullable: false),
                     Order = table.Column<int>(type: "integer", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
@@ -349,16 +495,35 @@ namespace BIS.ERP.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "ReportUserSettings",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ReportId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserLogin = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    ParameterName = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    Value = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ReportUserSettings", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "SystemConfigurations",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     SystemName = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
                     Icon = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    LogoImage = table.Column<byte[]>(type: "bytea", nullable: true),
+                    LogoContentType = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
+                    LogoFileName = table.Column<string>(type: "character varying(260)", maxLength: 260, nullable: true),
                     Description = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
                     CompanyDetails = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: false),
                     Email = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: false),
                     Phone = table.Column<string>(type: "character varying(80)", maxLength: 80, nullable: false),
+                    AppUpdateUrl = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
@@ -414,6 +579,8 @@ namespace BIS.ERP.Migrations
                     PasswordHash = table.Column<string>(type: "text", nullable: false),
                     FullName = table.Column<string>(type: "text", nullable: false),
                     Role = table.Column<int>(type: "integer", nullable: false),
+                    RoleChecksum = table.Column<string>(type: "text", nullable: false),
+                    IsSystem = table.Column<bool>(type: "boolean", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false),
                     LastLoginDate = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
@@ -545,29 +712,6 @@ namespace BIS.ERP.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Transactions",
-                columns: table => new
-                {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    Date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    Amount = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
-                    Type = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
-                    Category = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
-                    Description = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                    DocumentNumber = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
-                    InfoBaseId = table.Column<Guid>(type: "uuid", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Transactions", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Transactions_InfoBases_InfoBaseId",
-                        column: x => x.InfoBaseId,
-                        principalTable: "InfoBases",
-                        principalColumn: "Id");
-                });
-
-            migrationBuilder.CreateTable(
                 name: "MetadataObjects",
                 columns: table => new
                 {
@@ -634,6 +778,67 @@ namespace BIS.ERP.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "ReportDataSetFields",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ReportDataSetId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: false),
+                    DbColumnName = table.Column<string>(type: "character varying(160)", maxLength: 160, nullable: false),
+                    FieldType = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
+                    Order = table.Column<int>(type: "integer", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ReportDataSetFields", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_ReportDataSetFields_ReportDataSets_ReportDataSetId",
+                        column: x => x.ReportDataSetId,
+                        principalTable: "ReportDataSets",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ReportElementMappings",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ReportId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ElementOrder = table.Column<int>(type: "integer", nullable: false),
+                    ElementType = table.Column<string>(type: "text", nullable: false),
+                    ElementText = table.Column<string>(type: "text", nullable: false),
+                    ElementExpression = table.Column<string>(type: "text", nullable: false),
+                    BandType = table.Column<string>(type: "text", nullable: false),
+                    Left = table.Column<double>(type: "double precision", nullable: false),
+                    Top = table.Column<double>(type: "double precision", nullable: false),
+                    Width = table.Column<double>(type: "double precision", nullable: false),
+                    Height = table.Column<double>(type: "double precision", nullable: false),
+                    FontName = table.Column<string>(type: "text", nullable: false),
+                    FontSize = table.Column<double>(type: "double precision", nullable: false),
+                    Bold = table.Column<bool>(type: "boolean", nullable: false),
+                    Italic = table.Column<bool>(type: "boolean", nullable: false),
+                    Alignment = table.Column<string>(type: "text", nullable: false),
+                    Order = table.Column<int>(type: "integer", nullable: false),
+                    MappedFieldName = table.Column<string>(type: "text", nullable: true),
+                    MappedDisplayName = table.Column<string>(type: "text", nullable: true),
+                    DataSource = table.Column<string>(type: "text", nullable: false),
+                    FormatString = table.Column<string>(type: "text", nullable: false),
+                    IsVisible = table.Column<bool>(type: "boolean", nullable: false),
+                    CustomText = table.Column<string>(type: "text", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ReportElementMappings", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_ReportElementMappings_Reports_ReportId",
+                        column: x => x.ReportId,
+                        principalTable: "Reports",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "ReportFields",
                 columns: table => new
                 {
@@ -669,7 +874,8 @@ namespace BIS.ERP.Migrations
                     Operation = table.Column<string>(type: "text", nullable: false),
                     Value = table.Column<string>(type: "text", nullable: false),
                     Value2 = table.Column<string>(type: "text", nullable: false),
-                    Order = table.Column<int>(type: "integer", nullable: false)
+                    Order = table.Column<int>(type: "integer", nullable: false),
+                    IsOptional = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -727,6 +933,31 @@ namespace BIS.ERP.Migrations
                     table.PrimaryKey("PK_ReportHeaderFooter", x => x.Id);
                     table.ForeignKey(
                         name: "FK_ReportHeaderFooter_Reports_ReportId",
+                        column: x => x.ReportId,
+                        principalTable: "Reports",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ReportParameters",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ReportId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    Title = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    ParameterType = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
+                    DefaultValue = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
+                    IsRequired = table.Column<bool>(type: "boolean", nullable: false),
+                    ReferenceSource = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    Order = table.Column<int>(type: "integer", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ReportParameters", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_ReportParameters_Reports_ReportId",
                         column: x => x.ReportId,
                         principalTable: "Reports",
                         principalColumn: "Id",
@@ -814,6 +1045,12 @@ namespace BIS.ERP.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_AccountingPeriodModuleStates_PeriodId_ModuleId",
+                table: "AccountingPeriodModuleStates",
+                columns: new[] { "PeriodId", "ModuleId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_AccountingPeriods_StartDate_EndDate",
                 table: "AccountingPeriods",
                 columns: new[] { "StartDate", "EndDate" },
@@ -866,6 +1103,12 @@ namespace BIS.ERP.Migrations
                 name: "IX_FinancialReportLines_ReportCode_LineCode",
                 table: "FinancialReportLines",
                 columns: new[] { "ReportCode", "LineCode" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_FixedAssetPeriodBalances_PeriodId_AssetId",
+                table: "FixedAssetPeriodBalances",
+                columns: new[] { "PeriodId", "AssetId" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -945,6 +1188,34 @@ namespace BIS.ERP.Migrations
                 column: "OrganizationId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_RegulatedReportTemplates_Code_IsActive",
+                table: "RegulatedReportTemplates",
+                columns: new[] { "Code", "IsActive" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RegulatedReportTemplates_Code_Version",
+                table: "RegulatedReportTemplates",
+                columns: new[] { "Code", "Version" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ReportDataSetFields_ReportDataSetId_DbColumnName",
+                table: "ReportDataSetFields",
+                columns: new[] { "ReportDataSetId", "DbColumnName" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ReportDataSets_Code",
+                table: "ReportDataSets",
+                column: "Code",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ReportElementMappings_ReportId_ElementOrder",
+                table: "ReportElementMappings",
+                columns: new[] { "ReportId", "ElementOrder" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ReportFields_ReportId",
                 table: "ReportFields",
                 column: "ReportId");
@@ -965,9 +1236,16 @@ namespace BIS.ERP.Migrations
                 column: "ReportId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_Transactions_InfoBaseId",
-                table: "Transactions",
-                column: "InfoBaseId");
+                name: "IX_ReportParameters_ReportId_Name",
+                table: "ReportParameters",
+                columns: new[] { "ReportId", "Name" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ReportUserSettings_ReportId_UserLogin_ParameterName",
+                table: "ReportUserSettings",
+                columns: new[] { "ReportId", "UserLogin", "ParameterName" },
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_UserAccessPermissions_UserId_NavigationKey",
@@ -985,6 +1263,9 @@ namespace BIS.ERP.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "AccountingPeriodModuleStates");
+
             migrationBuilder.DropTable(
                 name: "AccountingPeriods");
 
@@ -1011,6 +1292,9 @@ namespace BIS.ERP.Migrations
 
             migrationBuilder.DropTable(
                 name: "FinancialReportLines");
+
+            migrationBuilder.DropTable(
+                name: "FixedAssetPeriodBalances");
 
             migrationBuilder.DropTable(
                 name: "FixedAssets");
@@ -1040,6 +1324,15 @@ namespace BIS.ERP.Migrations
                 name: "Postings");
 
             migrationBuilder.DropTable(
+                name: "RegulatedReportTemplates");
+
+            migrationBuilder.DropTable(
+                name: "ReportDataSetFields");
+
+            migrationBuilder.DropTable(
+                name: "ReportElementMappings");
+
+            migrationBuilder.DropTable(
                 name: "ReportFields");
 
             migrationBuilder.DropTable(
@@ -1052,13 +1345,16 @@ namespace BIS.ERP.Migrations
                 name: "ReportHeaderFooter");
 
             migrationBuilder.DropTable(
+                name: "ReportParameters");
+
+            migrationBuilder.DropTable(
+                name: "ReportUserSettings");
+
+            migrationBuilder.DropTable(
                 name: "SystemConfigurations");
 
             migrationBuilder.DropTable(
                 name: "TaxJournalRecords");
-
-            migrationBuilder.DropTable(
-                name: "Transactions");
 
             migrationBuilder.DropTable(
                 name: "UserAccessPermissions");
@@ -1073,6 +1369,9 @@ namespace BIS.ERP.Migrations
                 name: "DynamicDocuments");
 
             migrationBuilder.DropTable(
+                name: "InfoBases");
+
+            migrationBuilder.DropTable(
                 name: "MetadataObjects");
 
             migrationBuilder.DropTable(
@@ -1082,10 +1381,10 @@ namespace BIS.ERP.Migrations
                 name: "Organizations");
 
             migrationBuilder.DropTable(
-                name: "Reports");
+                name: "ReportDataSets");
 
             migrationBuilder.DropTable(
-                name: "InfoBases");
+                name: "Reports");
 
             migrationBuilder.DropTable(
                 name: "MetadataConfigurations");

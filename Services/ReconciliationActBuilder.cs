@@ -259,7 +259,7 @@ namespace BIS.ERP.Services
                        COALESCE(o.""code"", '') AS organization_code
                 FROM doc_postings p
                 LEFT JOIN catalog_organizations o ON p.organization_id::text = o.""Id""::text
-                LEFT JOIN catalog_currencies c ON c.""Id""::text = p.currency_id
+                LEFT JOIN catalog_currencies c ON c.""Id"" = p.currency_id
                 WHERE COALESCE(p.is_active, true) = true
                   AND (COALESCE(@organizationId, '') = '' OR p.organization_id::text = @organizationId)
                   AND p.posting_date >= @startDate

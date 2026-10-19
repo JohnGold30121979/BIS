@@ -1060,6 +1060,10 @@ namespace BIS.ERP.Views
 
         private async Task CreateCashOrderAsync(string orderKind, string title)
         {
+            // Обновляем данные перед вводом: касса, добавленная в справочнике,
+            // должна сразу появиться в списке выбора.
+            await LoadData();
+
             try
             {
                 var dialog = new CashOrderDialog(_documentMetadata, _metadataService, orderKind)

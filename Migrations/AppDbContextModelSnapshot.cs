@@ -141,6 +141,38 @@ namespace BIS.ERP.Migrations
                     b.ToTable("AccountingPeriods");
                 });
 
+            modelBuilder.Entity("BIS.ERP.Models.AccountingPeriodModuleState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsClosed")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("ModuleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PeriodId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeriodId", "ModuleId")
+                        .IsUnique();
+
+                    b.ToTable("AccountingPeriodModuleStates");
+                });
+
             modelBuilder.Entity("BIS.ERP.Models.DbfMetadata", b =>
                 {
                     b.Property<Guid>("Id")
@@ -360,63 +392,19 @@ namespace BIS.ERP.Migrations
                     b.ToTable("DynamicDocumentRows");
                 });
 
-            modelBuilder.Entity("BIS.ERP.Models.Employee", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Department")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("FullName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("HireDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("PersonnelNumber")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Phone")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Position")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("TaxId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("TerminationDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Employee");
-                });
-
             modelBuilder.Entity("BIS.ERP.Models.FinancialReportLine", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<decimal>("FixedAmount")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Formula")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
@@ -533,6 +521,179 @@ namespace BIS.ERP.Migrations
                     b.ToTable("FixedAssets");
                 });
 
+            modelBuilder.Entity("BIS.ERP.Models.FixedAssetPeriodBalance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AccumulatedDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("AcquisitionCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("AcquisitionDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AssetAccount")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("AssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AssetName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<decimal>("AutomaticDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("CarryingAmount")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("ClosingCarryingAmount")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("ClosingCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("ClosingDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("ClosingMileage")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("CommissioningDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DepreciationAccount")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("DepreciationAdjustment")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime?>("DepreciationStartDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("DepreciationWriteOff")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("DisposalCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("DisposalDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("ExpenseAccount")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("InitialCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("InventoryNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LifecycleStatus")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<decimal>("ManualDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("MonthlyDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("OpeningCarryingAmount")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("OpeningCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("OpeningDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("OpeningMileage")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OrganizationName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime>("PeriodEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PeriodId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("PeriodMileage")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ResponsiblePersonId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResponsiblePersonName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<decimal>("RevaluationCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("SalvageValue")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("SiteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SiteName")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<decimal>("TransferInCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TransferInDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TransferOutCost")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TransferOutDepreciation")
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PeriodId", "AssetId")
+                        .IsUnique();
+
+                    b.ToTable("FixedAssetPeriodBalances");
+                });
+
             modelBuilder.Entity("BIS.ERP.Models.InfoBase", b =>
                 {
                     b.Property<Guid>("Id")
@@ -556,8 +717,24 @@ namespace BIS.ERP.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("LogoContentType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("LogoFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<byte[]>("LogoImage")
+                        .HasColumnType("bytea");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -582,8 +759,8 @@ namespace BIS.ERP.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.Property<string>("Version")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
 
@@ -606,8 +783,8 @@ namespace BIS.ERP.Migrations
 
                     b.Property<string>("Culture")
                         .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
@@ -824,6 +1001,9 @@ namespace BIS.ERP.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("CloseOrder")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Code")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -852,6 +1032,12 @@ namespace BIS.ERP.Migrations
 
                     b.Property<int>("Order")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("ParticipatesInPeriodClose")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("RequirePreviousModulesClosed")
+                        .HasColumnType("boolean");
 
                     b.HasKey("Id");
 
@@ -1151,11 +1337,80 @@ namespace BIS.ERP.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("EmployeeId");
-
                     b.HasIndex("OrganizationId");
 
                     b.ToTable("Postings");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.RegulatedReportTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FileExtension")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MimeType")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<byte[]>("TemplateData")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code", "IsActive");
+
+                    b.HasIndex("Code", "Version")
+                        .IsUnique();
+
+                    b.ToTable("RegulatedReportTemplates");
                 });
 
             modelBuilder.Entity("BIS.ERP.Models.Report", b =>
@@ -1174,10 +1429,14 @@ namespace BIS.ERP.Migrations
                     b.Property<int>("BottomMargin")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ClosedXmlLayout")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Code")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1191,8 +1450,8 @@ namespace BIS.ERP.Migrations
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<string>("FontName")
                         .IsRequired()
@@ -1246,13 +1505,16 @@ namespace BIS.ERP.Migrations
                     b.Property<bool>("IsPrintForm")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("LeftMargin")
                         .HasColumnType("integer");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<int>("Order")
                         .HasColumnType("integer");
@@ -1294,13 +1556,16 @@ namespace BIS.ERP.Migrations
                     b.Property<bool>("ShowHeader")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("ShowInAccountingReports")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("ShowPageNumbers")
                         .HasColumnType("boolean");
 
                     b.Property<string>("SourceFormat")
                         .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
 
                     b.Property<string>("SubtitleText")
                         .IsRequired()
@@ -1330,6 +1595,191 @@ namespace BIS.ERP.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Reports");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportDataSet", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CalculatorCode")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("MetadataObjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("ParameterDefinitions")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SqlText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("ReportDataSets");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportDataSetField", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DbColumnName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("FieldType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ReportDataSetId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReportDataSetId", "DbColumnName")
+                        .IsUnique();
+
+                    b.ToTable("ReportDataSetFields");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportElementMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Alignment")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("BandType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Bold")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("CustomText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DataSource")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ElementExpression")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("ElementOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ElementText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ElementType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FontName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<double>("FontSize")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("FormatString")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<double>("Height")
+                        .HasColumnType("double precision");
+
+                    b.Property<bool>("IsVisible")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Italic")
+                        .HasColumnType("boolean");
+
+                    b.Property<double>("Left")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("MappedDisplayName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MappedFieldName")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ReportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<double>("Top")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("Width")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReportId", "ElementOrder");
+
+                    b.ToTable("ReportElementMappings");
                 });
 
             modelBuilder.Entity("BIS.ERP.Models.ReportField", b =>
@@ -1386,6 +1836,9 @@ namespace BIS.ERP.Migrations
                     b.Property<string>("FieldName")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<bool>("IsOptional")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Operation")
                         .IsRequired()
@@ -1496,11 +1949,96 @@ namespace BIS.ERP.Migrations
                     b.ToTable("ReportHeaderFooter");
                 });
 
+            modelBuilder.Entity("BIS.ERP.Models.ReportParameter", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DefaultValue")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ParameterType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("ReferenceSource")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("ReportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReportId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("ReportParameters");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportUserSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ParameterName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("ReportId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UserLogin")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReportId", "UserLogin", "ParameterName")
+                        .IsUnique();
+
+                    b.ToTable("ReportUserSettings");
+                });
+
             modelBuilder.Entity("BIS.ERP.Models.SystemConfiguration", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("AppUpdateUrl")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("CompanyDetails")
                         .IsRequired()
@@ -1521,6 +2059,17 @@ namespace BIS.ERP.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("LogoContentType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("LogoFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<byte[]>("LogoImage")
+                        .HasColumnType("bytea");
 
                     b.Property<string>("Phone")
                         .IsRequired()
@@ -1594,46 +2143,6 @@ namespace BIS.ERP.Migrations
                     b.ToTable("TaxJournalRecords");
                 });
 
-            modelBuilder.Entity("BIS.ERP.Models.Transaction", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime>("Date")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("DocumentNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<Guid?>("InfoBaseId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InfoBaseId");
-
-                    b.ToTable("Transactions");
-                });
-
             modelBuilder.Entity("BIS.ERP.Models.User", b =>
                 {
                     b.Property<int>("Id")
@@ -1656,6 +2165,9 @@ namespace BIS.ERP.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid?>("LastInfoBaseId")
                         .HasColumnType("uuid");
 
@@ -1672,6 +2184,10 @@ namespace BIS.ERP.Migrations
 
                     b.Property<int>("Role")
                         .HasColumnType("integer");
+
+                    b.Property<string>("RoleChecksum")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -1803,17 +2319,33 @@ namespace BIS.ERP.Migrations
 
             modelBuilder.Entity("BIS.ERP.Models.Posting", b =>
                 {
-                    b.HasOne("BIS.ERP.Models.Employee", "Employee")
-                        .WithMany()
-                        .HasForeignKey("EmployeeId");
-
                     b.HasOne("BIS.ERP.Models.Organization", "Organization")
                         .WithMany()
                         .HasForeignKey("OrganizationId");
 
-                    b.Navigation("Employee");
-
                     b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportDataSetField", b =>
+                {
+                    b.HasOne("BIS.ERP.Models.ReportDataSet", "ReportDataSet")
+                        .WithMany("Fields")
+                        .HasForeignKey("ReportDataSetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ReportDataSet");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportElementMapping", b =>
+                {
+                    b.HasOne("BIS.ERP.Models.Report", "Report")
+                        .WithMany("ElementMappings")
+                        .HasForeignKey("ReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Report");
                 });
 
             modelBuilder.Entity("BIS.ERP.Models.ReportField", b =>
@@ -1860,13 +2392,15 @@ namespace BIS.ERP.Migrations
                     b.Navigation("Report");
                 });
 
-            modelBuilder.Entity("BIS.ERP.Models.Transaction", b =>
+            modelBuilder.Entity("BIS.ERP.Models.ReportParameter", b =>
                 {
-                    b.HasOne("BIS.ERP.Models.InfoBase", "InfoBase")
-                        .WithMany()
-                        .HasForeignKey("InfoBaseId");
+                    b.HasOne("BIS.ERP.Models.Report", "Report")
+                        .WithMany("Parameters")
+                        .HasForeignKey("ReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
-                    b.Navigation("InfoBase");
+                    b.Navigation("Report");
                 });
 
             modelBuilder.Entity("BIS.ERP.Models.Document", b =>
@@ -1890,6 +2424,8 @@ namespace BIS.ERP.Migrations
 
             modelBuilder.Entity("BIS.ERP.Models.Report", b =>
                 {
+                    b.Navigation("ElementMappings");
+
                     b.Navigation("Fields");
 
                     b.Navigation("Filters");
@@ -1897,6 +2433,13 @@ namespace BIS.ERP.Migrations
                     b.Navigation("Groups");
 
                     b.Navigation("HeadersFooters");
+
+                    b.Navigation("Parameters");
+                });
+
+            modelBuilder.Entity("BIS.ERP.Models.ReportDataSet", b =>
+                {
+                    b.Navigation("Fields");
                 });
 #pragma warning restore 612, 618
         }

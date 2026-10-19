@@ -782,6 +782,9 @@ namespace BIS.ERP.Services
 
             try
             {
+                // Типы колонок: иначе строки из патча уходят как text и падают с 42804.
+                var columnTypes = await DbValueConverter.LoadColumnTypesAsync(connection, tableName);
+
                 if (row.TryGetValue("Id", out var idValue) && Guid.TryParse(idValue?.ToString(), out var id) &&
                     await RowExistsAsync(tableName, id))
                 {
@@ -794,7 +797,9 @@ namespace BIS.ERP.Services
                     update.CommandText =
                         $"UPDATE {Quote(tableName)} SET {string.Join(", ", columns.Select((column, index) => $"{Quote(column)} = @p{index}"))} WHERE \"Id\" = @id";
                     for (var i = 0; i < columns.Count; i++)
-                        AddParameter(update, $"@p{i}", NormalizeJsonValue(row[columns[i]]) ?? DBNull.Value);
+                        AddParameter(update, $"@p{i}",
+                            DbValueConverter.Convert(NormalizeJsonValue(row[columns[i]]),
+                                columnTypes.GetValueOrDefault(columns[i])));
                     AddParameter(update, "@id", id);
                     await update.ExecuteNonQueryAsync();
                 }
@@ -806,7 +811,9 @@ namespace BIS.ERP.Services
                     insert.CommandText =
                         $"INSERT INTO {Quote(tableName)} ({string.Join(", ", columns.Select(Quote))}) VALUES ({string.Join(", ", columns.Select((_, index) => $"@p{index}"))})";
                     for (var i = 0; i < columns.Count; i++)
-                        AddParameter(insert, $"@p{i}", NormalizeJsonValue(row[columns[i]]) ?? DBNull.Value);
+                        AddParameter(insert, $"@p{i}",
+                            DbValueConverter.Convert(NormalizeJsonValue(row[columns[i]]),
+                                columnTypes.GetValueOrDefault(columns[i])));
                     await insert.ExecuteNonQueryAsync();
                 }
             }
