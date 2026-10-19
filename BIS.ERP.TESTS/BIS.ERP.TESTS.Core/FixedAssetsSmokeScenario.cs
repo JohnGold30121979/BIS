@@ -395,9 +395,9 @@ public sealed class FixedAssetsSmokeScenario : SmokeTestScenarioBase
         var id = Guid.NewGuid();
         var insertAccountSql = $@"
             INSERT INTO {SqlNames.QuoteIdentifier(chart.TableName)}
-                (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
             VALUES
-                (@id, @code, @name, @type, @description, 1, true, NOW(), NOW());";
+                (@id, @code, @name, @type, @description, true, NOW(), NOW());";
         await context.Database.ExecuteSqlRawAsync(insertAccountSql,
             new NpgsqlParameter("@id", id),
             new NpgsqlParameter("@code", account.Code),

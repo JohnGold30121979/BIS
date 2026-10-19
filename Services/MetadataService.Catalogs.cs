@@ -1766,7 +1766,6 @@ namespace BIS.ERP.Services
                 "name",
                 "account_type",
                 "description",
-                "level",
                 "is_active",
                 "closing_module_code",
                 "analytic_group",
@@ -2045,7 +2044,6 @@ namespace BIS.ERP.Services
                 ["name"] = account.Name,
                 ["account_type"] = account.AccountType,
                 ["description"] = string.IsNullOrWhiteSpace(account.Description) ? null : account.Description,
-                ["level"] = account.Level,
                 ["is_active"] = account.IsActive,
                 // Поле целочисленное: номер модуля (3 — финансы, 6 — материалы, 7 — ОС…).
                 ["closing_module_code"] = account.ClosingSubsystemCode == 0 ? null : (int?)account.ClosingSubsystemCode,

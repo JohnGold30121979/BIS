@@ -21,33 +21,27 @@ namespace BIS.ERP.Services
 
         private async Task AddCurrencyDataToTable(MetadataObject catalog)
         {
-            var currencies = new[]
-            {
-                new { code = "KGS", name = "Киргизский сом", symbol = "с", rate = 1.0000m, is_base = true, is_active = true },
-                new { code = "USD", name = "Доллар США", symbol = "$", rate = 0.0000m, is_base = false, is_active = true },
-                new { code = "EUR", name = "Евро", symbol = "€", rate = 0.0000m, is_base = false, is_active = true },
-                new { code = "KZT", name = "Казахстанский тенге", symbol = "₸", rate = 0.0000m, is_base = false, is_active = true },
-                new { code = "RUB", name = "Российский рубль", symbol = "₽", rate = 0.0000m, is_base = false, is_active = true }
-            };
+            // Данные — в InitialDataProvider.GetCurrencies(), здесь только запись.
+            var currencies = InitialDataProvider.GetCurrencies();
 
             foreach (var currency in currencies)
             {
-                await UpsertCatalogSeedRowAsync(catalog.TableName, currency.code, new Dictionary<string, object?>
+                await UpsertCatalogSeedRowAsync(catalog.TableName, currency.Code, new Dictionary<string, object?>
                 {
                     ["Id"] = Guid.NewGuid(),
-                    ["code"] = currency.code,
-                    ["name"] = currency.name,
-                    ["symbol"] = currency.symbol,
-                    ["rate"] = currency.rate,
-                    ["is_base"] = currency.is_base,
-                    ["is_active"] = currency.is_active,
+                    ["code"] = currency.Code,
+                    ["name"] = currency.Name,
+                    ["symbol"] = currency.Symbol,
+                    ["rate"] = currency.Rate,
+                    ["is_base"] = currency.IsBase,
+                    ["is_active"] = currency.IsActive,
                     ["CreatedAt"] = DateTime.UtcNow,
                     ["UpdatedAt"] = DateTime.UtcNow
                 });
             }
 
             await DeactivateLegacyCurrencyRowsAsync(catalog.TableName);
-            System.Diagnostics.Debug.WriteLine($"Добавлено валют: {currencies.Length}");
+            System.Diagnostics.Debug.WriteLine($"Добавлено валют: {currencies.Count}");
         }
 
         private async Task DeactivateLegacyCurrencyRowsAsync(string tableName)
@@ -62,15 +56,8 @@ namespace BIS.ERP.Services
 
         private async Task AddMaterialCategoriesDataToTable(MetadataObject catalog)
         {
-            var categories = new[]
-            {
-            new { code = "1", name = "ЗАПАСЫ ОСНОВНОГО ПРОИЗВОДСТВА", description = "Основные производственные запасы", is_active = true },
-            new { code = "2", name = "ТОПЛИВО", description = "Топливные материалы", is_active = true },
-            new { code = "3", name = "ТАРА", description = "Тара и упаковка", is_active = true },
-            new { code = "4", name = "ЗАПЧАСТИ", description = "Запасные части для оборудования", is_active = true },
-            new { code = "5", name = "СТРОЙМАТЕРИАЛЫ", description = "Строительные материалы", is_active = true },
-            new { code = "6", name = "ПРОЧИЕ МАТЕРИАЛЫ", description = "Прочие материалы", is_active = true }
-        };
+            // Данные — в InitialDataProvider.GetMaterialCategories(), здесь только запись.
+            var categories = InitialDataProvider.GetMaterialCategories();
 
             foreach (var cat in categories)
             {
@@ -79,65 +66,288 @@ namespace BIS.ERP.Services
             (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
             VALUES (
                 '{Guid.NewGuid()}',
-                '{cat.code}',
-                '{cat.name.Replace("'", "''")}',
-                '{cat.description?.Replace("'", "''") ?? ""}',
-                {cat.is_active},
+                '{cat.Code}',
+                '{cat.Name.Replace("'", "''")}',
+                '{cat.Description?.Replace("'", "''") ?? ""}',
+                {cat.IsActive.ToString().ToLower()},
                 NOW(),
                 NOW()
             )";
                 await using var ctx = CreateIndependentContext();
                 await ctx.Database.ExecuteSqlRawAsync(sql);
             }
-            System.Diagnostics.Debug.WriteLine($"Добавлено категорий: {categories.Length}");
+            System.Diagnostics.Debug.WriteLine($"Добавлено категорий: {categories.Count}");
         }
 
+        /// <summary>
+        /// План счетов по умолчанию (счета Fox-источника).
+        /// Вставка идемпотентная и не перезаписывает существующие коды, поэтому её можно
+        /// повторять при создании новой инфобазы и при восстановлении пустого плана.
+        /// Раньше цикл падал на колонке level, которой нет в описании справочника,
+        /// ошибки глушились по одной строке, и справочник оставался пустым.
+        /// </summary>
         private async Task AddChartOfAccountsDataToTable(MetadataObject catalog)
         {
+            var tableColumns = await GetCatalogTableColumnsAsync(catalog.TableName);
             var accounts = InitialDataProvider.GetChartOfAccounts();
+            if (tableColumns.Count == 0)
+            {
+                SystemLogService.Warning(
+                    $"План счетов не заполнен: таблица \"{catalog.TableName}\" недоступна.",
+                    nameof(MetadataService));
+                return;
+            }
+
+            var existingCodes = await GetCatalogCodeSetAsync(catalog.TableName);
+            var inserted = 0;
+            var skipped = 0;
+            var failures = new List<string>();
 
             foreach (var account in accounts)
             {
+                if (existingCodes.Contains(account.Code))
+                {
+                    skipped++;
+                    continue;
+                }
+
                 try
                 {
-                    var sql = $@"
-                        INSERT INTO ""{catalog.TableName}"" 
-                        (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"",
-                         ""closing_module_code"", ""analytic_group"", ""print_mode"", ""balance_mode"",
-                         ""link_organizations"", ""link_employees"", ""link_currencies"", ""link_personal_accounts"",
-                         ""link_materials"", ""link_sites"", ""tax_code"",
-                         ""CreatedAt"", ""UpdatedAt"") 
-                        VALUES (
-                            '{Guid.NewGuid()}',
-                            '{EscapeSql(account.Code)}',
-                            '{EscapeSql(account.Name)}',
-                            '{EscapeSql(account.AccountType)}',
-                            '{EscapeSql(account.Description)}',
-                            {account.Level},
-                            true,
-                            {ToSqlLiteral(account.ClosingSubsystemCode == 0 ? null : account.ClosingSubsystemCode.ToString(CultureInfo.InvariantCulture))},
-                            {ToSqlLiteral(account.AnalyticsGroupCode == 0 ? null : account.AnalyticsGroupCode.ToString(CultureInfo.InvariantCulture))},
-                            {ToSqlLiteral(account.PrintModeCode == 0 ? null : account.PrintModeCode.ToString(CultureInfo.InvariantCulture))},
-                            {ToSqlLiteral(account.BalanceModeCode == 0 ? null : account.BalanceModeCode.ToString(CultureInfo.InvariantCulture))},
-                            {account.UseOrganizations.ToString().ToLower()},
-                            {account.UseEmployees.ToString().ToLower()},
-                            {account.UseCurrencies.ToString().ToLower()},
-                            {account.UsePersonalAccounts.ToString().ToLower()},
-                            {account.UseMaterials.ToString().ToLower()},
-                            {account.UseSites.ToString().ToLower()},
-                            {ToSqlLiteral(account.TaxCode == 0 ? null : account.TaxCode.ToString(CultureInfo.InvariantCulture))},
-                            NOW(),
-                            NOW()
-                        )";
-                    await using var ctx = CreateIndependentContext();
-                    await ctx.Database.ExecuteSqlRawAsync(sql);
+                    if (await InsertChartOfAccountsSeedRowAsync(catalog.TableName, tableColumns, account))
+                    {
+                        existingCodes.Add(account.Code);
+                        inserted++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка добавления счета {account.Code}: {ex.Message}");
+                    failures.Add($"{account.Code} {account.Name}: {ex.Message}");
                 }
             }
-            System.Diagnostics.Debug.WriteLine($"Добавлено счетов: {accounts.Count}");
+
+            System.Diagnostics.Debug.WriteLine(
+                $"План счетов: добавлено {inserted} из {accounts.Count}, уже было {skipped}, ошибок {failures.Count}.");
+
+            if (failures.Count > 0)
+            {
+                SystemLogService.Warning(
+                    $"План счетов: не добавлено {failures.Count} счёт(ов) из {accounts.Count}. " +
+                    string.Join("; ", failures.Take(5)),
+                    nameof(MetadataService));
+            }
+        }
+
+        /// <summary>
+        /// Восстанавливает план счетов по умолчанию, если справочник уже есть,
+        /// а строк в нём нет (например, инфобаза создана с ошибкой вставки).
+        /// Непустой план счетов не трогаем: удалённые вручную счета обратно не возвращаем.
+        /// </summary>
+        private async Task EnsureDefaultChartOfAccountsDataAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "План счетов");
+            if (catalog == null)
+                return;
+
+            // Поле «Уровень» убрано из справочника: колонку в таблице больше не держим.
+            await RemoveChartOfAccountsLevelAsync(catalog);
+
+            if (!await IsCatalogTableEmptyAsync(catalog.TableName))
+                return;
+
+            await AddChartOfAccountsDataToTable(catalog);
+        }
+
+        private async Task<bool> IsCatalogTableEmptyAsync(string tableName)
+        {
+            try
+            {
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = $@"SELECT EXISTS (SELECT 1 FROM ""{tableName}"" LIMIT 1);";
+
+                await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    var exists = await command.ExecuteScalarAsync();
+                    return exists is bool hasRows && !hasRows;
+                }
+                finally
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Не удалось проверить заполнение таблицы {tableName}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Убирает поле «Уровень» из плана счетов: строку в MetadataFields и колонку level
+        /// в таблице справочника. Метаданные удаляем первыми — иначе сетка продолжила бы
+        /// выбирать колонку level, которой уже нет в таблице.
+        /// </summary>
+        private async Task RemoveChartOfAccountsLevelAsync(MetadataObject catalog)
+        {
+            try
+            {
+                var levelFields = await _context.MetadataFields
+                    .Where(field => field.MetadataObjectId == catalog.Id &&
+                                    field.DbColumnName.ToLower() == "level")
+                    .ToListAsync();
+
+                if (levelFields.Count > 0)
+                {
+                    // Загруженный граф справочника чистим вручную: колонки грида берутся из него.
+                    foreach (var entry in _context.ChangeTracker.Entries<MetadataObject>()
+                                 .Where(item => item.Entity.Id == catalog.Id))
+                    {
+                        foreach (var field in entry.Entity.Fields
+                                     .Where(item => item.DbColumnName.Equals("level", StringComparison.OrdinalIgnoreCase))
+                                     .ToList())
+                        {
+                            entry.Entity.Fields.Remove(field);
+                        }
+                    }
+
+                    _context.MetadataFields.RemoveRange(levelFields);
+                    await _context.SaveChangesAsync();
+
+                    SystemLogService.Info(
+                        $"План счетов: поле «Уровень» (level) удалено из метаданных справочника \"{catalog.Name}\".",
+                        nameof(MetadataService));
+                }
+
+                var columns = await GetCatalogTableColumnsAsync(catalog.TableName);
+                if (!columns.Contains("level"))
+                    return;
+
+                await _context.Database.ExecuteSqlRawAsync($@"
+                    ALTER TABLE ""{catalog.TableName}""
+                    DROP COLUMN IF EXISTS ""level"";");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Не удалось убрать поле level из плана счетов: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Вставляет один счёт плана счетов, используя только те колонки, которые реально
+        /// есть в таблице: набор полей справочника со временем менялся, и жёсткий список
+        /// колонок не должен ронять наполнение целиком.
+        /// </summary>
+        private async Task<bool> InsertChartOfAccountsSeedRowAsync(
+            string tableName,
+            ISet<string> tableColumns,
+            ChartOfAccount account)
+        {
+            var values = BuildChartOfAccountsSeedRowValues(account)
+                .Where(item => tableColumns.Contains(item.Key))
+                .ToList();
+
+            if (!values.Any(item => item.Key.Equals("code", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("В таблице плана счетов нет колонки code.");
+
+            var columnSql = string.Join(", ", values.Select(item => $@"""{item.Key}"""));
+            var valueSql = string.Join(", ", values.Select(item => ToSqlLiteral(item.Value)));
+
+            var affected = await _context.Database.ExecuteSqlRawAsync($@"
+                INSERT INTO ""{tableName}"" ({columnSql})
+                SELECT {valueSql}
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM ""{tableName}""
+                    WHERE ""code"" = {ToSqlLiteral(account.Code)}
+                );");
+
+            return affected > 0;
+        }
+
+        private static Dictionary<string, object?> BuildChartOfAccountsSeedRowValues(ChartOfAccount account)
+        {
+            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Id"] = Guid.NewGuid(),
+                ["code"] = account.Code,
+                ["name"] = account.Name,
+                ["account_type"] = account.AccountType,
+                ["description"] = string.IsNullOrWhiteSpace(account.Description) ? null : account.Description,
+                ["is_active"] = true,
+                ["closing_module_code"] = account.ClosingSubsystemCode == 0
+                    ? null
+                    : account.ClosingSubsystemCode.ToString(CultureInfo.InvariantCulture),
+                ["analytic_group"] = account.AnalyticsGroupCode == 0
+                    ? null
+                    : account.AnalyticsGroupCode.ToString(CultureInfo.InvariantCulture),
+                ["print_mode"] = account.PrintModeCode == 0
+                    ? null
+                    : account.PrintModeCode.ToString(CultureInfo.InvariantCulture),
+                ["balance_mode"] = account.BalanceModeCode == 0
+                    ? null
+                    : account.BalanceModeCode.ToString(CultureInfo.InvariantCulture),
+                ["link_organizations"] = account.UseOrganizations,
+                ["link_employees"] = account.UseEmployees,
+                ["link_currencies"] = account.UseCurrencies,
+                ["link_personal_accounts"] = account.UsePersonalAccounts,
+                ["link_materials"] = account.UseMaterials,
+                ["link_sites"] = account.UseSites,
+                ["tax_code"] = account.TaxCode == 0
+                    ? null
+                    : account.TaxCode.ToString(CultureInfo.InvariantCulture),
+                ["CreatedAt"] = DateTime.UtcNow,
+                ["UpdatedAt"] = DateTime.UtcNow
+            };
+        }
+
+        private async Task<HashSet<string>> GetCatalogTableColumnsAsync(string tableName)
+        {
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                // to_regclass резолвит имя таблицы так же, как INSERT, поэтому
+                // набор колонок всегда соответствует той таблице, в которую пишем.
+                command.CommandText = $@"
+                    SELECT attname
+                    FROM pg_attribute
+                    WHERE attrelid = to_regclass('""{EscapeSql(tableName)}""')
+                      AND attnum > 0
+                      AND NOT attisdropped";
+
+                await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        if (reader.IsDBNull(0))
+                            continue;
+
+                        columns.Add(reader.GetString(0));
+                    }
+                }
+                finally
+                {
+                    await _context.Database.CloseConnectionAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Не удалось прочитать колонки таблицы {tableName}: {ex.Message}");
+            }
+
+            return columns;
         }
 
         public async Task EnsureCashOrderPostingAccountsAsync()
@@ -147,21 +357,28 @@ namespace BIS.ERP.Services
             if (catalog == null)
                 return;
 
+            // План счетов по умолчанию мог не заполниться при создании инфобазы —
+            // восстанавливаем его, пока справочник пуст.
+            await EnsureDefaultChartOfAccountsDataAsync();
+
             var accounts = InitialDataProvider.GetChartOfAccounts()
-                .Where(item => item.Code is "4010" or "6010" or "6810" or "6850");
+                // Коды 8-значные XXXXXXXX: синтетика — первые 4 знака (3010, 4010, 6010, 6810, 6850).
+                .Where(item => item.Code is not null && item.Code.Length >= 4 &&
+                    (item.Code.StartsWith("3010") || item.Code.StartsWith("4010") ||
+                     item.Code.StartsWith("6010") || item.Code.StartsWith("6810") ||
+                     item.Code.StartsWith("6850")));
 
             foreach (var account in accounts)
             {
                 var sql = $@"
                     INSERT INTO ""{catalog.TableName}""
-                    (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""level"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                    (""Id"", ""code"", ""name"", ""account_type"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
                     SELECT
                         '{Guid.NewGuid()}',
                         '{EscapeSql(account.Code)}',
                         '{EscapeSql(account.Name)}',
                         '{EscapeSql(account.AccountType)}',
                         '{EscapeSql(account.Description)}',
-                        {account.Level},
                         true,
                         NOW(),
                         NOW()
@@ -239,23 +456,8 @@ namespace BIS.ERP.Services
 
         private async Task AddMaterialTypesDataToTable(MetadataObject catalog)
         {
-            var materialTypes = new[]
-            {
-        new { code = "1", name = "ОС", description = "Основные средства", is_active = true },
-        new { code = "2", name = "Малоценка", description = "Малоценные предметы", is_active = true },
-        new { code = "3", name = "Прочие материалы", description = "Прочие материалы", is_active = true },
-        new { code = "8", name = "Спец.одежда", description = "Специальная одежда", is_active = true },
-        new { code = "9", name = "Бензин, л", description = "Бензин в литрах", is_active = true },
-        new { code = "10", name = "Див. топливо, л", description = "Дизельное топливо в литрах", is_active = true },
-        new { code = "11", name = "Авто Масла и про", description = "Автомасла и прочие жидкости", is_active = true },
-        new { code = "12", name = "Сера, кг", description = "Сера в килограммах", is_active = true },
-        new { code = "13", name = "Тринатрий фосфат, кг", description = "Тринатрий фосфат в кг", is_active = true },
-        new { code = "14", name = "Известь хлорная, кг", description = "Известь хлорная в кг", is_active = true },
-        new { code = "15", name = "Жир технический, кг", description = "Жир технический в кг", is_active = true },
-        new { code = "16", name = "Мешки 50 кг, шт", description = "Мешки 50 кг в штуках", is_active = true },
-        new { code = "17", name = "Мешки 25 кг, шт", description = "Мешки 25 кг в штуках", is_active = true },
-        new { code = "18", name = "Бирки для мешков 25 кг, л", description = "Бирки для мешков 25 кг", is_active = true }
-    };
+            // Данные — InitialDataProvider.GetMaterialTypes().
+            var materialTypes = InitialDataProvider.GetMaterialTypes();
 
             foreach (var type in materialTypes)
             {
@@ -264,16 +466,16 @@ namespace BIS.ERP.Services
             (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
             VALUES (
                 '{Guid.NewGuid()}',
-                '{type.code}',
-                '{type.name.Replace("'", "''")}',
-                '{type.description?.Replace("'", "''") ?? ""}',
-                {type.is_active.ToString().ToLower()},
+                '{type.Code}',
+                '{type.Name.Replace("'", "''")}',
+                '{type.Description?.Replace("'", "''") ?? ""}',
+                {type.IsActive.ToString().ToLower()},
                 NOW(),
                 NOW()
             )";
                 await _context.Database.ExecuteSqlRawAsync(sql);
             }
-            System.Diagnostics.Debug.WriteLine($"Добавлено видов материалов: {materialTypes.Length}");
+            System.Diagnostics.Debug.WriteLine($"Добавлено видов материалов: {materialTypes.Count}");
         }
 
         private async Task AddCountriesDataToTable(MetadataObject catalog)
@@ -498,8 +700,24 @@ namespace BIS.ERP.Services
 
         private async Task AddInitialCashDeskData(MetadataObject catalog)
         {
-            await Task.CompletedTask;
-            System.Diagnostics.Debug.WriteLine("Автоматическое создание кассы пропущено: счет кассы задается пользователем в справочнике касс.");
+            // Данные — InitialDataProvider.GetCashDesks().
+            var cashDesks = InitialDataProvider.GetCashDesks();
+
+            foreach (var desk in cashDesks)
+            {
+                await UpsertCatalogSeedRowAsync(catalog.TableName, desk.Code, new Dictionary<string, object?>
+                {
+                    ["Id"] = Guid.NewGuid(),
+                    ["code"] = desk.Code,
+                    ["name"] = desk.Name,
+                    ["description"] = desk.Description,
+                    ["is_active"] = desk.IsActive,
+                    ["CreatedAt"] = DateTime.UtcNow,
+                    ["UpdatedAt"] = DateTime.UtcNow
+                });
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Добавлено касс: {cashDesks.Count}");
         }
 
         private async Task AddPrimaryOrganizationDataToTable(MetadataObject catalog)
@@ -687,32 +905,27 @@ namespace BIS.ERP.Services
         // Начальные данные для справочника "Группы"
         private async Task AddOrganizationGroupsDataToTable(MetadataObject catalog)
         {
-            var groups = new[]
-            {
-                new { code = "REPUBLIC_BUDGET", name = "Республиканский бюджет", description = "", is_active = true },
-                new { code = "LOCAL_BUDGET", name = "Местный бюджет", description = "", is_active = true },
-                new { code = "HOUSING_MANAGEMENT", name = "Жилкомбинаты", description = "", is_active = true },
-                new { code = "OTHER", name = "Прочие", description = "", is_active = true }
-            };
+            // Данные — InitialDataProvider.GetOrganizationGroups().
+            var groups = InitialDataProvider.GetOrganizationGroups();
 
             foreach (var group in groups)
             {
                 try
                 {
-                    await InsertCatalogSeedRowIfMissingAsync(catalog.TableName, group.code, new Dictionary<string, object?>
+                    await UpsertCatalogSeedRowAsync(catalog.TableName, group.Code, new Dictionary<string, object?>
                     {
                         ["Id"] = Guid.NewGuid(),
-                        ["code"] = group.code,
-                        ["name"] = group.name,
-                        ["description"] = group.description,
-                        ["is_active"] = group.is_active,
+                        ["code"] = group.Code,
+                        ["name"] = group.Name,
+                        ["description"] = group.Description,
+                        ["is_active"] = group.IsActive,
                         ["CreatedAt"] = DateTime.UtcNow,
                         ["UpdatedAt"] = DateTime.UtcNow
                     });
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения группы {group.code}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения группы {group.Code}: {ex.Message}");
                 }
             }
         }
@@ -721,43 +934,34 @@ namespace BIS.ERP.Services
         private async Task AddTaxDataToTable(MetadataObject catalog)
         {
             var tableName = catalog.TableName;
-            var taxes = new[]
-            {
-        new { code = "НДС12", name = "НДС 12%", rate = 12m, esf_vat_code = "10", esf_sales_tax_code = "", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "", is_active = true, sort_order = 1, is_default_vat = true, is_default_sales_tax = false },
-        new { code = "НДС0", name = "НДС 0%", rate = 0m, esf_vat_code = "10", esf_sales_tax_code = "", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "", is_active = true, sort_order = 2, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "WITHOUT_TAX", name = "Без НДС / освобождено", rate = 0m, esf_vat_code = "90", esf_sales_tax_code = "50", vat_payable_account = "34300000", vat_recoverable_account = "15400000", sales_tax_account = "34004000", is_active = true, sort_order = 3, is_default_vat = false, is_default_sales_tax = true },
-        new { code = "SALES_TAX", name = "Налог с продаж (базовый режим)", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 4, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_SERVICE", name = "Налог с продаж: услуги (неторг. деятельность)", rate = 2.5m, esf_vat_code = "", esf_sales_tax_code = "70", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 5, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_TRADE", name = "Налог с продаж: торговая деятельность", rate = 1.5m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 6, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_EXEMPT", name = "Налог с продаж: необлагаемая деятельность", rate = 0m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 7, is_default_vat = false, is_default_sales_tax = false },
-        new { code = "SALES_RETAIL_2009", name = "Налог с продаж: розничная продажа до 2009", rate = 4m, esf_vat_code = "", esf_sales_tax_code = "50", vat_payable_account = "", vat_recoverable_account = "", sales_tax_account = "34004000", is_active = true, sort_order = 8, is_default_vat = false, is_default_sales_tax = false }
-        };
+            // Данные — InitialDataProvider.GetTaxes().
+            var taxes = InitialDataProvider.GetTaxes();
 
             foreach (var tax in taxes)
             {
                 try
                 {
-                    await UpsertCatalogSeedRowAsync(tableName, tax.code, new Dictionary<string, object?>
+                    await UpsertCatalogSeedRowAsync(tableName, tax.Code, new Dictionary<string, object?>
                     {
-                        ["code"] = tax.code,
-                        ["name"] = tax.name,
-                        ["rate"] = tax.rate,
-                        ["esf_vat_code"] = tax.esf_vat_code,
-                        ["esf_sales_tax_code"] = tax.esf_sales_tax_code,
-                        ["vat_payable_account"] = tax.vat_payable_account,
-                        ["vat_recoverable_account"] = tax.vat_recoverable_account,
-                        ["sales_tax_account"] = tax.sales_tax_account,
-                        ["is_active"] = tax.is_active,
-                        ["sort_order"] = tax.sort_order,
-                        ["is_default_vat"] = tax.is_default_vat,
-                        ["is_default_sales_tax"] = tax.is_default_sales_tax,
+                        ["code"] = tax.Code,
+                        ["name"] = tax.Name,
+                        ["rate"] = tax.Rate,
+                        ["esf_vat_code"] = tax.EsfVatCode,
+                        ["esf_sales_tax_code"] = tax.EsfSalesTaxCode,
+                        ["vat_payable_account"] = tax.VatPayableAccount,
+                        ["vat_recoverable_account"] = tax.VatRecoverableAccount,
+                        ["sales_tax_account"] = tax.SalesTaxAccount,
+                        ["is_active"] = tax.IsActive,
+                        ["sort_order"] = tax.SortOrder,
+                        ["is_default_vat"] = tax.IsDefaultVat,
+                        ["is_default_sales_tax"] = tax.IsDefaultSalesTax,
                         ["CreatedAt"] = DateTime.UtcNow,
                         ["UpdatedAt"] = DateTime.UtcNow
                     });
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {tax.code}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {tax.Code}: {ex.Message}");
                 }
             }
         }
@@ -768,33 +972,29 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             await NormalizeDeliveryKindSeedCodesAsync(tableName);
 
-            var items = new[]
-            {
-            new { code = "1", name = "Поставка товаров", description = "Используется для стандартной товарной поставки ЭСФ.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
-            new { code = "2", name = "Работы / услуги", description = "Наблюдалось в FoxPro-выгрузках как код 101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
-            new { code = "3", name = "Прочая поставка", description = "Наблюдалось в FoxPro-выгрузках как код 299.", esf_code = "299", is_active = true, sort_order = 3, is_default = false }
-            };
+            // Данные — InitialDataProvider.GetSupplyKinds().
+            var items = InitialDataProvider.GetSupplyKinds();
 
             foreach (var item in items)
             {
                 try
                 {
-                    await UpsertCatalogSeedRowAsync(tableName, item.code, new Dictionary<string, object?>
+                    await UpsertCatalogSeedRowAsync(tableName, item.Code, new Dictionary<string, object?>
                     {
-                        ["code"] = item.code,
-                        ["name"] = item.name,
-                        ["description"] = item.description,
-                        ["esf_code"] = item.esf_code,
-                        ["is_active"] = item.is_active,
-                        ["sort_order"] = item.sort_order,
-                        ["is_default"] = item.is_default,
+                        ["code"] = item.Code,
+                        ["name"] = item.Name,
+                        ["description"] = item.Description,
+                        ["esf_code"] = item.EsfCode,
+                        ["is_active"] = item.IsActive,
+                        ["sort_order"] = item.SortOrder,
+                        ["is_default"] = item.IsDefault,
                         ["CreatedAt"] = DateTime.UtcNow,
                         ["UpdatedAt"] = DateTime.UtcNow
                     });
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.Code}: {ex.Message}");
                 }
             }
 
@@ -961,33 +1161,28 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             await NormalizePaymentKindSeedCodesAsync(tableName);
 
-            var items = new[]
-            {
-            new { code = "1", name = "Наличные", rate = 0m, esf_code = "10", is_active = true, is_default = false },
-            new { code = "2", name = "Банковская карта", rate = 0m, esf_code = "11", is_active = true, is_default = false },
-            new { code = "3", name = "Безналичный перевод", rate = 0m, esf_code = "20", is_active = true, is_default = true },
-            new { code = "4", name = "Чек", rate = 0m, esf_code = "30", is_active = true, is_default = false }
-            };
+            // Данные — InitialDataProvider.GetPaymentKinds().
+            var items = InitialDataProvider.GetPaymentKinds();
 
             foreach (var item in items)
             {
                 try
                 {
-                    await UpsertCatalogSeedRowAsync(tableName, item.code, new Dictionary<string, object?>
+                    await UpsertCatalogSeedRowAsync(tableName, item.Code, new Dictionary<string, object?>
                     {
-                        ["code"] = item.code,
-                        ["name"] = item.name,
-                        ["rate"] = item.rate,
-                        ["esf_code"] = item.esf_code,
-                        ["is_active"] = item.is_active,
-                        ["is_default"] = item.is_default,
+                        ["code"] = item.Code,
+                        ["name"] = item.Name,
+                        ["rate"] = item.Rate,
+                        ["esf_code"] = item.EsfCode,
+                        ["is_active"] = item.IsActive,
+                        ["is_default"] = item.IsDefault,
                         ["CreatedAt"] = DateTime.UtcNow,
                         ["UpdatedAt"] = DateTime.UtcNow
                     });
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.Code}: {ex.Message}");
                 }
             }
 
@@ -1002,34 +1197,29 @@ namespace BIS.ERP.Services
             var tableName = catalog.TableName;
             await NormalizeDeliveryTypeSeedCodesAsync(tableName);
 
-            var items = new[]
-            {
-                new { code = "1", name = "Облагаемая поставка", description = "FoxPro/XML: vatDeliveryTypeCode=100.", esf_code = "100", is_active = true, sort_order = 1, is_default = true },
-                new { code = "2", name = "Необлагаемая / без НДС", description = "FoxPro/XML: vatDeliveryTypeCode=101.", esf_code = "101", is_active = true, sort_order = 2, is_default = false },
-                new { code = "3", name = "Импорт", description = "Резерв под vatDeliveryTypeCode=200.", esf_code = "200", is_active = true, sort_order = 3, is_default = false },
-                new { code = "4", name = "Экспорт", description = "Резерв под vatDeliveryTypeCode=300.", esf_code = "300", is_active = true, sort_order = 4, is_default = false }
-            };
+            // Данные — InitialDataProvider.GetDeliveryTypes().
+            var items = InitialDataProvider.GetDeliveryTypes();
 
             foreach (var item in items)
             {
                 try
                 {
-                    await UpsertCatalogSeedRowAsync(tableName, item.code, new Dictionary<string, object?>
+                    await UpsertCatalogSeedRowAsync(tableName, item.Code, new Dictionary<string, object?>
                     {
-                        ["code"] = item.code,
-                        ["name"] = item.name,
-                        ["description"] = item.description,
-                        ["esf_code"] = item.esf_code,
-                        ["is_active"] = item.is_active,
-                        ["sort_order"] = item.sort_order,
-                        ["is_default"] = item.is_default,
+                        ["code"] = item.Code,
+                        ["name"] = item.Name,
+                        ["description"] = item.Description,
+                        ["esf_code"] = item.EsfCode,
+                        ["is_active"] = item.IsActive,
+                        ["sort_order"] = item.SortOrder,
+                        ["is_default"] = item.IsDefault,
                         ["CreatedAt"] = DateTime.UtcNow,
                         ["UpdatedAt"] = DateTime.UtcNow
                     });
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.code}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"Ошибка заполнения {item.Code}: {ex.Message}");
                 }
             }
 
@@ -1107,12 +1297,9 @@ namespace BIS.ERP.Services
         // Начальные данные для справочника "Должности"
         private async Task AddPositionDataToTable(MetadataObject catalog)
         {
-            var positions = new[]
-            {
-                new { code = "1", name = "Директор", description = "Генеральный директор", is_active = true },
-                new { code = "2", name = "Бухгалтер", description = "Главный бухгалтер", is_active = true },
-                new { code = "3", name = "Экономист", description = "Экономист", is_active = true }
-            };
+            // Данные — InitialDataProvider.GetPositions().
+            var positions = InitialDataProvider.GetPositions();
+
 
             foreach (var position in positions)
             {
@@ -1121,16 +1308,16 @@ namespace BIS.ERP.Services
             (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
             VALUES (
                 '{Guid.NewGuid()}',
-                '{position.code}',
-                '{position.name.Replace("'", "''")}',
-                '{position.description?.Replace("'", "''") ?? ""}',
-                {position.is_active.ToString().ToLower()},
+                '{position.Code}',
+                '{position.Name.Replace("'", "''")}',
+                '{position.Description?.Replace("'", "''") ?? ""}',
+                {position.IsActive.ToString().ToLower()},
                 NOW(),
                 NOW()
             )";
                 await _context.Database.ExecuteSqlRawAsync(sql);
             }
-            System.Diagnostics.Debug.WriteLine($"Добавлено должностей: {positions.Length}");
+            System.Diagnostics.Debug.WriteLine($"Добавлено должностей: {positions.Count}");
         }
 
         private static string EscapeSql(string value)
@@ -1138,7 +1325,7 @@ namespace BIS.ERP.Services
             return (value ?? string.Empty).Replace("'", "''");
         }
 
-        private async Task InsertCatalogSeedRowIfMissingAsync(
+        private async Task UpsertCatalogSeedRowAsync(
             string tableName,
             string code,
             IReadOnlyDictionary<string, object?> values)
@@ -1252,15 +1439,8 @@ namespace BIS.ERP.Services
 
         private async Task AddSiteDataToTable(MetadataObject catalog)
         {
-            var sites = new[]
-            {
-                new { code = "01", name = "Цех основной", desc = "Основной производственный цех", active = true },
-                new { code = "02", name = "Склад", desc = "Склад готовой продукции", active = true },
-                new { code = "03", name = "Администрация", desc = "Административный участок", active = true },
-                new { code = "04", name = "Торговый зал", desc = "Торговый зал / магазин", active = true },
-                new { code = "05", name = "Транспортный цех", desc = "Транспортный участок", active = true }
-            };
-
+            // Данные — InitialDataProvider.GetSites().
+            var sites = InitialDataProvider.GetSites();
             foreach (var site in sites)
             {
                 var sql = $@"
@@ -1268,16 +1448,18 @@ namespace BIS.ERP.Services
                     (""Id"", ""site_code"", ""site_name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"")
                     VALUES (
                         '{Guid.NewGuid()}',
-                        '{site.code}',
-                        '{site.name.Replace("'", "''")}',
-                        '{site.desc.Replace("'", "''")}',
-                        {site.active.ToString().ToLower()},
+                        '{site.Code}',
+                        '{site.Name.Replace("'", "''")}',
+                        '{site.Description.Replace("'", "''")}',
+                        {site.IsActive.ToString().ToLower()},
                         NOW(),
                         NOW()
                     )";
                 await _context.Database.ExecuteSqlRawAsync(sql);
             }
-            System.Diagnostics.Debug.WriteLine($"Добавлено участков: {sites.Length}");
+            System.Diagnostics.Debug.WriteLine($"Добавлено участков: {sites.Count}");
         }
     }
 }
+
+

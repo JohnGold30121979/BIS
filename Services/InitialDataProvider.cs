@@ -430,190 +430,306 @@ namespace BIS.ERP.Services
         public static List<Bank> GetBanks()
         {
             return new List<Bank>
-    {
-        new Bank {
-            Code = "1",
-            Name = "Открытое акционерное общество «Кыргызкоммерцбанк»",
-            BIC = "105001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Шопокова, 101",
-            Phone = "+996 312 33 30 00",
-            Swift = "KAKYKG22XXX",
-            Chips = "",
-            AddressEng = "101 Shopokova str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "2",
-            Name = "Открытое акционерное общество «Мбанк»",
-            BIC = "125001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Тоголок Молдо, 54а",
-            Phone = "+996 312 61 33 33",
-            Swift = "",
-            Chips = "",
-            AddressEng = "54a Togolok Moldo str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "3",
-            Name = "Открытое акционерное общество «Оптима Банк»",
-            BIC = "109001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, пр. Чынгыза Айтматова, 95/1",
-            Phone = "+996 312 90 59 59",
-            Swift = "ENEJKG22",
-            Chips = "",
-            AddressEng = "95/1 Chyngyz Aitmatov ave., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "4",
-            Name = "Открытое акционерное общество «Дос-Кредобанк»",
-            BIC = "121001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, пр. Чуй, 92, 6 этаж",
-            Phone = "8686",
-            Swift = "",
-            Chips = "",
-            AddressEng = "92 Chuy ave., 6th floor, Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "5",
-            Name = "Открытое акционерное общество «РСК Банк»",
-            BIC = "129001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Московская, 80/1",
-            Phone = "+996 312 65 67 46",
-            Swift = "",
-            Chips = "",
-            AddressEng = "80/1 Moskovskaya str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "6",
-            Name = "Открытое акционерное общество «Керемет Банк»",
-            BIC = "118001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Тоголок Молдо, 40/4",
-            Phone = "+996 312 31 31 73",
-            Swift = "",
-            Chips = "",
-            AddressEng = "40/4 Togolok Moldo str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "7",
-            Name = "Открытое акционерное общество «БАКАЙ БАНК»",
-            BIC = "106001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Мичурина, 56",
-            Phone = "+996 312 61 00 61",
-            Swift = "",
-            Chips = "",
-            AddressEng = "56 Michurina str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "8",
-            Name = "Открытое акционерное общество «Айыл Банк»",
-            BIC = "133001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Логвиненко, 14",
-            Phone = "+996 312 66 52 78",
-            Swift = "",
-            Chips = "",
-            AddressEng = "14 Logvinenko str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "9",
-            Name = "Открытое акционерное общество «Капитал Банк»",
-            BIC = "113001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Московская, 161",
-            Phone = "+996 312 31 30 30",
-            Swift = "",
-            Chips = "",
-            AddressEng = "161 Moskovskaya str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "10",
-            Name = "Закрытое акционерное общество «Банк Азии»",
-            BIC = "112001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, пр. Ч.Айтматова, 303",
-            Phone = "+996 312 55 00 01",
-            Swift = "",
-            Chips = "",
-            AddressEng = "303 Ch.Aitmatov ave., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "11",
-            Name = "Закрытое акционерное общество «ФИНКА Банк»",
-            BIC = "131001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Шопокова, 93/2",
-            Phone = "+996 312 44 04 40",
-            Swift = "",
-            Chips = "",
-            AddressEng = "93/2 Shopokova str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "12",
-            Name = "Закрытое акционерное общество «Банк Компаньон»",
-            BIC = "117001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, ул. Шота Руставели, 62",
-            Phone = "+996 312 97 99 79",
-            Swift = "",
-            Chips = "",
-            AddressEng = "62 Shota Rustaveli str., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "13",
-            Name = "Закрытое акционерное общество «Кыргызский Инвестиционно-Кредитный Банк»",
-            BIC = "119001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, бульвар Эркиндик, 21",
-            Phone = "+996 312 62 01 01",
-            Swift = "",
-            Chips = "",
-            AddressEng = "21 Erkindik blvd., Bishkek",
-            IsActive = true,
-            Description = ""
-        },
-        new Bank {
-            Code = "14",
-            Name = "Закрытое акционерное общество «Демир Кыргыз Интернэшнл Банк»",
-            BIC = "118001",
-            Branch = "Головной офис",
-            Address = "г. Бишкек, пр. Чуй, 245",
-            Phone = "+996 312 61 06 10",
-            Swift = "",
-            Chips = "",
-            AddressEng = "245 Chuy ave., Bishkek",
-            IsActive = true,
-            Description = ""
+            {
+                new Bank {
+                    Code = "1",
+                    Name = "Открытое акционерное общество «Кыргызкоммерцбанк»",
+                    BIC = "105001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Шопокова, 101",
+                    Phone = "+996 312 33 30 00",
+                    Swift = "KAKYKG22XXX",
+                    Chips = "",
+                    AddressEng = "101 Shopokova str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "2",
+                    Name = "Открытое акционерное общество «Мбанк»",
+                    BIC = "125001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Тоголок Молдо, 54а",
+                    Phone = "+996 312 61 33 33",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "54a Togolok Moldo str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "3",
+                    Name = "Открытое акционерное общество «Оптима Банк»",
+                    BIC = "109001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, пр. Чынгыза Айтматова, 95/1",
+                    Phone = "+996 312 90 59 59",
+                    Swift = "ENEJKG22",
+                    Chips = "",
+                    AddressEng = "95/1 Chyngyz Aitmatov ave., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "4",
+                    Name = "Открытое акционерное общество «Дос-Кредобанк»",
+                    BIC = "121001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, пр. Чуй, 92, 6 этаж",
+                    Phone = "8686",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "92 Chuy ave., 6th floor, Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "5",
+                    Name = "Открытое акционерное общество «РСК Банк»",
+                    BIC = "129001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Московская, 80/1",
+                    Phone = "+996 312 65 67 46",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "80/1 Moskovskaya str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "6",
+                    Name = "Открытое акционерное общество «Керемет Банк»",
+                    BIC = "118001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Тоголок Молдо, 40/4",
+                    Phone = "+996 312 31 31 73",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "40/4 Togolok Moldo str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "7",
+                    Name = "Открытое акционерное общество «БАКАЙ БАНК»",
+                    BIC = "106001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Мичурина, 56",
+                    Phone = "+996 312 61 00 61",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "56 Michurina str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "8",
+                    Name = "Открытое акционерное общество «Айыл Банк»",
+                    BIC = "133001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Логвиненко, 14",
+                    Phone = "+996 312 66 52 78",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "14 Logvinenko str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "9",
+                    Name = "Открытое акционерное общество «Капитал Банк»",
+                    BIC = "113001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Московская, 161",
+                    Phone = "+996 312 31 30 30",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "161 Moskovskaya str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "10",
+                    Name = "Закрытое акционерное общество «Банк Азии»",
+                    BIC = "112001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, пр. Ч.Айтматова, 303",
+                    Phone = "+996 312 55 00 01",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "303 Ch.Aitmatov ave., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "11",
+                    Name = "Закрытое акционерное общество «ФИНКА Банк»",
+                    BIC = "131001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Шопокова, 93/2",
+                    Phone = "+996 312 44 04 40",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "93/2 Shopokova str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "12",
+                    Name = "Закрытое акционерное общество «Банк Компаньон»",
+                    BIC = "117001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, ул. Шота Руставели, 62",
+                    Phone = "+996 312 97 99 79",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "62 Shota Rustaveli str., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "13",
+                    Name = "Закрытое акционерное общество «Кыргызский Инвестиционно-Кредитный Банк»",
+                    BIC = "119001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, бульвар Эркиндик, 21",
+                    Phone = "+996 312 62 01 01",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "21 Erkindik blvd., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                },
+                new Bank {
+                    Code = "14",
+                    Name = "Закрытое акционерное общество «Демир Кыргыз Интернэшнл Банк»",
+                    BIC = "118001",
+                    Branch = "Головной офис",
+                    Address = "г. Бишкек, пр. Чуй, 245",
+                    Phone = "+996 312 61 06 10",
+                    Swift = "",
+                    Chips = "",
+                    AddressEng = "245 Chuy ave., Bishkek",
+                    IsActive = true,
+                    Description = ""
+                }
+            };
         }
-    };
-        }
+        // ===== Единый источник начальных данных мелких справочников =====
+        // DataSeed только пишет в БД, массивы — только здесь.
+        public sealed record SeedCurrency(string Code, string Name, string Symbol, decimal Rate, bool IsBase, bool IsActive);
+        public sealed record SeedCategory(string Code, string Name, string Description, bool IsActive);
+        public sealed record SeedPosition(string Code, string Name, string Description, bool IsActive);
+        public sealed record SeedSite(string Code, string Name, string Description, bool IsActive);
+        public sealed record SeedGroup(string Code, string Name, string Description, bool IsActive);
+        public sealed record SeedCashDesk(string Code, string Name, string Description, bool IsActive);
+        public sealed record SeedSupplyKind(string Code, string Name, string Description, string EsfCode, bool IsActive, int SortOrder, bool IsDefault);
+        public sealed record SeedPaymentKind(string Code, string Name, decimal Rate, string EsfCode, bool IsActive, bool IsDefault);
+        public sealed record SeedDeliveryType(string Code, string Name, string Description, string EsfCode, bool IsActive, int SortOrder, bool IsDefault);
+        public sealed record SeedTax(string Code, string Name, decimal Rate, string EsfVatCode, string EsfSalesTaxCode, string VatPayableAccount, string VatRecoverableAccount, string SalesTaxAccount, bool IsActive, int SortOrder, bool IsDefaultVat, bool IsDefaultSalesTax);
+
+        public static IReadOnlyList<SeedCurrency> GetCurrencies() => new[]
+        {
+            new SeedCurrency("KGS", "Киргизский сом", "с", 1.0000m, true, true),
+            new SeedCurrency("USD", "Доллар США", "$", 0.0000m, false, true),
+            new SeedCurrency("EUR", "Евро", "€", 0.0000m, false, true),
+            new SeedCurrency("KZT", "Казахстанский тенге", "₸", 0.0000m, false, true),
+            new SeedCurrency("RUB", "Российский рубль", "₽", 0.0000m, false, true),
+        };
+
+        public static IReadOnlyList<SeedCategory> GetMaterialCategories() => new[]
+        {
+            new SeedCategory("1", "ЗАПАСЫ ОСНОВНОГО ПРОИЗВОДСТВА", "Основные производственные запасы", true),
+            new SeedCategory("2", "ТОПЛИВО", "Топливные материалы", true),
+            new SeedCategory("3", "ТАРА", "Тара и упаковка", true),
+            new SeedCategory("4", "ЗАПЧАСТИ", "Запасные части для оборудования", true),
+            new SeedCategory("5", "СТРОЙМАТЕРИАЛЫ", "Строительные материалы", true),
+            new SeedCategory("6", "ПРОЧИЕ МАТЕРИАЛЫ", "Прочие материалы", true),
+        };
+
+        public static IReadOnlyList<SeedPosition> GetPositions() => new[]
+        {
+            new SeedPosition("1", "Директор", "Генеральный директор", true),
+            new SeedPosition("2", "Бухгалтер", "Главный бухгалтер", true),
+            new SeedPosition("3", "Экономист", "Экономист", true),
+        };
+
+        public static IReadOnlyList<SeedSite> GetSites() => new[]
+        {
+            new SeedSite("01", "Цех основной", "Основной производственный цех", true),
+            new SeedSite("02", "Склад", "Склад готовой продукции", true),
+            new SeedSite("03", "Администрация", "Административный участок", true),
+            new SeedSite("04", "Торговый зал", "Торговый зал / магазин", true),
+            new SeedSite("05", "Транспортный цех", "Транспортный участок", true),
+        };
+
+        public static IReadOnlyList<SeedGroup> GetOrganizationGroups() => new[]
+        {
+            new SeedGroup("REPUBLIC_BUDGET", "Республиканский бюджет", "", true),
+            new SeedGroup("LOCAL_BUDGET", "Местный бюджет", "", true),
+            new SeedGroup("HOUSING_MANAGEMENT", "Жилкомбинаты", "", true),
+            new SeedGroup("OTHER", "Прочие", "", true),
+        };
+
+        public static IReadOnlyList<SeedCashDesk> GetCashDesks() => new[]
+        {
+            new SeedCashDesk("1", "Основная касса (сомы)",
+                "Основная касса предприятия для операций в национальной валюте", true),
+        };
+
+        public static IReadOnlyList<SeedSupplyKind> GetSupplyKinds() => new[]
+        {
+            new SeedSupplyKind("1", "Поставка товаров", "Используется для стандартной товарной поставки ЭСФ.", "100", true, 1, true),
+            new SeedSupplyKind("2", "Работы / услуги", "Наблюдалось в FoxPro-выгрузках как код 101.", "101", true, 2, false),
+            new SeedSupplyKind("3", "Прочая поставка", "Наблюдалось в FoxPro-выгрузках как код 299.", "299", true, 3, false),
+        };
+
+        public static IReadOnlyList<SeedPaymentKind> GetPaymentKinds() => new[]
+        {
+            new SeedPaymentKind("1", "Наличные", 0m, "10", true, false),
+            new SeedPaymentKind("2", "Банковская карта", 0m, "11", true, false),
+            new SeedPaymentKind("3", "Безналичный перевод", 0m, "20", true, true),
+            new SeedPaymentKind("4", "Чек", 0m, "30", true, false),
+        };
+
+        public static IReadOnlyList<SeedDeliveryType> GetDeliveryTypes() => new[]
+        {
+            new SeedDeliveryType("1", "Облагаемая поставка", "FoxPro/XML: vatDeliveryTypeCode=100.", "100", true, 1, true),
+            new SeedDeliveryType("2", "Необлагаемая / без НДС", "FoxPro/XML: vatDeliveryTypeCode=101.", "101", true, 2, false),
+            new SeedDeliveryType("3", "Импорт", "Резерв под vatDeliveryTypeCode=200.", "200", true, 3, false),
+            new SeedDeliveryType("4", "Экспорт", "Резерв под vatDeliveryTypeCode=300.", "300", true, 4, false),
+        };
+
+        public static IReadOnlyList<SeedTax> GetTaxes() => new[]
+        {
+            new SeedTax("НДС12", "НДС 12%", 12m, "10", "", "34300000", "15400000", "", true, 1, true, false),
+            new SeedTax("НДС0", "НДС 0%", 0m, "10", "", "34300000", "15400000", "", true, 2, false, false),
+            new SeedTax("WITHOUT_TAX", "Без НДС / освобождено", 0m, "90", "50", "34300000", "15400000", "34004000", true, 3, false, true),
+            new SeedTax("SALES_TAX", "Налог с продаж (базовый режим)", 1.5m, "", "50", "", "", "34004000", true, 4, false, false),
+            new SeedTax("SALES_SERVICE", "Налог с продаж: услуги (неторг. деятельность)", 2.5m, "", "70", "", "", "34004000", true, 5, false, false),
+            new SeedTax("SALES_TRADE", "Налог с продаж: торговая деятельность", 1.5m, "", "50", "", "", "34004000", true, 6, false, false),
+            new SeedTax("SALES_EXEMPT", "Налог с продаж: необлагаемая деятельность", 0m, "", "50", "", "", "34004000", true, 7, false, false),
+            new SeedTax("SALES_RETAIL_2009", "Налог с продаж: розничная продажа до 2009", 4m, "", "50", "", "", "34004000", true, 8, false, false),
+        };
+
+        public sealed record SeedMaterialType(string Code, string Name, string Description, bool IsActive);
+
+        public static IReadOnlyList<SeedMaterialType> GetMaterialTypes() => new[]
+        {
+            new SeedMaterialType("1", "ОС", "Основные средства", true),
+            new SeedMaterialType("2", "Малоценка", "Малоценные предметы", true),
+            new SeedMaterialType("3", "Прочие материалы", "Прочие материалы", true),
+            new SeedMaterialType("8", "Спец.одежда", "Специальная одежда", true),
+            new SeedMaterialType("9", "Бензин, л", "Бензин в литрах", true),
+            new SeedMaterialType("10", "Див. топливо, л", "Дизельное топливо в литрах", true),
+            new SeedMaterialType("11", "Авто Масла и про", "Автомасла и прочие жидкости", true),
+            new SeedMaterialType("12", "Сера, кг", "Сера в килограммах", true),
+            new SeedMaterialType("13", "Тринатрий фосфат, кг", "Тринатрий фосфат в кг", true),
+            new SeedMaterialType("14", "Известь хлорная, кг", "Известь хлорная в кг", true),
+            new SeedMaterialType("15", "Жир технический, кг", "Жир технический в кг", true),
+            new SeedMaterialType("16", "Мешки 50 кг, шт", "Мешки 50 кг в штуках", true),
+            new SeedMaterialType("17", "Мешки 25 кг, шт", "Мешки 25 кг в штуках", true),
+            new SeedMaterialType("18", "Бирки для мешков 25 кг, л", "Бирки для мешков 25 кг", true),
+        };
     }
 }

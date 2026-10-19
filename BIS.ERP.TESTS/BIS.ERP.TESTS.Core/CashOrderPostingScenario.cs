@@ -743,7 +743,6 @@ END $$;", cancellationToken);
                 "name" => GetAccountName(code),
                 "account_type" => GetAccountType(code),
                 "description" => TestAccountDescription,
-                "level" => 1,
                 "is_active" => true,
                 _ => field.FieldType switch
                 {
