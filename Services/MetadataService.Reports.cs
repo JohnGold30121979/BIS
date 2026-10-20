@@ -369,22 +369,19 @@ public partial class MetadataService
 
         var existing = await _context.MetadataModuleItems
             .FirstOrDefaultAsync(item => item.ObjectType == "Report" && item.ObjectId == reportId);
-        if (existing == null)
+
+        // Уже привязан — не перетаскиваем: состав модуля мог быть изменён вручную.
+        if (existing != null)
+            return;
+
+        await _context.MetadataModuleItems.AddAsync(new MetadataModuleItem
         {
-            await _context.MetadataModuleItems.AddAsync(new MetadataModuleItem
-            {
-                Id = Guid.NewGuid(),
-                ModuleId = module.Id,
-                ObjectId = reportId,
-                ObjectType = "Report",
-                Order = order
-            });
-        }
-        else
-        {
-            existing.ModuleId = module.Id;
-            existing.Order = order;
-        }
+            Id = Guid.NewGuid(),
+            ModuleId = module.Id,
+            ObjectId = reportId,
+            ObjectType = "Report",
+            Order = order
+        });
 
         await _context.SaveChangesAsync();
     }

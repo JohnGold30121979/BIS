@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace BIS.ERP.Models
 {
@@ -15,6 +16,10 @@ namespace BIS.ERP.Models
         public bool ParticipatesInPeriodClose { get; set; } = true;
         public bool RequirePreviousModulesClosed { get; set; }
         public bool IsSystem { get; set; }
+
+        /// <summary>Имя с пометкой состояния — для списка модулей в конфигураторе.</summary>
+        [NotMapped]
+        public string DisplayName => IsActive ? Name : $"{Name} (отключён)";
     }
 
     public class MetadataModuleItem

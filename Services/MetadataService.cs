@@ -132,10 +132,10 @@ namespace BIS.ERP.Services
                 var incomingDoc = new MetadataObject
                 {
                     Id = Guid.NewGuid(),
-                    Name = "Приход товаров",
-                    TableName = "doc_incoming",
+                    Name = InventoryDocumentModel.IncomingName,
+                    TableName = InventoryDocumentModel.IncomingTable,
                     ObjectType = "Document",
-                    Description = "Приход товаров на склад",
+                    Description = "Поступление товарно-материальных запасов на склад",
                     Icon = "📥",
                     Order = 1,
                     IsSystem = true,
@@ -147,10 +147,10 @@ namespace BIS.ERP.Services
                 var outgoingDoc = new MetadataObject
                 {
                     Id = Guid.NewGuid(),
-                    Name = "Расход товаров",
-                    TableName = "doc_outgoing",
+                    Name = InventoryDocumentModel.OutgoingName,
+                    TableName = InventoryDocumentModel.OutgoingTable,
                     ObjectType = "Document",
-                    Description = "Расход товаров со склада",
+                    Description = "Выбытие товарно-материальных запасов со склада",
                     Icon = "📤",
                     Order = 2,
                     IsSystem = true,
@@ -1008,7 +1008,8 @@ namespace BIS.ERP.Services
             {
                 await EnsurePaymentOrderDocumentStructureAsync(documents);
                 await EnsureManagedDocumentAnalyticFieldsAsync(documents);
-                await EnsureInventoryDocumentStructureAsync(documents);
+                // Документы ТМЗ перешли на модель «шапка + строки» (InventoryDocumentSchemaService):
+                // достройка одиночного материала в шапке больше не нужна и только мешала бы.
                 await EnsurePostingDocumentStructureAsync(documents);
                 await EnsureGlobalDocumentNumberConfigurationAsync(documents);
 

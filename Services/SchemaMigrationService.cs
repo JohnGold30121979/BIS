@@ -1,5 +1,6 @@
 using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -77,7 +78,17 @@ namespace BIS.ERP.Services
                 new("2026.10.19.07",
                     "Схема периодов, остатков и финансовых отчётов (перенесено из AccountingPeriodService)",
                     true,
-                    EnsureAccountingPeriodSchemaAsync)
+                    EnsureAccountingPeriodSchemaAsync),
+
+                new("2026.10.20.01",
+                    "Канонические имена таблиц документов ОС/ТМЦ (doc_asset_*, doc_inventory_*)",
+                    false,
+                    NormalizeDocumentTableNamesAsync),
+
+                new("2026.10.21.01",
+                    "Модель документов ТМЗ: 3 документа + строки + справочник видов операций",
+                    false,
+                    EnsureInventoryDocumentModelAsync)
             };
         }
 
@@ -130,7 +141,12 @@ namespace BIS.ERP.Services
                     description text NOT NULL DEFAULT '',
                     applied_at  timestamp with time zone NOT NULL DEFAULT now(),
                     runs        integer NOT NULL DEFAULT 1
-                );");
+                );
+                ALTER TABLE schema_migrations
+                    ADD COLUMN IF NOT EXISTS last_run_at timestamp with time zone;
+                UPDATE schema_migrations
+                   SET last_run_at = applied_at
+                 WHERE last_run_at IS NULL;");
         }
 
         private async Task<HashSet<string>> LoadAppliedAsync()
@@ -162,13 +178,28 @@ namespace BIS.ERP.Services
 
         private async Task RecordAsync(Step step)
         {
-            var description = step.Description.Replace("'", "''");
-
-            await _context.Database.ExecuteSqlRawAsync($@"
-                INSERT INTO schema_migrations (version, description, applied_at, runs)
-                VALUES ('{step.Version}', '{description}', now(), 1)
+            // applied_at — момент ПЕРВОГО применения шага и больше не меняется.
+            // last_run_at — последний успешный прогон (повторяемые шаги идут при каждом открытии).
+            // runs — сколько раз шаг фактически выполнялся.
+            var sql = step.Repeatable
+                ? @"
+                INSERT INTO schema_migrations (version, description, applied_at, last_run_at, runs)
+                VALUES (@version, @description, now(), clock_timestamp(), 1)
                 ON CONFLICT (version) DO UPDATE
-                SET applied_at = now(), runs = schema_migrations.runs + 1;");
+                SET last_run_at = clock_timestamp(),
+                    runs = schema_migrations.runs + 1;"
+                : @"
+                INSERT INTO schema_migrations (version, description, applied_at, last_run_at, runs)
+                VALUES (@version, @description, now(), clock_timestamp(), 1)
+                ON CONFLICT (version) DO UPDATE
+                SET applied_at = now(),
+                    last_run_at = clock_timestamp(),
+                    runs = schema_migrations.runs + 1;";
+
+            await _context.Database.ExecuteSqlRawAsync(
+                sql,
+                new NpgsqlParameter("version", step.Version),
+                new NpgsqlParameter("description", step.Description));
         }
 
         /// <summary>
@@ -177,6 +208,59 @@ namespace BIS.ERP.Services
         /// AccountingPeriodService; теперь единственный источник — здесь,
         /// а сервис вызывает этот метод.
         /// </summary>
+        /// <summary>
+        /// Модель документов ТМЗ: Поступление / Выбытие / Внутреннее перемещение,
+        /// у каждого — таблица строк и вид операции реквизитом.
+        /// Шаг разовый; идемпотентен (см. InventoryDocumentSchemaService).
+        /// </summary>
+        private static async Task EnsureInventoryDocumentModelAsync(AppDbContext context)
+        {
+            // Отдельный контекст: если шаг упадёт, «грязные» отслеживаемые записи
+            // не должны ронять остальные шаги и загрузку главного окна
+            // (инцидент 20.10.2026: DbUpdateConcurrencyException в MetadataFields).
+            var connectionString = context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось определить строку подключения инфобазы.");
+
+            await using var isolated = new AppDbContext(connectionString);
+            var report = await new InventoryDocumentSchemaService(isolated).EnsureAsync();
+
+            foreach (var action in report.Actions)
+                SystemLogService.Info($"ТМЗ: {action}", "Migration");
+
+            foreach (var warning in report.Warnings)
+                SystemLogService.Warning($"ТМЗ: {warning}", "Migration");
+        }
+
+        /// <summary>
+        /// Приводит имена таблиц документов ОС/ТМЦ к канону <see cref="DocumentTableNames"/>.
+        /// Шаг разовый: после успешного выполнения фиксируется в schema_migrations и больше
+        /// не выполняется. Если прогон упал — запись не создаётся, и шаг повторится при
+        /// следующем открытии базы. Идемпотентен (см. DocumentTableNameNormalizer).
+        /// </summary>
+        private static async Task NormalizeDocumentTableNamesAsync(AppDbContext context)
+        {
+            var connectionString = context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось определить строку подключения инфобазы.");
+
+            await using var isolated = new AppDbContext(connectionString);
+            var results = await new DocumentTableNameNormalizer(isolated).NormalizeAsync();
+            var renamed = results.Where(item => item.Renamed).Count();
+
+            foreach (var result in results.Where(item => !string.IsNullOrWhiteSpace(item.SkippedReason)))
+            {
+                SystemLogService.Warning(
+                    $"doc-names: {result.DocumentName} — {result.SkippedReason} ({result.OldTableName} -> {result.NewTableName})",
+                    "Migration");
+            }
+
+            if (renamed > 0)
+            {
+                SystemLogService.Info($"doc-names: переименовано таблиц — {renamed}.", "Migration");
+            }
+        }
+
         public static Task EnsureAccountingPeriodSchemaAsync(AppDbContext context)
             => context.Database.ExecuteSqlRawAsync(AccountingPeriodSchemaSql);
 

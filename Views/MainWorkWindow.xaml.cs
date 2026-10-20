@@ -96,27 +96,6 @@ namespace BIS.ERP
             [ModuleReportsGroupKey] = 3,
             [FinanceToolsGroupKey] = 4
         };
-        // Скрывает временные объекты разработки из навигации независимо от модуля.
-        private static readonly HashSet<string> DevelopmentHiddenNavigationObjectNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Покупка ОС",
-            "Ввод ОС в эксплуатацию",
-            "Приход из производства ОС",
-            "Переоценка ОС",
-            "Передача ОС в подотчет",
-            "Реализация ОС",
-            "Частичная реализация ОС",
-            "Ликвидация ОС",
-            "Разукомплектация ОС",
-            "Укомплектация ОС",
-            "Начисление амортизации",
-            "Списание амортизации",
-            "Консервация ОС",
-            "Расконсервация ОС",
-            "Смена группы ОС",
-            "Смена затратного счета"
-
-        };
         public ObservableCollection<NavigationItem> NavigationItems { get; set; }
 
         // Быстрый поиск по дереву объектов
@@ -519,12 +498,22 @@ namespace BIS.ERP
             var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
             var allModules = await _moduleMetadataService.GetModulesAsync(includeInactive: true);
             var modules = allModules
-                .Where(module => module.IsActive && !ModuleMetadataService.IsDevelopmentDisabledModuleCode(module.Code))
+                .Where(module => module.IsActive)
                 .OrderBy(module => module.Order)
                 .ThenBy(module => module.Name)
                 .ToList();
             var activeModuleCodes = modules.Select(module => module.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var moduleItems = await _moduleMetadataService.GetItemsAsync();
+
+            // Почему модуль не появился в рабочем окне: он отключён, хотя объекты в нём есть.
+            foreach (var inactive in allModules.Where(module => !module.IsActive))
+            {
+                var itemCount = moduleItems.Count(item => item.ModuleId == inactive.Id);
+                if (itemCount > 0)
+                    SystemLogService.Info(
+                        $"Модуль «{inactive.Name}» отключён ({itemCount} объектов) — в рабочем окне не показывается.",
+                        nameof(MainWorkWindow));
+            }
             var assignedModuleCodesByObject = BuildAssignedModuleCodesByObject(moduleItems, allModules);
             var hiddenMetadataIds = allMetadata
                 .Where(item => IsHiddenByUnavailableModule(item, assignedModuleCodesByObject, activeModuleCodes))
@@ -549,7 +538,6 @@ namespace BIS.ERP
                 await BuildLegacyNavigationTree();
                 return;
             }
-            var assignmentByObject = moduleItems.ToDictionary(item => item.ObjectId, item => item);
 
             var directoriesSection = new NavigationItem
             {
@@ -679,19 +667,8 @@ namespace BIS.ERP
                 if (moduleSection.Children.Count > 0)
                     NavigationItems.Add(moduleSection);
             }
-            var unassignedDocuments = documents.Where(document => !assignmentByObject.ContainsKey(document.Id)).ToList();
-            var unassignedReports = reports.Where(report => !assignmentByObject.ContainsKey(report.Id)).ToList();
-            if (!ModuleMetadataService.HideUnassignedObjectsInNavigationDuringDevelopment && (unassignedDocuments.Count > 0 || unassignedReports.Count > 0))
-            {
-                var otherSection = new NavigationItem
-                {
-                    Id = "UnassignedSection", Name = "НЕРАСПРЕДЕЛЕННЫЕ ОБЪЕКТЫ", Icon = "📂", Type = "Section"
-                };
-                AddDocumentNavigationItems(otherSection, unassignedDocuments);
-                foreach (var report in unassignedReports.OrderBy(report => report.Name))
-                    otherSection.Children.Add(CreateReportNavigationItem(report));
-                NavigationItems.Add(otherSection);
-            }
+            // Неназначенные объекты в рабочем окне не показываем: их место — вкладка
+            // «Неназначенные» в конфигураторе (Модули и разделы).
 
             var serviceSection = new NavigationItem
             {
@@ -785,9 +762,6 @@ namespace BIS.ERP
             IReadOnlyDictionary<Guid, HashSet<string>> assignedModuleCodesByObject,
             IReadOnlySet<string> activeModuleCodes)
         {
-            if (DevelopmentHiddenNavigationObjectNames.Contains(metadata.Name))
-                return true;
-
             if (IsAssignedOnlyToInactiveModules(metadata.Id, assignedModuleCodesByObject, activeModuleCodes))
                 return true;
 
@@ -799,9 +773,6 @@ namespace BIS.ERP
 
         private static bool IsHiddenByUnavailableModule(MetadataObject metadata, IReadOnlySet<string> activeModuleCodes)
         {
-            if (DevelopmentHiddenNavigationObjectNames.Contains(metadata.Name))
-                return true;
-
             return IsHiddenLegacyNavigationTable(metadata.TableName, activeModuleCodes);
         }
 
@@ -811,9 +782,6 @@ namespace BIS.ERP
             IReadOnlyDictionary<Guid, HashSet<string>> assignedModuleCodesByObject,
             IReadOnlySet<string> activeModuleCodes)
         {
-            if (DevelopmentHiddenNavigationObjectNames.Contains(report.Name))
-                return true;
-
             if (report.DataSourceId.HasValue && hiddenMetadataIds.Contains(report.DataSourceId.Value))
                 return true;
 
@@ -822,9 +790,6 @@ namespace BIS.ERP
 
         private static bool IsHiddenByUnavailableModule(Report report, IReadOnlySet<Guid> hiddenMetadataIds, IReadOnlySet<string> activeModuleCodes)
         {
-            if (DevelopmentHiddenNavigationObjectNames.Contains(report.Name))
-                return true;
-
             if (report.DataSourceId.HasValue && hiddenMetadataIds.Contains(report.DataSourceId.Value))
                 return true;
 
@@ -1847,7 +1812,8 @@ namespace BIS.ERP
                 case "DynamicDocument":
                     if (item.Tag is MetadataObject document)
                     {
-                        var dynamicView = new DynamicDocumentWorkView(document, _metadataService);
+                        var documentContext = await _infoBaseManager.GetCurrentDbContextAsync();
+                        var dynamicView = new DynamicDocumentWorkView(document, _metadataService, documentContext);
                         _navigation.NavigateTo(dynamicView, item.Name, $"document:{item.Id}");
                     }
                     break;
@@ -2513,18 +2479,18 @@ namespace BIS.ERP
         {
             var result = new List<string>();
 
-            foreach (var token in (report.Fields ?? new List<ReportField>())
+            foreach (var parameterName in (report.Fields ?? new List<ReportField>())
                          .Select(field => ReportParameterSyntax.GetSingleToken(field.FieldName))
-                         .Where(token => !string.IsNullOrWhiteSpace(token))
+                         .Where(parameterName => !string.IsNullOrWhiteSpace(parameterName))
                          .Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                if (values != null && values.TryGetValue(token!, out var value) &&
+                if (values != null && values.TryGetValue(parameterName!, out var value) &&
                     !ReportParameterResolver.IsEmptyValue(value, null))
                 {
                     continue;
                 }
 
-                result.Add(token!);
+                result.Add(parameterName!);
             }
 
             return result;

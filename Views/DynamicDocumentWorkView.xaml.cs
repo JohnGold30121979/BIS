@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using BIS.ERP.Behaviors;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views.Dialogs;
@@ -16,15 +17,21 @@ namespace BIS.ERP.Views
     {
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
+        private readonly AppDbContext? _context;
         private DataTable _dataTable;
 
-        public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService)
+        public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService, AppDbContext? context = null)
         {
             InitializeComponent();
             AmountColumnsBehavior.Attach(DataGrid); // динамические колонки — суммы с разрядами через пробел
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
+            _context = context;
         }
+
+        private bool IsInventoryDocument =>
+            InventoryDocumentModel.Documents.Any(item =>
+                string.Equals(item.Name, _documentMetadata.Name, StringComparison.OrdinalIgnoreCase));
 
         private async void UserControl_Loaded(object sender, RoutedEventArgs e)
         {
@@ -512,6 +519,20 @@ namespace BIS.ERP.Views
                     StatusText.Text = "✅ Запись добавлена";
                 }
             }
+            else if (IsInventoryDocument && _context != null)
+            {
+                var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService, _context);
+                dialog.Owner = Window.GetWindow(this);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        $"Новый документ: {_documentMetadata.Name}") == true)
+                {
+                    await LoadData();
+                    DataGrid.SelectRowById(dialog.SavedRecordId, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Документ добавлен";
+                }
+            }
             else
             {
                 var dialog = new DynamicDocumentItemDialog(_documentMetadata, _metadataService);
@@ -556,6 +577,24 @@ namespace BIS.ERP.Views
                     // Возвращаем выделение на отредактированную проводку.
                     DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
                     StatusText.Text = "✅ Проводка обновлена";
+                }
+            }
+            else if (IsInventoryDocument && _context != null)
+            {
+                var rows = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
+                var existing = rows.FirstOrDefault(row =>
+                    row.TryGetValue("Id", out var value) && value is Guid guid && guid == id);
+
+                var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService, _context, id, existing);
+                dialog.Owner = Window.GetWindow(this);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                        Window.GetWindow(this),
+                        dialog,
+                        $"Редактирование: {_documentMetadata.Name}") == true)
+                {
+                    await LoadData();
+                    DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
+                    StatusText.Text = "✅ Документ обновлён";
                 }
             }
             else

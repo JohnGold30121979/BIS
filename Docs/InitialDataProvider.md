@@ -1,12 +1,12 @@
 # InitialDataProvider — начальные данные справочников
 
 Дата: 19.10.2026. Ветка `main`.
-Файл: `Services/InitialDataProvider.cs` (619 строк, `public static class`, без EF/PostgreSQL).
+Файл: `Services/InitialDataProvider.cs` (735 строк, `public static class`, без EF/PostgreSQL, без SQL).
 
 ## 1. Что это и зачем
 
-Чистая фабрика данных — «ЧТО сеем». Не знает про БД, `DbContext`, SQL.
-Возвращает `List<T>` DTO из `BIS.ERP.Models` (`ChartOfAccount`, `Bank`, ...).
+Чистая фабрика данных — **«ЧТО сеем»**. Не знает про БД, `DbContext`, SQL, `Npgsql`.
+Возвращает `List<T>` / `IReadOnlyList<T>` DTO из `BIS.ERP.Models` (`ChartOfAccount`, `Bank`, ...) и вложенных `sealed record` (`SeedCurrency`, `SeedCountry`, ...).
 Fox-специфика (8-значные коды `XXXXYYYY`, `SCHET|NAIM|...`) изолирована здесь.
 
 Похожий `Services/MetadataService.DataSeed.cs` (partial `MetadataService`, ~1509 строк) — это «КАК сеем»: `Add*DataToTable(catalog)` / `Ensure*DataAsync(catalog)` пишут в `catalog_*` через `_context`, `UpsertCatalogSeedRowAsync`, raw SQL. Разделение: данные отдельно, запись в БД отдельно.

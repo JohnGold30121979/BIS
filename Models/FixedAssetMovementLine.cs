@@ -5,7 +5,7 @@ namespace BIS.ERP.Models
 {
     /// <summary>
     /// Строка документа «Учет движения ОС» (табличная часть, копия механизма Счет-фактур).
-    /// Хранится в таблице doc_fixed_asset_movement_lines.
+    /// Хранится в таблице doc_asset_movement_lines.
     /// </summary>
     public class FixedAssetMovementLineRow
     {

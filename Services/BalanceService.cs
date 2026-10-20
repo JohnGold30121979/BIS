@@ -281,8 +281,8 @@ namespace BIS.ERP.Services
                 await AppendInvoiceJournalEntriesAsync(result, purchaseInvoiceDocument, startDate, endDate, "Закупки");
 
             foreach (var document in documents.Where(document =>
-                         document.Name.Equals("Приход товаров", StringComparison.OrdinalIgnoreCase) ||
-                         document.Name.Equals("Расход товаров", StringComparison.OrdinalIgnoreCase) ||
+                         document.Name.Equals(InventoryDocumentModel.IncomingName, StringComparison.OrdinalIgnoreCase) ||
+                         document.Name.Equals(InventoryDocumentModel.OutgoingName, StringComparison.OrdinalIgnoreCase) ||
                          (document.Name.Contains("Счет-фактура", StringComparison.OrdinalIgnoreCase) &&
                           !document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) &&
                           !document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase))))
@@ -295,10 +295,14 @@ namespace BIS.ERP.Services
                     if (!TryGetDate(row, out var date) || date.Date < startDate.Date || date.Date > endDate.Date)
                         continue;
 
-                    var isPurchase = document.Name.Contains("Приход", StringComparison.OrdinalIgnoreCase) ||
+                    var isPurchase = document.Name.Equals(InventoryDocumentModel.IncomingName, StringComparison.OrdinalIgnoreCase) ||
+                                     document.Name.Contains("Поступление", StringComparison.OrdinalIgnoreCase) ||
+                                     document.Name.Contains("Приход", StringComparison.OrdinalIgnoreCase) ||
                                      document.Name.Contains("получ", StringComparison.OrdinalIgnoreCase) ||
                                      document.Name.Equals(InvoiceDocumentTypes.PurchaseRegistration, StringComparison.OrdinalIgnoreCase);
                     var isSales = document.Name.Equals(InvoiceDocumentTypes.SalesIssue, StringComparison.OrdinalIgnoreCase) ||
+                                  document.Name.Equals(InventoryDocumentModel.OutgoingName, StringComparison.OrdinalIgnoreCase) ||
+                                  document.Name.Contains("Выбытие", StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("Расход", StringComparison.OrdinalIgnoreCase) ||
                                   document.Name.Contains("реализа", StringComparison.OrdinalIgnoreCase);
                     var amount = GetDecimal(row, "Сумма", "Сумма в сом");

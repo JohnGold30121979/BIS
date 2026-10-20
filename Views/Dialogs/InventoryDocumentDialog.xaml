@@ -1,0 +1,88 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.InventoryDocumentDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Документ ТМЗ" Height="740" Width="1240"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppSurfaceBrush}">
+
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1" CornerRadius="7" Padding="10">
+            <WrapPanel x:Name="HeaderPanel" Orientation="Horizontal"/>
+        </Border>
+
+        <DataGrid x:Name="LinesGrid" Grid.Row="1" Margin="0,10,0,0"
+                  AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
+                  HeadersVisibility="Column" RowHeight="26" GridLinesVisibility="Horizontal"
+                  CellEditEnding="OnCellEditEnding">
+            <DataGrid.Columns>
+                <DataGridComboBoxColumn x:Name="MaterialColumn" Header="Материал" Width="230"
+                                        SelectedValueBinding="{Binding MaterialId, UpdateSourceTrigger=PropertyChanged}"
+                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
+                <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="60"/>
+                <DataGridComboBoxColumn x:Name="AccountColumn" Header="Дебет" Width="150"
+                                        SelectedValueBinding="{Binding AccountCode, UpdateSourceTrigger=PropertyChanged}"
+                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
+                <DataGridComboBoxColumn x:Name="SiteColumn" Header="Участок" Width="140"
+                                        SelectedValueBinding="{Binding SiteId, UpdateSourceTrigger=PropertyChanged}"
+                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
+                <DataGridComboBoxColumn x:Name="ResponsibleColumn" Header="МОЛ" Width="150"
+                                        SelectedValueBinding="{Binding ResponsiblePersonId, UpdateSourceTrigger=PropertyChanged}"
+                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
+                <DataGridTextColumn Header="%" Binding="{Binding VatRate}" Width="60"/>
+                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity}" Width="90"/>
+                <DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="100"/>
+                <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
+                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="100" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal}" Width="110" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Примечание" Binding="{Binding Description}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+            <Button Content="Добавить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
+            <Button Content="Удалить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnDeleteLineClick"/>
+            <Button Content="Пересчет" Width="110" Height="32" Margin="0,0,8,0" Click="OnRecalculateClick"/>
+            <Button Content="Запись" Width="110" Height="32" Margin="24,0,8,0" Click="OnSaveClick"
+                    Background="{DynamicResource AppAccentBrush}" Foreground="White"/>
+            <Button Content="Отмена" Width="110" Height="32" Click="OnCancelClick"/>
+        </StackPanel>
+
+        <Border Grid.Row="3" Margin="0,10,0,0" Padding="8"
+                Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1" CornerRadius="7">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel>
+                    <TextBlock Text="Без налогов" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                    <TextBlock x:Name="TotalWithoutTaxText" FontWeight="Bold" FontSize="15" Text="0,00"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="НДС" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                    <TextBlock x:Name="TotalVatText" FontWeight="Bold" FontSize="15" Text="0,00"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Налог с продаж" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                    <TextBlock x:Name="TotalSalesTaxText" FontWeight="Bold" FontSize="15" Text="0,00"/>
+                </StackPanel>
+                <StackPanel Grid.Column="3">
+                    <TextBlock Text="Итого" Foreground="{DynamicResource AppSecondaryTextBrush}"/>
+                    <TextBlock x:Name="TotalAmountText" FontWeight="Bold" FontSize="15" Text="0,00"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

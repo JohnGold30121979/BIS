@@ -16,10 +16,6 @@ namespace BIS.ERP.Services
         public const string RawMaterialsCode = "RawMaterials";
         public const string CostAccountingCode = "CostAccounting";
         public const int FinalBalanceCloseOrder = 10000;
-        public const bool HideUnassignedObjectsInNavigationDuringDevelopment = true;
-
-        // Module visibility must be controlled by administrator settings, not by a hardcoded development lock.
-        private static readonly HashSet<string> DevelopmentDisabledModuleCodes = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly AppDbContext _context;
 
@@ -163,7 +159,13 @@ namespace BIS.ERP.Services
                 ApplyFinalBalanceStageRules(existing);
             }
             await _context.SaveChangesAsync();
-            return existing ?? module;
+
+            var saved = existing ?? module;
+            SystemLogService.Info(
+                $"Модуль «{saved.Name}» сохранён: IsActive={saved.IsActive}, объектов в модуле={await _context.MetadataModuleItems.CountAsync(item => item.ModuleId == saved.Id)}",
+                nameof(ModuleMetadataService));
+
+            return saved;
         }
 
         public async Task DeleteModuleAsync(Guid moduleId)
@@ -261,10 +263,6 @@ namespace BIS.ERP.Services
             !string.IsNullOrWhiteSpace(moduleCode) &&
             moduleCode.Equals(BalanceCode, StringComparison.OrdinalIgnoreCase);
 
-        public static bool IsDevelopmentDisabledModuleCode(string? moduleCode) =>
-            !string.IsNullOrWhiteSpace(moduleCode) &&
-            DevelopmentDisabledModuleCodes.Contains(moduleCode);
-
         public static void ApplyFinalBalanceStageRules(MetadataModule module)
         {
             if (!IsFinalBalanceStageModule(module))
@@ -281,6 +279,22 @@ namespace BIS.ERP.Services
 
         private async Task SynchronizeDefaultAssignmentsAsync()
         {
+            // Автопривязка — только для первичной настройки базы.
+            // Если в системных модулях уже есть объекты, состав настраивали руками:
+            // повторный прогон возвращал бы снятые галочки (инцидент 20.10.2026).
+            var systemModuleIds = await _context.MetadataModules
+                .Where(module => module.IsSystem)
+                .Select(module => module.Id)
+                .ToListAsync();
+
+            if (systemModuleIds.Count > 0 &&
+                await _context.MetadataModuleItems.AnyAsync(item => systemModuleIds.Contains(item.ModuleId)))
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    "[modules] привязки уже есть — автосинхронизация пропущена");
+                return;
+            }
+
             var modules = await _context.MetadataModules.ToDictionaryAsync(module => module.Code);
             var catalogs = await _context.MetadataObjects.AsNoTracking()
                 .Where(item => item.ObjectType == "Catalog").ToListAsync();
@@ -301,8 +315,7 @@ namespace BIS.ERP.Services
             await MoveByNameToModuleAsync(modules[FinanceCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 InvoiceDocumentTypes.SalesIssue, InvoiceDocumentTypes.PurchaseRegistration);
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
-                "Приход товаров", "Расход товаров", "Внутреннее перемещение ТМЦ", "Приход из производства ТМЦ",
-                "Расход в производство", "Передача ТМЦ в подотчет", "Инвентаризация ТМЦ");
+                DocumentTableNames.InventoryDocumentNames.ToArray());
             await AssignMissingByNameAsync(modules[FixedAssetsCode].Id, "Document", documents.Select(item => (item.Id, item.Name)),
                 FixedAssetDocumentNames);
 
@@ -461,14 +474,7 @@ namespace BIS.ERP.Services
         };
 
         public static readonly string[] FixedAssetDocumentNames =
-        {
-            "Учет движения ОС",
-            "Покупка ОС", "Ввод ОС в эксплуатацию", "Приход из производства ОС", "Переоценка ОС",
-            "Реализация ОС", "Частичная реализация ОС", "Ликвидация ОС", "Укомплектация ОС",
-            "Разукомплектация ОС", "Начисление амортизации", "Списание амортизации",
-            "Консервация ОС", "Расконсервация ОС", "Передача ОС в подотчет", "Смена затратного счета",
-            "Смена группы ОС"
-        };
+            DocumentTableNames.FixedAssetDocumentNames.ToArray();
     }
 public class NavigationGroupOrderRow
     {

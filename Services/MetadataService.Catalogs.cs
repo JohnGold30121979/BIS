@@ -2478,14 +2478,14 @@ namespace BIS.ERP.Services
             await EnsureMetadataReportAsync(
                 "Журнал прихода товаров",
                 "Документы поступления товарно-материальных запасов.",
-                "Приход товаров",
+                InventoryDocumentModel.IncomingName,
                 "Table",
                 30,
                 new[] { "Номер", "Дата", "Сумма", "Примечание" });
             await EnsureMetadataReportAsync(
                 "Журнал расхода товаров",
                 "Документы выбытия товарно-материальных запасов.",
-                "Расход товаров",
+                InventoryDocumentModel.OutgoingName,
                 "Table",
                 31,
                 new[] { "Номер", "Дата", "Сумма", "Примечание" });

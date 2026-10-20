@@ -8,7 +8,7 @@
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <TextBlock Text="Модули" FontSize="16" FontWeight="SemiBold" Margin="4,2,0,10"/>
-                <ListBox x:Name="ModulesList" Grid.Row="1" DisplayMemberPath="Name" SelectionChanged="OnModuleSelected"
+                <ListBox x:Name="ModulesList" Grid.Row="1" DisplayMemberPath="DisplayName" SelectionChanged="OnModuleSelected"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
@@ -85,32 +85,97 @@
 
                 <TabControl Grid.Row="3">
                     <TabItem Header="Документы">
-                        <DataGrid x:Name="DocumentsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                  EnableRowVirtualization="True"
-                                  VirtualizingPanel.IsVirtualizing="True"
-                                  VirtualizingPanel.VirtualizationMode="Recycling">
-                            <DataGrid.Columns>
-                                <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
-                                <DataGridTextColumn Header="Документ" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" IsReadOnly="True"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <CheckBox x:Name="SelectAllDocumentsCheck" Content="Выделить все" Margin="4,2,0,6"
+                                      Checked="OnSelectAllDocumentsChanged" Unchecked="OnSelectAllDocumentsChanged"/>
+
+                            <TextBlock x:Name="DocumentsEmptyText" Grid.Row="1" Margin="8,14,0,0"
+                                       Text="В данный момент в модуле нет документов."
+                                       Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                       Visibility="Collapsed"/>
+
+                            <DataGrid x:Name="DocumentsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      EnableRowVirtualization="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
+                                    <DataGridTextColumn Header="Документ" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
                     </TabItem>
                     <TabItem Header="Отчеты">
-                        <DataGrid x:Name="ReportsGrid" AutoGenerateColumns="False" CanUserAddRows="False"
-                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                  EnableRowVirtualization="True"
-                                  VirtualizingPanel.IsVirtualizing="True"
-                                  VirtualizingPanel.VirtualizationMode="Recycling">
-                            <DataGrid.Columns>
-                                <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
-                                <DataGridTextColumn Header="Отчет" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" IsReadOnly="True"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <CheckBox x:Name="SelectAllReportsCheck" Content="Выделить все" Margin="4,2,0,6"
+                                      Checked="OnSelectAllReportsChanged" Unchecked="OnSelectAllReportsChanged"/>
+
+                            <TextBlock x:Name="ReportsEmptyText" Grid.Row="1" Margin="8,14,0,0"
+                                       Text="В данный момент в модуле нет отчетов."
+                                       Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                       Visibility="Collapsed"/>
+
+                            <DataGrid x:Name="ReportsGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      EnableRowVirtualization="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
+                                    <DataGridTextColumn Header="Отчет" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Неназначенные">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Orientation="Horizontal" Margin="4,2,0,6">
+                                <CheckBox x:Name="SelectAllUnassignedCheck" Content="Выделить все" VerticalAlignment="Center"
+                                          Checked="OnSelectAllUnassignedChanged" Unchecked="OnSelectAllUnassignedChanged"/>
+                                <TextBlock Margin="14,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                           Text="Объекты без модуля. Отметьте и сохраните — они попадут в этот модуль."/>
+                            </StackPanel>
+
+                            <TextBlock x:Name="UnassignedEmptyText" Grid.Row="1" Margin="8,14,0,0"
+                                       Text="Неназначенных объектов нет."
+                                       Foreground="{DynamicResource AppSecondaryTextBrush}"
+                                       Visibility="Collapsed"/>
+
+                            <DataGrid x:Name="UnassignedGrid" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="False"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      EnableRowVirtualization="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="В модуле" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="85"/>
+                                    <DataGridTextColumn Header="Тип" Binding="{Binding TypeName}" Width="100" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Объект" Binding="{Binding Name}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Описание" Binding="{Binding Description}" Width="2*" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
                     </TabItem>
                 </TabControl>
 

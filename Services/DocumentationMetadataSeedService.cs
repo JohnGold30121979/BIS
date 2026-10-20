@@ -23,7 +23,9 @@ namespace BIS.ERP.Services
             await SeedFixedAssetDocumentEntryDataAsync();
             await ExtendFixedAssetCardAsync();
             await EnsureFixedAssetCanonicalModelAsync();
+            await EnsureInventoryDocumentModelAsync();
             await EnsureDocumentsAsync();
+            await NormalizeDocumentTableNamesAsync();
             await EnsureDocumentLineForeignKeysAsync();
             await RemoveDeletedDocumentsAsync();
             await EnsureFixedAssetPeriodBalanceReportSourceAsync();
@@ -394,6 +396,36 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        /// <summary>
+        /// Модель документов ТМЗ в отдельном контексте: ошибка шага не должна
+        /// оставлять «грязные» записи в контексте старта (инцидент 20.10.2026).
+        /// </summary>
+        private async Task EnsureInventoryDocumentModelAsync()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                return;
+
+            try
+            {
+                await using var isolated = new AppDbContext(connectionString);
+                var report = await new InventoryDocumentSchemaService(isolated).EnsureAsync();
+
+                foreach (var action in report.Actions)
+                    SystemLogService.Info($"ТМЗ: {action}", nameof(DocumentationMetadataSeedService));
+
+                foreach (var warning in report.Warnings)
+                    SystemLogService.Warning($"ТМЗ: {warning}", nameof(DocumentationMetadataSeedService));
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Warning(
+                    $"Модель документов ТМЗ не применена: {ex.Message}",
+                    nameof(DocumentationMetadataSeedService),
+                    ex);
+            }
+        }
+
         private async Task EnsureDocumentsAsync()
         {
             // Документы модуля ОС с хешем в имени таблицы (doc_asset_<hash>) не сидируются:
@@ -664,6 +696,47 @@ namespace BIS.ERP.Services
                     Field(Guid.Empty, "Пробег за период", "PeriodMileage", "Decimal", 42),
                     Field(Guid.Empty, "Пробег на конец", "ClosingMileage", "Decimal", 43)
                 });
+        }
+
+        /// <summary>
+        /// Приводит имена таблиц документов ОС/ТМЦ к канону <see cref="DocumentTableNames"/>:
+        /// doc_incoming → doc_inventory_receipt, doc_outgoing → doc_inventory_issue,
+        /// doc_asset_&lt;hash&gt; → doc_asset_purchase и т.д.
+        /// Идемпотентно; ошибка нормализации не валит старт, но пишется в системный лог.
+        /// </summary>
+        private async Task NormalizeDocumentTableNamesAsync()
+        {
+            try
+            {
+                var connectionString = _context.Database.GetConnectionString();
+                if (string.IsNullOrWhiteSpace(connectionString))
+                    return;
+
+                await using var isolated = new AppDbContext(connectionString);
+                var results = await new DocumentTableNameNormalizer(isolated).NormalizeAsync();
+                foreach (var result in results)
+                {
+                    if (result.Renamed)
+                        SystemLogService.Info(
+                            $"{result.DocumentName}: {result.OldTableName} -> {result.NewTableName}",
+                            nameof(DocumentationMetadataSeedService));
+                    else if (!string.IsNullOrWhiteSpace(result.SkippedReason))
+                        SystemLogService.Warning(
+                            $"{result.DocumentName}: {result.SkippedReason} ({result.OldTableName} -> {result.NewTableName})",
+                            nameof(DocumentationMetadataSeedService));
+                    else
+                        SystemLogService.Info(
+                            $"{result.DocumentName}: метаданные переведены на {result.NewTableName} (таблицы ещё нет)",
+                            nameof(DocumentationMetadataSeedService));
+                }
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error(
+                    "Не удалось привести имена таблиц документов ОС/ТМЦ к канону",
+                    nameof(DocumentationMetadataSeedService),
+                    ex);
+            }
         }
 
         private async Task EnsureFinanceReportsAsync()

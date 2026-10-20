@@ -10,11 +10,11 @@ namespace BIS.ERP.Services
 {
     /// <summary>
     /// Табличная часть документа «Учет движения ОС» (аналог счет-фактур).
-    /// Хранит строки в таблице doc_fixed_asset_movement_lines.
+    /// Хранит строки в таблице doc_asset_movement_lines (канон — DocumentTableNames.AssetMovementLines).
     /// </summary>
     public partial class FixedAssetMovementLineService
     {
-        public const string LinesTableName = "doc_fixed_asset_movement_lines";
+        public const string LinesTableName = DocumentTableNames.AssetMovementLines;
 
         private readonly AppDbContext _context;
 
