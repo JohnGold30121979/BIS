@@ -1182,9 +1182,11 @@ namespace BIS.ERP.Services
         }
 
         /// <summary>
-        /// Приводит колонку в соответствие с признаком обязательности поля:
-        /// обязательное поле — NOT NULL, необязательное — снимаем ограничение
-        /// и ставим пустое значение по умолчанию вместо NULL.
+        /// Приводит колонку в соответствие с признаком обязательности поля.
+        ///
+        /// Значение по умолчанию зависит от ФАКТИЧЕСКОГО типа колонки: для числовых,
+        /// логических и uuid-колонок пустая строка недопустима (22P02), поэтому
+        /// подставляем 0 / false / NULL, а не ''.
         /// </summary>
         private async Task EnsureColumnNullableAsync(string tableName, MetadataField field)
         {
@@ -1193,13 +1195,60 @@ namespace BIS.ERP.Services
 
             try
             {
-                var constraintSql = field.IsRequired
-                    ? $@"ALTER TABLE ""{tableName}"" ALTER COLUMN ""{field.DbColumnName}"" SET NOT NULL;"
-                    : $@"ALTER TABLE ""{tableName}"" ALTER COLUMN ""{field.DbColumnName}"" DROP NOT NULL;
-                        UPDATE ""{tableName}"" SET ""{field.DbColumnName}"" = '' WHERE ""{field.DbColumnName}"" IS NULL;
-                        ALTER TABLE ""{tableName}"" ALTER COLUMN ""{field.DbColumnName}"" SET DEFAULT '';";
+                var columnType = await GetActualColumnTypeAsync(tableName, field.DbColumnName);
+                if (columnType == null)
+                    return; // колонки ещё нет — её создаст EnsureObjectFieldsAsync
 
-                await _context.Database.ExecuteSqlRawAsync(constraintSql);
+                var defaultValue = DefaultLiteralFor(columnType);
+
+                // Защита от старого дрейфа: колонка текстовая, а поле описано как число/bool.
+                // Приводить её к NOT NULL нельзя, пока тип не мигрирован отдельным шагом.
+                var textColumn = columnType.Contains("character", StringComparison.OrdinalIgnoreCase)
+                                 || columnType.Equals("text", StringComparison.OrdinalIgnoreCase);
+                var nonTextField = !string.Equals(field.FieldType, "String", StringComparison.OrdinalIgnoreCase)
+                                   && !string.Equals(field.FieldType, "Reference", StringComparison.OrdinalIgnoreCase);
+
+                if (field.IsRequired)
+                {
+                    if (textColumn && nonTextField)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Обязательность {tableName}.{field.DbColumnName} не применена: " +
+                            $"колонка текстовая, а поле {field.FieldType}. Нужна миграция типа.");
+                        return;
+                    }
+
+                    if (defaultValue != null)
+                    {
+                        await _context.Database.ExecuteSqlRawAsync(
+                            $"UPDATE \"{tableName}\" SET \"{field.DbColumnName}\" = {defaultValue} " +
+                            $"WHERE \"{field.DbColumnName}\" IS NULL;");
+                    }
+
+                    await _context.Database.ExecuteSqlRawAsync(
+                        $"ALTER TABLE \"{tableName}\" ALTER COLUMN \"{field.DbColumnName}\" SET NOT NULL;");
+                }
+                else
+                {
+                    await _context.Database.ExecuteSqlRawAsync(
+                        $"ALTER TABLE \"{tableName}\" ALTER COLUMN \"{field.DbColumnName}\" DROP NOT NULL;");
+
+                    if (defaultValue != null)
+                    {
+                        await _context.Database.ExecuteSqlRawAsync(
+                            $"UPDATE \"{tableName}\" SET \"{field.DbColumnName}\" = {defaultValue} " +
+                            $"WHERE \"{field.DbColumnName}\" IS NULL;");
+
+                        await _context.Database.ExecuteSqlRawAsync(
+                            $"ALTER TABLE \"{tableName}\" ALTER COLUMN \"{field.DbColumnName}\" SET DEFAULT {defaultValue};");
+                    }
+                    else
+                    {
+                        // uuid: значение по умолчанию не задаём — NULL допустим и не ломает FK.
+                        await _context.Database.ExecuteSqlRawAsync(
+                            $"ALTER TABLE \"{tableName}\" ALTER COLUMN \"{field.DbColumnName}\" DROP DEFAULT;");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1208,6 +1257,69 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine(
                     $"Не удалось применить обязательность колонки {tableName}.{field.DbColumnName}: {ex.Message}");
             }
+        }
+
+        private async Task<string?> GetActualColumnTypeAsync(string tableName, string columnName)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var openedHere = connection.State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await connection.OpenAsync();
+
+            try
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = @"
+                    SELECT data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = @table AND column_name = @column";
+
+                var tableParameter = command.CreateParameter();
+                tableParameter.ParameterName = "@table";
+                tableParameter.Value = tableName;
+                command.Parameters.Add(tableParameter);
+
+                var columnParameter = command.CreateParameter();
+                columnParameter.ParameterName = "@column";
+                columnParameter.Value = columnName;
+                command.Parameters.Add(columnParameter);
+
+                var value = await command.ExecuteScalarAsync();
+                return value as string;
+            }
+            finally
+            {
+                if (openedHere)
+                    await connection.CloseAsync();
+            }
+        }
+
+        /// <summary>Литерал значения по умолчанию для фактического типа колонки.</summary>
+        private static string? DefaultLiteralFor(string columnType)
+        {
+            if (columnType.Contains("character", StringComparison.OrdinalIgnoreCase) ||
+                columnType.Equals("text", StringComparison.OrdinalIgnoreCase))
+                return "''";
+
+            if (columnType.Equals("integer", StringComparison.OrdinalIgnoreCase) ||
+                columnType.Equals("bigint", StringComparison.OrdinalIgnoreCase) ||
+                columnType.Equals("smallint", StringComparison.OrdinalIgnoreCase) ||
+                columnType.Equals("numeric", StringComparison.OrdinalIgnoreCase) ||
+                columnType.Equals("real", StringComparison.OrdinalIgnoreCase) ||
+                columnType.Equals("double precision", StringComparison.OrdinalIgnoreCase))
+                return "0";
+
+            if (columnType.Equals("boolean", StringComparison.OrdinalIgnoreCase))
+                return "false";
+
+            if (columnType.StartsWith("timestamp", StringComparison.OrdinalIgnoreCase))
+                return "now()";
+
+            if (columnType.Equals("date", StringComparison.OrdinalIgnoreCase))
+                return "CURRENT_DATE";
+
+            // uuid и всё остальное — оставляем NULL: выдуманный uuid ломает FK.
+            return null;
         }
 
         private static void ConfigureField(

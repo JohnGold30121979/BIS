@@ -87,34 +87,17 @@ namespace BIS.ERP.Services
                     return;
             }
 
+            // Единый механизм миграций: журнал schema_migrations и шаги
+            // (колонки EF, колонки метаданных, схемы касс/наборов, разовые чистки).
             try
             {
-                await DetectDriftAsync();
+                await new SchemaMigrationService(_context).EnsureAsync();
             }
             catch (Exception ex)
             {
-                // Диагностика не должна мешать запуску приложения.
-                System.Diagnostics.Debug.WriteLine($"[schema] детектор дрейфа не отработал: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[migration] миграции не выполнены: {ex.Message}");
             }
 
-            // Схему этих таблиц пока создают их сервисы (до перехода на миграции, план §2).
-            await new CashDayClosureService(_context).EnsureSchemaAsync();
-            await new ReportDataSetService(_context).EnsureSchemaAsync();
-
-            // Разово отмечаем рабочие отчёты для окна «Бухгалтерская отчётность».
-            await MarkAccountingReportsOnceAsync();
-
-            // Разовая чистка FRX-отчётов (Docs/FRX_удаление_план_и_скрипты.md, этап 2).
-            // Выполняется один раз на базу, помечает себя в DataFixJournal.
-            try
-            {
-                await new FrxReportsCleanupService(_context).RunOnceAsync();
-            }
-            catch (Exception ex)
-            {
-                // Чистка данных не должна мешать запуску приложения.
-                System.Diagnostics.Debug.WriteLine($"[frx] разовая чистка не выполнена: {ex.Message}");
-            }
 
             lock (SyncLock)
             {
@@ -192,47 +175,5 @@ namespace BIS.ERP.Services
         ///
         /// Это отчёты с готовым визуальным макетом ClosedXML.
         /// </summary>
-        private static readonly string[] DefaultAccountingReportCodes =
-        {
-            "standard.finance.trial-balance-closedxml",
-            "standard.finance.reconciliation-act-closedxml",
-            "standard.finance.invoice-journal",
-            "standard.finance.vat-invoice-st1"
-        };
-
-        /// <summary>
-        /// Разово отмечает рабочие отчёты для окна «Бухгалтерская отчётность».
-        ///
-        /// Выполняется только тогда, когда ни один отчёт ещё не отмечен: дальше
-        /// отметками управляет администратор в конструкторе отчётов,
-        /// и повторный запуск его выбор не перетирает.
-        /// </summary>
-        private async Task MarkAccountingReportsOnceAsync()
-        {
-            try
-            {
-                var anyMarked = await _context.Reports
-                    .AsNoTracking()
-                    .AnyAsync(report => report.ShowInAccountingReports);
-
-                if (anyMarked)
-                    return;
-
-                var codes = DefaultAccountingReportCodes;
-
-                await _context.Reports
-                    .Where(report => codes.Contains(report.Code))
-                    .ExecuteUpdateAsync(setters => setters
-                        .SetProperty(report => report.ShowInAccountingReports, true)
-                        .SetProperty(report => report.IsActive, true));
-            }
-            catch (Exception ex)
-            {
-                // Разметка отчётов не должна мешать запуску приложения.
-                System.Diagnostics.Debug.WriteLine(
-                    $"Не удалось отметить отчеты для бухгалтерской отчетности: {ex.Message}");
-            }
-        }
-
-}
+    }
 }

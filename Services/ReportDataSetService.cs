@@ -876,8 +876,9 @@ SELECT
 FROM invoice_rows
 WHERE doc_date >= CAST(@PeriodStart AS date)
   AND doc_date <= CAST(@PeriodEnd AS date)
-  -- Типы приводим явно: без этого PostgreSQL не сравнивает text с uuid.
-  AND (CAST(@OrganizationId AS text) = '' OR organization_id = NULLIF(CAST(@OrganizationId AS text), '')::uuid)
+  -- organization_id в CTE уже приведён к text (в разных базах колонка бывает
+  -- и text, и uuid), поэтому сравниваем text с text: uuid приводить нельзя.
+  AND (CAST(@OrganizationId AS text) = '' OR organization_id = CAST(@OrganizationId AS text))
 ORDER BY doc_date DESC, doc_number DESC";
 
     /// <summary>
