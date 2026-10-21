@@ -88,7 +88,12 @@ namespace BIS.ERP.Services
                 new("2026.10.21.01",
                     "Модель документов ТМЗ: 3 документа + строки + справочник видов операций",
                     false,
-                    EnsureInventoryDocumentModelAsync)
+                    EnsureInventoryDocumentModelAsync),
+
+                new("2026.10.22.01",
+                    "Справочник видов операций ТМЗ: колонка operation_kind",
+                    false,
+                    EnsureInventoryEntryOperationKindsAsync)
             };
         }
 
@@ -208,6 +213,20 @@ namespace BIS.ERP.Services
         /// AccountingPeriodService; теперь единственный источник — здесь,
         /// а сервис вызывает этот метод.
         /// </summary>
+        /// <summary>
+        /// Миграция справочника видов операций ТМЗ: добавляет operation_kind
+        /// и заполняет его из code для существующих строк.
+        /// </summary>
+        private static async Task EnsureInventoryEntryOperationKindsAsync(AppDbContext context)
+        {
+            var connectionString = context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось определить строку подключения инфобазы.");
+
+            await using var isolated = new AppDbContext(connectionString);
+            await new InventoryDocumentSchemaService(isolated).EnsureEntryCatalogOperationKindAsync();
+        }
+
         /// <summary>
         /// Модель документов ТМЗ: Поступление / Выбытие / Внутреннее перемещение,
         /// у каждого — таблица строк и вид операции реквизитом.

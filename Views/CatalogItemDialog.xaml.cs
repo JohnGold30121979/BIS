@@ -713,6 +713,106 @@ inputControl = AccountPickerControlFactory.Create(
             return comboBox;
         }
 
+        /// <summary>
+        /// Выпадающие списки для справочника «Ввод нового документа ТМЗ»,
+        /// чтобы пользователь без технических знаний мог создать запись,
+        /// не вводя вручную названия документов и видов движения.
+        /// </summary>
+        private Control? CreateInventoryEntryChoiceControl(MetadataField field, Dictionary<string, object> existingData)
+        {
+            if (!IsInventoryEntryCatalog())
+                return null;
+
+            var existingValue = GetExistingValue(field, existingData)?.ToString();
+
+            return field.Name switch
+            {
+                "Документ ТМЗ" => BuildInventoryEntryDocumentCombo(field, existingValue),
+                "Вид движения" => BuildFixedChoiceComboBox(field,
+                    new[]
+                    {
+                        new ChoiceItem("Приход", "Приход"),
+                        new ChoiceItem("Расход", "Расход"),
+                        new ChoiceItem("Перемещение", "Перемещение"),
+                    }, existingValue, "Выберите вид движения операции"),
+                _ => null
+            };
+        }
+
+        /// <summary>
+        /// Поле «Документ ТМЗ»: фиксированный список из трёх документов.
+        /// При выборе документа в поле «Вид движения» предлагается подходящий вид движения.
+        /// </summary>
+        private ComboBox BuildInventoryEntryDocumentCombo(MetadataField field, string? existingValue)
+        {
+            var comboBox = BuildFixedChoiceComboBox(field,
+                new[]
+                {
+                    new ChoiceItem(InventoryDocumentModel.IncomingName, "Поступление ТМЗ"),
+                    new ChoiceItem(InventoryDocumentModel.OutgoingName, "Выбытие ТМЗ"),
+                    new ChoiceItem(InventoryDocumentModel.MovementName, "Внутреннее перемещение ТМЗ"),
+                    new ChoiceItem("Другое…", "Другое…")
+                }, existingValue, "Выберите документ ТМЗ (если нужного нет — выберите «Другое…» и впишите вручную)");
+
+            comboBox.SelectionChanged += (_, _) =>
+            {
+                if (comboBox.SelectedItem is not ChoiceItem selected)
+                {
+                    return;
+                }
+
+                // Если выбран «Другое…» — разрешаем свободный ввод названия документа
+                if (string.Equals(selected.Code, "Другое…", StringComparison.OrdinalIgnoreCase))
+                {
+                    comboBox.IsEditable = true;
+                    comboBox.Text = string.Empty;
+                    comboBox.Focus();
+                    return;
+                }
+
+                comboBox.IsEditable = false;
+
+                if (!_controls.TryGetValue("Вид движения", out var movementControl) ||
+                    movementControl is not ComboBox movementCombo)
+                {
+                    return;
+                }
+
+                string movement = selected.Display switch
+                {
+                    InventoryDocumentModel.IncomingName => "Приход",
+                    InventoryDocumentModel.OutgoingName => "Расход",
+                    InventoryDocumentModel.MovementName => "Перемещение",
+                    _ => null
+                };
+
+                if (movement != null)
+                    movementCombo.SelectedItem = movementCombo.Items.OfType<ChoiceItem>()
+                        .FirstOrDefault(item => string.Equals(item.Display, movement, StringComparison.OrdinalIgnoreCase));
+            };
+
+            return comboBox;
+        }
+
+        /// <summary>
+        /// Универсальный ComboBox с фиксированным списком вариантов (без свободного ввода).
+        /// </summary>
+        private static ComboBox BuildFixedChoiceComboBox(MetadataField field, ChoiceItem[] choices, string? existingValue, string toolTip)
+        {
+            var comboBox = new ComboBox
+            {
+                Height = 35,
+                MinWidth = 200,
+                Tag = field,
+                ItemsSource = choices,
+                ToolTip = toolTip,
+                IsEditable = false
+            };
+
+            comboBox.SelectedItem = choices.FirstOrDefault(choice => choice.Matches(existingValue)) ?? choices[0];
+            return comboBox;
+        }
+
         private bool IsTaxCatalog() =>
             string.Equals(_catalog.Name, "Налоги", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, "catalog_taxes", StringComparison.OrdinalIgnoreCase);
@@ -868,6 +968,10 @@ inputControl = AccountPickerControlFactory.Create(
             var taxKindChoiceControl = CreateTaxKindChoiceControl(field, existingData);
             if (taxKindChoiceControl != null)
                 return taxKindChoiceControl;
+
+            var entryChoiceControl = CreateInventoryEntryChoiceControl(field, existingData);
+            if (entryChoiceControl != null)
+                return entryChoiceControl;
 
             var existingValue = GetExistingValue(field, existingData);
 
@@ -1249,6 +1353,9 @@ inputControl = AccountPickerControlFactory.Create(
                 if (!ValidateChartOfAccountsCatalogLinks())
                     return;
 
+                if (!await ValidateInventoryEntryRequired())
+                    return;
+
                 BIS.ERP.Services.MdiDialogService.CloseWithResult(this, true);
                 Close();
             }
@@ -1311,6 +1418,11 @@ inputControl = AccountPickerControlFactory.Create(
         private bool IsBankAccountsCatalog() =>
             string.Equals(_catalog.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Справочник «Ввод нового документа ТМЗ» (виды операций с ТМЗ).</summary>
+        private bool IsInventoryEntryCatalog() =>
+            string.Equals(_catalog.Name, InventoryDocumentModel.EntryCatalogName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.TableName, InventoryDocumentModel.EntryCatalogTable, StringComparison.OrdinalIgnoreCase);
 
         private async Task<string?> ResolveDefaultCurrencyIdAsync(
             IReadOnlyDictionary<string, MetadataObject> catalogsDict)
@@ -1433,6 +1545,13 @@ inputControl = AccountPickerControlFactory.Create(
                 default:
                     if (control is TextBox tb)
                         return tb.Text;
+                    if (control is ComboBox combo)
+                    {
+                        if (combo.SelectedItem is ChoiceItem ci)
+                            return ci.Code;
+                        if (!string.IsNullOrWhiteSpace(combo.Text))
+                            return combo.Text.Trim();
+                    }
                     return null;
             }
         }
@@ -1492,6 +1611,72 @@ inputControl = AccountPickerControlFactory.Create(
                 MessageBoxImage.Warning);
 
             return false;
+        }
+
+        /// <summary>Проверка обязательных полей при добавлении в «Ввод нового документа ТМЗ».</summary>
+        private async Task<bool> ValidateInventoryEntryRequired()
+        {
+            if (!IsInventoryEntryCatalog())
+                return true;
+
+            var name = GetItemText("Наименование", "name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                MessageBox.Show(
+                    "Заполните поле «Наименование».",
+                    "Ввод нового документа ТМЗ",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+
+                if (_controls.TryGetValue("Наименование", out var control) && control is TextBox nameBox)
+                {
+                    nameBox.Focus();
+                    nameBox.SelectAll();
+                }
+
+                return false;
+            }
+
+            // Поле «Код» генерируется автоматически при создании формы.
+            // Если по какой-то причине осталось пустым — пытаемся сгенерировать сейчас.
+            var codeField = GetEditableFields().FirstOrDefault(IsCatalogCodeField);
+            if (codeField != null)
+            {
+                var code = GetItemText(codeField.Name, codeField.DbColumnName);
+                if (string.IsNullOrWhiteSpace(code))
+                {
+                    var generated = await GenerateNextCatalogCodeAsync(codeField);
+                    if (!string.IsNullOrWhiteSpace(generated))
+                    {
+                        if (_controls.TryGetValue(codeField.Name, out var codeControl) &&
+                            codeControl is TextBox codeBox)
+                        {
+                            codeBox.Text = generated;
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show(
+                            $"Не удалось сгенерировать код для поля «{codeField.Name}». Введите код вручную.",
+                            "Ввод нового документа ТМЗ",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+
+                        if (_controls.TryGetValue(codeField.Name, out var codeControl2) &&
+                            codeControl2 is TextBox codeBox2)
+                        {
+                            codeBox2.Focus();
+                            codeBox2.SelectAll();
+                        }
+
+                        return false;
+                    }
+                }
+            }
+
+            // «Документ ТМЗ» и «Вид движения» — выпадающие списки со значением по умолчанию,
+            // «Активен» установлен по умолчанию. Дополнительных проверок не требуется.
+            return true;
         }
 
         private static bool IsChartOfAccountsCatalogLinkField(MetadataField field)

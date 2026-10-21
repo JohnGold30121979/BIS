@@ -125,8 +125,8 @@ namespace BIS.ERP.Services
 
                 var sql =
                     $"INSERT INTO {table} (\"Id\", \"code\", \"name\", \"document_name\", \"movement_kind\", " +
-                    "\"sort_order\", \"description\", \"is_active\") " +
-                    "VALUES (@id, @code, @name, @document_name, @movement_kind, @sort_order, @description, true)";
+                    "\"operation_kind\", \"sort_order\", \"description\", \"is_active\") " +
+                    "VALUES (@id, @code, @name, @document_name, @movement_kind, @operation_kind, @sort_order, @description, true)";
 
                 await _context.Database.ExecuteSqlRawAsync(
                     sql,
@@ -135,11 +135,27 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("name", kind.Name),
                     new NpgsqlParameter("document_name", kind.DocumentName),
                     new NpgsqlParameter("movement_kind", kind.MovementKind),
+                    new NpgsqlParameter("operation_kind", kind.OperationKind),
                     new NpgsqlParameter("sort_order", kind.Order),
                     new NpgsqlParameter("description", (object?)kind.Description ?? DBNull.Value));
 
                 report.Actions.Add($"Вид операции «{kind.Name}» → {kind.DocumentName}");
             }
+
+            // Старые строки (без кода операции) получают код из своего code.
+            await _context.Database.ExecuteSqlRawAsync(
+                $"UPDATE {table} SET \"operation_kind\" = \"code\" " +
+                "WHERE COALESCE(btrim(\"operation_kind\"), '') = '';");
+        }
+
+        /// <summary>
+        /// Точечная миграция справочника видов операций: колонка operation_kind и её заполнение.
+        /// Используется шагом миграции, чтобы не гонять весь сервис.
+        /// </summary>
+        public async Task EnsureEntryCatalogOperationKindAsync()
+        {
+            var report = new InventorySchemaReport();
+            await EnsureEntryCatalogAsync(report);
         }
 
         // ---------- Документы ----------

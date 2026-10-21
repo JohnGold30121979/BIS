@@ -9,15 +9,18 @@ using System.Windows.Threading;
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 
 namespace BIS.ERP.Views.Dialogs
 {
     /// <summary>
-    /// Окно документа ТМЗ по образцу счёта-фактуры: шапка, таблица строк, итоги.
-    /// Работает для «Поступление ТМЗ», «Выбытие ТМЗ», «Внутреннее перемещение ТМЗ».
+    /// Окно документа ТМЗ по образцу счёта-фактуры: шапка, карточка «Поставщик»,
+    /// налоги справа, таблица строк и итоги.
     /// </summary>
     public partial class InventoryDocumentDialog : Window
     {
+        private const string DateMask = "dd/MM/yyyy";
+
         private sealed class RefItem
         {
             public object Id { get; init; } = Guid.Empty;
@@ -30,10 +33,18 @@ namespace BIS.ERP.Views.Dialogs
         private readonly InventoryDocumentModel.DocumentDefinition _definition;
         private readonly Guid? _recordId;
         private readonly Dictionary<string, object?> _existing;
+
         private readonly ObservableCollection<InventoryLineRow> _lines = new();
         private readonly Dictionary<string, Control> _editors = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Guid?> _references = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, TextBox> _referenceBoxes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, StackPanel> _referencePanels = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, List<Dictionary<string, object>>> _rowsByColumn = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Guid, Dictionary<string, object>> _materialRows = new();
-        private readonly Dictionary<Guid, string> _entryCodes = new();
+        private readonly Dictionary<Guid, string> _entryOperationKinds = new();
+        private ComboBox? _entryEditor;
+
+        private StackPanel? _currencyPanel;
 
         public Guid SavedRecordId { get; private set; }
 
@@ -72,44 +83,35 @@ namespace BIS.ERP.Views.Dialogs
             {
                 var catalogs = await _metadataService.GetCatalogsAsync();
 
-                var accounts = await BuildItemsAsync(catalogs, "План счетов", idAsCode: true,
-                    display: row => $"{Read(row, "Код")} - {Read(row, "Наименование")}".Trim(' ', '-'));
-                var organizations = await BuildItemsAsync(catalogs, "Организации",
-                    display: row => Read(row, "Наименование", "Полное наименование"));
-                var employees = await BuildItemsAsync(catalogs, "Сотрудники (Списочный состав)",
-                    display: row => Read(row, "ФИО", "Наименование"));
-                var supplyKinds = await BuildItemsAsync(catalogs, "Типы поставки",
-                    display: row => Read(row, "Наименование"));
-                var taxes = await BuildItemsAsync(catalogs, "Налоги",
-                    display: row => Read(row, "Наименование"));
-                var paymentKinds = await BuildItemsAsync(catalogs, "Виды оплаты",
-                    display: row => Read(row, "Наименование"));
-                var currencies = await BuildItemsAsync(catalogs, "Справочник валют",
-                    display: row => Read(row, "Наименование", "Код"));
-                var sites = await BuildItemsAsync(catalogs, "Участки",
-                    display: row => Read(row, "Наименование"));
-                var responsible = await BuildItemsAsync(catalogs, "МОЛ",
-                    display: row => Read(row, "Наименование", "ФИО"));
-                var materials = await BuildItemsAsync(catalogs, "Справочник материалов",
-                    display: row => $"{Read(row, "Код")} - {Read(row, "Наименование материала", "Наименование")}".Trim(' ', '-'),
-                    store: _materialRows);
-                var entries = await BuildItemsAsync(catalogs, InventoryDocumentModel.EntryCatalogName,
-                    display: row =>
-                    {
-                        var id = ReadGuid(row);
-                        if (id.HasValue)
-                            _entryCodes[id.Value] = Read(row, "code", "Код");
-                        return $"{Read(row, "Код")} - {Read(row, "Наименование")}".Trim(' ', '-');
-                    });
+                var accounts = await LoadRowsAsync(catalogs, "План счетов");
+                var organizations = await LoadRowsAsync(catalogs, "Организации");
+                var employees = await LoadRowsAsync(catalogs, "Сотрудники (Списочный состав)");
+                var supplyKinds = await LoadRowsAsync(catalogs, "Типы поставки");
+                var taxes = await LoadRowsAsync(catalogs, "Налоги");
+                var paymentKinds = await LoadRowsAsync(catalogs, "Виды оплаты");
+                var currencies = await LoadRowsAsync(catalogs, "Справочник валют");
+                var sites = await LoadRowsAsync(catalogs, "Участки");
+                var responsible = await LoadRowsAsync(catalogs, "МОЛ");
+                var materials = await LoadRowsAsync(catalogs, "Справочник материалов");
+                var entries = await LoadRowsAsync(catalogs, InventoryDocumentModel.EntryCatalogName);
 
-                BuildHeader(accounts, organizations, employees, supplyKinds, taxes, paymentKinds, currencies, sites, responsible, entries);
+                BuildTopRow(entries);
+                BuildSupplierCard(accounts, organizations, employees, supplyKinds, sites, responsible);
+                BuildTaxCard(taxes, paymentKinds, currencies);
 
-                MaterialColumn.ItemsSource = materials;
-                AccountColumn.ItemsSource = accounts;
-                SiteColumn.ItemsSource = sites;
-                ResponsibleColumn.ItemsSource = responsible;
+                MaterialColumn.ItemsSource = ToItems(materials, row =>
+                {
+                    var id = ReadGuid(row);
+                    if (id.HasValue)
+                        _materialRows[id.Value] = row;
+                    return $"{Read(row, "Код")} - {Read(row, "Наименование материала", "Наименование")}".Trim(' ', '-');
+                });
+                AccountColumn.ItemsSource = ToItems(accounts, AccountDisplay, idAsCode: true);
+                SiteColumn.ItemsSource = ToItems(sites, row => Read(row, "Наименование"));
+                ResponsibleColumn.ItemsSource = ToItems(responsible, row => Read(row, "Наименование", "ФИО"));
 
                 ApplyExistingValues();
+                UpdateAccountDependencies();
 
                 if (!_recordId.HasValue &&
                     _editors.TryGetValue("doc_number", out var numberEditor) &&
@@ -129,152 +131,333 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
-        private void BuildHeader(
-            List<RefItem> accounts,
-            List<RefItem> organizations,
-            List<RefItem> employees,
-            List<RefItem> supplyKinds,
-            List<RefItem> taxes,
-            List<RefItem> paymentKinds,
-            List<RefItem> currencies,
-            List<RefItem> sites,
-            List<RefItem> responsible,
-            List<RefItem> entries)
+        // ---------- Шапка ----------
+
+        private void BuildTopRow(List<Dictionary<string, object>> entries)
         {
-            AddText("Номер", "doc_number", 110);
-            AddDate("Дата", "doc_date", 140);
-            AddCombo("Вид операции", "document_entry_id", entries, 240);
-            AddText("№ пачки", "pack_number", 80);
-            AddText("Серия/№ бланка", "tax_blank_number", 130);
-            AddText("Номер ЭСФ", "esf_number", 130);
-            AddCombo("Счет", "counterparty_account", accounts, 200);
-            AddCombo("Организация", "organization_id", organizations, 240);
-            AddCombo("Сотрудник", "employee_id", employees, 200);
-            AddCombo("Вид покупки", "supply_kind", supplyKinds, 200);
-            AddCombo("Вид НДС", "vat_type", taxes, 200);
-            AddText("Ставка НДС, %", "vat_rate", 90);
-            AddCombo("Вид оплаты", "payment_kind", paymentKinds, 170);
-            AddCombo("Налог", "sales_tax_type", taxes, 200);
-            AddText("Ставка налога, %", "sales_tax_rate", 90);
-            AddCombo("Валюта", "currency_id", currencies, 150);
-            AddText("Курс", "exchange_rate", 90);
-            AddCombo("Участок-получатель", "destination_site_id", sites, 180);
-            AddCombo("МОЛ-получатель", "destination_person_id", responsible, 180);
-            AddText("Примечание", "basis", 420);
+            AddText(HeaderTopPanel, "Номер", "doc_number", 110);
+            AddDateText(HeaderTopPanel, "Дата", "doc_date", 130);
+            _entryEditor = AddCombo(HeaderTopPanel, "Вид операции", "document_entry_id", entries,
+                row =>
+                {
+                    var id = ReadGuid(row);
+                    if (id.HasValue)
+                        _entryOperationKinds[id.Value] = Read(row, "operation_kind", "Код операции", "code", "Код");
+                    return Read(row, "Наименование");
+                }, 250);
+            AddText(HeaderTopPanel, "№ пачки", "pack_number", 80);
+            AddText(HeaderTopPanel, "Серия/№ бланка", "tax_blank_number", 130);
+            AddText(HeaderTopPanel, "Номер ЭСФ", "esf_number", 150);
         }
 
-        private void AddText(string label, string column, double width)
+        /// <summary>
+        /// Перезагружает записи справочника «Ввод нового документа ТМЗ»
+        /// (catalog_inventory_document_entries) из базы данных.
+        /// Очищает кэш _entryCodes и обновляет ComboBox вида операции.
+        /// </summary>
+        private async Task RefreshEntriesAsync()
+        {
+            try
+            {
+                var catalogs = await _metadataService.GetCatalogsAsync();
+                var entries = await LoadRowsAsync(catalogs, InventoryDocumentModel.EntryCatalogName);
+
+                _entryOperationKinds.Clear();
+                foreach (var row in entries)
+                {
+                    var id = ReadGuid(row);
+                    if (id.HasValue)
+                        _entryOperationKinds[id.Value] = Read(row, "operation_kind", "Код операции", "code", "Код");
+                }
+
+                if (_entryEditor != null)
+                {
+                    _entryEditor.ItemsSource = ToItems(entries, BuildEntryDisplay);
+                    _entryEditor.SelectedItem = null;
+                }
+
+                _rowsByColumn["document_entry_id"] = entries;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось обновить справочник видов операций: {ex.Message}",
+                    "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private string BuildEntryDisplay(Dictionary<string, object> row)
+        {
+            var code = Read(row, "Код", "Код");
+            var name = Read(row, "Наименование", "Наименование");
+            return (code + " - " + name).Trim(' ', '-');
+        }
+
+        private void BuildSupplierCard(
+            List<Dictionary<string, object>> accounts,
+            List<Dictionary<string, object>> organizations,
+            List<Dictionary<string, object>> employees,
+            List<Dictionary<string, object>> supplyKinds,
+            List<Dictionary<string, object>> sites,
+            List<Dictionary<string, object>> responsible)
+        {
+            AddReference(SupplierPanel, "Счет", "counterparty_account", 260, accounts);
+            AddReference(SupplierPanel, "Организация", "organization_id", 260, organizations);
+            AddReference(SupplierPanel, "Сотрудник", "employee_id", 220, employees);
+            AddReference(SupplierPanel, "Вид покупки", "supply_kind", 220, supplyKinds);
+
+            // Организация и сотрудник показываются по привязкам счёта.
+            SetPanelVisibility("organization_id", false);
+            SetPanelVisibility("employee_id", false);
+            SetPanelVisibility("supply_kind", true);
+
+            // Для внутреннего перемещения нужны получатель и его МОЛ.
+            if (string.Equals(_definition.Name, InventoryDocumentModel.MovementName, StringComparison.OrdinalIgnoreCase))
+            {
+                AddReference(SupplierPanel, "Участок-получатель", "destination_site_id", 220, sites);
+                AddReference(SupplierPanel, "МОЛ-получатель", "destination_person_id", 220, responsible);
+            }
+        }
+
+        private void BuildTaxCard(
+            List<Dictionary<string, object>> taxes,
+            List<Dictionary<string, object>> paymentKinds,
+            List<Dictionary<string, object>> currencies)
+        {
+            AddCombo(TaxPanel, "Вид НДС", "vat_type", taxes, row => Read(row, "Наименование"), 200);
+            AddText(TaxPanel, "Ставка НДС, %", "vat_rate", 80);
+            AddCombo(TaxPanel, "Вид оплаты", "payment_kind", paymentKinds, row => Read(row, "Наименование"), 180);
+            AddCombo(TaxPanel, "Налог", "sales_tax_type", taxes, row => Read(row, "Наименование"), 200);
+            AddText(TaxPanel, "Ставка налога, %", "sales_tax_rate", 80);
+
+            _currencyPanel = new StackPanel { Orientation = Orientation.Horizontal };
+            AddCombo(_currencyPanel, "Валюта", "currency_id", currencies,
+                row => Read(row, "Наименование", "Код"), 150);
+            AddText(_currencyPanel, "Курс", "exchange_rate", 90);
+            _currencyPanel.Visibility = Visibility.Collapsed;
+            TaxPanel.Children.Add(_currencyPanel);
+        }
+
+        // ---------- Построители полей ----------
+
+        private TextBox AddText(Panel panel, string label, string column, double width)
         {
             var box = new TextBox { Width = width, Height = 28, Padding = new Thickness(6, 3, 6, 3) };
-            AddEditor(label, column, box);
+            AddEditor(panel, label, column, box);
+            return box;
         }
 
-        private void AddDate(string label, string column, double width)
+        private void AddDateText(Panel panel, string label, string column, double width)
         {
-            var picker = new DatePicker { Width = width, Height = 28 };
-            AddEditor(label, column, picker);
+            // Дата — настоящий DatePicker: глобальный DatePickerInputMaskBehavior (App.xaml.cs)
+            // сам даёт маску/шаблон DD/MM/YYYY и календарь. Ручную маску и NormalizeDateText не нужно.
+            var datePicker = new DatePicker
+            {
+                Width = width,
+                Height = 28,
+                ToolTip = "Формат: ДД/ММ/ГГГГ"
+            };
+
+            AddEditor(panel, label, column, datePicker);
         }
 
-        private void AddCombo(string label, string column, List<RefItem> items, double width)
+        private ComboBox AddCombo(
+            Panel panel,
+            string label,
+            string column,
+            List<Dictionary<string, object>> rows,
+            Func<Dictionary<string, object>, string> display,
+            double width)
         {
+            _rowsByColumn[column] = rows;
             var combo = new ComboBox
             {
                 Width = width,
                 Height = 28,
-                ItemsSource = items,
+                ItemsSource = ToItems(rows, display),
                 DisplayMemberPath = "Display",
                 SelectedValuePath = "Id"
             };
-            AddEditor(label, column, combo);
+            AddEditor(panel, label, column, combo);
+            return combo;
         }
 
-        private void AddEditor(string label, string column, Control control)
+        private void AddReference(
+            Panel panel,
+            string label,
+            string column,
+            double width,
+            List<Dictionary<string, object>> rows)
         {
-            var panel = new StackPanel { Margin = new Thickness(0, 0, 10, 8) };
-            panel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 3) });
-            panel.Children.Add(control);
-            HeaderPanel.Children.Add(panel);
+            _rowsByColumn[column] = rows;
+
+            var container = new StackPanel { Margin = new Thickness(0, 0, 10, 8) };
+            container.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 3) });
+
+            var line = new StackPanel { Orientation = Orientation.Horizontal };
+            var box = new TextBox { Width = width, Height = 28, Padding = new Thickness(6, 3, 6, 3) };
+            var pick = new Button
+            {
+                Content = "?",
+                Width = 30,
+                Height = 28,
+                Margin = new Thickness(4, 0, 0, 0),
+                ToolTip = "Выбрать из справочника"
+            };
+
+            pick.Click += async (_, _) => await PickReferenceAsync(column, box, rows);
+            box.TextChanged += (_, _) =>
+            {
+                _references[column] = null;
+                if (string.Equals(column, "counterparty_account", StringComparison.OrdinalIgnoreCase))
+                    UpdateAccountDependencies();
+            };
+
+            line.Children.Add(box);
+            line.Children.Add(pick);
+            container.Children.Add(line);
+            panel.Children.Add(container);
+
+            _referenceBoxes[column] = box;
+            _referencePanels[column] = container;
+        }
+
+        private void AddEditor(Panel panel, string label, string column, Control control)
+        {
+            var container = new StackPanel { Margin = new Thickness(0, 0, 10, 8) };
+            container.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 3) });
+            container.Children.Add(control);
+            panel.Children.Add(container);
             _editors[column] = control;
         }
 
-        private async Task<List<RefItem>> BuildItemsAsync(
-            List<MetadataObject> catalogs,
-            string catalogName,
-            Func<Dictionary<string, object>, string> display,
-            bool idAsCode = false,
-            Dictionary<Guid, Dictionary<string, object>>? store = null)
+        private async Task PickReferenceAsync(
+            string column,
+            TextBox box,
+            List<Dictionary<string, object>> rows)
         {
-            var result = new List<RefItem>();
-            var catalog = catalogs.FirstOrDefault(item =>
-                string.Equals(item.Name, catalogName, StringComparison.OrdinalIgnoreCase));
-            if (catalog == null)
-                return result;
+            if (rows.Count == 0)
+                return;
 
-            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
-            foreach (var row in rows)
+            // Приводим строки к единым полям, чтобы диалог выбора показывал их одинаково.
+            var pickRows = rows.Select(row => new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
-                var text = display(row) ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(text))
-                    text = Read(row, "Код", "code");
+                ["Id"] = row.TryGetValue("Id", out var id) ? id : DBNull.Value,
+                ["Код"] = Read(row, "Код", "code"),
+                ["Наименование"] = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала")
+            }).ToList();
 
-                if (idAsCode)
-                {
-                    result.Add(new RefItem { Id = text.Split(" - ")[0], Display = text });
-                    continue;
-                }
-
-                var id = ReadGuid(row);
-                if (!id.HasValue)
-                    continue;
-
-                if (store != null)
-                    store[id.Value] = row;
-
-                result.Add(new RefItem { Id = id.Value, Display = text });
+            var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this), dialog, "Выбор значения") != true ||
+                dialog.SelectedItem == null)
+            {
+                return;
             }
 
-            return result.OrderBy(item => item.Display).ToList();
+            var selected = dialog.SelectedItem;
+            var text = Read(selected, "Наименование");
+            var code = Read(selected, "Код");
+            box.Text = string.IsNullOrWhiteSpace(code) ? text : $"{code} - {text}".Trim(' ', '-');
+            _references[column] = ReadGuid(selected);
+
+            if (string.Equals(column, "counterparty_account", StringComparison.OrdinalIgnoreCase))
+            {
+                _references[column] = null;
+                UpdateAccountDependencies();
+            }
         }
+
+        // ---------- Зависимости счёта ----------
+
+        private Dictionary<string, object>? FindAccountRow()
+        {
+            if (!_referenceBoxes.TryGetValue("counterparty_account", out var box) ||
+                !_rowsByColumn.TryGetValue("counterparty_account", out var rows))
+            {
+                return null;
+            }
+
+            var text = box.Text?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+                return null;
+
+            var code = text.Split(" - ")[0].Trim();
+            return rows.FirstOrDefault(row =>
+                string.Equals(Read(row, "Код"), code, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(AccountDisplay(row), text, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void UpdateAccountDependencies()
+        {
+            var account = FindAccountRow();
+            var linkOrganizations = account != null && IsTrue(account, "Связь с организациями");
+            var linkEmployees = account != null && IsTrue(account, "Связь со списочным составом");
+            var linkCurrency = account != null && IsTrue(account, "Связь с валютами");
+
+            SetPanelVisibility("organization_id", linkOrganizations);
+            SetPanelVisibility("employee_id", linkEmployees);
+            if (_currencyPanel != null)
+                _currencyPanel.Visibility = linkCurrency ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SetPanelVisibility(string column, bool visible)
+        {
+            if (_referencePanels.TryGetValue(column, out var panel))
+                panel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // ---------- Значения ----------
 
         private void ApplyExistingValues()
         {
             if (_existing.Count == 0)
             {
-                if (_editors.TryGetValue("doc_date", out var dateEditor) && dateEditor is DatePicker picker)
-                    picker.SelectedDate = DateTime.Today;
+                SetDateEditor("doc_date", DateTime.Today);
                 return;
             }
 
             foreach (var field in _document.Fields)
             {
-                if (!_editors.TryGetValue(field.DbColumnName, out var control))
+                if (!_existing.TryGetValue(field.Name, out var value) || value == null || value == DBNull.Value)
                     continue;
 
-                if (!_existing.TryGetValue(field.Name, out var value) || value == null || value == DBNull.Value)
+                if (_referenceBoxes.TryGetValue(field.DbColumnName, out var referenceBox))
+                {
+                    referenceBox.Text = Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+                    continue;
+                }
+
+                if (!_editors.TryGetValue(field.DbColumnName, out var control))
                     continue;
 
                 switch (control)
                 {
-                    case TextBox textBox:
-                        textBox.Text = Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
-                        break;
-                    case DatePicker datePicker:
-                        if (value is DateTime date)
-                            datePicker.SelectedDate = date;
+                    case DatePicker datePicker when field.FieldType == "DateTime":
+                        if (value is DateTime dateValue)
+                            datePicker.SelectedDate = dateValue;
                         else if (DateTime.TryParse(value.ToString(), out var parsed))
                             datePicker.SelectedDate = parsed;
                         break;
+                    case TextBox textBox when field.FieldType == "DateTime":
+                        if (value is DateTime date)
+                            textBox.Text = date.ToString(DateMask, CultureInfo.InvariantCulture);
+                        else if (DateTime.TryParse(value.ToString(), out var parsedDate))
+                            textBox.Text = parsedDate.ToString(DateMask, CultureInfo.InvariantCulture);
+                        break;
+                    case TextBox textBox:
+                        textBox.Text = Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+                        break;
                     case ComboBox comboBox:
                         comboBox.SelectedValue = value;
-                        if (comboBox.SelectedValue == null && value is string text)
-                        {
-                            var match = comboBox.Items.OfType<RefItem>()
-                                .FirstOrDefault(item => string.Equals(item.Id?.ToString(), text, StringComparison.OrdinalIgnoreCase));
-                            comboBox.SelectedItem = match;
-                        }
                         break;
                 }
             }
+        }
+
+        private void SetDateEditor(string column, DateTime value)
+        {
+            if (_editors.TryGetValue(column, out var editor) && editor is DatePicker datePicker)
+                datePicker.SelectedDate = value;
         }
 
         private async Task LoadLinesAsync()
@@ -294,16 +477,17 @@ namespace BIS.ERP.Views.Dialogs
                 AddLine();
         }
 
+        // ---------- Строки ----------
+
         private void OnAddLineClick(object sender, RoutedEventArgs e) => AddLine();
 
         private void AddLine()
         {
-            var row = new InventoryLineRow
+            _lines.Add(new InventoryLineRow
             {
                 VatRate = ReadDecimalEditor("vat_rate"),
                 SalesTaxRate = ReadDecimalEditor("sales_tax_rate")
-            };
-            _lines.Add(row);
+            });
         }
 
         private void OnDeleteLineClick(object sender, RoutedEventArgs e)
@@ -319,10 +503,12 @@ namespace BIS.ERP.Views.Dialogs
         {
             foreach (var row in _lines)
                 row.Recalculate();
+
             LinesGrid.Items.Refresh();
             UpdateTotals();
         }
 
+       
         private void OnCellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
         {
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
@@ -355,6 +541,8 @@ namespace BIS.ERP.Views.Dialogs
             TotalSalesTaxText.Text = salesTax.ToString("N2");
             TotalAmountText.Text = total.ToString("N2");
         }
+
+        // ---------- Сохранение ----------
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
@@ -398,9 +586,29 @@ namespace BIS.ERP.Views.Dialogs
 
             foreach (var field in _document.Fields)
             {
-                var value = ReadEditorValue(field);
-                if (value != null)
+                if (_referenceBoxes.TryGetValue(field.DbColumnName, out var referenceBox))
+                {
+                    var text = referenceBox.Text?.Trim() ?? string.Empty;
+                    if (text.Length == 0)
+                        continue;
+
+                    if (_references.TryGetValue(field.DbColumnName, out var known) && known.HasValue)
+                    {
+                        data[field.Name] = known.Value;
+                        continue;
+                    }
+
+                    var value = ResolveReference(field.DbColumnName, text);
+                    if (value == null)
+                        throw new InvalidOperationException($"Не найдено значение для поля «{field.Name}»: {text}");
+
                     data[field.Name] = value;
+                    continue;
+                }
+
+                var editorValue = ReadEditorValue(field);
+                if (editorValue != null)
+                    data[field.Name] = editorValue;
             }
 
             InventoryDocumentLineService.RecalculateTotals(
@@ -413,16 +621,39 @@ namespace BIS.ERP.Views.Dialogs
             SetField(data, "amount_currency", total);
 
             if (_editors.TryGetValue("document_entry_id", out var entryEditor) &&
-                entryEditor is ComboBox { SelectedValue: Guid entryId } &&
-                _entryCodes.TryGetValue(entryId, out var code))
+                entryEditor is ComboBox { SelectedValue: Guid entryId })
             {
-                SetField(data, "operation_kind", code);
+                if (_entryOperationKinds.TryGetValue(entryId, out var operationKind))
+                {
+                    SetField(data, "operation_kind", operationKind);
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        "Не выбран вид операции. Укажите вид документа ТМЗ из справочника «Ввод нового документа ТМЗ».");
+                }
             }
 
             if (!_recordId.HasValue)
                 SetField(data, "is_posted", false);
 
             return data;
+        }
+
+        private object? ResolveReference(string column, string text)
+        {
+            if (!_rowsByColumn.TryGetValue(column, out var rows))
+                return null;
+
+            var code = text.Split(" - ")[0].Trim();
+
+            var row = rows.FirstOrDefault(item =>
+                string.Equals(Read(item, "Код", "code"), code, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Read(item, "Наименование", "ФИО", "Полное наименование", "Наименование материала"),
+                    text, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(AccountDisplay(item), text, StringComparison.OrdinalIgnoreCase));
+
+            return row == null ? null : ReadGuid(row);
         }
 
         private object? ReadEditorValue(MetadataField field)
@@ -432,11 +663,24 @@ namespace BIS.ERP.Views.Dialogs
 
             switch (control)
             {
+                case DatePicker datePicker:
+                    return datePicker.SelectedDate;
                 case TextBox textBox:
                 {
                     var text = textBox.Text?.Trim() ?? string.Empty;
                     if (text.Length == 0)
                         return null;
+
+                    if (field.FieldType == "DateTime")
+                    {
+                        if (DateTime.TryParseExact(text, DateMask, CultureInfo.InvariantCulture,
+                                DateTimeStyles.None, out var date))
+                            return date;
+                        if (DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.None, out var parsed))
+                            return parsed;
+                        throw new InvalidOperationException(
+                            $"Дата в поле «{field.Name}» должна быть в формате ДД/ММ/ГГГГ.");
+                    }
 
                     return field.FieldType switch
                     {
@@ -447,8 +691,6 @@ namespace BIS.ERP.Views.Dialogs
                         _ => text
                     };
                 }
-                case DatePicker datePicker:
-                    return datePicker.SelectedDate;
                 case ComboBox comboBox:
                     return comboBox.SelectedValue;
                 default:
@@ -473,6 +715,64 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             return 0m;
+        }
+
+        // ---------- Справочники ----------
+
+        private async Task<List<Dictionary<string, object>>> LoadRowsAsync(
+            List<MetadataObject> catalogs,
+            string catalogName)
+        {
+            var catalog = catalogs.FirstOrDefault(item =>
+                string.Equals(item.Name, catalogName, StringComparison.OrdinalIgnoreCase));
+
+            return catalog == null
+                ? new List<Dictionary<string, object>>()
+                : await _metadataService.GetCatalogDataAsync(catalog.Id);
+        }
+
+        private static List<RefItem> ToItems(
+            List<Dictionary<string, object>> rows,
+            Func<Dictionary<string, object>, string> display,
+            bool idAsCode = false)
+        {
+            var result = new List<RefItem>();
+            foreach (var row in rows)
+            {
+                var text = display(row) ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                if (idAsCode)
+                {
+                    result.Add(new RefItem { Id = text.Split(" - ")[0], Display = text });
+                    continue;
+                }
+
+                var id = ReadGuid(row);
+                if (id.HasValue)
+                    result.Add(new RefItem { Id = id.Value, Display = text });
+            }
+
+            return result.OrderBy(item => item.Display).ToList();
+        }
+
+        private static string AccountDisplay(Dictionary<string, object> row) =>
+            $"{Read(row, "Код")} - {Read(row, "Наименование")}".Trim(' ', '-');
+
+        private static bool IsTrue(Dictionary<string, object> row, string key)
+        {
+            if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                return false;
+
+            if (value is bool flag)
+                return flag;
+
+            var text = value.ToString()?.Trim() ?? string.Empty;
+            return text == "1" ||
+                   text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                   text.Equals("да", StringComparison.OrdinalIgnoreCase) ||
+                   text.Equals("yes", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string Read(Dictionary<string, object> row, params string[] keys)

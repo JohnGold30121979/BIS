@@ -96,7 +96,8 @@ namespace BIS.ERP.Services
         public sealed class KindDefinition
         {
             public KindDefinition(
-                string code, string name, string documentName, string movementKind, int order, string description)
+                string code, string name, string documentName, string movementKind, int order, string description,
+                string? operationKind = null)
             {
                 Code = code;
                 Name = name;
@@ -104,6 +105,7 @@ namespace BIS.ERP.Services
                 MovementKind = movementKind;
                 Order = order;
                 Description = description;
+                OperationKind = string.IsNullOrWhiteSpace(operationKind) ? code : operationKind;
             }
 
             public string Code { get; }
@@ -112,6 +114,9 @@ namespace BIS.ERP.Services
             public string MovementKind { get; }
             public int Order { get; }
             public string Description { get; }
+
+            /// <summary>Код операции, который пишется в шапку документа.</summary>
+            public string OperationKind { get; }
         }
 
         /// <summary>
@@ -233,9 +238,10 @@ namespace BIS.ERP.Services
             Field(metadataObjectId, "Наименование", "name", "String", 2, required: true, length: 200),
             Field(metadataObjectId, "Документ ТМЗ", "document_name", "String", 3, required: true, length: 120),
             Field(metadataObjectId, "Вид движения", "movement_kind", "String", 4, required: true, length: 40),
-            Field(metadataObjectId, "Порядок", "sort_order", "Int", 5),
-            Field(metadataObjectId, "Описание", "description", "String", 6, length: 500),
-            Field(metadataObjectId, "Активен", "is_active", "Bool", 7, required: true)
+            Field(metadataObjectId, "Код операции", "operation_kind", "String", 5, length: 50),
+            Field(metadataObjectId, "Порядок", "sort_order", "Int", 6),
+            Field(metadataObjectId, "Описание", "description", "String", 7, length: 500),
+            Field(metadataObjectId, "Активен", "is_active", "Bool", 8, required: true)
         };
 
         private static MetadataField Field(
