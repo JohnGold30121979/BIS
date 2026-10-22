@@ -18,6 +18,13 @@ namespace BIS.ERP.Services
 
         public async Task EnsureAsync()
         {
+            // Повторный запуск ничего не меняет, но на удалённой базе стоит 6–7 секунд.
+            if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.DocumentationKey))
+            {
+                SystemLogService.Info("Посадка документации уже выполнена — пропуск.", "Seed");
+                return;
+            }
+
             await EnsureFixedAssetCatalogsAsync();
             await EnsureFixedAssetSupportCatalogsAsync();
             await SeedFixedAssetSupportCatalogDataAsync();
@@ -35,6 +42,8 @@ namespace BIS.ERP.Services
             await EnsureInventoryReportsAsync();
             await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
             await _metadataService.EnsureStandardReportsAsync();
+
+            await SeedStateService.MarkAsync(_context, SeedStateService.DocumentationKey, "Посадка документации");
         }
 
         /// <summary>

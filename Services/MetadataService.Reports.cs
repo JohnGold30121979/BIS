@@ -10,6 +10,12 @@ public partial class MetadataService
 
     public async Task EnsureStandardReportsAsync()
     {
+        if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.StandardReportsKey))
+        {
+            SystemLogService.Info("Стандартные отчёты уже посажены — пропуск.", "Seed");
+            return;
+        }
+
         await new PrintFormService(_context).EnsureSchemaAsync();
         await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
         await new ReportDataSetService(_context).EnsureStandardDataSetsAsync();
@@ -32,6 +38,8 @@ public partial class MetadataService
                      .Where(definition => !deletedReportCodes.Contains(definition.Code)))
             await EnsureStandardReportAsync(definition, existingReports, reportSources);
         await _context.SaveChangesAsync();
+
+        await SeedStateService.MarkAsync(_context, SeedStateService.StandardReportsKey, "Стандартные отчёты");
     }
 
     private async Task EnsureCashOrderTurnoverReportSourceAsync()

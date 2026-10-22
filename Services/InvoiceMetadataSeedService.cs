@@ -26,6 +26,12 @@ namespace BIS.ERP.Services
 
         public async Task EnsureAsync()
         {
+            if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.InvoiceKey))
+            {
+                SystemLogService.Info("Посадка счетов-фактур уже выполнена — пропуск.", "Seed");
+                return;
+            }
+
             await _invoiceService.EnsureSchemaAsync();
 
             var configId = await _context.MetadataConfigurations.Select(item => (Guid?)item.Id).FirstOrDefaultAsync();
@@ -46,6 +52,8 @@ namespace BIS.ERP.Services
                 configId);
             await EnsureInvoiceReferenceDataAsync();
             await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
+
+            await SeedStateService.MarkAsync(_context, SeedStateService.InvoiceKey, "Посадка счетов-фактур");
         }
 
         private async Task EnsureEsfXmlTagCatalogAsync(Guid? configId)
