@@ -259,21 +259,41 @@ namespace BIS.ERP.Views
 
         private void ApplyDocumentGridProfile()
         {
-            if (!IsFixedAssetMovementDocument())
+            bool isFixedAsset = IsFixedAssetMovementDocument();
+            bool isInventory = IsInventoryDocument;
+
+            if (!isFixedAsset && !isInventory)
                 return;
 
             DataGrid.IsReadOnly = true;
 
-            var profiles = new[]
+            GridColumnProfile[] profiles;
+            if (isInventory)
             {
-                CreateGridColumnProfile("Дата", 175, "Дата", "doc_date"),
-                CreateGridColumnProfile("№ документа", 115, "Номер", "№ документа", "doc_number"),
-                CreateGridColumnProfile("№ счет-фактуры", 145, "№ счет-фактуры", "invoice_number"),
-                CreateGridColumnProfile("Сумма", 120, "Сумма", "amount"),
-                CreateGridColumnProfile("Сумма в валюте", 135, "Сумма в валюте", "amount_currency"),
-                CreateGridColumnProfile("Организация", 220, "Организация", "organization_id"),
-                CreateGridColumnProfile("Примечание", 1, "Примечание", "description")
-            };
+                profiles = new[]
+                {
+                    CreateGridColumnProfile("Дата", 175, "Дата", "doc_date"),
+                    CreateGridColumnProfile("№ документа", 115, "Номер", "№ документа", "doc_number"),
+                    CreateGridColumnProfile("Сумма", 120, "Итого", "Сумма", "amount"),
+                    CreateGridColumnProfile("Сумма в валюте", 135, "Сумма в валюте", "amount_currency"),
+                    CreateGridColumnProfile("Организация", 220, "Организация", "organization_id"),
+                    CreateGridColumnProfile("Примечание", 1, "Примечание", "Примечания", "description", "basis"),
+                    CreateGridColumnProfile("Вид операции", 150, "Вид операции", "Операция", "document_entry_id")
+                };
+            }
+            else
+            {
+                profiles = new[]
+                {
+                    CreateGridColumnProfile("Дата", 175, "Дата", "doc_date"),
+                    CreateGridColumnProfile("№ документа", 115, "Номер", "№ документа", "doc_number"),
+                    CreateGridColumnProfile("№ счет-фактуры", 145, "№ счет-фактуры", "invoice_number"),
+                    CreateGridColumnProfile("Сумма", 120, "Сумма", "amount"),
+                    CreateGridColumnProfile("Сумма в валюте", 135, "Сумма в валюте", "amount_currency"),
+                    CreateGridColumnProfile("Организация", 220, "Организация", "organization_id"),
+                    CreateGridColumnProfile("Примечание", 1, "Примечание", "description")
+                };
+            }
 
             var visibleColumns = new List<(DataGridColumn Column, GridColumnProfile Profile)>();
             foreach (var column in DataGrid.Columns)
