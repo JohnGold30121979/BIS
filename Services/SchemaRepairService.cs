@@ -17,6 +17,7 @@ namespace BIS.ERP.Services
     public sealed class SchemaRepairService
     {
         private readonly AppDbContext _context;
+        private DatabaseSchemaCache? _schema;
 
         public SchemaRepairService(AppDbContext context)
         {
@@ -65,6 +66,7 @@ namespace BIS.ERP.Services
                         try
                         {
                             await _context.Database.ExecuteSqlRawAsync(sql);
+                            _schema?.AddColumn(tableName, columnName, columnType);
                             added++;
                             SystemLogService.Warning(
                                 $"Схема: добавлена отсутствующая колонка {tableName}.{columnName} ({columnType}).",
@@ -103,26 +105,16 @@ namespace BIS.ERP.Services
             return string.Empty;
         }
 
-        private static async Task<HashSet<string>> LoadColumnsAsync(DbConnection connection, string tableName)
+        private async Task<HashSet<string>> LoadColumnsAsync(DbConnection connection, string tableName)
         {
-            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Схема читается одним запросом на отдельном соединении и кэшируется:
+            // на удалённой базе это убирает десятки round-trip'ов.
+            _schema ??= await DatabaseSchemaCache.LoadAsync(
+                _context.Database.GetConnectionString() ?? throw new InvalidOperationException("Не задана строка подключения."));
 
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = @table";
-
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = "@table";
-            parameter.Value = tableName;
-            command.Parameters.Add(parameter);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-                result.Add(reader.GetString(0));
-
-            return result;
+            return _schema.TryGetColumns(tableName, out var columns)
+                ? new HashSet<string>(columns.Keys, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
     }
 }

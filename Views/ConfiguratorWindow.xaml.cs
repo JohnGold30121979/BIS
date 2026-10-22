@@ -237,7 +237,7 @@ namespace BIS.ERP.Views
                     : $"{systemConfiguration.SystemName} - Конфигуратор - {currentInfoBase.Name}";
 
                 _context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                await new RuntimeSchemaFixService(_context).EnsureAsync();
+                await StartupProfiler.MeasureAsync("Схема и миграции", () => new RuntimeSchemaFixService(_context).EnsureAsync());
                 await new SystemConfigurationService(_context).GetAsync();
                 var patchService = new BisPatchService(_context);
                 await patchService.EnsureSchemaAsync();
@@ -253,16 +253,25 @@ namespace BIS.ERP.Views
                 await printFormService.EnsureSchemaAsync();
                 _regulatedTemplateService = new RegulatedReportTemplateService(_context);
                 await _regulatedTemplateService.EnsureSchemaAsync();
-                await new DocumentationMetadataSeedService(_context).EnsureAsync();
-                await new InvoiceMetadataSeedService(_context).EnsureAsync();
-                await printFormService.SeedCashOrderFormsAsync();
-                await printFormService.SeedInvoiceFormsAsync();
-                await _metadataService.EnsureStandardReportsAsync();
+                await StartupProfiler.MeasureAsync("Посадка документации", () => new DocumentationMetadataSeedService(_context).EnsureAsync());
+                await StartupProfiler.MeasureAsync("Посадка счетов-фактур", () => new InvoiceMetadataSeedService(_context).EnsureAsync());
+                await StartupProfiler.MeasureAsync("Печатные формы: кассовые ордера", () => printFormService.SeedCashOrderFormsAsync());
+                await StartupProfiler.MeasureAsync("Печатные формы: счета-фактуры", () => printFormService.SeedInvoiceFormsAsync());
+                await StartupProfiler.MeasureAsync("Стандартные отчёты", () => _metadataService.EnsureStandardReportsAsync());
 
-                var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
+                // Дерево конфигуратора строится на отдельных подключениях:
+                // общий контекст в это время занят другими операциями.
+                var metadataTask = LoadWithIndependentConnectionAsync(context =>
+                    new MetadataService(context).GetAllMetadataObjectsAsync());
+                var reportsTask = LoadWithIndependentConnectionAsync(context =>
+                    new ReportService(context).GetReportHeadersAsync(includePrintForms: true));
+
+                await Task.WhenAll(metadataTask, reportsTask);
+
+                var allMetadata = await metadataTask;
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Name).ToList();
                 _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Name).ToList();
-                _reports = await _reportService.GetReportHeadersAsync(includePrintForms: true);
+                _reports = await reportsTask;
                 BuildMetadataTree();
                 ShowMetadataOverview();
                 await LogConfiguratorEventAsync(
@@ -345,6 +354,16 @@ namespace BIS.ERP.Views
         }
         private Report? _selectedReport;
         private TreeViewItem? _selectedReportTreeItem;
+
+        /// <summary>
+        /// Читает данные на собственном подключении: общий контекст конфигуратора
+        /// в это время занят посадкой метаданных и другими операциями.
+        /// </summary>
+        private static async Task<T> LoadWithIndependentConnectionAsync<T>(Func<AppDbContext, Task<T>> load)
+        {
+            await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            return await load(context);
+        }
 
         private void BuildMetadataTree()
         {

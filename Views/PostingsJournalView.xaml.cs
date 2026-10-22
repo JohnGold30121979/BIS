@@ -178,7 +178,26 @@ namespace BIS.ERP.Views
             MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, $"Обороты по счету", null, fillWorkspace: true);
         }
 
-        private async void OnOpenJournalReportClick(object sender, RoutedEventArgs e)
+        private Report? _chosenPrintForm;
+
+        private PostingsJournalVariant GetSelectedVariant() =>
+            (JournalReportKindComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+            {
+                "Brief" => PostingsJournalVariant.Brief,
+                "ByArticle" => PostingsJournalVariant.ByArticle,
+                "BySubaccount" => PostingsJournalVariant.BySubaccount,
+                _ => PostingsJournalVariant.Full
+            };
+
+        /// <summary>
+        /// Печать журнала по макету ClosedXML: тот же макет уходит и в Excel, и в PDF.
+        /// Кнопки работают без диалога; список форм открывает только флажок «Выбрать форму».
+        /// </summary>
+        private async void OnPrintExcelClick(object sender, RoutedEventArgs e) => await PrintJournalAsync(toPdf: false);
+
+        private async void OnPrintPdfClick(object sender, RoutedEventArgs e) => await PrintJournalAsync(toPdf: true);
+
+        private async Task PrintJournalAsync(bool toPdf)
         {
             if (_filteredPostings.Count == 0)
             {
@@ -187,25 +206,49 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var rows = _filteredPostings.ToList();
-            var kind = GetSelectedJournalReportKind();
-            var startDate = dpStartDate.SelectedDate ?? rows.Min(row => row.Date);
-            var endDate = dpEndDate.SelectedDate ?? rows.Max(row => row.Date);
-
             try
             {
                 Mouse.OverrideCursor = Cursors.Wait;
-                StatusText.Text = "Формирование Excel-отчета журнала проводок...";
 
-                var path = BuildTemporaryExcelPath($"BIS_Журнал_проводок_{kind}");
-                await Task.Run(() => ExportJournalReportExcel(path, kind, rows, startDate, endDate));
-                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                var rows = _filteredPostings.ToList();
+                var startDate = dpStartDate.SelectedDate ?? rows.Min(row => row.Date);
+                var endDate = dpEndDate.SelectedDate ?? rows.Max(row => row.Date);
 
-                StatusText.Text = "Excel-отчет журнала проводок открыт";
+                var variant = _chosenPrintForm != null
+                    ? PostingsJournalPrintService.ParseVariant(_chosenPrintForm.Code)
+                    : GetSelectedVariant();
+
+                var table = PostingsJournalPrintService.BuildTable(variant, rows, startDate, endDate);
+
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var service = new PostingsJournalPrintService(context);
+
+                var forms = await service.GetPrintFormsAsync();
+                var report = _chosenPrintForm != null
+                    ? forms.FirstOrDefault(form => form.Id == _chosenPrintForm.Id) ?? forms.First()
+                    : forms.First(form => form.Code == PostingsJournalPrintService.GetCode(variant));
+
+                if (toPdf)
+                {
+                    StatusText.Text = "Формирование PDF журнала проводок...";
+                    var pdf = await Task.Run(() => PostingsJournalPrintService.RenderPdf(report, table, startDate, endDate));
+                    var previewWindow = new PdfPreviewWindow(pdf, report.Name) { Owner = Window.GetWindow(this) };
+                    previewWindow.ShowDialog();
+                    StatusText.Text = "Предпросмотр PDF открыт";
+                }
+                else
+                {
+                    StatusText.Text = "Формирование Excel журнала проводок...";
+                    var content = await Task.Run(() => PostingsJournalPrintService.RenderExcel(report, table, startDate, endDate));
+                    var path = await PrintFormOutputFileService.SaveAndOpenAsync(
+                        content, report.Name, PrintFormOutputFormat.Excel);
+                    StatusText.Text = $"Excel-отчет открыт: {Path.GetFileName(path)}";
+                }
             }
             catch (Exception ex)
             {
-                SystemLogService.Error("Ошибка формирования Excel-отчета журнала проводок.", "PostingsJournalView.OnOpenJournalReportClick", ex);
+                SystemLogService.Error("Ошибка формирования отчета журнала проводок (ClosedXML).",
+                    "PostingsJournalView.PrintJournalAsync", ex);
                 StatusText.Text = $"Ошибка отчета: {ex.Message}";
                 MessageBox.Show($"Ошибка формирования отчета: {ex.Message}", "Журнал проводок",
                     MessageBoxButton.OK, MessageBoxImage.Error);
@@ -216,278 +259,46 @@ namespace BIS.ERP.Views
             }
         }
 
-        private JournalReportKind GetSelectedJournalReportKind()
+        private async void OnChoosePrintFormChecked(object sender, RoutedEventArgs e)
         {
-            return (JournalReportKindComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+            try
             {
-                "Brief" => JournalReportKind.Brief,
-                "ByArticle" => JournalReportKind.ByArticle,
-                "BySubaccount" => JournalReportKind.BySubaccount,
-                _ => JournalReportKind.Full
-            };
-        }
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var service = new PostingsJournalPrintService(context);
+                var forms = await service.GetPrintFormsAsync();
 
-        private void ExportJournalReportExcel(
-            string path,
-            JournalReportKind kind,
-            IReadOnlyList<PostingViewModel> rows,
-            DateTime startDate,
-            DateTime endDate)
-        {
-            using var workbook = new XLWorkbook();
-            var sheet = workbook.Worksheets.Add(SafeSheetName(GetJournalReportKindTitle(kind)));
-
-            var row = 1;
-            sheet.Cell(row, 1).Value = "Журнал проводок";
-            sheet.Range(row, 1, row, 8).Merge().Style.Font.SetBold().Font.SetFontSize(14);
-            row++;
-            sheet.Cell(row, 1).Value = $"Период: {startDate:dd/MM/yyyy} - {endDate:dd/MM/yyyy}";
-            sheet.Range(row, 1, row, 8).Merge();
-            row++;
-            sheet.Cell(row, 1).Value = $"Вид отчета: {GetJournalReportKindTitle(kind)}";
-            sheet.Range(row, 1, row, 8).Merge();
-            row += 2;
-
-            row = kind switch
-            {
-                JournalReportKind.Brief => WriteBriefJournalReport(sheet, row, rows),
-                JournalReportKind.ByArticle => WriteJournalByArticleReport(sheet, row, rows),
-                JournalReportKind.BySubaccount => WriteJournalBySubaccountReport(sheet, row, rows),
-                _ => WriteFullJournalReport(sheet, row, rows)
-            };
-
-            row++;
-            WriteJournalTotals(sheet, row, kind, rows);
-
-            var usedRange = sheet.RangeUsed();
-            if (usedRange != null)
-            {
-                usedRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-                usedRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-                usedRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
-            }
-
-            sheet.SheetView.FreezeRows(5);
-            sheet.Columns().AdjustToContents();
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            workbook.SaveAs(path);
-        }
-
-        private static int WriteFullJournalReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
-        {
-            WriteJournalHeader(sheet, row,
-                "Дата", "Документ", "Тип", "Модуль", "Дебет", "Кредит", "Сумма", "Сумма вал.",
-                "Валюта", "Организация", "Сотрудник", "Содержание");
-            row++;
-
-            foreach (var posting in rows.OrderBy(item => item.Date).ThenBy(item => item.DocumentNumber))
-            {
-                sheet.Cell(row, 1).Value = posting.Date;
-                sheet.Cell(row, 1).Style.DateFormat.Format = "dd/MM/yyyy";
-                sheet.Cell(row, 2).Value = posting.DocumentNumber;
-                sheet.Cell(row, 3).Value = posting.DocumentType;
-                sheet.Cell(row, 4).Value = posting.ModuleName;
-                sheet.Cell(row, 5).Value = posting.DebitAccount;
-                sheet.Cell(row, 6).Value = posting.CreditAccount;
-                sheet.Cell(row, 7).Value = posting.Amount;
-                sheet.Cell(row, 8).Value = posting.AmountCurrency;
-                sheet.Cell(row, 9).Value = posting.Currency;
-                sheet.Cell(row, 10).Value = posting.Organization;
-                sheet.Cell(row, 11).Value = posting.Employee;
-                sheet.Cell(row, 12).Value = posting.Note;
-                row++;
-            }
-
-            sheet.Range(1, 7, Math.Max(row, 1), 8).Style.NumberFormat.Format = "#,##0.00";
-            return row;
-        }
-
-        private static int WriteBriefJournalReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
-        {
-            WriteJournalHeader(sheet, row,
-                "Дата", "Документ", "Тип", "Модуль", "Дебет", "Кредит", "Кол-во", "Сумма", "Сумма вал.", "Содержание");
-            row++;
-
-            var groups = rows
-                .GroupBy(posting => new
+                if (forms.Count == 0)
                 {
-                    Date = posting.Date.Date,
-                    posting.DocumentNumber,
-                    posting.DocumentType,
-                    posting.ModuleName,
-                    posting.DebitAccount,
-                    posting.CreditAccount,
-                    Note = posting.Note ?? string.Empty
-                })
-                .OrderBy(group => group.Key.Date)
-                .ThenBy(group => group.Key.DocumentNumber);
+                    ChoosePrintFormCheckBox.IsChecked = false;
+                    MessageBox.Show("Печатные формы журнала не найдены.", "Печать",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
 
-            foreach (var group in groups)
-            {
-                sheet.Cell(row, 1).Value = group.Key.Date;
-                sheet.Cell(row, 1).Style.DateFormat.Format = "dd/MM/yyyy";
-                sheet.Cell(row, 2).Value = group.Key.DocumentNumber;
-                sheet.Cell(row, 3).Value = group.Key.DocumentType;
-                sheet.Cell(row, 4).Value = group.Key.ModuleName;
-                sheet.Cell(row, 5).Value = group.Key.DebitAccount;
-                sheet.Cell(row, 6).Value = group.Key.CreditAccount;
-                sheet.Cell(row, 7).Value = group.Count();
-                sheet.Cell(row, 8).Value = group.Sum(item => item.Amount);
-                sheet.Cell(row, 9).Value = group.Sum(item => item.AmountCurrency);
-                sheet.Cell(row, 10).Value = group.Key.Note;
-                row++;
+                var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
+                if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
+                {
+                    ChoosePrintFormCheckBox.IsChecked = false;
+                    return;
+                }
+
+                _chosenPrintForm = selectionDialog.SelectedReport;
+                StatusText.Text = $"Печатная форма: {_chosenPrintForm.Name}";
             }
-
-            sheet.Range(1, 8, Math.Max(row, 1), 9).Style.NumberFormat.Format = "#,##0.00";
-            return row;
-        }
-
-        private static int WriteJournalByArticleReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
-        {
-            WriteJournalHeader(sheet, row, "Статья / содержание", "Кол-во", "Оборот сом", "Оборот вал.");
-            row++;
-
-            var groups = rows
-                .GroupBy(posting => string.IsNullOrWhiteSpace(posting.Note) ? "(без статьи)" : posting.Note.Trim())
-                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var group in groups)
+            catch (Exception ex)
             {
-                sheet.Cell(row, 1).Value = group.Key;
-                sheet.Cell(row, 2).Value = group.Count();
-                sheet.Cell(row, 3).Value = group.Sum(item => item.Amount);
-                sheet.Cell(row, 4).Value = group.Sum(item => item.AmountCurrency);
-                row++;
-            }
-
-            sheet.Range(1, 3, Math.Max(row, 1), 4).Style.NumberFormat.Format = "#,##0.00";
-            return row;
-        }
-
-        private static int WriteJournalBySubaccountReport(IXLWorksheet sheet, int row, IReadOnlyList<PostingViewModel> rows)
-        {
-            WriteJournalHeader(sheet, row, "Субсчет", "Наименование", "Кол-во", "Дебет оборот", "Кредит оборот");
-            row++;
-
-            var debitRows = rows.Select(posting => new
-            {
-                Code = posting.DebitAccount,
-                Name = posting.DebitAccountName,
-                DebitAmount = posting.Amount,
-                CreditAmount = 0m
-            });
-            var creditRows = rows.Select(posting => new
-            {
-                Code = posting.CreditAccount,
-                Name = posting.CreditAccountName,
-                DebitAmount = 0m,
-                CreditAmount = posting.Amount
-            });
-
-            var groups = debitRows
-                .Concat(creditRows)
-                .Where(item => !string.IsNullOrWhiteSpace(item.Code))
-                .GroupBy(item => item.Code, StringComparer.OrdinalIgnoreCase)
-                .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var group in groups)
-            {
-                var name = group.Select(item => item.Name).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
-                sheet.Cell(row, 1).Value = group.Key;
-                sheet.Cell(row, 2).Value = name;
-                sheet.Cell(row, 3).Value = group.Count();
-                sheet.Cell(row, 4).Value = group.Sum(item => item.DebitAmount);
-                sheet.Cell(row, 5).Value = group.Sum(item => item.CreditAmount);
-                row++;
-            }
-
-            sheet.Range(1, 4, Math.Max(row, 1), 5).Style.NumberFormat.Format = "#,##0.00";
-            return row;
-        }
-
-        private static void WriteJournalTotals(IXLWorksheet sheet, int row, JournalReportKind kind, IReadOnlyList<PostingViewModel> rows)
-        {
-            sheet.Cell(row, 1).Value = "Итого";
-            sheet.Cell(row, 1).Style.Font.SetBold();
-
-            switch (kind)
-            {
-                case JournalReportKind.Brief:
-                    sheet.Cell(row, 8).Value = rows.Sum(item => item.Amount);
-                    sheet.Cell(row, 9).Value = rows.Sum(item => item.AmountCurrency);
-                    sheet.Range(row, 8, row, 9).Style.NumberFormat.Format = "#,##0.00";
-                    sheet.Range(row, 1, row, 9).Style.Font.SetBold();
-                    break;
-                case JournalReportKind.ByArticle:
-                    sheet.Cell(row, 3).Value = rows.Sum(item => item.Amount);
-                    sheet.Cell(row, 4).Value = rows.Sum(item => item.AmountCurrency);
-                    sheet.Range(row, 3, row, 4).Style.NumberFormat.Format = "#,##0.00";
-                    sheet.Range(row, 1, row, 4).Style.Font.SetBold();
-                    break;
-                case JournalReportKind.BySubaccount:
-                    sheet.Cell(row, 4).Value = rows.Sum(item => item.Amount);
-                    sheet.Cell(row, 5).Value = rows.Sum(item => item.Amount);
-                    sheet.Range(row, 4, row, 5).Style.NumberFormat.Format = "#,##0.00";
-                    sheet.Range(row, 1, row, 5).Style.Font.SetBold();
-                    break;
-                default:
-                    sheet.Cell(row, 7).Value = rows.Sum(item => item.Amount);
-                    sheet.Cell(row, 8).Value = rows.Sum(item => item.AmountCurrency);
-                    sheet.Range(row, 7, row, 8).Style.NumberFormat.Format = "#,##0.00";
-                    sheet.Range(row, 1, row, 8).Style.Font.SetBold();
-                    break;
+                ChoosePrintFormCheckBox.IsChecked = false;
+                SystemLogService.Error("Ошибка выбора печатной формы журнала проводок.",
+                    "PostingsJournalView.OnChoosePrintFormChecked", ex);
             }
         }
 
-        private static void WriteJournalHeader(IXLWorksheet sheet, int row, params string[] headers)
+        private void OnChoosePrintFormUnchecked(object sender, RoutedEventArgs e)
         {
-            for (var index = 0; index < headers.Length; index++)
-            {
-                var cell = sheet.Cell(row, index + 1);
-                cell.Value = headers[index];
-                cell.Style.Font.SetBold();
-                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#DDEAF6");
-                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            }
+            _chosenPrintForm = null;
+            StatusText.Text = "Печатная форма по умолчанию";
         }
 
-        private static string GetJournalReportKindTitle(JournalReportKind kind) => kind switch
-        {
-            JournalReportKind.Brief => "Краткая",
-            JournalReportKind.ByArticle => "Итоги по статьям",
-            JournalReportKind.BySubaccount => "Итоги по субсчетам",
-            _ => "Полная"
-        };
-
-        private static string BuildTemporaryExcelPath(string baseName)
-        {
-            foreach (var invalid in Path.GetInvalidFileNameChars())
-                baseName = baseName.Replace(invalid, '_');
-
-            var directory = Path.Combine(Path.GetTempPath(), "BIS ERP", "Reports");
-            return Path.Combine(directory, $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx");
-        }
-
-        private static string SafeSheetName(string name)
-        {
-            var safeName = name;
-            foreach (var invalid in new[] { ':', '\\', '/', '?', '*', '[', ']' })
-                safeName = safeName.Replace(invalid, ' ');
-
-            safeName = safeName.Trim();
-            if (string.IsNullOrWhiteSpace(safeName))
-                safeName = "Журнал";
-
-            return safeName.Length > 31 ? safeName[..31] : safeName;
-        }
-
-        private enum JournalReportKind
-        {
-            Full,
-            Brief,
-            ByArticle,
-            BySubaccount
-        }
         private async void OnOpenSourceDocumentClick(object sender, RoutedEventArgs e)
         {
             if (PostingsGrid.SelectedItem is not PostingViewModel selected)

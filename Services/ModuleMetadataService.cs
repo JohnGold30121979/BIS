@@ -400,6 +400,43 @@ namespace BIS.ERP.Services
         /// Возвращает сохранённый пользователем порядок групп навигации внутри модуля.
         /// Ключ значения: имя группы, значение: порядок (1..N). Если порядок не задан — пустой словарь.
         /// </summary>
+        /// <summary>
+        /// Порядок групп навигации по всем модулям одним запросом.
+        ///
+        /// Раньше дерево спрашивало порядок отдельно для каждого модуля —
+        /// на удалённой базе это лишние round-trip'ы при каждом построении.
+        /// </summary>
+        public async Task<Dictionary<Guid, Dictionary<string, int>>> GetAllNavigationGroupOrdersAsync()
+        {
+            await EnsureSchemaAsync();
+
+            var rows = await _context.Database
+                .SqlQueryRaw<NavigationGroupOrderAllRow>(
+                    @"SELECT ""ModuleId"", ""GroupKey"", ""Order"" FROM ""NavigationGroupOrders""")
+                .ToListAsync();
+
+            var result = new Dictionary<Guid, Dictionary<string, int>>();
+            foreach (var row in rows)
+            {
+                if (!result.TryGetValue(row.ModuleId, out var groups))
+                {
+                    groups = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    result[row.ModuleId] = groups;
+                }
+
+                groups[row.GroupKey] = row.Order;
+            }
+
+            return result;
+        }
+
+        private sealed class NavigationGroupOrderAllRow
+        {
+            public Guid ModuleId { get; set; }
+            public string GroupKey { get; set; } = string.Empty;
+            public int Order { get; set; }
+        }
+
         public async Task<Dictionary<string, int>> GetNavigationGroupOrdersAsync(Guid moduleId)
         {
             await EnsureSchemaAsync();

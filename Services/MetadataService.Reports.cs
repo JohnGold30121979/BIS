@@ -18,10 +18,19 @@ public partial class MetadataService
         await DeleteDeprecatedObjectTreeReportsAsync();
         var deletedReportCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
 
+        // Отчёты и источники читаем один раз: раньше на каждое определение уходило
+        // до трёх запросов (источник, отчёт по коду, отчёт по имени), а определений десятки.
+        // На удалённой базе это главный источник задержки этапа.
+        var existingReports = await _context.Reports.ToListAsync();
+        var reportSources = await _context.MetadataObjects
+            .AsNoTracking()
+            .Include(metadata => metadata.Fields)
+            .ToListAsync();
+
         foreach (var definition in BuildStandardReportDefinitions()
                      .Where(definition => !IsDeprecatedObjectTreeReportCode(definition.Code))
                      .Where(definition => !deletedReportCodes.Contains(definition.Code)))
-            await EnsureStandardReportAsync(definition);
+            await EnsureStandardReportAsync(definition, existingReports, reportSources);
         await _context.SaveChangesAsync();
     }
 
@@ -172,16 +181,16 @@ public partial class MetadataService
         await _context.SaveChangesAsync();
     }
 
-    private async Task EnsureStandardReportAsync(StandardReportDefinition definition)
+    private async Task EnsureStandardReportAsync(
+        StandardReportDefinition definition,
+        List<Report> existingReports,
+        List<MetadataObject> reportSources)
     {
-        var source = await _context.MetadataObjects
-            .AsNoTracking()
-            .Include(metadata => metadata.Fields)
-            .FirstOrDefaultAsync(metadata =>
-                metadata.Name == definition.SourceName &&
-                metadata.ObjectType == definition.SourceObjectType);
+        var source = reportSources.FirstOrDefault(metadata =>
+            metadata.Name == definition.SourceName &&
+            metadata.ObjectType == definition.SourceObjectType);
 
-        var report = await FindExistingStandardReportAsync(definition);
+        var report = FindExistingStandardReport(definition, existingReports);
         var isNewReport = report == null;
 
         if (report == null)
@@ -192,6 +201,7 @@ public partial class MetadataService
                 CreatedAt = DateTime.UtcNow
             };
             await _context.Reports.AddAsync(report);
+            existingReports.Add(report);
         }
 
         report.Code = definition.Code;
@@ -294,20 +304,18 @@ public partial class MetadataService
         await AssignStandardReportToModuleAsync(report.Id, definition.ModuleCode, definition.Order);
     }
 
-    private async Task<Report?> FindExistingStandardReportAsync(StandardReportDefinition definition)
+    private static Report? FindExistingStandardReport(StandardReportDefinition definition, List<Report> existingReports)
     {
-        var report = await _context.Reports
-            .FirstOrDefaultAsync(item => item.Code == definition.Code);
+        var report = existingReports.FirstOrDefault(item => item.Code == definition.Code);
         if (report != null)
             return report;
 
-        return await _context.Reports
-            .FirstOrDefaultAsync(item =>
-                item.Name == definition.Name &&
-                (string.IsNullOrWhiteSpace(item.Code) ||
-                 item.Code.StartsWith("assets.") ||
-                 item.Code.StartsWith("finance.") ||
-                 item.Code.StartsWith("inventory.")));
+        return existingReports.FirstOrDefault(item =>
+            item.Name == definition.Name &&
+            (string.IsNullOrWhiteSpace(item.Code) ||
+             item.Code.StartsWith("assets.") ||
+             item.Code.StartsWith("finance.") ||
+             item.Code.StartsWith("inventory.")));
     }
 
     private async Task DeleteStandardReportDetailsAsync(Guid reportId)

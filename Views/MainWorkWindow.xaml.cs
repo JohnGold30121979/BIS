@@ -434,7 +434,7 @@ namespace BIS.ERP
                     _moduleMetadataService = new ModuleMetadataService(context);
 
                     initStage = "схемы и сервисы (RuntimeSchemaFixService, PrintForm, шаблоны)";
-                    await new RuntimeSchemaFixService(context).EnsureAsync();
+                    await StartupProfiler.MeasureAsync("Схема и миграции", () => new RuntimeSchemaFixService(context).EnsureAsync());
                     await _accountingPeriodService.EnsureSchemaAsync();
                     await _userAccessService.EnsureSchemaAsync();
                     await _localizationService.InitializeAsync();
@@ -447,25 +447,25 @@ namespace BIS.ERP
                     // DbUpdateConcurrencyException в следующем SaveChanges.
                     context.ChangeTracker.Clear();
                     initStage = "InitializePredefinedCatalogsAsync (предустановленные справочники)";
-                    await _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id);
+                    await StartupProfiler.MeasureAsync("Предустановленные справочники", () => _metadataService.InitializePredefinedCatalogsAsync(_currentInfoBase.Id));
 
                     context.ChangeTracker.Clear();
                     initStage = "DocumentationMetadataSeedService (посадка документации)";
-                    await new DocumentationMetadataSeedService(context).EnsureAsync();
+                    await StartupProfiler.MeasureAsync("Посадка документации", () => new DocumentationMetadataSeedService(context).EnsureAsync());
 
                     context.ChangeTracker.Clear();
                     initStage = "InvoiceMetadataSeedService (посадка счетов-фактур)";
-                    await new InvoiceMetadataSeedService(context).EnsureAsync();
+                    await StartupProfiler.MeasureAsync("Посадка счетов-фактур", () => new InvoiceMetadataSeedService(context).EnsureAsync());
 
                     context.ChangeTracker.Clear();
                     initStage = "PrintFormService (печатные формы)";
                     var printFormService = new PrintFormService(context);
-                    await printFormService.SeedCashOrderFormsAsync();
-                    await printFormService.SeedInvoiceFormsAsync();
+                    await StartupProfiler.MeasureAsync("Печатные формы: кассовые ордера", () => printFormService.SeedCashOrderFormsAsync());
+                    await StartupProfiler.MeasureAsync("Печатные формы: счета-фактуры", () => printFormService.SeedInvoiceFormsAsync());
 
                     context.ChangeTracker.Clear();
                     initStage = "EnsureStandardReportsAsync (стандартные отчёты)";
-                    await _metadataService.EnsureStandardReportsAsync();
+                    await StartupProfiler.MeasureAsync("Стандартные отчёты", () => _metadataService.EnsureStandardReportsAsync());
 
                     context.ChangeTracker.Clear();
                     initStage = "BuildNavigationTree (дерево навигации)";
@@ -491,19 +491,46 @@ namespace BIS.ERP
             }
         }
 
+        /// <summary>
+        /// Читает данные на собственном подключении. Нужно для деревьев:
+        /// общий контекст окна в это время может быть занят другой операцией,
+        /// а на одном соединении параллельные команды падают.
+        /// </summary>
+        private static async Task<T> LoadWithIndependentConnectionAsync<T>(Func<AppDbContext, Task<T>> load)
+        {
+            await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            return await load(context);
+        }
+
         private async Task BuildNavigationTree()
         {
             NavigationItems.Clear();
 
-            var allMetadata = await _metadataService.GetAllMetadataObjectsAsync();
-            var allModules = await _moduleMetadataService.GetModulesAsync(includeInactive: true);
+            // Дерево строится на отдельных подключениях: не делим соединение с остальной
+            // загрузкой окна и грузим независимые наборы параллельно (важно для VPN).
+            var metadataTask = StartupProfiler.MeasureAsync("Дерево: метаданные", () => LoadWithIndependentConnectionAsync(context =>
+                new MetadataService(context).GetAllMetadataObjectsAsync()));
+            var modulesTask = StartupProfiler.MeasureAsync("Дерево: модули", () => LoadWithIndependentConnectionAsync(context =>
+                new ModuleMetadataService(context).GetModulesAsync(includeInactive: true)));
+            var moduleItemsTask = StartupProfiler.MeasureAsync("Дерево: состав модулей", () => LoadWithIndependentConnectionAsync(context =>
+                new ModuleMetadataService(context).GetItemsAsync()));
+            var reportsTask = StartupProfiler.MeasureAsync("Дерево: отчёты", () => LoadWithIndependentConnectionAsync(context =>
+                new ReportService(context).GetNavigationReportsAsync()));
+            var groupOrdersTask = StartupProfiler.MeasureAsync("Дерево: порядок групп", () => LoadWithIndependentConnectionAsync(context =>
+                new ModuleMetadataService(context).GetAllNavigationGroupOrdersAsync()));
+
+            await Task.WhenAll(metadataTask, modulesTask, moduleItemsTask, reportsTask, groupOrdersTask);
+
+            var allMetadata = await metadataTask;
+            var allModules = await modulesTask;
+            var groupOrdersByModule = await groupOrdersTask;
             var modules = allModules
                 .Where(module => module.IsActive)
                 .OrderBy(module => module.Order)
                 .ThenBy(module => module.Name)
                 .ToList();
             var activeModuleCodes = modules.Select(module => module.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var moduleItems = await _moduleMetadataService.GetItemsAsync();
+            var moduleItems = await moduleItemsTask;
 
             // Почему модуль не появился в рабочем окне: он отключён, хотя объекты в нём есть.
             foreach (var inactive in allModules.Where(module => !module.IsActive))
@@ -529,7 +556,7 @@ namespace BIS.ERP
                                !RemovedDocumentNames.Contains(item.Name) &&
                                !hiddenMetadataIds.Contains(item.Id))
                 .ToList();
-            var reports = (await _reportService.GetNavigationReportsAsync())
+            var reports = (await reportsTask)
                 .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, assignedModuleCodesByObject, activeModuleCodes))
                 .Where(IsReportAvailableForNavigation)
                 .ToList();
@@ -563,7 +590,9 @@ namespace BIS.ERP
                     Tag = module
                 };
 
-                var groupOrders = await _moduleMetadataService.GetNavigationGroupOrdersAsync(module.Id);
+                var groupOrders = groupOrdersByModule.TryGetValue(module.Id, out var loadedOrders)
+                    ? loadedOrders
+                    : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 var moduleGroups = new List<NavigationItem>();
 
                 var catalogOrderById = GetModuleItemOrderMap(moduleItems, module.Id, "Catalog");

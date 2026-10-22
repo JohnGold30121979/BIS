@@ -482,7 +482,10 @@ namespace BIS.ERP.Services
                         ON public.{lines} ({parent}, ""line_number"");
                     DO $$
                     BEGIN
-                        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '{definition.LinesTable}_header') THEN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint
+                            WHERE conname = 'fk_{definition.LinesTable}_header'
+                              AND conrelid = 'public.{definition.LinesTable}'::regclass) THEN
                             ALTER TABLE public.{lines}
                                 ADD CONSTRAINT {fkName} FOREIGN KEY ({parent})
                                 REFERENCES public.{header}(""Id"") ON DELETE CASCADE;
@@ -493,11 +496,16 @@ namespace BIS.ERP.Services
 
                 // Колонки, добавленные позже (участок, МОЛ, налог с продаж и т.п.),
                 // догоняем на уже существующих таблицах строк.
-                foreach (var (column, columnDefinition) in InventoryDocumentModel.LineColumns)
+                // Все недостающие колонки — одним ALTER: на удалённой базе
+                // это один round-trip вместо десятков.
+                var addedColumns = InventoryDocumentModel.LineColumns
+                    .Select(pair => $"ADD COLUMN IF NOT EXISTS {QuoteIdentifier(pair.Column)} {pair.Definition}")
+                    .ToList();
+
+                if (addedColumns.Count > 0)
                 {
                     await _context.Database.ExecuteSqlRawAsync(
-                        $"ALTER TABLE public.{lines} ADD COLUMN IF NOT EXISTS " +
-                        $"{QuoteIdentifier(column)} {columnDefinition};");
+                        $"ALTER TABLE public.{lines} {string.Join(", ", addedColumns)};");
                 }
             }
         }

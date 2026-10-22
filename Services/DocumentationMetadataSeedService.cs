@@ -7,6 +7,7 @@ namespace BIS.ERP.Services
     public class DocumentationMetadataSeedService
     {
         private readonly AppDbContext _context;
+        private DatabaseSchemaCache? _schemaCache;
         private readonly MetadataService _metadataService;
 
         public DocumentationMetadataSeedService(AppDbContext context)
@@ -1268,9 +1269,20 @@ namespace BIS.ERP.Services
 
             try
             {
-                var columnType = await GetActualColumnTypeAsync(tableName, field.DbColumnName);
-                if (columnType == null)
+                var info = await GetColumnInfoAsync(tableName, field.DbColumnName);
+                if (info == null)
                     return; // колонки ещё нет — её создаст EnsureObjectFieldsAsync
+
+                var columnType = info.DataType;
+
+                // Уже в нужном состоянии — ни одной команды в базу.
+                // На удалённой базе это главный выигрыш: раньше на каждое поле
+                // уходило 2–3 запроса, даже когда менять было нечего.
+                if (field.IsRequired && !info.IsNullable)
+                    return;
+
+                if (!field.IsRequired && info.IsNullable)
+                    return;
 
                 var defaultValue = DefaultLiteralFor(columnType);
 
@@ -1322,6 +1334,9 @@ namespace BIS.ERP.Services
                             $"ALTER TABLE \"{tableName}\" ALTER COLUMN \"{field.DbColumnName}\" DROP DEFAULT;");
                     }
                 }
+
+                _schemaCache?.SetColumn(tableName, field.DbColumnName,
+                    new ColumnInfo(columnType, !field.IsRequired, defaultValue));
             }
             catch (Exception ex)
             {
@@ -1332,39 +1347,22 @@ namespace BIS.ERP.Services
             }
         }
 
+        private async Task<ColumnInfo?> GetColumnInfoAsync(string tableName, string columnName)
+        {
+            _schemaCache ??= await DatabaseSchemaCache.LoadAsync(
+                _context.Database.GetConnectionString() ?? throw new InvalidOperationException("Не задана строка подключения."));
+
+            return _schemaCache.GetColumnInfo(tableName, columnName);
+        }
+
         private async Task<string?> GetActualColumnTypeAsync(string tableName, string columnName)
         {
-            var connection = _context.Database.GetDbConnection();
-            var openedHere = connection.State != System.Data.ConnectionState.Open;
-            if (openedHere)
-                await connection.OpenAsync();
+            // Читаем схему отдельным соединением и один раз: на общем соединении EF
+            // такой запрос падал с NpgsqlOperationInProgressException.
+            _schemaCache ??= await DatabaseSchemaCache.LoadAsync(
+                _context.Database.GetConnectionString() ?? throw new InvalidOperationException("Не задана строка подключения."));
 
-            try
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText = @"
-                    SELECT data_type
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = @table AND column_name = @column";
-
-                var tableParameter = command.CreateParameter();
-                tableParameter.ParameterName = "@table";
-                tableParameter.Value = tableName;
-                command.Parameters.Add(tableParameter);
-
-                var columnParameter = command.CreateParameter();
-                columnParameter.ParameterName = "@column";
-                columnParameter.Value = columnName;
-                command.Parameters.Add(columnParameter);
-
-                var value = await command.ExecuteScalarAsync();
-                return value as string;
-            }
-            finally
-            {
-                if (openedHere)
-                    await connection.CloseAsync();
-            }
+            return _schemaCache.GetColumnType(tableName, columnName);
         }
 
         /// <summary>Литерал значения по умолчанию для фактического типа колонки.</summary>
