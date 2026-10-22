@@ -502,9 +502,23 @@ namespace BIS.ERP
             return await load(context);
         }
 
+        /// <summary>
+        /// Схема модулей — один раз и на отдельном подключении, до параллельных чтений дерева.
+        /// DDL на общем контексте или одновременно с чтениями давал взаимоблокировку 40P01.
+        /// </summary>
+        private static async Task EnsureModuleSchemaAsync()
+        {
+            await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+            await new ModuleMetadataService(context).EnsureSchemaAsync();
+        }
+
         private async Task BuildNavigationTree()
         {
             NavigationItems.Clear();
+
+            // Схема модулей готовится заранее и на своём подключении: дальше пять наборов
+            // читаются параллельно, и DDL в этот момент не должен выполняться.
+            await EnsureModuleSchemaAsync();
 
             // Дерево строится на отдельных подключениях: не делим соединение с остальной
             // загрузкой окна и грузим независимые наборы параллельно (важно для VPN).

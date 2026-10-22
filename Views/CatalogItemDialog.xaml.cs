@@ -1406,7 +1406,7 @@ inputControl = AccountPickerControlFactory.Create(
         /// </summary>
         private string? GetDefaultCurrencyColumn()
         {
-            if (IsBankAccountsCatalog())
+            if (IsBankAccountsCatalog() || IsCashDesksCatalog())
                 return "currency_id";
 
             if (IsChartOfAccountsCatalog())
@@ -1418,6 +1418,10 @@ inputControl = AccountPickerControlFactory.Create(
         private bool IsBankAccountsCatalog() =>
             string.Equals(_catalog.TableName, "catalog_bank_accounts", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Расчетные счета организаций", StringComparison.OrdinalIgnoreCase);
+
+        private bool IsCashDesksCatalog() =>
+            string.Equals(_catalog.TableName, "catalog_cash_desks", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.Name, "Кассы", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Справочник «Ввод нового документа ТМЗ» (виды операций с ТМЗ).</summary>
         private bool IsInventoryEntryCatalog() =>

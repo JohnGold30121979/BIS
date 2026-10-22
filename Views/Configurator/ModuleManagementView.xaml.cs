@@ -11,30 +11,58 @@ namespace BIS.ERP.Views.Configurator
 {
     public partial class ModuleManagementView : UserControl
     {
-        private readonly AppDbContext _context;
-        private readonly ModuleMetadataService _moduleService;
-        private MetadataModule? _currentModule;
+        // Общий контекст окна конфигуратора здесь не используем: он занят другими
+        // редакторами, а DbContext не переносит параллельных операций — вторая
+        // падает с «A second operation was started on this context instance…».
+        // Каждая операция идёт на своём подключении
+        // (см. Docs/Задержки_запуска_и_оптимизация.md, п. 4.6 и 4.8).
+        private readonly string _connectionString;
         private readonly ObservableCollection<ModuleObjectRow> _documents = new();
         private readonly ObservableCollection<ModuleObjectRow> _reports = new();
         private readonly ObservableCollection<ModuleObjectRow> _unassigned = new();
+        private MetadataModule? _currentModule;
+        private int _loadVersion;
 
-        public ModuleManagementView(AppDbContext context)
+        public ModuleManagementView(string connectionString)
         {
             InitializeComponent();
-            _context = context;
-            _moduleService = new ModuleMetadataService(context);
+            _connectionString = string.IsNullOrWhiteSpace(connectionString)
+                ? throw new ArgumentException("Не задана строка подключения к информационной базе.", nameof(connectionString))
+                : connectionString;
             DocumentsGrid.ItemsSource = _documents;
             ReportsGrid.ItemsSource = _reports;
             UnassignedGrid.ItemsSource = _unassigned;
-            Loaded += async (_, _) => await LoadAsync();
+            Loaded += async (_, _) => await OnLoadedAsync();
+        }
+
+        private async Task OnLoadedAsync()
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Ошибка загрузки списка модулей.", nameof(ModuleManagementView), ex);
+                StatusText.Text = "Не удалось загрузить список модулей.";
+            }
         }
 
         private async Task LoadAsync(Guid? selectId = null)
         {
-            await _moduleService.EnsureDefaultModulesAsync();
-            var modules = await _moduleService.GetModulesAsync(true);
+            // Схема модулей — на своём подключении и до любых чтений: DDL на общем
+            // контексте или одновременно с чтениями давал взаимоблокировку 40P01.
+            await EnsureModuleSchemaAsync();
+
+            // Посадка системных модулей — тоже на своём подключении (запись в БД).
+            await EnsureDefaultModulesAsync();
+
+            var modules = await LoadOnOwnConnectionAsync(context =>
+                new ModuleMetadataService(context).GetModulesAsync(true));
             ModulesList.ItemsSource = modules;
-            var selected = selectId.HasValue ? modules.FirstOrDefault(module => module.Id == selectId) : modules.FirstOrDefault();
+            var selected = selectId.HasValue
+                ? modules.FirstOrDefault(module => module.Id == selectId)
+                : modules.FirstOrDefault();
             ModulesList.SelectedItem = selected;
         }
 
@@ -56,7 +84,6 @@ namespace BIS.ERP.Views.Configurator
             DeleteButton.IsEnabled = !module.IsSystem;
             await LoadObjectsAsync(module.Id, module.Code);
 
-            const string hint = "Показаны объекты этого модуля. Если списки пусты — в модуле пока нет документов и отчётов.";
             var state = module.IsActive
                 ? "Модуль включён."
                 : "Модуль ОТКЛЮЧЁН — в рабочем окне не показывается. Включите «Доступен в инфобазе».";
@@ -68,99 +95,124 @@ namespace BIS.ERP.Views.Configurator
 
         private async Task LoadObjectsAsync(Guid moduleId, string moduleCode)
         {
-            var selectedDocuments = _documents.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
-            var selectedReports = _reports.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
-            var selectedUnassigned = _unassigned.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
+            // Переключение модулей может начать новую загрузку, пока предыдущая
+            // ещё идёт: устаревший результат отбрасываем.
+            var version = ++_loadVersion;
 
-            var allAssignments = await _moduleService.GetItemsAsync();
-            var own = allAssignments
-                .Where(item => item.ModuleId == moduleId)
-                .Select(item => item.ObjectId)
-                .ToHashSet();
-            var assignedAnywhere = allAssignments
-                .Select(item => item.ObjectId)
-                .ToHashSet();
-
-            var documents = await _context.MetadataObjects.AsNoTracking()
-                .Where(item => item.ObjectType == "Document").OrderBy(item => item.Name).ToListAsync();
-            var reports = await _context.Reports.AsNoTracking()
-                .Where(item => !item.IsPrintForm).OrderBy(item => item.Name).ToListAsync();
-
-            var fixedAssets = new HashSet<string>(ModuleMetadataService.FixedAssetDocumentNames, StringComparer.OrdinalIgnoreCase);
-            var inventory = new HashSet<string>(DocumentTableNames.InventoryDocumentNames, StringComparer.OrdinalIgnoreCase);
-
-            IEnumerable<MetadataObject> visibleDocuments;
-            IEnumerable<Report> visibleReports;
-
-            if (string.Equals(moduleCode, ModuleMetadataService.FixedAssetsCode, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                // Строго свой состав: чужие документы в списке ОС не нужны.
-                visibleDocuments = documents.Where(item => fixedAssets.Contains(item.Name) || own.Contains(item.Id));
-                visibleReports = reports.Where(item =>
-                    item.Code.StartsWith("standard.fixed-assets.", StringComparison.OrdinalIgnoreCase) ||
-                    item.Code.StartsWith("assets.", StringComparison.OrdinalIgnoreCase) ||
-                    own.Contains(item.Id));
-            }
-            else if (string.Equals(moduleCode, ModuleMetadataService.InventoryCode, StringComparison.OrdinalIgnoreCase))
-            {
-                visibleDocuments = documents.Where(item => inventory.Contains(item.Name) || own.Contains(item.Id));
-                visibleReports = reports.Where(item =>
-                    item.Code.StartsWith("inventory.", StringComparison.OrdinalIgnoreCase) ||
-                    own.Contains(item.Id));
-            }
-            else
-            {
-                // Прочие модули: только свои объекты. Неназначенные — на отдельной вкладке.
-                visibleDocuments = documents.Where(item => own.Contains(item.Id));
-                visibleReports = reports.Where(item => own.Contains(item.Id));
-            }
+                var selectedDocuments = _documents.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
+                var selectedReports = _reports.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
+                var selectedUnassigned = _unassigned.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
 
-            _documents.Clear();
-            foreach (var document in visibleDocuments)
-            {
-                var row = new ModuleObjectRow(
-                    document.Id, document.Name, document.Description,
-                    own.Contains(document.Id) || selectedDocuments.Contains(document.Id), "Document");
-                row.PropertyChanged += OnModuleObjectRowChanged;
-                _documents.Add(row);
+                // Три независимых набора — на трёх разных подключениях и параллельно:
+                // по VPN задержки складываются не в сумму, а в максимум.
+                var assignmentsTask = LoadOnOwnConnectionAsync(context =>
+                    new ModuleMetadataService(context).GetItemsAsync());
+                var documentsTask = LoadOnOwnConnectionAsync(context => context.MetadataObjects.AsNoTracking()
+                    .Where(item => item.ObjectType == "Document").OrderBy(item => item.Name).ToListAsync());
+                var reportsTask = LoadOnOwnConnectionAsync(context => context.Reports.AsNoTracking()
+                    .Where(item => !item.IsPrintForm).OrderBy(item => item.Name).ToListAsync());
+
+                await Task.WhenAll(assignmentsTask, documentsTask, reportsTask);
+
+                var allAssignments = await assignmentsTask;
+                var documents = await documentsTask;
+                var reports = await reportsTask;
+
+                if (version != _loadVersion)
+                    return;
+
+                var own = allAssignments
+                    .Where(item => item.ModuleId == moduleId)
+                    .Select(item => item.ObjectId)
+                    .ToHashSet();
+                var assignedAnywhere = allAssignments
+                    .Select(item => item.ObjectId)
+                    .ToHashSet();
+
+                var fixedAssets = new HashSet<string>(ModuleMetadataService.FixedAssetDocumentNames, StringComparer.OrdinalIgnoreCase);
+                var inventory = new HashSet<string>(DocumentTableNames.InventoryDocumentNames, StringComparer.OrdinalIgnoreCase);
+
+                IEnumerable<MetadataObject> visibleDocuments;
+                IEnumerable<Report> visibleReports;
+
+                if (string.Equals(moduleCode, ModuleMetadataService.FixedAssetsCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Строго свой состав: чужие документы в списке ОС не нужны.
+                    visibleDocuments = documents.Where(item => fixedAssets.Contains(item.Name) || own.Contains(item.Id));
+                    visibleReports = reports.Where(item =>
+                        item.Code.StartsWith("standard.fixed-assets.", StringComparison.OrdinalIgnoreCase) ||
+                        item.Code.StartsWith("assets.", StringComparison.OrdinalIgnoreCase) ||
+                        own.Contains(item.Id));
+                }
+                else if (string.Equals(moduleCode, ModuleMetadataService.InventoryCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    visibleDocuments = documents.Where(item => inventory.Contains(item.Name) || own.Contains(item.Id));
+                    visibleReports = reports.Where(item =>
+                        item.Code.StartsWith("inventory.", StringComparison.OrdinalIgnoreCase) ||
+                        own.Contains(item.Id));
+                }
+                else
+                {
+                    // Прочие модули: только свои объекты. Неназначенные — на отдельной вкладке.
+                    visibleDocuments = documents.Where(item => own.Contains(item.Id));
+                    visibleReports = reports.Where(item => own.Contains(item.Id));
+                }
+
+                _documents.Clear();
+                foreach (var document in visibleDocuments)
+                {
+                    var row = new ModuleObjectRow(
+                        document.Id, document.Name, document.Description,
+                        own.Contains(document.Id) || selectedDocuments.Contains(document.Id), "Document");
+                    row.PropertyChanged += OnModuleObjectRowChanged;
+                    _documents.Add(row);
+                }
+
+                _reports.Clear();
+                foreach (var report in visibleReports)
+                {
+                    var row = new ModuleObjectRow(
+                        report.Id, report.Name, report.Description,
+                        own.Contains(report.Id) || selectedReports.Contains(report.Id), "Report");
+                    row.PropertyChanged += OnModuleObjectRowChanged;
+                    _reports.Add(row);
+                }
+
+                // На вкладке «Неназначенные» — объекты без модуля, которых нет в списках выше.
+                var visibleDocumentIds = visibleDocuments.Select(item => item.Id).ToHashSet();
+                var visibleReportIds = visibleReports.Select(item => item.Id).ToHashSet();
+
+                _unassigned.Clear();
+                foreach (var document in documents.Where(item =>
+                             !assignedAnywhere.Contains(item.Id) && !visibleDocumentIds.Contains(item.Id)))
+                {
+                    var row = new ModuleObjectRow(
+                        document.Id, document.Name, document.Description,
+                        selectedUnassigned.Contains(document.Id), "Document");
+                    row.PropertyChanged += OnModuleObjectRowChanged;
+                    _unassigned.Add(row);
+                }
+
+                foreach (var report in reports.Where(item =>
+                             !assignedAnywhere.Contains(item.Id) && !visibleReportIds.Contains(item.Id)))
+                {
+                    var row = new ModuleObjectRow(
+                        report.Id, report.Name, report.Description,
+                        selectedUnassigned.Contains(report.Id), "Report");
+                    row.PropertyChanged += OnModuleObjectRowChanged;
+                    _unassigned.Add(row);
+                }
+
+                UpdateEmptyStates();
             }
-
-            _reports.Clear();
-            foreach (var report in visibleReports)
+            catch (Exception ex)
             {
-                var row = new ModuleObjectRow(
-                    report.Id, report.Name, report.Description,
-                    own.Contains(report.Id) || selectedReports.Contains(report.Id), "Report");
-                row.PropertyChanged += OnModuleObjectRowChanged;
-                _reports.Add(row);
+                SystemLogService.Error(
+                    $"Ошибка загрузки состава модуля «{moduleCode}».", nameof(ModuleManagementView), ex);
+                StatusText.Text = "Не удалось загрузить состав модуля: " + ex.Message;
             }
-
-            // На вкладке «Неназначенные» — объекты без модуля, которых нет в списках выше.
-            var visibleDocumentIds = visibleDocuments.Select(item => item.Id).ToHashSet();
-            var visibleReportIds = visibleReports.Select(item => item.Id).ToHashSet();
-
-            _unassigned.Clear();
-            foreach (var document in documents.Where(item =>
-                         !assignedAnywhere.Contains(item.Id) && !visibleDocumentIds.Contains(item.Id)))
-            {
-                var row = new ModuleObjectRow(
-                    document.Id, document.Name, document.Description,
-                    selectedUnassigned.Contains(document.Id), "Document");
-                row.PropertyChanged += OnModuleObjectRowChanged;
-                _unassigned.Add(row);
-            }
-
-            foreach (var report in reports.Where(item =>
-                         !assignedAnywhere.Contains(item.Id) && !visibleReportIds.Contains(item.Id)))
-            {
-                var row = new ModuleObjectRow(
-                    report.Id, report.Name, report.Description,
-                    selectedUnassigned.Contains(report.Id), "Report");
-                row.PropertyChanged += OnModuleObjectRowChanged;
-                _unassigned.Add(row);
-            }
-
-            UpdateEmptyStates();
         }
 
         private bool _updatingSelectAll;
@@ -276,8 +328,6 @@ namespace BIS.ERP.Views.Configurator
                 _currentModule.IsActive = IsActiveCheck.IsChecked == true;
                 _currentModule.ParticipatesInPeriodClose = ParticipatesInPeriodCloseCheck.IsChecked == true;
                 _currentModule.RequirePreviousModulesClosed = RequirePreviousModulesClosedCheck.IsChecked == true;
-                var saved = await _moduleService.SaveModuleAsync(_currentModule);
-
                 var documentIds = _documents.Where(row => row.IsSelected).Select(row => row.Id)
                     .Concat(_unassigned.Where(row => row.IsSelected && row.ObjectType == "Document").Select(row => row.Id))
                     .ToList();
@@ -285,12 +335,15 @@ namespace BIS.ERP.Views.Configurator
                     .Concat(_unassigned.Where(row => row.IsSelected && row.ObjectType == "Report").Select(row => row.Id))
                     .ToList();
 
-                await _moduleService.SaveAssignmentsAsync(saved.Id, documentIds, reportIds);
+                // Запись — одна единица работы на своём подключении: свой трекер,
+                // общий контекст окна не трогаем.
+                await SaveModuleWithAssignmentsAsync(_currentModule, documentIds, reportIds);
                 StatusText.Text = "Модуль и его состав сохранены.";
-                await LoadAsync(saved.Id);
+                await LoadAsync(_currentModule.Id);
             }
             catch (Exception ex)
             {
+                SystemLogService.Error("Ошибка сохранения модуля.", nameof(ModuleManagementView), ex);
                 MessageBox.Show(ex.Message, "Модули", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -304,14 +357,56 @@ namespace BIS.ERP.Views.Configurator
                 return;
             try
             {
-                await _moduleService.DeleteModuleAsync(_currentModule.Id);
+                await DeleteModuleAsync(_currentModule.Id);
                 await LoadAsync();
             }
             catch (Exception ex)
             {
+                SystemLogService.Error("Ошибка удаления модуля.", nameof(ModuleManagementView), ex);
                 MessageBox.Show(ex.Message, "Модули", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
+
+        private async Task SaveModuleWithAssignmentsAsync(
+            MetadataModule module,
+            IEnumerable<Guid> documentIds,
+            IEnumerable<Guid> reportIds)
+        {
+            await using var context = CreateContext();
+            var service = new ModuleMetadataService(context);
+            var saved = await service.SaveModuleAsync(module);
+            await service.SaveAssignmentsAsync(saved.Id, documentIds, reportIds);
+        }
+
+        private async Task DeleteModuleAsync(Guid moduleId)
+        {
+            await using var context = CreateContext();
+            await new ModuleMetadataService(context).DeleteModuleAsync(moduleId);
+        }
+
+        private async Task EnsureModuleSchemaAsync()
+        {
+            await using var context = CreateContext();
+            await new ModuleMetadataService(context).EnsureSchemaAsync();
+        }
+
+        private async Task EnsureDefaultModulesAsync()
+        {
+            await using var context = CreateContext();
+            await new ModuleMetadataService(context).EnsureDefaultModulesAsync();
+        }
+
+        /// <summary>
+        /// Чтение на собственном подключении: общий контекст конфигуратора в это
+        /// время занят другими редакторами.
+        /// </summary>
+        private async Task<T> LoadOnOwnConnectionAsync<T>(Func<AppDbContext, Task<T>> load)
+        {
+            await using var context = CreateContext();
+            return await load(context);
+        }
+
+        private AppDbContext CreateContext() => new AppDbContext(_connectionString);
     }
 
     public class ModuleObjectRow : INotifyPropertyChanged

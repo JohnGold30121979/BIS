@@ -93,8 +93,25 @@ namespace BIS.ERP.Services
                 new("2026.10.22.01",
                     "Справочник видов операций ТМЗ: колонка operation_kind",
                     false,
-                    EnsureInventoryEntryOperationKindsAsync)
+                    EnsureInventoryEntryOperationKindsAsync),
+
+                new("2026.10.22.02",
+                    "doc_postings: colonnes document_table/document_id (восстановление схемы при отсутствии)",
+                    true,
+                    EnsurePostingDocumentTableColumnsAsync)
             };
+        }
+
+        private static async Task EnsurePostingDocumentTableColumnsAsync(AppDbContext ctx)
+        {
+            await ctx.Database.ExecuteSqlRawAsync(@"
+                DO $$
+                BEGIN
+                    IF to_regclass('public.doc_postings') IS NOT NULL THEN
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS document_table text;
+                        ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS document_id uuid;
+                    END IF;
+                END $$;");
         }
 
         public async Task<SchemaMigrationReport> EnsureAsync()

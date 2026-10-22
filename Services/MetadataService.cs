@@ -938,11 +938,17 @@ namespace BIS.ERP.Services
 
             try
             {
-                var moduleService = new ModuleMetadataService(_context);
+                // СВОЁ ПОДКЛЮЧЕНИЕ НА ОПЕРАЦИЮ. Метод зовут несколько редакторов
+                // одновременно (быстрое переключение между модулями), а общий контекст
+                // приложения переносит только одну операцию за раз: вторая падала с
+                // "A second operation was started on this context instance"
+                // (журнал системы 22.10.2026 11:04:38, редактор счетов-фактур).
+                await using var context = CreateIndependentContext();
+                var moduleService = new ModuleMetadataService(context);
                 await moduleService.EnsureSchemaAsync();
 
-                return await (from item in _context.MetadataModuleItems.AsNoTracking()
-                              join module in _context.MetadataModules.AsNoTracking()
+                return await (from item in context.MetadataModuleItems.AsNoTracking()
+                              join module in context.MetadataModules.AsNoTracking()
                                   on item.ModuleId equals module.Id
                               where item.ObjectId == metadataObjectId &&
                                     item.ObjectType == objectType
@@ -952,8 +958,10 @@ namespace BIS.ERP.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine(
-                    $"Ошибка определения модуля для объекта {metadataObjectId}: {ex.Message}");
+                SystemLogService.Warning(
+                    $"Ошибка определения модуля для объекта {metadataObjectId}.",
+                    nameof(MetadataService),
+                    ex);
                 return null;
             }
         }
@@ -1540,7 +1548,7 @@ namespace BIS.ERP.Services
             data[currencyField.Name] = currencyId.Value.ToString();
         }
 
-        private async Task<Guid?> GetDefaultCurrencyIdAsync()
+        public async Task<Guid?> GetDefaultCurrencyIdAsync()
         {
             // 1) Базовая валюта (is_base = true) — по умолчанию киргизский сом.
             var baseId = await TryReadCurrencyIdAsync(

@@ -536,10 +536,12 @@ namespace BIS.ERP.Views
             if (_context == null)
                 return;
 
+            // Редактор модулей работает на своих подключениях (см. ModuleManagementView):
+            // общий контекст окна делить нельзя — DbContext не переносит параллельных операций.
             OpenConfiguratorDocument(
                 "config:modules",
                 "Модули и разделы",
-                new BIS.ERP.Views.Configurator.ModuleManagementView(_context));
+                new BIS.ERP.Views.Configurator.ModuleManagementView(CurrentConnectionString()));
         }
         private void ShowAccountingSetupEditor()
         {
@@ -560,6 +562,18 @@ namespace BIS.ERP.Views
                 "config:user-access",
                 "Пользователи и права",
                 new UserAccessManagementView(_context, BuildUserAccessNavigationItems(), ServiceLocator.AuthService.CurrentUser));
+        }
+
+        /// <summary>
+        /// Строка подключения к текущей инфобазе.
+        /// </summary>
+        private string CurrentConnectionString()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось получить строку подключения к информационной базе.");
+
+            return connectionString;
         }
         private void ShowSystemLogsViewer()
         {

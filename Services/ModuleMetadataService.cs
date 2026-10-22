@@ -24,9 +24,44 @@ namespace BIS.ERP.Services
             _context = context;
         }
 
+        private static readonly HashSet<string> SchemaEnsuredConnections = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly object SchemaEnsuredLock = new();
+
+        // DDL и посадка модулей — по одному потоку на строку подключения.
+        // Иначе два вызова идут на разных подключениях одновременно: DDL против
+        // чтений даёт взаимоблокировку 40P01, а две вставки одного модуля —
+        // гонку по уникальному индексу Code.
+        private static readonly Dictionary<string, SemaphoreSlim> SchemaGates = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, SemaphoreSlim> DefaultModulesGates = new(StringComparer.OrdinalIgnoreCase);
+
+        private static SemaphoreSlim GetGate(Dictionary<string, SemaphoreSlim> gates, string connectionKey)
+        {
+            lock (SchemaEnsuredLock)
+            {
+                if (!gates.TryGetValue(connectionKey, out var gate))
+                {
+                    gate = new SemaphoreSlim(1, 1);
+                    gates[connectionKey] = gate;
+                }
+
+                return gate;
+            }
+        }
+
         public async Task EnsureSchemaAsync()
         {
-            await _context.Database.ExecuteSqlRawAsync(@"
+            var connectionKey = _context.Database.GetConnectionString() ?? "default";
+            var gate = GetGate(SchemaGates, connectionKey);
+            await gate.WaitAsync();
+            try
+            {
+                lock (SchemaEnsuredLock)
+                {
+                    if (SchemaEnsuredConnections.Contains(connectionKey))
+                        return;
+                }
+
+                await _context.Database.ExecuteSqlRawAsync(@"
                 CREATE TABLE IF NOT EXISTS ""MetadataModules"" (
                     ""Id"" uuid PRIMARY KEY,
                     ""Code"" varchar(80) NOT NULL,
@@ -64,9 +99,34 @@ namespace BIS.ERP.Services
                 CREATE UNIQUE INDEX IF NOT EXISTS ""IX_NavigationGroupOrders_Module_Key""
                     ON ""NavigationGroupOrders"" (""ModuleId"", ""GroupKey"");
             ");
+
+                lock (SchemaEnsuredLock)
+                {
+                    SchemaEnsuredConnections.Add(connectionKey);
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
         }
 
         public async Task EnsureDefaultModulesAsync()
+        {
+            var connectionKey = _context.Database.GetConnectionString() ?? "default";
+            var gate = GetGate(DefaultModulesGates, connectionKey);
+            await gate.WaitAsync();
+            try
+            {
+                await EnsureDefaultModulesCoreAsync();
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        private async Task EnsureDefaultModulesCoreAsync()
         {
             await EnsureSchemaAsync();
             await EnsureModuleAsync(
@@ -113,7 +173,6 @@ namespace BIS.ERP.Services
             bool includeInactive = false,
             bool includeFinalBalanceStage = false)
         {
-            await EnsureSchemaAsync();
             var query = _context.MetadataModules.AsNoTracking();
             if (!includeInactive)
                 query = query.Where(module => module.IsActive);
@@ -124,7 +183,6 @@ namespace BIS.ERP.Services
 
         public async Task<List<MetadataModuleItem>> GetItemsAsync()
         {
-            await EnsureSchemaAsync();
             return await _context.MetadataModuleItems.AsNoTracking()
                 .OrderBy(item => item.Order).ToListAsync();
         }
@@ -408,8 +466,6 @@ namespace BIS.ERP.Services
         /// </summary>
         public async Task<Dictionary<Guid, Dictionary<string, int>>> GetAllNavigationGroupOrdersAsync()
         {
-            await EnsureSchemaAsync();
-
             var rows = await _context.Database
                 .SqlQueryRaw<NavigationGroupOrderAllRow>(
                     @"SELECT ""ModuleId"", ""GroupKey"", ""Order"" FROM ""NavigationGroupOrders""")
@@ -439,7 +495,6 @@ namespace BIS.ERP.Services
 
         public async Task<Dictionary<string, int>> GetNavigationGroupOrdersAsync(Guid moduleId)
         {
-            await EnsureSchemaAsync();
             var rows = await _context.Database
                 .SqlQueryRaw<NavigationGroupOrderRow>(
                     @"SELECT ""GroupKey"", ""Order"" FROM ""NavigationGroupOrders"" WHERE ""ModuleId"" = @moduleId",
