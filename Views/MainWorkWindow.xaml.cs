@@ -522,29 +522,33 @@ namespace BIS.ERP
 
             // Дерево строится на отдельных подключениях: не делим соединение с остальной
             // загрузкой окна и грузим независимые наборы параллельно (важно для VPN).
-            var metadataTask = StartupProfiler.MeasureAsync("Дерево: метаданные", () => LoadWithIndependentConnectionAsync(context =>
-                new MetadataService(context).GetAllMetadataObjectsAsync()));
-            var modulesTask = StartupProfiler.MeasureAsync("Дерево: модули", () => LoadWithIndependentConnectionAsync(context =>
-                new ModuleMetadataService(context).GetModulesAsync(includeInactive: true)));
-            var moduleItemsTask = StartupProfiler.MeasureAsync("Дерево: состав модулей", () => LoadWithIndependentConnectionAsync(context =>
-                new ModuleMetadataService(context).GetItemsAsync()));
-            var reportsTask = StartupProfiler.MeasureAsync("Дерево: отчёты", () => LoadWithIndependentConnectionAsync(context =>
-                new ReportService(context).GetNavigationReportsAsync()));
-            var groupOrdersTask = StartupProfiler.MeasureAsync("Дерево: порядок групп", () => LoadWithIndependentConnectionAsync(context =>
-                new ModuleMetadataService(context).GetAllNavigationGroupOrdersAsync()));
+            // Шаг A1: без параллельных запросов — наборы читаются последовательно,
+            // каждый на своём подключении. Гонок нет, пиков по соединениям тоже.
+            var allMetadata = await StartupProfiler.MeasureAsync("Дерево: метаданные", () =>
+                LoadWithIndependentConnectionAsync(context =>
+                    new MetadataService(context).GetAllMetadataObjectsAsync()));
 
-            await Task.WhenAll(metadataTask, modulesTask, moduleItemsTask, reportsTask, groupOrdersTask);
+            var allModules = await StartupProfiler.MeasureAsync("Дерево: модули", () =>
+                LoadWithIndependentConnectionAsync(context =>
+                    new ModuleMetadataService(context).GetModulesAsync(includeInactive: true)));
 
-            var allMetadata = await metadataTask;
-            var allModules = await modulesTask;
-            var groupOrdersByModule = await groupOrdersTask;
+            var moduleItems = await StartupProfiler.MeasureAsync("Дерево: состав модулей", () =>
+                LoadWithIndependentConnectionAsync(context =>
+                    new ModuleMetadataService(context).GetItemsAsync()));
+
+            var navigationReports = await StartupProfiler.MeasureAsync("Дерево: отчёты", () =>
+                LoadWithIndependentConnectionAsync(context =>
+                    new ReportService(context).GetNavigationReportsAsync()));
+
+            var groupOrdersByModule = await StartupProfiler.MeasureAsync("Дерево: порядок групп", () =>
+                LoadWithIndependentConnectionAsync(context =>
+                    new ModuleMetadataService(context).GetAllNavigationGroupOrdersAsync()));
             var modules = allModules
                 .Where(module => module.IsActive)
                 .OrderBy(module => module.Order)
                 .ThenBy(module => module.Name)
                 .ToList();
             var activeModuleCodes = modules.Select(module => module.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var moduleItems = await moduleItemsTask;
 
             // Почему модуль не появился в рабочем окне: он отключён, хотя объекты в нём есть.
             foreach (var inactive in allModules.Where(module => !module.IsActive))
@@ -570,7 +574,7 @@ namespace BIS.ERP
                                !RemovedDocumentNames.Contains(item.Name) &&
                                !hiddenMetadataIds.Contains(item.Id))
                 .ToList();
-            var reports = (await reportsTask)
+            var reports = navigationReports
                 .Where(report => !IsHiddenByUnavailableModule(report, hiddenMetadataIds, assignedModuleCodesByObject, activeModuleCodes))
                 .Where(IsReportAvailableForNavigation)
                 .ToList();

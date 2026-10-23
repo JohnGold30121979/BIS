@@ -105,20 +105,14 @@ namespace BIS.ERP.Views.Configurator
                 var selectedReports = _reports.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
                 var selectedUnassigned = _unassigned.Where(row => row.IsSelected).Select(row => row.Id).ToHashSet();
 
-                // Три независимых набора — на трёх разных подключениях и параллельно:
-                // по VPN задержки складываются не в сумму, а в максимум.
-                var assignmentsTask = LoadOnOwnConnectionAsync(context =>
+                // Шаг A1: без параллельных запросов — три набора последовательно,
+                // каждый на своём подключении.
+                var allAssignments = await LoadOnOwnConnectionAsync(context =>
                     new ModuleMetadataService(context).GetItemsAsync());
-                var documentsTask = LoadOnOwnConnectionAsync(context => context.MetadataObjects.AsNoTracking()
+                var documents = await LoadOnOwnConnectionAsync(context => context.MetadataObjects.AsNoTracking()
                     .Where(item => item.ObjectType == "Document").OrderBy(item => item.Name).ToListAsync());
-                var reportsTask = LoadOnOwnConnectionAsync(context => context.Reports.AsNoTracking()
+                var reports = await LoadOnOwnConnectionAsync(context => context.Reports.AsNoTracking()
                     .Where(item => !item.IsPrintForm).OrderBy(item => item.Name).ToListAsync());
-
-                await Task.WhenAll(assignmentsTask, documentsTask, reportsTask);
-
-                var allAssignments = await assignmentsTask;
-                var documents = await documentsTask;
-                var reports = await reportsTask;
 
                 if (version != _loadVersion)
                     return;

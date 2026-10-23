@@ -259,19 +259,15 @@ namespace BIS.ERP.Views
                 await StartupProfiler.MeasureAsync("Печатные формы: счета-фактуры", () => printFormService.SeedInvoiceFormsAsync());
                 await StartupProfiler.MeasureAsync("Стандартные отчёты", () => _metadataService.EnsureStandardReportsAsync());
 
-                // Дерево конфигуратора строится на отдельных подключениях:
-                // общий контекст в это время занят другими операциями.
-                var metadataTask = LoadWithIndependentConnectionAsync(context =>
+                // Шаг A1: без параллельных запросов — последовательно, каждое чтение
+                // на своём подключении. Общий контекст при этом не участвует.
+                var allMetadata = await LoadWithIndependentConnectionAsync(context =>
                     new MetadataService(context).GetAllMetadataObjectsAsync());
-                var reportsTask = LoadWithIndependentConnectionAsync(context =>
+                var reportHeaders = await LoadWithIndependentConnectionAsync(context =>
                     new ReportService(context).GetReportHeadersAsync(includePrintForms: true));
-
-                await Task.WhenAll(metadataTask, reportsTask);
-
-                var allMetadata = await metadataTask;
                 _catalogs = allMetadata.Where(m => m.ObjectType == "Catalog").OrderBy(m => m.Name).ToList();
                 _documents = allMetadata.Where(m => m.ObjectType == "Document").OrderBy(m => m.Name).ToList();
-                _reports = await reportsTask;
+                _reports = reportHeaders;
                 BuildMetadataTree();
                 ShowMetadataOverview();
                 await LogConfiguratorEventAsync(
