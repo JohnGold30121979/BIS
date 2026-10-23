@@ -44,6 +44,19 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<Guid, string> _entryOperationKinds = new();
         private ComboBox? _entryEditor;
 
+        private readonly TaxService _taxService;
+        private readonly Dictionary<Guid, decimal> _taxRates = new();
+        private readonly Dictionary<Guid, bool> _vatDefaults = new();
+        private readonly Dictionary<Guid, bool> _salesTaxDefaults = new();
+        private Guid? _defaultPaymentId;
+        private ComboBox? _vatCombo;
+        private ComboBox? _salesTaxCombo;
+        private ComboBox? _paymentCombo;
+        private TextBox? _vatRateBox;
+        private TextBox? _salesTaxRateBox;
+        private DatePicker? _dateBox;
+        private List<Dictionary<string, object>> _taxRows = new();
+
         private StackPanel? _currencyPanel;
 
         public Guid SavedRecordId { get; private set; }
@@ -60,6 +73,7 @@ namespace BIS.ERP.Views.Dialogs
             _document = document;
             _metadataService = metadataService;
             _lineService = new InventoryDocumentLineService(context);
+            _taxService = new TaxService(metadataService);
             _recordId = recordId;
             _existing = existingData == null
                 ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -87,7 +101,8 @@ namespace BIS.ERP.Views.Dialogs
                 var organizations = await LoadRowsAsync(catalogs, "Организации");
                 var employees = await LoadRowsAsync(catalogs, "Сотрудники (Списочный состав)");
                 var supplyKinds = await LoadRowsAsync(catalogs, "Типы поставки");
-                var taxes = await LoadRowsAsync(catalogs, "Налоги");
+                var taxRows = await LoadRowsAsync(catalogs, "Налоги");
+                _taxRows = taxRows;
                 var paymentKinds = await LoadRowsAsync(catalogs, "Виды оплаты");
                 var currencies = await LoadRowsAsync(catalogs, "Справочник валют");
                 var sites = await LoadRowsAsync(catalogs, "Участки");
@@ -97,7 +112,13 @@ namespace BIS.ERP.Views.Dialogs
 
                 BuildTopRow(entries);
                 BuildSupplierCard(accounts, organizations, employees, supplyKinds, sites, responsible);
-                BuildTaxCard(taxes, paymentKinds, currencies);
+
+                var documentDate = GetDocumentDate();
+                var vatItems = await BuildTaxItemsAsync(TaxKind.Vat, taxRows, documentDate);
+                var salesItems = await BuildTaxItemsAsync(TaxKind.Sales, taxRows, documentDate);
+                var paymentItems = BuildPaymentItems(paymentKinds);
+
+                BuildTaxCard(vatItems, salesItems, paymentItems, currencies);
 
                 MaterialColumn.ItemsSource = ToItems(materials, row =>
                 {
@@ -108,9 +129,13 @@ namespace BIS.ERP.Views.Dialogs
                 });
                 AccountColumn.ItemsSource = ToItems(accounts, AccountDisplay, idAsCode: true);
                 SiteColumn.ItemsSource = ToItems(sites, row => Read(row, "Наименование"));
-                ResponsibleColumn.ItemsSource = ToItems(responsible, row => Read(row, "Наименование", "ФИО"));
 
                 ApplyExistingValues();
+
+                if (!_recordId.HasValue)
+                    ApplyDefaultSelections();
+
+                ApplyTaxRates();
                 UpdateAccountDependencies();
 
                 if (!_recordId.HasValue &&
@@ -136,7 +161,8 @@ namespace BIS.ERP.Views.Dialogs
         private void BuildTopRow(List<Dictionary<string, object>> entries)
         {
             AddText(HeaderTopPanel, "Номер", "doc_number", 110);
-            AddDateText(HeaderTopPanel, "Дата", "doc_date", 130);
+            _dateBox = AddDateText(HeaderTopPanel, "Дата", "doc_date", 130);
+            _dateBox.LostFocus += async (_, _) => await ReloadTaxesAsync();
             _entryEditor = AddCombo(HeaderTopPanel, "Вид операции", "document_entry_id", entries,
                 row =>
                 {
@@ -219,15 +245,21 @@ namespace BIS.ERP.Views.Dialogs
         }
 
         private void BuildTaxCard(
-            List<Dictionary<string, object>> taxes,
-            List<Dictionary<string, object>> paymentKinds,
+            List<RefItem> vatItems,
+            List<RefItem> salesItems,
+            List<RefItem> paymentItems,
             List<Dictionary<string, object>> currencies)
         {
-            AddCombo(TaxPanel, "Вид НДС", "vat_type", taxes, row => Read(row, "Наименование"), 200);
-            AddText(TaxPanel, "Ставка НДС, %", "vat_rate", 80);
-            AddCombo(TaxPanel, "Вид оплаты", "payment_kind", paymentKinds, row => Read(row, "Наименование"), 180);
-            AddCombo(TaxPanel, "Налог", "sales_tax_type", taxes, row => Read(row, "Наименование"), 200);
-            AddText(TaxPanel, "Ставка налога, %", "sales_tax_rate", 80);
+            _vatCombo = AddComboItems(TaxPanel, "Вид НДС", "vat_type", vatItems, 220);
+            _vatRateBox = AddText(TaxPanel, "Ставка НДС, %", "vat_rate", 80);
+            _paymentCombo = AddComboItems(TaxPanel, "Вид оплаты", "payment_kind", paymentItems, 180);
+            _salesTaxCombo = AddComboItems(TaxPanel, "Налог", "sales_tax_type", salesItems, 220);
+            _salesTaxRateBox = AddText(TaxPanel, "Ставка налога, %", "sales_tax_rate", 80);
+
+            if (_vatCombo != null)
+                _vatCombo.SelectionChanged += (_, _) => ApplyTaxRate(_vatCombo, _vatRateBox);
+            if (_salesTaxCombo != null)
+                _salesTaxCombo.SelectionChanged += (_, _) => ApplyTaxRate(_salesTaxCombo, _salesTaxRateBox);
 
             _currencyPanel = new StackPanel { Orientation = Orientation.Horizontal };
             AddCombo(_currencyPanel, "Валюта", "currency_id", currencies,
@@ -235,6 +267,167 @@ namespace BIS.ERP.Views.Dialogs
             AddText(_currencyPanel, "Курс", "exchange_rate", 90);
             _currencyPanel.Visibility = Visibility.Collapsed;
             TaxPanel.Children.Add(_currencyPanel);
+        }
+
+        private ComboBox AddComboItems(Panel panel, string label, string column, List<RefItem> items, double width)
+        {
+            var combo = new ComboBox
+            {
+                Width = width,
+                Height = 28,
+                ItemsSource = items,
+                DisplayMemberPath = "Display",
+                SelectedValuePath = "Id"
+            };
+            AddEditor(panel, label, column, combo);
+            return combo;
+        }
+
+        /// <summary>
+        /// Налоги — через TaxService, как в счёте-фактуре: фильтр по виду (НДС/НСП)
+        /// и дате документа. В RefItem попадают только налоги, найденные в каталоге.
+        /// </summary>
+        private async Task<List<RefItem>> BuildTaxItemsAsync(
+            TaxKind kind,
+            List<Dictionary<string, object>> taxRows,
+            DateTime documentDate)
+        {
+            var options = await _taxService.GetTaxesAsync(kind, documentDate);
+
+            var byCode = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in taxRows)
+            {
+                var id = ReadGuid(row);
+                var code = Read(row, "Код", "code");
+                if (id.HasValue && !string.IsNullOrWhiteSpace(code) && !byCode.ContainsKey(code))
+                    byCode[code] = id.Value;
+            }
+
+            var result = new List<RefItem>();
+            foreach (var option in options)
+            {
+                if (!byCode.TryGetValue(option.Code, out var id))
+                    continue;
+
+                _taxRates[id] = option.Rate;
+                if (kind == TaxKind.Vat)
+                    _vatDefaults[id] = option.IsDefaultVat;
+                else
+                    _salesTaxDefaults[id] = option.IsDefaultSalesTax;
+
+                var display = option.Name.Contains('%')
+                    ? option.Name
+                    : $"{option.Name} ({option.Rate:N2}%)";
+
+                result.Add(new RefItem { Id = id, Display = display });
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Виды оплаты: по умолчанию — строка с is_default (как в счёте-фактуре),
+        /// запасной вариант — «безналичный перевод».
+        /// </summary>
+        private List<RefItem> BuildPaymentItems(List<Dictionary<string, object>> rows)
+        {
+            var result = new List<RefItem>();
+
+            foreach (var row in rows)
+            {
+                var id = ReadGuid(row);
+                if (!id.HasValue)
+                    continue;
+
+                result.Add(new RefItem { Id = id.Value, Display = Read(row, "Наименование") });
+
+                if (_defaultPaymentId == null && (IsTrue(row, "По умолчанию") || IsTrue(row, "is_default")))
+                    _defaultPaymentId = id.Value;
+            }
+
+            if (_defaultPaymentId == null)
+            {
+                var fallback = result.FirstOrDefault(item =>
+                    item.Display.Contains("безналич", StringComparison.OrdinalIgnoreCase));
+                if (fallback != null && fallback.Id is Guid fallbackId)
+                    _defaultPaymentId = fallbackId;
+            }
+
+            return result;
+        }
+
+        private void ApplyDefaultSelections()
+        {
+            if (_vatCombo != null)
+            {
+                var vatId = _vatDefaults.FirstOrDefault(pair => pair.Value).Key;
+                if (_vatDefaults.ContainsKey(vatId))
+                    _vatCombo.SelectedValue = vatId;
+            }
+
+            if (_salesTaxCombo != null)
+            {
+                var salesId = _salesTaxDefaults.FirstOrDefault(pair => pair.Value).Key;
+                if (_salesTaxDefaults.ContainsKey(salesId))
+                    _salesTaxCombo.SelectedValue = salesId;
+            }
+
+            if (_paymentCombo != null && _defaultPaymentId.HasValue)
+                _paymentCombo.SelectedValue = _defaultPaymentId.Value;
+
+            ApplyTaxRates();
+        }
+
+        private void ApplyTaxRates()
+        {
+            ApplyTaxRate(_vatCombo, _vatRateBox);
+            ApplyTaxRate(_salesTaxCombo, _salesTaxRateBox);
+        }
+
+        private void ApplyTaxRate(ComboBox? combo, TextBox? rateBox)
+        {
+            if (combo?.SelectedValue is not Guid id || rateBox == null)
+                return;
+
+            if (_taxRates.TryGetValue(id, out var rate))
+                rateBox.Text = rate.ToString("0.##", CultureInfo.CurrentCulture);
+        }
+
+        private DateTime GetDocumentDate() => _dateBox?.SelectedDate?.Date ?? DateTime.Today;
+
+        /// <summary>Перечитывает налоги при смене даты: ставки действуют в ограниченном периоде.</summary>
+        private async Task ReloadTaxesAsync()
+        {
+            if (_taxRows.Count == 0 || _vatCombo == null || _salesTaxCombo == null)
+                return;
+
+            try
+            {
+                var vatId = _vatCombo.SelectedValue is Guid vat ? vat : (Guid?)null;
+                var salesId = _salesTaxCombo.SelectedValue is Guid sales ? sales : (Guid?)null;
+
+                _taxRates.Clear();
+                _vatDefaults.Clear();
+                _salesTaxDefaults.Clear();
+
+                var date = GetDocumentDate();
+                var vatItems = await BuildTaxItemsAsync(TaxKind.Vat, _taxRows, date);
+                var salesItems = await BuildTaxItemsAsync(TaxKind.Sales, _taxRows, date);
+
+                _vatCombo.ItemsSource = vatItems;
+                _salesTaxCombo.ItemsSource = salesItems;
+
+                if (vatId.HasValue && vatItems.Any(item => item.Id is Guid id && id == vatId.Value))
+                    _vatCombo.SelectedValue = vatId.Value;
+                if (salesId.HasValue && salesItems.Any(item => item.Id is Guid id && id == salesId.Value))
+                    _salesTaxCombo.SelectedValue = salesId.Value;
+
+                ApplyTaxRates();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Инвентаризация: ошибка перечитывания налогов: {ex.Message}");
+            }
         }
 
         // ---------- Построители полей ----------
@@ -246,7 +439,7 @@ namespace BIS.ERP.Views.Dialogs
             return box;
         }
 
-        private void AddDateText(Panel panel, string label, string column, double width)
+        private DatePicker AddDateText(Panel panel, string label, string column, double width)
         {
             // Дата — настоящий DatePicker: глобальный DatePickerInputMaskBehavior (App.xaml.cs)
             // сам даёт маску/шаблон DD/MM/YYYY и календарь. Ручную маску и NormalizeDateText не нужно.
@@ -258,6 +451,7 @@ namespace BIS.ERP.Views.Dialogs
             };
 
             AddEditor(panel, label, column, datePicker);
+            return datePicker;
         }
 
         private ComboBox AddCombo(
@@ -449,6 +643,14 @@ namespace BIS.ERP.Views.Dialogs
                         break;
                     case ComboBox comboBox:
                         comboBox.SelectedValue = value;
+                        if (comboBox.SelectedValue == null && value is string text)
+                        {
+                            var match = comboBox.Items.OfType<RefItem>().FirstOrDefault(item =>
+                                string.Equals(item.Display, text, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(item.Id?.ToString(), text, StringComparison.OrdinalIgnoreCase));
+                            if (match != null)
+                                comboBox.SelectedItem = match;
+                        }
                         break;
                 }
             }
@@ -471,7 +673,11 @@ namespace BIS.ERP.Views.Dialogs
 
             var rows = await _lineService.GetLinesAsync(_definition.LinesTable, _definition.ParentColumn, _recordId.Value);
             foreach (var row in rows)
+            {
+                if (row.MaterialId.HasValue && _materialRows.TryGetValue(row.MaterialId.Value, out var material))
+                    row.MaterialCode = Read(material, "Код", "code");
                 _lines.Add(row);
+            }
 
             if (_lines.Count == 0)
                 AddLine();
@@ -519,6 +725,7 @@ namespace BIS.ERP.Views.Dialogs
                         _materialRows.TryGetValue(row.MaterialId.Value, out var material))
                     {
                         row.MaterialName = Read(material, "Наименование материала", "Наименование");
+                        row.MaterialCode = Read(material, "Код", "code");
                         var unit = Read(material, "Ед изм", "Единица");
                         if (!string.IsNullOrWhiteSpace(unit))
                             row.UnitName = unit;

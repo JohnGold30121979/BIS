@@ -39,8 +39,10 @@
         <DataGrid x:Name="LinesGrid" Grid.Row="1" Margin="0,10,0,0"
                   AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                   HeadersVisibility="Column" RowHeight="26" GridLinesVisibility="Horizontal"
-                  CellEditEnding="OnCellEditEnding">
+                  CellEditEnding="OnCellEditEnding" CanUserReorderColumns="True"
+                  VerticalScrollBarVisibility="Auto">
             <DataGrid.Columns>
+                <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="80"/>
                 <DataGridComboBoxColumn x:Name="MaterialColumn" Header="Материал" Width="230"
                                         SelectedValueBinding="{Binding MaterialId, UpdateSourceTrigger=PropertyChanged}"
                                         DisplayMemberPath="Display" SelectedValuePath="Id"/>
@@ -51,16 +53,11 @@
                 <DataGridComboBoxColumn x:Name="SiteColumn" Header="Участок" Width="140"
                                         SelectedValueBinding="{Binding SiteId, UpdateSourceTrigger=PropertyChanged}"
                                         DisplayMemberPath="Display" SelectedValuePath="Id"/>
-                <DataGridComboBoxColumn x:Name="ResponsibleColumn" Header="МОЛ" Width="150"
-                                        SelectedValueBinding="{Binding ResponsiblePersonId, UpdateSourceTrigger=PropertyChanged}"
-                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
                 <DataGridTextColumn Header="%" Binding="{Binding VatRate}" Width="60"/>
                 <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity}" Width="90"/>
                 <DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="100"/>
                 <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="100" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal}" Width="110" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Примечание" Binding="{Binding Description}" Width="*"/>
             </DataGrid.Columns>
         </DataGrid>
 

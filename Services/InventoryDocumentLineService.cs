@@ -34,6 +34,7 @@ namespace BIS.ERP.Services
         public int LineNumber { get => _lineNumber; set => Set(ref _lineNumber, value); }
         public Guid? MaterialId { get => _materialId; set => Set(ref _materialId, value); }
         public string MaterialName { get => _materialName; set => Set(ref _materialName, value); }
+        public string MaterialCode { get; set; } = string.Empty;
         public string UnitName { get => _unitName; set => Set(ref _unitName, value); }
         public string AccountCode { get => _accountCode; set => Set(ref _accountCode, value); }
         public Guid? SiteId { get => _siteId; set => Set(ref _siteId, value); }
