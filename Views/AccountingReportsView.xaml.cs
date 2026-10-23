@@ -52,7 +52,7 @@ namespace BIS.ERP.Views
             _balanceService = new BalanceService(context);
             _organizationBalanceService = new OrganizationBalanceService(context);
             _reportService = new ReportService(context);
-            _periodService = new AccountingPeriodService(context);
+            _periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
             _postingService = new PostingService(context);
             _metadataService = new MetadataService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
@@ -477,9 +477,6 @@ namespace BIS.ERP.Views
                 System.Diagnostics.Debug.WriteLine($"Ошибка загрузки catalog_organizations: {ex.Message}");
             }
 
-            if (organizations.Count == (includeAll ? 1 : 0))
-                organizations.AddRange(await LoadEfOrganizationsAsync());
-
             return DeduplicateOrganizationSelectionItems(organizations)
                 .OrderByDescending(org => org.IsAll)
                 .ThenByDescending(org => org.IsPrimary)
@@ -495,30 +492,6 @@ namespace BIS.ERP.Views
             return organizationCatalog == null
                 ? new List<Dictionary<string, object>>()
                 : await _metadataService.GetCatalogDataAsync(organizationCatalog.Id);
-        }
-
-        private async Task<List<OrganizationSelectionItem>> LoadEfOrganizationsAsync()
-        {
-            try
-            {
-                return await _context.Organizations.AsNoTracking()
-                    .OrderByDescending(org => org.IsActive)
-                    .ThenBy(org => org.Code)
-                    .Select(org => new OrganizationSelectionItem
-                    {
-                        Id = org.Id,
-                        Code = org.Code ?? string.Empty,
-                        Name = org.Name ?? string.Empty,
-                        FullName = org.FullName ?? string.Empty,
-                        IsActive = org.IsActive,
-                        IsPrimary = false
-                    }).ToListAsync();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки Organizations: {ex.Message}");
-                return new List<OrganizationSelectionItem>();
-            }
         }
 
         private static OrganizationSelectionItem BuildOrganizationSelectionItem(Dictionary<string, object> row)

@@ -10,12 +10,7 @@ namespace BIS.ERP.Services
 {
     public class AccountingPeriodService
     {
-        private readonly AppDbContext _context;
-
-        // Сериализует конкурентные вызовы EnsureSchemaAsync, которые идут через один
-        // общий AppDbContext (Npgsql не допускает параллельные команды на соединении:
-        // "A command is already in progress"). См. лог 10:45, SeedFinancialReportLinesAsync.
-        private static readonly System.Threading.SemaphoreSlim _ensureSchemaGate = new(1, 1);
+        private readonly IAppDbContextFactory _factory;
 
         private sealed record FinancialReportLinePreset(
             string ReportCode,
@@ -53,79 +48,83 @@ namespace BIS.ERP.Services
                 DepreciationWriteOff - DisposalDepreciation + TransferInDepreciation - TransferOutDepreciation;
         }
 
-        public AccountingPeriodService(AppDbContext context)
+        public AccountingPeriodService(IAppDbContextFactory factory)
         {
-            _context = context;
+            _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         }
 
         public async Task EnsureSchemaAsync()
         {
-            // Лог 10:45: параллельные команды на общем соединении
-            // (NpgsqlOperationInProgress) роняли процесс. Сериализуем вход.
-            await _ensureSchemaGate.WaitAsync();
-            try
-            {
-            await SchemaMigrationService.EnsureAccountingPeriodSchemaAsync(_context);
-            await SeedFinancialReportLinesAsync();
-            }
-            finally
-            {
-                _ensureSchemaGate.Release();
-            }
+            await using var db = await _factory.CreateAsync();
+
+            await SchemaMigrationService.EnsureAccountingPeriodSchemaAsync(db);
+            await SeedFinancialReportLinesAsync(db);
         }
 
         public async Task<AccountingPeriod> CollectAsync(DateTime startDate, DateTime endDate)
         {
             await EnsureSchemaAsync();
+
+            await using var db = await _factory.CreateAsync();
+
             var start = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
             var end = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
+
             if (end < start)
                 throw new InvalidOperationException("Дата окончания периода не может быть раньше даты начала.");
-            var overlappingPeriod = await _context.AccountingPeriods.AsNoTracking().AnyAsync(item =>
+            
+            var overlappingPeriod = await db.AccountingPeriods.AsNoTracking().AnyAsync(item =>
                 !(end < item.StartDate || start > item.EndDate) &&
                 !(item.StartDate == start && item.EndDate == end));
+            
             if (overlappingPeriod)
                 throw new InvalidOperationException("Выбранный диапазон пересекается с другим учетным периодом.");
-            var period = await _context.AccountingPeriods
-                .FirstOrDefaultAsync(item => item.StartDate == start && item.EndDate == end);
+            
+            var period = await db.AccountingPeriods.FirstOrDefaultAsync(item => item.StartDate == start && item.EndDate == end);
             period ??= new AccountingPeriod { StartDate = start, EndDate = end };
+            
             if (period.IsLocked)
                 throw new InvalidOperationException("Закрытый период нельзя пересобирать. Сначала откройте период.");
 
-            if (_context.Entry(period).State == EntityState.Detached)
-                await _context.AccountingPeriods.AddAsync(period);
-            await _context.SaveChangesAsync();
+            if (db.Entry(period).State == EntityState.Detached)
+                await db.AccountingPeriods.AddAsync(period);
+            await db.SaveChangesAsync();
 
             await EnsureFixedAssetPeriodClosingAsync(startDate, endDate);
             await SaveFixedAssetPeriodBalancesAsync(period.Id, startDate, endDate);
-            var balances = await new BalanceService(_context).GetTurnoverBalanceAsync(startDate, endDate);
-            var previous = await _context.AccountTurnoverSnapshots.Where(item => item.PeriodId == period.Id).ToListAsync();
-            _context.AccountTurnoverSnapshots.RemoveRange(previous);
-            await _context.AccountTurnoverSnapshots.AddRangeAsync(balances.Select(balance => new AccountTurnoverSnapshot
+
+            var balances = await new BalanceService(db).GetTurnoverBalanceAsync(startDate, endDate);
+
+            var previous = await db.AccountTurnoverSnapshots.Where(item => item.PeriodId == period.Id).ToListAsync();
+            db.AccountTurnoverSnapshots.RemoveRange(previous);
+            await db.AccountTurnoverSnapshots.AddRangeAsync(balances.Select(balance => new AccountTurnoverSnapshot
             {
                 PeriodId = period.Id, AccountCode = balance.AccountCode, AccountName = balance.AccountName,
                 OpeningDebit = balance.OpeningDebit, OpeningCredit = balance.OpeningCredit,
                 TurnoverDebit = balance.TurnoverDebit, TurnoverCredit = balance.TurnoverCredit,
                 ClosingDebit = balance.ClosingDebit, ClosingCredit = balance.ClosingCredit
             }));
-            await new OrganizationBalanceService(_context).CalculateAsync(startDate, endDate);
+            
+            await new OrganizationBalanceService(db).CalculateAsync(startDate, endDate);
+            
             await SynchronizeTaxJournalAsync(startDate, endDate);
             await ResetPeriodModuleStatesAsync(period.Id);
             period.Status = "Collected";
             period.CollectedAt = DateTime.UtcNow;
             period.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
             return period;
         }
 
         public async Task CloseAsync(Guid periodId)
         {
-            var period = await _context.AccountingPeriods.FindAsync(periodId)
+            await using var db = await _factory.CreateAsync();
+            var period = await db.AccountingPeriods.FindAsync(periodId)
                 ?? throw new InvalidOperationException("Учетный период не найден");
             if (period.Status != "Collected")
                 throw new InvalidOperationException("Перед закрытием выполните сбор информации за период");
             await EnsureAllModulesClosedAsync(periodId);
-            var snapshots = await _context.AccountTurnoverSnapshots.AsNoTracking()
+            var snapshots = await db.AccountTurnoverSnapshots.AsNoTracking()
                 .Where(snapshot => snapshot.PeriodId == periodId).ToListAsync();
             var openingDifference = snapshots.Sum(item => item.OpeningDebit - item.OpeningCredit);
             var turnoverDifference = snapshots.Sum(item => item.TurnoverDebit - item.TurnoverCredit);
@@ -137,36 +136,45 @@ namespace BIS.ERP.Services
             period.IsLocked = true;
             period.ClosedAt = DateTime.UtcNow;
             period.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         public async Task ReopenAsync(Guid periodId)
         {
-            var period = await _context.AccountingPeriods.FindAsync(periodId)
-                ?? throw new InvalidOperationException("Учетный период не найден");
+            await using var db = await _factory.CreateAsync();
+
+            var period = await db.AccountingPeriods.FindAsync(periodId)
+                ?? throw new InvalidOperationException("Учетный период не найден.");
+
+            //period.Status = AccountingPeriodStatus.Open;
             period.Status = "Open";
             period.IsLocked = false;
             period.ClosedAt = null;
             period.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+
+             await db.SaveChangesAsync();
             await ResetPeriodModuleStatesAsync(periodId);
         }
 
         public async Task<AccountingPeriod?> FindAsync(DateTime startDate, DateTime endDate)
         {
             await EnsureSchemaAsync();
+            await using var db = await _factory.CreateAsync();
+
             var start = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
             var end = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
-            return await _context.AccountingPeriods.AsNoTracking()
-                .FirstOrDefaultAsync(item => item.StartDate == start && item.EndDate == end);
+            return await db.AccountingPeriods
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(period => period.StartDate == startDate && period.EndDate == endDate);
         }
 
         public async Task<List<AccountingPeriodModuleStatus>> GetModuleStatusesAsync(Guid periodId)
         {
+            await using var db = await _factory.CreateAsync();
             await EnsureSchemaAsync();
             await EnsurePeriodModuleStatesAsync(periodId);
 
-            var modules = await _context.MetadataModules.AsNoTracking()
+            var modules = await db.MetadataModules.AsNoTracking()
                 .Where(module =>
                     module.IsActive &&
                     module.ParticipatesInPeriodClose &&
@@ -176,7 +184,7 @@ namespace BIS.ERP.Services
                 .ThenBy(module => module.Name)
                 .ToListAsync();
 
-            var states = await _context.AccountingPeriodModuleStates.AsNoTracking()
+            var states = await db.AccountingPeriodModuleStates.AsNoTracking()
                 .Where(state => state.PeriodId == periodId)
                 .ToDictionaryAsync(state => state.ModuleId);
 
@@ -200,8 +208,10 @@ namespace BIS.ERP.Services
 
         public async Task CloseModuleAsync(Guid periodId, Guid moduleId)
         {
+            await using var db = await _factory.CreateAsync();
+
             await EnsureSchemaAsync();
-            var period = await _context.AccountingPeriods.FindAsync(periodId)
+            var period = await db.AccountingPeriods.FindAsync(periodId)
                 ?? throw new InvalidOperationException("Учетный период не найден.");
             if (period.IsLocked)
                 throw new InvalidOperationException("Период уже закрыт итоговым балансом. Сначала откройте период.");
@@ -210,7 +220,7 @@ namespace BIS.ERP.Services
 
             await EnsurePeriodModuleStatesAsync(periodId);
 
-            var module = await _context.MetadataModules.FindAsync(moduleId)
+            var module = await db.MetadataModules.FindAsync(moduleId)
                 ?? throw new InvalidOperationException("Модуль не найден.");
             if (ModuleMetadataService.IsFinalBalanceStageModule(module))
                 throw new InvalidOperationException("Баланс закрывается только итоговым закрытием периода, а не как обычный модуль.");
@@ -224,7 +234,7 @@ namespace BIS.ERP.Services
 
             if (module.RequirePreviousModulesClosed)
             {
-                var previousModules = await _context.MetadataModules.AsNoTracking()
+                var previousModules = await db.MetadataModules.AsNoTracking()
                     .Where(item =>
                         item.IsActive &&
                         item.ParticipatesInPeriodClose &&
@@ -237,7 +247,7 @@ namespace BIS.ERP.Services
                 if (previousModules.Count > 0)
                 {
                     var previousIds = previousModules.Select(item => item.Id).ToHashSet();
-                    var previousStates = await _context.AccountingPeriodModuleStates.AsNoTracking()
+                    var previousStates = await db.AccountingPeriodModuleStates.AsNoTracking()
                         .Where(item => item.PeriodId == periodId && previousIds.Contains(item.ModuleId))
                         .ToListAsync();
 
@@ -254,49 +264,58 @@ namespace BIS.ERP.Services
                 }
             }
 
-            var state = await _context.AccountingPeriodModuleStates
+            var state = await db.AccountingPeriodModuleStates
                 .FirstOrDefaultAsync(item => item.PeriodId == periodId && item.ModuleId == moduleId)
                 ?? throw new InvalidOperationException("Не найдено состояние модуля для выбранного периода.");
 
             state.IsClosed = true;
             state.ClosedAt = DateTime.UtcNow;
             state.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         public async Task ReopenModuleAsync(Guid periodId, Guid moduleId)
         {
+            await using var db = await _factory.CreateAsync();
+
             await EnsureSchemaAsync();
-            var period = await _context.AccountingPeriods.FindAsync(periodId)
+            var period = await db.AccountingPeriods.FindAsync(periodId)
                 ?? throw new InvalidOperationException("Учетный период не найден.");
             if (period.IsLocked)
                 throw new InvalidOperationException("Сначала откройте итогово закрытый период.");
 
             await EnsurePeriodModuleStatesAsync(periodId);
 
-            var state = await _context.AccountingPeriodModuleStates
+            var state = await db.AccountingPeriodModuleStates
                 .FirstOrDefaultAsync(item => item.PeriodId == periodId && item.ModuleId == moduleId)
                 ?? throw new InvalidOperationException("Не найдено состояние модуля для выбранного периода.");
 
             state.IsClosed = false;
             state.ClosedAt = null;
             state.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         public async Task EnsureDateCanBeModifiedAsync(DateTime date)
         {
             await EnsureSchemaAsync();
             var utcDate = DateTime.SpecifyKind(date.Date, DateTimeKind.Utc);
-            var locked = await _context.AccountingPeriods.AsNoTracking().AnyAsync(period =>
-                period.IsLocked && utcDate >= period.StartDate && utcDate <= period.EndDate);
+
+            await using var db = await _factory.CreateAsync();
+
+            var locked = await db.AccountingPeriods
+                .AsNoTracking()
+                .AnyAsync(period => period.IsLocked && date >= period.StartDate && date <= period.EndDate);
+
             if (locked)
                 throw new InvalidOperationException($"Период, содержащий дату {date:dd.MM.yyyy}, закрыт. Изменение документов запрещено.");
         }
 
         private async Task EnsurePeriodModuleStatesAsync(Guid periodId)
         {
-            var modules = await _context.MetadataModules
+            await using var db = await _factory.CreateAsync();
+
+            var modules = await db.MetadataModules
                 .Where(module =>
                     module.IsActive &&
                     module.ParticipatesInPeriodClose &&
@@ -305,21 +324,21 @@ namespace BIS.ERP.Services
                 .ThenBy(module => module.Name)
                 .ToListAsync();
 
-            var states = await _context.AccountingPeriodModuleStates
+            var states = await db.AccountingPeriodModuleStates
                 .Where(state => state.PeriodId == periodId)
                 .ToListAsync();
 
             var moduleIds = modules.Select(module => module.Id).ToHashSet();
             var orphaned = states.Where(state => !moduleIds.Contains(state.ModuleId)).ToList();
             if (orphaned.Count > 0)
-                _context.AccountingPeriodModuleStates.RemoveRange(orphaned);
+                db.AccountingPeriodModuleStates.RemoveRange(orphaned);
 
             foreach (var module in modules)
             {
                 if (states.Any(state => state.ModuleId == module.Id))
                     continue;
 
-                await _context.AccountingPeriodModuleStates.AddAsync(new AccountingPeriodModuleState
+                await db.AccountingPeriodModuleStates.AddAsync(new AccountingPeriodModuleState
                 {
                     PeriodId = periodId,
                     ModuleId = module.Id,
@@ -327,13 +346,15 @@ namespace BIS.ERP.Services
                 });
             }
 
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         private async Task ResetPeriodModuleStatesAsync(Guid periodId)
         {
+            await using var db = await _factory.CreateAsync();
+
             await EnsurePeriodModuleStatesAsync(periodId);
-            var states = await _context.AccountingPeriodModuleStates
+            var states = await db.AccountingPeriodModuleStates
                 .Where(state => state.PeriodId == periodId)
                 .ToListAsync();
 
@@ -344,7 +365,7 @@ namespace BIS.ERP.Services
                 state.UpdatedAt = DateTime.UtcNow;
             }
 
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         private async Task EnsureAllModulesClosedAsync(Guid periodId)
@@ -365,7 +386,9 @@ namespace BIS.ERP.Services
 
         private async Task EnsureFinanceModuleCanBeClosedAsync(Guid periodId, Guid financeModuleId)
         {
-            var modules = await _context.MetadataModules.AsNoTracking()
+            await using var db = await _factory.CreateAsync();
+
+            var modules = await db.MetadataModules.AsNoTracking()
                 .Where(item =>
                     item.IsActive &&
                     item.ParticipatesInPeriodClose &&
@@ -379,7 +402,7 @@ namespace BIS.ERP.Services
                 return;
 
             var moduleIds = modules.Select(item => item.Id).ToHashSet();
-            var states = await _context.AccountingPeriodModuleStates.AsNoTracking()
+            var states = await db.AccountingPeriodModuleStates.AsNoTracking()
                 .Where(item => item.PeriodId == periodId && moduleIds.Contains(item.ModuleId))
                 .ToListAsync();
 
@@ -401,13 +424,15 @@ namespace BIS.ERP.Services
 
         private async Task SynchronizeTaxJournalAsync(DateTime startDate, DateTime endDate)
         {
-            var entries = await new BalanceService(_context).GetPurchaseSalesJournalAsync(startDate, endDate);
+            await using var db = await _factory.CreateAsync();
+
+            var entries = await new BalanceService(db).GetPurchaseSalesJournalAsync(startDate, endDate);
             var utcStart = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
             var utcEnd = DateTime.SpecifyKind(endDate.Date.AddDays(1), DateTimeKind.Utc);
-            var previous = await _context.TaxJournalRecords
+            var previous = await db.TaxJournalRecords
                 .Where(record => record.Date >= utcStart && record.Date < utcEnd).ToListAsync();
-            _context.TaxJournalRecords.RemoveRange(previous);
-            await _context.TaxJournalRecords.AddRangeAsync(entries.Where(entry => entry.IsPosted).Select(entry => new TaxJournalRecord
+            db.TaxJournalRecords.RemoveRange(previous);
+            await db.TaxJournalRecords.AddRangeAsync(entries.Where(entry => entry.IsPosted).Select(entry => new TaxJournalRecord
             {
                 JournalType = entry.Section == "Закупки" ? "Purchase" : "Sale",
                 Date = DateTime.SpecifyKind(entry.Date, DateTimeKind.Utc),
@@ -421,11 +446,11 @@ namespace BIS.ERP.Services
             }));
         }
 
-        private async Task SeedFinancialReportLinesAsync()
+        private async Task SeedFinancialReportLinesAsync(AppDbContext db)
         {
             foreach (var preset in BuildFinancialReportLinePresets())
             {
-                var line = await _context.FinancialReportLines
+                var line = await db.FinancialReportLines
                     .FirstOrDefaultAsync(item => item.ReportCode == preset.ReportCode && item.LineCode == preset.LineCode);
                 var isNewLine = false;
 
@@ -444,7 +469,7 @@ namespace BIS.ERP.Services
                         FixedAmount = preset.FixedAmount,
                         IsActive = true
                     };
-                    await _context.FinancialReportLines.AddAsync(line);
+                    await db.FinancialReportLines.AddAsync(line);
                     isNewLine = true;
                 }
                 else
@@ -463,12 +488,12 @@ namespace BIS.ERP.Services
                         line.FixedAmount = preset.FixedAmount;
                 }
 
-                await _context.SaveChangesAsync();
+                await db.SaveChangesAsync();
 
                 if (preset.AccountCodePrefixes.Length == 0)
                     continue;
 
-                var hasConfiguredAccounts = await _context.FinancialReportLineAccounts
+                var hasConfiguredAccounts = await db.FinancialReportLineAccounts
                     .AnyAsync(item => item.LineId == line.Id);
                 if (!isNewLine && hasConfiguredAccounts)
                     continue;
@@ -477,12 +502,12 @@ namespace BIS.ERP.Services
                     .Where(item => !string.IsNullOrWhiteSpace(item))
                     .Distinct(StringComparer.OrdinalIgnoreCase))
                 {
-                    var exists = await _context.FinancialReportLineAccounts
+                    var exists = await db.FinancialReportLineAccounts
                         .AnyAsync(item => item.LineId == line.Id && item.AccountCode == accountCodePrefix);
                     if (exists)
                         continue;
 
-                    await _context.FinancialReportLineAccounts.AddAsync(new FinancialReportLineAccount
+                    await db.FinancialReportLineAccounts.AddAsync(new FinancialReportLineAccount
                     {
                         LineId = line.Id,
                         AccountCode = accountCodePrefix
@@ -490,7 +515,7 @@ namespace BIS.ERP.Services
                 }
             }
 
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         private static FinancialReportLinePreset[] BuildFinancialReportLinePresets()
@@ -544,14 +569,16 @@ namespace BIS.ERP.Services
 
         private async Task EnsureFixedAssetPeriodClosingAsync(DateTime startDate, DateTime endDate)
         {
+            await using var db = await _factory.CreateAsync();
+
             var monthEnds = GetCoveredMonthEnds(startDate, endDate);
             if (monthEnds.Count == 0)
                 return;
 
-            var metadataService = new MetadataService(_context);
-            var assetCatalog = await _context.MetadataObjects.AsNoTracking()
+            var metadataService = new MetadataService(db);
+            var assetCatalog = await db.MetadataObjects.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
-            var depreciationDocument = await _context.MetadataObjects.AsNoTracking()
+            var depreciationDocument = await db.MetadataObjects.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Начисление амортизации");
 
             if (assetCatalog == null || depreciationDocument == null)
@@ -668,8 +695,10 @@ namespace BIS.ERP.Services
 
         private async Task SaveFixedAssetPeriodBalancesAsync(Guid periodId, DateTime startDate, DateTime endDate)
         {
-            var metadataService = new MetadataService(_context);
-            var assetCatalog = await _context.MetadataObjects.AsNoTracking()
+            await using var db = await _factory.CreateAsync();
+
+            var metadataService = new MetadataService(db);
+            var assetCatalog = await db.MetadataObjects.AsNoTracking()
                 .Include(item => item.Fields)
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Основные средства");
             if (assetCatalog == null)
@@ -682,11 +711,11 @@ namespace BIS.ERP.Services
             var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(assetCatalog, metadataService);
             var displayAssets = ReferenceDisplayHelper.ResolveRows(rawAssets, referenceMaps);
 
-            var previous = await _context.FixedAssetPeriodBalances
+            var previous = await db.FixedAssetPeriodBalances
                 .Where(balance => balance.PeriodId == periodId)
                 .ToListAsync();
             if (previous.Count > 0)
-                _context.FixedAssetPeriodBalances.RemoveRange(previous);
+                db.FixedAssetPeriodBalances.RemoveRange(previous);
 
             var periodStart = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
             var periodEnd = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
@@ -703,7 +732,7 @@ namespace BIS.ERP.Services
                 .ToDictionary(group => group.Key, group => group.First().Row);
             var previousSnapshots = assetIds.Count == 0
                 ? new List<FixedAssetPeriodBalance>()
-                : await _context.FixedAssetPeriodBalances.AsNoTracking()
+                : await db.FixedAssetPeriodBalances.AsNoTracking()
                     .Where(balance => balance.PeriodEnd < periodStart && assetIds.Contains(balance.AssetId))
                     .OrderByDescending(balance => balance.PeriodEnd)
                     .ToListAsync();
@@ -814,9 +843,9 @@ namespace BIS.ERP.Services
             }
 
             if (snapshots.Count > 0)
-                await _context.FixedAssetPeriodBalances.AddRangeAsync(snapshots);
+                await db.FixedAssetPeriodBalances.AddRangeAsync(snapshots);
 
-            await _context.SaveChangesAsync();
+            await db.SaveChangesAsync();
         }
 
         private async Task<Dictionary<Guid, FixedAssetPeriodMovement>> BuildFixedAssetPeriodMovementsAsync(
@@ -825,8 +854,9 @@ namespace BIS.ERP.Services
             DateTime periodEnd,
             IReadOnlyDictionary<Guid, Dictionary<string, object>> assetsById)
         {
+            await using var db = await _factory.CreateAsync();
             var result = new Dictionary<Guid, FixedAssetPeriodMovement>();
-            var documents = await _context.MetadataObjects.AsNoTracking()
+            var documents = await db.MetadataObjects.AsNoTracking()
                 .Where(item =>
                     item.ObjectType == "Document" &&
                     ModuleMetadataService.FixedAssetDocumentNames.Contains(item.Name))

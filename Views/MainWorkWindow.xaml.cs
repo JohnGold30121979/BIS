@@ -425,7 +425,7 @@ namespace BIS.ERP
 
                     var context = await _infoBaseManager.GetCurrentDbContextAsync();
                     diagnosticContext = context;
-                    _accountingPeriodService = new AccountingPeriodService(context);
+                    _accountingPeriodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
                     _localizationService = new LocalizationService(context, settings.Language);
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context);

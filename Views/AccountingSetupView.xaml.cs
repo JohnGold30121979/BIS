@@ -25,7 +25,7 @@ namespace BIS.ERP.Views
             InitializeComponent();
             _context = context;
             _metadataService = new MetadataService(context);
-            _periodService = new AccountingPeriodService(context);
+            _periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
             _exchangeRateDifferenceService = new ExchangeRateDifferenceService(context);
             OpeningGrid.ItemsSource = _openings;
             ReportLinesGrid.ItemsSource = _reportLines;

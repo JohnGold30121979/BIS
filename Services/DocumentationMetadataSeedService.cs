@@ -657,7 +657,7 @@ namespace BIS.ERP.Services
 
         private async Task EnsureFixedAssetPeriodBalanceReportSourceAsync()
         {
-            await new AccountingPeriodService(_context).EnsureSchemaAsync();
+            await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
             await EnsureObjectAsync("Снимки остатков ОС", "FixedAssetPeriodBalances", "ReportSource",
                 "Системный источник отчетов ОС по зафиксированным остаткам периода", "📌",
                 new List<MetadataField>
@@ -1554,7 +1554,3 @@ namespace BIS.ERP.Services
         }
     }
 }
-
-
-
-

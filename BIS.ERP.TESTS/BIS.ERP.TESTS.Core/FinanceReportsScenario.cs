@@ -173,7 +173,7 @@ public sealed class FinanceReportsScenario : SmokeTestScenarioBase
             try
             {
                 await using var context = new AppDbContext(candidate.ConnectionString);
-                await new AccountingPeriodService(context).EnsureSchemaAsync();
+                await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
 
                 checkedAnyDatabase = true;
                 var missingColumns = await FindMissingFinancialReportColumnsAsync(context, cancellationToken);

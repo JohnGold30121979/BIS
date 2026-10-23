@@ -22,7 +22,7 @@ namespace BIS.ERP.Services
 
         public async Task EnsureSchemaAsync()
         {
-            await new AccountingPeriodService(_context).EnsureSchemaAsync();
+            await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
             await _context.Database.ExecuteSqlRawAsync(@"
                 CREATE TABLE IF NOT EXISTS ""OrganizationBalanceSnapshots"" (
                     ""Id"" uuid PRIMARY KEY,

@@ -7,6 +7,17 @@ namespace BIS.ERP
         private static IAuthService? _authService;
         private static InfoBaseManager? _infoBaseManager;
 
+        private static IAppDbContextFactory? _dbContextFactory;
+
+        public static IAppDbContextFactory DbContextFactory
+        {
+            get
+            {
+                _dbContextFactory ??= new AppDbContextFactory(InfoBaseManager);
+                return _dbContextFactory;
+            }
+        }
+
         public static IAuthService AuthService
         {
             get

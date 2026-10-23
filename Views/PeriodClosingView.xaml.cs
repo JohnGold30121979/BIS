@@ -26,7 +26,7 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
 
-            _periodService = new AccountingPeriodService(context);
+            _periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
 
             var yearStart = new DateTime(DateTime.Today.Year, 1, 1);
             _isLoading = true;

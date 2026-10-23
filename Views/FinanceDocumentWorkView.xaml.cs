@@ -356,7 +356,7 @@ namespace BIS.ERP.Views
                 UpdateButtonsState();
 
                 await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                var reportService = new AdvancePaymentsTurnoverReportService(context);
+                var reportService = new AdvancePaymentsTurnoverReportService(ServiceLocator.DbContextFactory);
                 var filePath = await reportService.ExportExcelAsync(startDate, endDate);
 
                 Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });

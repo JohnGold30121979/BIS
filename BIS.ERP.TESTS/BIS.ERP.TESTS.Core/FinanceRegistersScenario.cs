@@ -71,7 +71,7 @@ public sealed class FinanceRegistersScenario : SmokeTestScenarioBase
 
             try
             {
-                await new AccountingPeriodService(context).EnsureSchemaAsync();
+                await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
                 await EnsurePostingTableAsync(context, cancellationToken);
 
                 if (options.Command == SmokeTestCommand.Cleanup)

@@ -717,8 +717,7 @@ namespace BIS.ERP.Views
                 {
                     try
                     {
-                        var periodService = new BIS.ERP.Services.AccountingPeriodService(
-                            await BIS.ERP.ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync());
+                        var periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
                         await periodService.EnsureDateCanBeModifiedAsync(documentDate);
                     }
                     catch (InvalidOperationException ex)

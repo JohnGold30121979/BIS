@@ -96,7 +96,7 @@ public sealed class FixedAssetsSmokeScenario : SmokeTestScenarioBase
         await new MetadataService(context).InitializePredefinedCatalogsAsync(Guid.Empty);
         await new ModuleMetadataService(context).EnsureDefaultModulesAsync();
         await new DocumentationMetadataSeedService(context).EnsureAsync();
-        await new AccountingPeriodService(context).EnsureSchemaAsync();
+        await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
         _ = await new MetadataService(context).GetAllMetadataObjectsAsync();
     }
 
@@ -239,7 +239,7 @@ public sealed class FixedAssetsSmokeScenario : SmokeTestScenarioBase
         CancellationToken cancellationToken)
     {
         Report(progress, "Сбор и закрытие контрольного периода ОС.");
-        var service = new AccountingPeriodService(context);
+        var service = new AccountingPeriodService(ServiceLocator.DbContextFactory);
         var period = await service.CollectAsync(PeriodStart, PeriodEnd);
         var statuses = await service.GetModuleStatusesAsync(period.Id);
         var financeModule = statuses.FirstOrDefault(item =>
@@ -268,7 +268,7 @@ public sealed class FixedAssetsSmokeScenario : SmokeTestScenarioBase
         List<string> errors,
         CancellationToken cancellationToken)
     {
-        var period = await new AccountingPeriodService(context).FindAsync(PeriodStart, PeriodEnd);
+        var period = await new AccountingPeriodService(ServiceLocator.DbContextFactory).FindAsync(PeriodStart, PeriodEnd);
         if (period == null)
         {
             details.Add($"{databaseName}: контрольный период ОС отсутствует. Для строгой сверки выполните fixed-assets-smoke run.");

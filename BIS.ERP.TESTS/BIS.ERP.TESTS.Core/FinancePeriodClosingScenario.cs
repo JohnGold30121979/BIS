@@ -96,7 +96,7 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
     private static async Task EnsureEnvironmentAsync(AppDbContext context, CancellationToken cancellationToken)
     {
         await new ModuleMetadataService(context).EnsureDefaultModulesAsync();
-        await new AccountingPeriodService(context).EnsureSchemaAsync();
+        await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
         await EnsurePostingTableAsync(context, cancellationToken);
         await EnsureControlModuleAsync(context, cancellationToken);
     }
@@ -227,7 +227,7 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
         List<string> errors,
         CancellationToken cancellationToken)
     {
-        var service = new AccountingPeriodService(context);
+        var service = new AccountingPeriodService(ServiceLocator.DbContextFactory);
         var period = await service.CollectAsync(PeriodStart, PeriodEnd);
         details.Add($"{databaseName}: период собран, обороты и остатки зафиксированы.");
 
@@ -269,7 +269,7 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
         List<string> errors,
         CancellationToken cancellationToken)
     {
-        var service = new AccountingPeriodService(context);
+        var service = new AccountingPeriodService(ServiceLocator.DbContextFactory);
         var period = await service.FindAsync(PeriodStart, PeriodEnd);
         if (period == null)
         {

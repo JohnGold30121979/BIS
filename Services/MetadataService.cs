@@ -1790,7 +1790,7 @@ namespace BIS.ERP.Services
                 if (!data.TryGetValue(name, out var value) || value == null)
                     continue;
                 if (value is DateTime date || DateTime.TryParse(value.ToString(), out date))
-                    await new AccountingPeriodService(_context).EnsureDateCanBeModifiedAsync(date);
+                    await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureDateCanBeModifiedAsync(date);
                 return;
             }
         }

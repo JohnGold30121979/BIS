@@ -14,28 +14,29 @@ namespace BIS.ERP.Services;
 
 public sealed class AdvancePaymentsTurnoverReportService
 {
-    private readonly AppDbContext _context;
+    private readonly IAppDbContextFactory _factory;
 
-    public AdvancePaymentsTurnoverReportService(AppDbContext context)
+    public AdvancePaymentsTurnoverReportService(IAppDbContextFactory factory)
     {
-        _context = context;
+        _factory = factory ?? throw new ArgumentNullException(nameof(factory));
     }
 
     public async Task<string> ExportExcelAsync(DateTime startDate, DateTime endDate)
     {
+        await using var db = await _factory.CreateAsync();
         startDate = startDate.Date;
         endDate = endDate.Date;
         if (endDate < startDate)
             throw new InvalidOperationException("Дата окончания отчета не может быть меньше даты начала.");
 
-        var metadataService = new MetadataService(_context);
+        var metadataService = new MetadataService(db);
         var accountLookup = await LoadAccountLookupAsync(metadataService);
         var pairs = await LoadAccountPairsAsync(metadataService, accountLookup);
         if (pairs.Count == 0)
             throw new InvalidOperationException("В справочнике пар счетов нет активных строк с заполненными счетами.");
 
         var employeeFallback = await LoadAdvanceDocumentEmployeeFallbackAsync(metadataService);
-        var postings = await new PostingService(_context).GetAllPostingsAsync(null, endDate);
+        var postings = await new PostingService(db).GetAllPostingsAsync(null, endDate);
         var lines = BuildReportLines(postings, pairs, employeeFallback, accountLookup, startDate, endDate);
         if (lines.Count == 0)
             throw new InvalidOperationException("За выбранный период нет проводок по парам счетов авансовых платежей.");
@@ -49,7 +50,8 @@ public sealed class AdvancePaymentsTurnoverReportService
 
     private async Task<AccountLookup> LoadAccountLookupAsync(MetadataService metadataService)
     {
-        var catalog = await _context.MetadataObjects.AsNoTracking()
+        await using var db = await _factory.CreateAsync();
+        var catalog = await db.MetadataObjects.AsNoTracking()
             .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name.StartsWith("План счетов"));
         if (catalog == null)
             return new AccountLookup();
@@ -99,9 +101,10 @@ public sealed class AdvancePaymentsTurnoverReportService
 
     private async Task<Dictionary<string, string>> LoadAdvanceDocumentEmployeeFallbackAsync(MetadataService metadataService)
     {
+        await using var db = await _factory.CreateAsync();
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var employeeMap = await LoadReferenceMapAsync(metadataService, "Сотрудники (Списочный состав)");
-        var document = await _context.MetadataObjects.AsNoTracking()
+        var document = await db.MetadataObjects.AsNoTracking()
             .FirstOrDefaultAsync(item =>
                 item.ObjectType == "Document" &&
                 (item.Name == "Авансовые платежи" || item.Name == "Авансовый отчет"));
@@ -127,7 +130,8 @@ public sealed class AdvancePaymentsTurnoverReportService
 
     private async Task<Dictionary<Guid, string>> LoadReferenceMapAsync(MetadataService metadataService, string catalogName)
     {
-        var catalog = await _context.MetadataObjects.AsNoTracking()
+        await using var db = await _factory.CreateAsync();
+        var catalog = await db.MetadataObjects.AsNoTracking()
             .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == catalogName);
         if (catalog == null)
             return new Dictionary<Guid, string>();

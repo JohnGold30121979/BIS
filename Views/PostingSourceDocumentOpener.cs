@@ -102,7 +102,7 @@ namespace BIS.ERP.Views
         {
             try
             {
-                var periodService = new AccountingPeriodService(context);
+                var periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
                 await periodService.EnsureDateCanBeModifiedAsync(date);
                 return true;
             }

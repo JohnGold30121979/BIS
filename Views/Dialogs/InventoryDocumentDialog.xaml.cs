@@ -63,7 +63,7 @@ namespace BIS.ERP.Views.Dialogs
             _recordId = recordId;
             _existing = existingData == null
                 ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, object?>(existingData, StringComparer.OrdinalIgnoreCase);
+                : existingData.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value, StringComparer.OrdinalIgnoreCase);
 
             _definition = InventoryDocumentModel.Documents.FirstOrDefault(item =>
                               string.Equals(item.Name, document.Name, StringComparison.OrdinalIgnoreCase))

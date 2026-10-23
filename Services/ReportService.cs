@@ -352,7 +352,7 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             if (!IsFixedAssetPeriodBalanceSource(source) || HasExplicitSnapshotPeriodFilter(whereClauses))
                 return;
 
-            await new AccountingPeriodService(_context).EnsureSchemaAsync();
+            await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
 
             if (TryGetGuidParameter(parameters, out var periodId, "PeriodId", "periodId", "Период"))
             {
