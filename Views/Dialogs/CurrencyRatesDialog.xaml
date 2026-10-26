@@ -1,0 +1,46 @@
+<Window x:Class="BIS.ERP.Views.Dialogs.CurrencyRatesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Курсы валюты" Height="460" Width="600"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="HeaderText" Grid.Row="0" FontSize="15" FontWeight="Bold" Margin="0,0,0,8"
+                   Text="Курсы валюты"/>
+
+        <DataGrid x:Name="RatesGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" AlternatingRowBackground="#F5F7FA"
+                  SelectionMode="Single" MouseDoubleClick="OnRatesGridDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Дата" Binding="{Binding DateText}" Width="130"/>
+                <DataGridTextColumn Header="Курс" Binding="{Binding RateText}" Width="140"/>
+                <DataGridTextColumn Header="Источник" Binding="{Binding Source}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock x:Name="StatusText" Grid.Column="0" VerticalAlignment="Center" Foreground="Gray"
+                       TextWrapping="Wrap"
+                       Text="Двойной клик по строке — применить курс."/>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Запросить новый курс" Width="190" Height="32" Margin="0,0,8,0"
+                        Background="#2980B9" Foreground="White" Click="OnRequestNewRateClick"
+                        ToolTip="Загрузить курсы НБКР за последнюю неделю и обновить список"/>
+                <Button Content="Применить" Width="110" Height="32" Margin="0,0,8,0"
+                        Background="#27AE60" Foreground="White" Click="OnApplyClick"/>
+                <Button Content="Закрыть" Width="90" Height="32" Click="OnCloseClick"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

@@ -22,7 +22,7 @@ namespace BIS.ERP.Services
 
         public async Task EnsureSchemaAsync()
         {
-            await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
+            await CreatePeriodService().EnsureSchemaAsync();
             await _context.Database.ExecuteSqlRawAsync(@"
                 CREATE TABLE IF NOT EXISTS ""OrganizationBalanceSnapshots"" (
                     ""Id"" uuid PRIMARY KEY,
@@ -739,6 +739,18 @@ namespace BIS.ERP.Services
                 ApplyClosing(row);
                 return row;
             }
+        }
+
+        /// <summary>
+        /// Сервис периодов на своём подключении: ServiceLocator в тестовом процессе
+        /// не инициализирован и отдаёт строку без пароля.
+        /// </summary>
+        private AccountingPeriodService CreatePeriodService()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            return string.IsNullOrWhiteSpace(connectionString)
+                ? new AccountingPeriodService(ServiceLocator.DbContextFactory)
+                : new AccountingPeriodService(new ConnectionStringDbContextFactory(connectionString));
         }
     }
 }

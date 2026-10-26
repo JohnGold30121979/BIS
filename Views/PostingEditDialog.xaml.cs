@@ -302,8 +302,20 @@ namespace BIS.ERP.Views
                     var textBox = new TextBox
                     {
                         Height = 30,
-                        Text = !editId.HasValue && field.FieldType == "Decimal" ? "0" : string.Empty
+                        // Пустое поле вместо предзаполненного "0": иначе при фокусе ноль
+                        // выделяется и при вводе выглядит так, будто значение исчезло.
+                        Text = string.Empty
                     };
+
+                    if (field.FieldType == "Decimal")
+                    {
+                        // Выделяем всё только в непустом поле: удобно заменить значение целиком.
+                        textBox.GotFocus += (_, _) =>
+                        {
+                            if (!string.IsNullOrWhiteSpace(textBox.Text))
+                                textBox.SelectAll();
+                        };
+                    }
 
                     // Для поля "Номер документа" - делаем ReadOnly
                     if (field.Name == "Номер документа")

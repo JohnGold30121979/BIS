@@ -63,6 +63,11 @@ namespace BIS.ERP.Services
 
         public async Task<AccountingPeriod> CollectAsync(DateTime startDate, DateTime endDate)
         {
+            // Даты из UI приходят с Kind=Unspecified/Local, а колонки — timestamptz:
+            // Npgsql принимает только UTC.
+            startDate = DateTime.SpecifyKind(startDate.Date, DateTimeKind.Utc);
+            endDate = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
+
             await EnsureSchemaAsync();
 
             await using var db = await _factory.CreateAsync();
@@ -165,7 +170,7 @@ namespace BIS.ERP.Services
             var end = DateTime.SpecifyKind(endDate.Date, DateTimeKind.Utc);
             return await db.AccountingPeriods
                     .AsNoTracking()
-                    .FirstOrDefaultAsync(period => period.StartDate == startDate && period.EndDate == endDate);
+                    .FirstOrDefaultAsync(period => period.StartDate == start && period.EndDate == end);
         }
 
         public async Task<List<AccountingPeriodModuleStatus>> GetModuleStatusesAsync(Guid periodId)
@@ -305,7 +310,7 @@ namespace BIS.ERP.Services
 
             var locked = await db.AccountingPeriods
                 .AsNoTracking()
-                .AnyAsync(period => period.IsLocked && date >= period.StartDate && date <= period.EndDate);
+                .AnyAsync(period => period.IsLocked && utcDate >= period.StartDate && utcDate <= period.EndDate);
 
             if (locked)
                 throw new InvalidOperationException($"Период, содержащий дату {date:dd.MM.yyyy}, закрыт. Изменение документов запрещено.");

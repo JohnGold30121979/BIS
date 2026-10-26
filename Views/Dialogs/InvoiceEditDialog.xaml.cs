@@ -851,6 +851,22 @@ namespace BIS.ERP.Views.Dialogs
             if (_isReadOnlyMode)
                 return;
 
+            // Перечитываем план счетов: пользователь мог изменить счёт (например,
+            // валюту счёта) в другом окне — кэш списка был бы устаревшим.
+            try
+            {
+                Cursor = Cursors.Wait;
+                await ReloadAccountsAsync();
+            }
+            catch
+            {
+                // Не смогли обновить — работаем с тем, что уже загружено.
+            }
+            finally
+            {
+                Cursor = Cursors.Arrow;
+            }
+
             if (_accounts.Count == 0)
                 return;
 
@@ -2585,14 +2601,15 @@ namespace BIS.ERP.Views.Dialogs
 
         private void UpdateCurrencyPanelVisibility()
         {
+            // Валюта показывается только для валютного счёта: раньше сюда добавлялось
+            // «ResolveDocumentCurrencyId() != null», и панель висела даже на сомовом счёте.
             var shouldShow = IsCurrencyAccount(_selectedHeaderAccountCode) ||
-                             _lines.Any(line => IsCurrencyAccount(line.AccountCode)) ||
-                             ResolveDocumentCurrencyId() != null;
-            var visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
-            if (CurrencyPanel.Visibility == visibility)
-                return;
+                             _lines.Any(line => IsCurrencyAccount(line.AccountCode));
 
-            CurrencyPanel.Visibility = visibility;
+            CurrencyPanel.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
+
+            // Раньше при уже видимой панели метод выходил и не переприменял валюту счёта —
+            // поэтому смена счёта (или его валюты) в форме не отражалась.
             if (!shouldShow)
             {
                 try
@@ -2754,17 +2771,27 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             var rateDate = (DatePicker.SelectedDate ?? DateTime.Today).Date;
-            var rate = await ResolveExchangeRateAsync(currencyId, rateDate, interactive: true);
-            if (rate == null)
-            {
-                MessageBox.Show(
-                    $"Курс валюты на {rateDate:dd/MM/yyyy} не найден. Введите курс вручную.",
-                    "Курс валюты", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
+            var currencyName = (CurrencyCombo.SelectedItem as ReferenceOption)?.DisplayName ?? string.Empty;
 
-            ApplyExchangeRate(rate);
-            ShowRateHint(rate);
+            // То же окно курсов, что в ПКО/РКО: история, выбор курса, запрос новых курсов НБКР.
+            var dialog = new CurrencyRatesDialog(_metadataService, currencyId, currencyName, rateDate);
+
+            var owner = Window.GetWindow(this);
+            if (owner != null && !ReferenceEquals(owner, this) && owner.IsVisible)
+                dialog.Owner = owner;
+            else if (Application.Current?.MainWindow is { IsVisible: true } mainWindow)
+                dialog.Owner = mainWindow;
+
+            if (dialog.ShowDialog() != true || dialog.SelectedRate is not decimal rate)
+                return;
+
+            var rateResult = new CurrencyRateLookupResult(
+                rate,
+                dialog.SelectedRateDate ?? rateDate,
+                "Справочник курсов валют");
+
+            ApplyExchangeRate(rateResult);
+            ShowRateHint(rateResult);
         }
 
         /// <summary>Кнопка «Текущий курс»: последний известный курс валюты.</summary>

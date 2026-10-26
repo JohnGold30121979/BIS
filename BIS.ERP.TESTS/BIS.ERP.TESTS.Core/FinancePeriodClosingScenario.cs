@@ -59,7 +59,7 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
 
             try
             {
-                await EnsureEnvironmentAsync(context, cancellationToken);
+                await EnsureEnvironmentAsync(candidate, context, cancellationToken);
 
                 if (options.Command == SmokeTestCommand.Cleanup)
                 {
@@ -71,13 +71,13 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
                 if (options.Command == SmokeTestCommand.Run)
                 {
                     await CleanupControlDataAsync(context, cancellationToken);
-                    await EnsureEnvironmentAsync(context, cancellationToken);
+                    await EnsureEnvironmentAsync(candidate, context, cancellationToken);
                     await InsertControlDataAsync(context, cancellationToken);
-                    await RunClosingWorkflowAsync(context, candidate.DatabaseName, details, errors, cancellationToken);
+                    await RunClosingWorkflowAsync(candidate, context, candidate.DatabaseName, details, errors, cancellationToken);
                     continue;
                 }
 
-                await VerifyClosedPeriodAsync(context, candidate.DatabaseName, details, errors, cancellationToken);
+                await VerifyClosedPeriodAsync(candidate, context, candidate.DatabaseName, details, errors, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -93,10 +93,14 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
             : SmokeTestResult.Failure("Проверка закрытия периода выявила ошибки.", errors.Concat(details));
     }
 
-    private static async Task EnsureEnvironmentAsync(AppDbContext context, CancellationToken cancellationToken)
+    private static async Task EnsureEnvironmentAsync(
+        DatabaseCandidate candidate,
+        AppDbContext context,
+        CancellationToken cancellationToken)
     {
         await new ModuleMetadataService(context).EnsureDefaultModulesAsync();
-        await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
+        // Схему приводит приложение своими миграциями — так же, как в рабочем режиме.
+        await EnsureDatabaseSchemaAsync(candidate, cancellationToken);
         await EnsurePostingTableAsync(context, cancellationToken);
         await EnsureControlModuleAsync(context, cancellationToken);
     }
@@ -152,11 +156,8 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
                 ""CreatedAt"" timestamp with time zone NOT NULL DEFAULT NOW(),
                 ""UpdatedAt"" timestamp with time zone NOT NULL DEFAULT NOW()
             );
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2) NOT NULL DEFAULT 0;
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS description text;
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;",
+            -- Колонки module_code, amount_currency, currency_id, description, is_active
+            -- добавляет миграция приложения (SchemaMigrationService), здесь не дублируем.",
             cancellationToken);
     }
 
@@ -221,13 +222,14 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
     }
 
     private static async Task RunClosingWorkflowAsync(
+        DatabaseCandidate candidate,
         AppDbContext context,
         string databaseName,
         List<string> details,
         List<string> errors,
         CancellationToken cancellationToken)
     {
-        var service = new AccountingPeriodService(ServiceLocator.DbContextFactory);
+        var service = new AccountingPeriodService(CreateFactory(candidate));
         var period = await service.CollectAsync(PeriodStart, PeriodEnd);
         details.Add($"{databaseName}: период собран, обороты и остатки зафиксированы.");
 
@@ -259,17 +261,18 @@ public sealed class FinancePeriodClosingScenario : SmokeTestScenarioBase
         await service.CloseModuleAsync(period.Id, financeModule.ModuleId);
         await service.CloseAsync(period.Id);
 
-        await VerifyClosedPeriodAsync(context, databaseName, details, errors, cancellationToken);
+        await VerifyClosedPeriodAsync(candidate, context, databaseName, details, errors, cancellationToken);
     }
 
     private static async Task VerifyClosedPeriodAsync(
+        DatabaseCandidate candidate,
         AppDbContext context,
         string databaseName,
         List<string> details,
         List<string> errors,
         CancellationToken cancellationToken)
     {
-        var service = new AccountingPeriodService(ServiceLocator.DbContextFactory);
+        var service = new AccountingPeriodService(CreateFactory(candidate));
         var period = await service.FindAsync(PeriodStart, PeriodEnd);
         if (period == null)
         {

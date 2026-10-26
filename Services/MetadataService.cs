@@ -1373,8 +1373,23 @@ namespace BIS.ERP.Services
             command.CommandText = sql;
 
             await _context.Database.OpenConnectionAsync();
-            var newId = await command.ExecuteScalarAsync();
-            await _context.Database.CloseConnectionAsync();
+
+            object? newId;
+            try
+            {
+                newId = await command.ExecuteScalarAsync();
+            }
+            catch (Exception ex)
+            {
+                // Без самого SQL непонятно, в какой колонке пустая строка стала uuid.
+                SystemLogService.Error($"Ошибка вставки записи {metadata.TableName}. SQL: {sql}",
+                    nameof(MetadataService), ex);
+                throw;
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
 
             var recordId = Guid.Parse(newId.ToString());
 
@@ -1790,7 +1805,17 @@ namespace BIS.ERP.Services
                 if (!data.TryGetValue(name, out var value) || value == null)
                     continue;
                 if (value is DateTime date || DateTime.TryParse(value.ToString(), out date))
-                    await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureDateCanBeModifiedAsync(date);
+                {
+                    // Своё подключение на той же строке: ServiceLocator в тестовом
+                    // процессе не инициализирован и отдаёт строку без пароля.
+                    var periodConnection = _context.Database.GetConnectionString();
+                    if (!string.IsNullOrWhiteSpace(periodConnection))
+                    {
+                        await new AccountingPeriodService(new ConnectionStringDbContextFactory(periodConnection))
+                            .EnsureDateCanBeModifiedAsync(date);
+                    }
+                }
+
                 return;
             }
         }
@@ -4221,6 +4246,16 @@ namespace BIS.ERP.Services
             }
         }
 
+        /// <summary>
+        /// Значение uuid-параметра: пустая строка и мусор превращаются в NULL.
+        /// Раньше в SQL стояло NULLIF(@x, '')::uuid, и PostgreSQL падал с
+        /// «неверный синтаксис для типа uuid: ""» ещё до сравнения.
+        /// </summary>
+        private static object ResolveUuidParameter(string? value)
+        {
+            return Guid.TryParse(value, out var id) ? id : DBNull.Value;
+        }
+
         private async Task CreatePosting(
             string docNumber,
             DateTime postingDate,
@@ -4272,9 +4307,9 @@ namespace BIS.ERP.Services
                         @creditAccount,
                         @amount,
                         @amountCurrency,
-                        NULLIF(@currencyId, '')::uuid,
-                        NULLIF(@organizationId, '')::uuid,
-                        NULLIF(@employeeId, '')::uuid,
+                        CAST(@currencyId AS uuid),
+                        CAST(@organizationId AS uuid),
+                        CAST(@employeeId AS uuid),
                         @description,
                         @isActive,
                         NOW(),
@@ -4291,9 +4326,10 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@creditAccount", creditAccount),
                     new NpgsqlParameter("@amount", amount),
                     new NpgsqlParameter("@amountCurrency", amountCurrency),
-                    new NpgsqlParameter("@currencyId", string.IsNullOrWhiteSpace(currencyId) ? DBNull.Value : (object)currencyId),
-                    new NpgsqlParameter("@organizationId", (object?)organizationId ?? DBNull.Value),
-                    new NpgsqlParameter("@employeeId", (object?)employeeId ?? DBNull.Value),
+                    // currencyId приходит строкой; пустая строка — это NULL, а не ''::uuid
+                    new NpgsqlParameter("@currencyId", ResolveUuidParameter(currencyId)),
+                    new NpgsqlParameter("@organizationId", organizationId.HasValue ? organizationId.Value : DBNull.Value),
+                    new NpgsqlParameter("@employeeId", employeeId.HasValue ? employeeId.Value : DBNull.Value),
                     new NpgsqlParameter("@description", (object?)description ?? DBNull.Value),
                     new NpgsqlParameter("@documentType", documentType),
                     new NpgsqlParameter("@documentTable", (object?)documentTable ?? DBNull.Value),

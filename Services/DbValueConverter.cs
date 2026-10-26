@@ -38,6 +38,20 @@ namespace BIS.ERP.Services
             return result;
         }
 
+        /// <summary>
+        /// Дата из значения любого вида: DateTime приходит из UI напрямую,
+        /// строка — из импорта и SQL-настроек.
+        /// </summary>
+        private static DateTime? ReadDateTime(object? value, string text)
+        {
+            if (value is DateTime direct)
+                return direct;
+
+            return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+                ? parsed
+                : null;
+        }
+
         public static object Convert(object? value, string? dataType)
         {
             if (value is null or DBNull)
@@ -75,11 +89,27 @@ namespace BIS.ERP.Services
                     return Guid.TryParse(text, out var guid) ? guid : DBNull.Value;
 
                 case "timestamp with time zone":
+                    // Npgsql принимает в timestamptz только UTC. WPF DatePicker даёт
+                    // Kind=Unspecified, DateTime.Now — Kind=Local: оба приводим к UTC,
+                    // иначе «Cannot write DateTime with Kind=Local to PostgreSQL type
+                    // 'timestamp with time zone'».
+                    var utcDate = ReadDateTime(value, text);
+                    if (utcDate == null)
+                        return DBNull.Value;
+
+                    return utcDate.Value.Kind switch
+                    {
+                        DateTimeKind.Utc => utcDate.Value,
+                        DateTimeKind.Local => utcDate.Value.ToUniversalTime(),
+                        _ => DateTime.SpecifyKind(utcDate.Value, DateTimeKind.Utc)
+                    };
+
                 case "timestamp without time zone":
                 case "date":
-                    return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
-                        ? date
-                        : DBNull.Value;
+                    var naiveDate = ReadDateTime(value, text);
+                    return naiveDate == null
+                        ? DBNull.Value
+                        : DateTime.SpecifyKind(naiveDate.Value, DateTimeKind.Unspecified);
 
                 default:
                     return text;

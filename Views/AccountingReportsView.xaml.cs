@@ -602,6 +602,13 @@ namespace BIS.ERP.Views
                 SearchBox.Clear();
                 StatusText.Text = $"Сформировано строк: {_currentData.Rows.Count}";
             }
+            catch (ReportNeedsAccountException ex)
+            {
+                // Не сбой, а недостающий выбор: подсказка вместо «ошибки».
+                MessageBox.Show(ex.Message, "Выбор счёта",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusText.Text = "Нужно выбрать счёт";
+            }
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка формирования отчета: {ex.Message}", "Ошибка",
@@ -681,7 +688,8 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildTurnoverStatementAsync(DateTime start, DateTime end)
         {
             if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
-                throw new InvalidOperationException("Для оборотной ведомости выберите счет.");
+                throw new ReportNeedsAccountException(
+                    "Для оборотной ведомости нужен счёт. Нажмите 🔍 рядом с полем «Счёт», выберите счёт и повторите формирование.");
 
             var report = await _context.Reports.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Code == "standard.finance.trial-balance-closedxml");
@@ -860,7 +868,8 @@ namespace BIS.ERP.Views
             bool closedXml = false)
         {
             if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
-                throw new InvalidOperationException("Для оборотно-сальдовой ведомости выберите счет.");
+                throw new ReportNeedsAccountException(
+                    "Для оборотно-сальдовой ведомости нужен счёт. Нажмите 🔍 рядом с полем «Счёт», выберите счёт и повторите формирование.");
 
             var variant = closedXml ? null : GetSelectedTrialBalanceReportVariant();
             var selectedOrganization = GetSelectedOrganizationScope();
@@ -992,6 +1001,14 @@ namespace BIS.ERP.Views
         /// Код стандартного отчёта, в котором хранится визуальный макет
         /// оборотно-сальдовой ведомости.
         /// </summary>
+        /// <summary>
+        /// Отчёт требует выбора счёта: это не ошибка, а недостающий шаг пользователя.
+        /// </summary>
+        private sealed class ReportNeedsAccountException : Exception
+        {
+            public ReportNeedsAccountException(string message) : base(message) { }
+        }
+
         private const string ClosedXmlTrialBalanceCode = "standard.finance.trial-balance-closedxml";
 
         /// <summary>

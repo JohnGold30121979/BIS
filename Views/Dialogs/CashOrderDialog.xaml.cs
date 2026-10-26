@@ -1,5 +1,6 @@
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 using System;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
@@ -1918,6 +1919,25 @@ namespace BIS.ERP.Views
         /// Ручное изменение курса или суммы в валюте: если курс введён вручную,
         /// «Сумма в валюте» пересчитывается от суммы документа по курсу.
         /// </summary>
+        /// <summary>
+        /// При фокусе «0» уходит: иначе пользователь вводит сумму поверх нуля
+        /// и получает «0» вместо значения. Незаполненное поле — просто пустое.
+        /// </summary>
+        private void OnAmountGotFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is not TextBox box)
+                return;
+
+            var text = box.Text?.Trim() ?? string.Empty;
+            if (text is "0" or "0,00" or "0.00" or "0,0" or "0.0")
+            {
+                box.Text = string.Empty;
+                return;
+            }
+
+            box.SelectAll();
+        }
+
         private void CurrencyAmountBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (_isApplyingCurrencyRate || AmountCurrencyBox == null ||
@@ -2020,9 +2040,82 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Кнопка «?» рядом с курсом: запрос курса из справочника курсов валют.
         /// </summary>
+        /// <summary>
+        /// «?» открывает окно курсов выбранной валюты: история, выбор курса,
+        /// запрос новых курсов НБКР. Раньше кнопка молчала, если курс уже был.
+        /// </summary>
         private async void RequestHeaderExchangeRate_Click(object sender, RoutedEventArgs e)
         {
-            await LoadExchangeRateFromCatalogAsync(interactive: true);
+            if (CurrencyCombo?.SelectedItem is not ReferenceItem currency)
+            {
+                MessageBox.Show("Сначала выберите валюту.", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var documentDate = DatePicker?.SelectedDate ?? DateTime.Today;
+
+            var dialog = new CurrencyRatesDialog(
+                _metadataService,
+                currency.Id,
+                currency.DisplayName ?? string.Empty,
+                documentDate);
+
+            // Owner задаём только видимому чужому окну: Window.GetWindow(this)
+            // может вернуть сам этот диалог (он ещё не показан) — тогда
+            // WPF падает с «Невозможно задать в свойстве Owner объект Window,
+            // который не был показан ранее».
+            var owner = Window.GetWindow(this);
+            if (owner != null && !ReferenceEquals(owner, this) && owner.IsVisible)
+                dialog.Owner = owner;
+            else if (Application.Current?.MainWindow is { IsVisible: true } mainWindow)
+                dialog.Owner = mainWindow;
+
+            if (dialog.ShowDialog() != true || dialog.SelectedRate is not decimal rate)
+                return;
+
+            try
+            {
+                _isApplyingCurrencyRate = true;
+                ExchangeRateBox.Text = rate.ToString("0.####", CultureInfo.CurrentCulture);
+            }
+            finally
+            {
+                _isApplyingCurrencyRate = false;
+            }
+
+            RecalculateAmountFromCurrency();
+        }
+
+        /// <summary>Кнопка «Запросить новый курс»: тянем курсы НБКР и подставляем курс на дату.</summary>
+        private async void OnRequestNewRateClick(object sender, RoutedEventArgs e)
+        {
+            if (CurrencyCombo?.SelectedItem is not ReferenceItem currency)
+            {
+                MessageBox.Show("Сначала выберите валюту.", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var rateDate = DatePicker?.SelectedDate ?? DateTime.Today;
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                await _metadataService.ImportOfficialCurrencyRatesAsync(rateDate.AddDays(-7), rateDate);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось запросить курсы НБКР: {ex.Message}", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+
+            await LoadExchangeRateFromCatalogAsync(interactive: false);
         }
 
         /// <summary>

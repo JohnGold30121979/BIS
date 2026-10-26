@@ -121,6 +121,7 @@ public sealed class FinanceReportsScenario : SmokeTestScenarioBase
         var balanceModelPath = Path.Combine(projectRoot, "Models", "BalanceModels.cs");
         var servicePath = Path.Combine(projectRoot, "Services", "BalanceService.cs");
         var periodServicePath = Path.Combine(projectRoot, "Services", "AccountingPeriodService.cs");
+
         var setupViewPath = Path.Combine(projectRoot, "Views", "AccountingSetupView.xaml");
         var setupCodePath = Path.Combine(projectRoot, "Views", "AccountingSetupView.xaml.cs");
 
@@ -140,8 +141,7 @@ public sealed class FinanceReportsScenario : SmokeTestScenarioBase
 
         RequireSource(modelSource, "public string Formula", "В модели строки отчетности нет поля Formula.", errors);
         RequireSource(modelSource, "public decimal FixedAmount", "В модели строки отчетности нет поля FixedAmount.", errors);
-        RequireSource(periodServiceSource, "ADD COLUMN IF NOT EXISTS \"\"Formula\"\"", "Схема БД не добавляет колонку Formula безопасно.", errors);
-        RequireSource(periodServiceSource, "ADD COLUMN IF NOT EXISTS \"\"FixedAmount\"\"", "Схема БД не добавляет колонку FixedAmount безопасно.", errors);
+
         RequireSource(serviceSource, "EvaluateReportFormula", "В BalanceService не найден расчетчик формул строк отчетности.", errors);
         RequireSource(serviceSource, "CalculateBalanceLineAmounts", "В BalanceService не найден расчет строк баланса с формулами.", errors);
         RequireSource(serviceSource, "CalculateProfitLossLineAmounts", "В BalanceService не найден расчет строк финрезультатов с формулами.", errors);
@@ -173,7 +173,9 @@ public sealed class FinanceReportsScenario : SmokeTestScenarioBase
             try
             {
                 await using var context = new AppDbContext(candidate.ConnectionString);
-                await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
+                // Схему приводит приложение своими миграциями: проверяем реальные колонки,
+                // а не текст исходников.
+                await EnsureDatabaseSchemaAsync(candidate, cancellationToken);
 
                 checkedAnyDatabase = true;
                 var missingColumns = await FindMissingFinancialReportColumnsAsync(context, cancellationToken);

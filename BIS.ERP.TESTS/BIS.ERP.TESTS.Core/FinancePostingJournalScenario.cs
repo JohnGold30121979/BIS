@@ -82,6 +82,9 @@ public sealed class FinancePostingJournalScenario : SmokeTestScenarioBase
 
             try
             {
+                // Схему приводит приложение своими миграциями (force: true),
+                // сценарий добавляет только отсутствующую таблицу проводок.
+                await EnsureDatabaseSchemaAsync(candidate, cancellationToken);
                 await EnsurePostingTableAsync(context, cancellationToken);
 
                 if (options.Command == SmokeTestCommand.Cleanup)
@@ -696,11 +699,8 @@ public sealed class FinancePostingJournalScenario : SmokeTestScenarioBase
                 ""CreatedAt"" timestamp NOT NULL DEFAULT NOW(),
                 ""UpdatedAt"" timestamp NOT NULL DEFAULT NOW()
             );
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS module_code varchar(50);
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS amount_currency numeric(18,2) NOT NULL DEFAULT 0;
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS currency_id text;
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS description text;
-            ALTER TABLE doc_postings ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;",
+            -- Колонки module_code, amount_currency, currency_id, description, is_active
+            -- добавляет миграция приложения (SchemaMigrationService), здесь не дублируем.",
             cancellationToken);
     }
 

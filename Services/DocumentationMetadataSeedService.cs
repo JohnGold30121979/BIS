@@ -657,7 +657,7 @@ namespace BIS.ERP.Services
 
         private async Task EnsureFixedAssetPeriodBalanceReportSourceAsync()
         {
-            await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
+            await CreatePeriodService().EnsureSchemaAsync();
             await EnsureObjectAsync("Снимки остатков ОС", "FixedAssetPeriodBalances", "ReportSource",
                 "Системный источник отчетов ОС по зафиксированным остаткам периода", "📌",
                 new List<MetadataField>
@@ -1551,6 +1551,18 @@ namespace BIS.ERP.Services
         {
             var bytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value));
             return Convert.ToHexString(bytes)[..12].ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Сервис периодов на своём подключении: ServiceLocator в тестовом процессе
+        /// не инициализирован и отдаёт строку без пароля.
+        /// </summary>
+        private AccountingPeriodService CreatePeriodService()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            return string.IsNullOrWhiteSpace(connectionString)
+                ? new AccountingPeriodService(ServiceLocator.DbContextFactory)
+                : new AccountingPeriodService(new ConnectionStringDbContextFactory(connectionString));
         }
     }
 }

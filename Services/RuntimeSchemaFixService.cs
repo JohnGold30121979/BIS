@@ -78,12 +78,17 @@ namespace BIS.ERP.Services
 
         private const int MinFreeTextLength = 80;
 
-        public async Task EnsureAsync()
+        /// <param name="force">
+        /// Выполнить миграции даже если для этого подключения они уже шли в текущем процессе.
+        /// Нужно тестовому центру: за один прогон несколько сценариев работают с одной базой,
+        /// и без force второй сценарий молча пропустил бы достройку схемы.
+        /// </param>
+        public async Task EnsureAsync(bool force = false)
         {
             var connectionKey = _context.Database.GetConnectionString() ?? "default";
             lock (SyncLock)
             {
-                if (ReportedConnections.Contains(connectionKey))
+                if (!force && ReportedConnections.Contains(connectionKey))
                     return;
             }
 

@@ -631,6 +631,14 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
+                // В сообщении видна только первая строка ошибки. Полный текст вместе
+                // с SQL (PostgresException.Where) пишем в лог: без него непонятно,
+                // в какой именно колонке пустая строка превращается в uuid.
+                var sql = (ex as Npgsql.PostgresException)?.Where;
+                BIS.ERP.Services.SystemLogService.Error(
+                    $"Ошибка сохранения финансового документа. SQL: {sql ?? "—"}",
+                    nameof(FinanceDocumentDialog), ex);
+
                 MessageBox.Show($"Ошибка сохранения: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }

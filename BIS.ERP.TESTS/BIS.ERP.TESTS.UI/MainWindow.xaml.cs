@@ -450,6 +450,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         // Настройки выбранной базы сохраняются в файл, а поля ввода
         // перечитываются тем же путём, что и при загрузке конфигурации.
+        // Пароль из строки подключения может быть пустым — тогда оставляем сохранённый.
+        if (string.IsNullOrWhiteSpace(settings.Password))
+        {
+            var stored = TestEnvironment.LoadSettings();
+            if (!string.IsNullOrWhiteSpace(stored.Password))
+                settings = settings with { Password = stored.Password };
+        }
+
         TestEnvironment.SaveSettings(settings);
         LoadConnectionSettingsFromStore();
         SqlStatus = $"Выбрана база: {settings.DatabaseName}. Строка подключения обновлена.";
@@ -473,6 +481,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void PersistCurrentConnectionSettings(bool announce)
     {
         var settings = BuildConnectionSettings();
+
+        // Пустое поле пароля не должно затирать сохранённый пароль:
+        // иначе сценарии получают строку без пароля и падают с
+        // «No password has been provided but the backend requires one».
+        if (string.IsNullOrWhiteSpace(settings.Password))
+        {
+            var stored = TestEnvironment.LoadSettings();
+            if (!string.IsNullOrWhiteSpace(stored.Password))
+                settings = settings with { Password = stored.Password };
+        }
+
         TestEnvironment.SaveSettings(settings);
         ConnectionSettingsFilePath = TestEnvironment.GetSettingsFilePath();
         LogsDirectoryPath = TestEnvironment.GetLogsDirectory();

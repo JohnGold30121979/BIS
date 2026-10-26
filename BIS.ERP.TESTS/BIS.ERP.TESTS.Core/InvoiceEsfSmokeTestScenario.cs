@@ -197,6 +197,7 @@ public sealed class InvoiceEsfSmokeTestScenario : SmokeTestScenarioBase
         var tempRoot = Path.Combine(Path.GetTempPath(), "BIS.ERP", "InvoiceEsfSmokeTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
         var keepArtifacts = false;
+        var innRestore = new List<OrganizationInnBackup>();
 
         try
         {
@@ -207,6 +208,14 @@ public sealed class InvoiceEsfSmokeTestScenario : SmokeTestScenarioBase
             var purchaseService = new InvoiceService(context);
             purchaseService.Configure(testContext.PurchaseDocument);
             await purchaseService.EnsureSchemaAsync();
+
+            // ЭСФ нельзя выгрузить без ИНН. В тестовой базе он может быть пустым —
+            // подставляем тестовый и возвращаем как было в finally.
+            innRestore = await EnsureOrganizationInnAsync(
+                context,
+                testContext.OrganizationCatalog.TableName,
+                progress,
+                cancellationToken);
 
             var operations = await ResolveOperationsAsync(options, cancellationToken);
             var salesRuns = new List<PreparedInvoiceRun>();
@@ -343,12 +352,103 @@ public sealed class InvoiceEsfSmokeTestScenario : SmokeTestScenarioBase
         }
         finally
         {
+            await RestoreOrganizationInnAsync(context, innRestore, cancellationToken);
+
             if (!keepArtifacts)
             {
                 await CleanupInvoicesAsync(context, createdDocuments, cancellationToken);
                 await CleanupOrganizationsByTableAsync(context, testContext.OrganizationCatalog.TableName, testContext.CreatedOrganizationIds, cancellationToken);
                 DeleteDirectorySafe(tempRoot);
             }
+        }
+    }
+
+    private sealed record OrganizationInnBackup(string TableName, Guid Id, string? Inn);
+
+    /// <summary>
+    /// Smoke-тест ЭСФ требует заполненный ИНН первичной организации и контрагента.
+    /// В тестовой базе ИНН может быть пустым, поэтому подставляем тестовый —
+    /// и возвращаем исходное значение в finally, база остаётся как была.
+    /// </summary>
+    private static async Task<List<OrganizationInnBackup>> EnsureOrganizationInnAsync(
+        AppDbContext context,
+        string organizationsTable,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        const string testInn = "12345678901234";
+        var backups = new List<OrganizationInnBackup>();
+
+        var connection = (NpgsqlConnection)context.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            var table = SqlNames.QuoteIdentifier(organizationsTable);
+            var ids = new List<Guid>();
+
+            await using (var select = connection.CreateCommand())
+            {
+                select.CommandText = $@"SELECT ""Id"" FROM {table} WHERE COALESCE(""inn"", '') = '';";
+                await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                    ids.Add(reader.GetGuid(0));
+            }
+
+            foreach (var id in ids)
+            {
+                backups.Add(new OrganizationInnBackup(organizationsTable, id, string.Empty));
+
+                await using var update = connection.CreateCommand();
+                update.CommandText = $@"UPDATE {table} SET ""inn"" = @inn WHERE ""Id"" = @id;";
+                update.Parameters.AddWithValue("@inn", testInn);
+                update.Parameters.AddWithValue("@id", id);
+                await update.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            if (backups.Count > 0)
+                Report(progress, $"Заполнен тестовый ИНН у организаций: {backups.Count} (будет возвращён после проверки).");
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
+        }
+
+        return backups;
+    }
+
+    private static async Task RestoreOrganizationInnAsync(
+        AppDbContext context,
+        IReadOnlyCollection<OrganizationInnBackup> backups,
+        CancellationToken cancellationToken)
+    {
+        if (backups.Count == 0)
+            return;
+
+        var connection = (NpgsqlConnection)context.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+            await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            foreach (var backup in backups)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = $@"UPDATE {SqlNames.QuoteIdentifier(backup.TableName)}
+                                         SET ""inn"" = @inn WHERE ""Id"" = @id;";
+                command.Parameters.AddWithValue("@inn", backup.Inn ?? string.Empty);
+                command.Parameters.AddWithValue("@id", backup.Id);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        finally
+        {
+            if (shouldClose)
+                await connection.CloseAsync();
         }
     }
 

@@ -40,8 +40,40 @@ namespace BIS.ERP.Services
             }
 
             var normalizedFieldName = NormalizeName(fieldName);
-            return DocumentFieldNames.Any(name =>
-                NormalizeName(name).Equals(normalizedFieldName, StringComparison.OrdinalIgnoreCase));
+            return DocumentFieldNames.Any(name => NameMatches(name, fieldName));
+        }
+
+        /// <summary>
+        /// Сопоставление имён аналитики терпимо к формулировкам:
+        /// «Сотрудники (Списочный состав)», «Списочный состав» и «Сотрудник» —
+        /// это одно и то же поле, иначе контрол не появляется в форме.
+        /// </summary>
+        private static bool NameMatches(string configured, string candidate)
+        {
+            var left = NormalizeName(configured);
+            var right = NormalizeName(candidate);
+
+            if (left.Equals(right, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var leftCore = StripParentheses(left);
+            var rightCore = StripParentheses(right);
+
+            if (leftCore.Equals(rightCore, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Сравниваем только достаточно длинные имена: «Счет» не должен
+            // совпадать со «Счет кассы» по вхождению.
+            return leftCore.Length >= 5 && rightCore.Length >= 5 &&
+                   (leftCore.Contains(rightCore, StringComparison.OrdinalIgnoreCase) ||
+                    rightCore.Contains(leftCore, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string StripParentheses(string value)
+        {
+            var index = value.IndexOf('(');
+            var core = index > 0 ? value[..index] : value;
+            return core.Trim();
         }
 
         private static IReadOnlyList<string> SplitNames(string value)

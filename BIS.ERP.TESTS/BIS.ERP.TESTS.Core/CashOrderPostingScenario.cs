@@ -42,6 +42,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
             try
             {
                 Report(progress, $"Проверяется база: {candidate.DatabaseName}");
+                Report(progress, $"  подключение: {DescribeConnection(candidate)}");
                 await using var context = new AppDbContext(candidate.ConnectionString);
                 await new RuntimeSchemaFixService(context).EnsureAsync();
 
@@ -68,7 +69,7 @@ public sealed class CashOrderPostingScenario : SmokeTestScenarioBase
             }
             catch (Exception ex)
             {
-                var message = $"{candidate.DatabaseName}: {ex.Message}";
+                var message = DescribeError(ex, candidate);
                 errors.Add(message);
                 Report(progress, $"Ошибка: {message}");
             }

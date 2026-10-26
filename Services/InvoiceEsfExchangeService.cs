@@ -599,7 +599,9 @@ namespace BIS.ERP.Services
             IReadOnlyDictionary<Guid, OrganizationEsfInfo> organizationsById)
         {
             if (string.IsNullOrWhiteSpace(primaryOrganization.Inn))
-                throw new InvalidOperationException("У первичной организации не заполнен ИНН.");
+                throw new InvalidOperationException(
+                    $"У первичной организации «{primaryOrganization.Name}» не заполнен ИНН — " +
+                    "заполните ИНН в карточке организации, иначе ЭСФ выгрузить нельзя.");
             if (string.IsNullOrWhiteSpace(primaryOrganization.BankAccount))
                 throw new InvalidOperationException("У первичной организации не заполнен расчетный счет.");
 

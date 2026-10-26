@@ -352,7 +352,7 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             if (!IsFixedAssetPeriodBalanceSource(source) || HasExplicitSnapshotPeriodFilter(whereClauses))
                 return;
 
-            await new AccountingPeriodService(ServiceLocator.DbContextFactory).EnsureSchemaAsync();
+            await CreatePeriodService().EnsureSchemaAsync();
 
             if (TryGetGuidParameter(parameters, out var periodId, "PeriodId", "periodId", "Период"))
             {
@@ -2069,6 +2069,18 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
                 throw new InvalidOperationException($"Отчет \"{report.Name}\" уже удален или не найден");
 
             await transaction.CommitAsync();
+        }
+
+        /// <summary>
+        /// Сервис периодов на своём подключении: ServiceLocator в тестовом процессе
+        /// не инициализирован и отдаёт строку без пароля.
+        /// </summary>
+        private AccountingPeriodService CreatePeriodService()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            return string.IsNullOrWhiteSpace(connectionString)
+                ? new AccountingPeriodService(ServiceLocator.DbContextFactory)
+                : new AccountingPeriodService(new ConnectionStringDbContextFactory(connectionString));
         }
     }
 }

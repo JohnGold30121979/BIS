@@ -490,6 +490,92 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        /// <summary>
+        /// Курсы валюты за период из справочника — для окна просмотра курсов.
+        /// Возвращает новые сверху; пустой список, если справочника нет.
+        /// </summary>
+        public async Task<List<CurrencyRateLookupResult>> GetCurrencyRatesAsync(
+            Guid currencyId,
+            DateTime fromDate,
+            DateTime toDate,
+            int limit = 50)
+        {
+            var result = new List<CurrencyRateLookupResult>();
+            await using var context = CreateIndependentContext();
+
+            var catalog = await context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" &&
+                    item.Name == "Справочник курсов валют");
+            if (catalog == null)
+                return result;
+
+            var sql = $@"
+                SELECT rate_date,
+                       COALESCE(NULLIF(rate_nb, 0), NULLIF(rate_commercial, 0), 0) AS rate,
+                       CASE
+                           WHEN COALESCE(rate_nb, 0) <> 0 THEN 'НБКР'
+                           WHEN COALESCE(rate_commercial, 0) <> 0 THEN 'Коммерческий'
+                           ELSE ''
+                       END AS source
+                FROM {QuoteIdentifier(catalog.TableName)}
+                WHERE currency_id::text = @currencyId
+                  AND rate_date::date >= @fromDate
+                  AND rate_date::date <= @toDate
+                  AND COALESCE(is_active, true) = true
+                ORDER BY rate_date DESC
+                LIMIT {Math.Clamp(limit, 1, 500)};";
+
+            using var command = context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = sql;
+
+            var currencyParameter = command.CreateParameter();
+            currencyParameter.ParameterName = "@currencyId";
+            currencyParameter.Value = currencyId.ToString();
+            command.Parameters.Add(currencyParameter);
+
+            var fromParameter = command.CreateParameter();
+            fromParameter.ParameterName = "@fromDate";
+            fromParameter.Value = fromDate.Date;
+            command.Parameters.Add(fromParameter);
+
+            var toParameter = command.CreateParameter();
+            toParameter.ParameterName = "@toDate";
+            toParameter.Value = toDate.Date;
+            command.Parameters.Add(toParameter);
+
+            var connectionOpened = false;
+            try
+            {
+                if (context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await context.Database.OpenConnectionAsync();
+                    connectionOpened = true;
+                }
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var rate = reader["rate"] == DBNull.Value
+                        ? 0m
+                        : Convert.ToDecimal(reader["rate"], CultureInfo.InvariantCulture);
+                    if (rate <= 0)
+                        continue;
+
+                    var rateDate = reader["rate_date"] is DateTime date ? date.Date : fromDate.Date;
+                    var source = reader["source"]?.ToString() ?? string.Empty;
+                    result.Add(new CurrencyRateLookupResult(rate, rateDate, source));
+                }
+            }
+            finally
+            {
+                if (connectionOpened)
+                    await context.Database.CloseConnectionAsync();
+            }
+
+            return result;
+        }
+
         public async Task<CurrencyRateLookupResult?> GetCurrencyRateForDateAsync(Guid currencyId, DateTime documentDate)
         {
             // Независимый контекст: запрос курса идёт из UI параллельно с другими

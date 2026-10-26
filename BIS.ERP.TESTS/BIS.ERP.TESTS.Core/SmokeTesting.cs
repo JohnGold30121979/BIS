@@ -1,5 +1,6 @@
 using System.Data;
 using BIS.ERP.Data;
+using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -113,6 +114,83 @@ public abstract class SmokeTestScenarioBase : ISmokeTestScenario
     protected static void Report(IProgress<string>? progress, string message)
     {
         progress?.Report(message);
+    }
+
+    /// <summary>
+    /// Фабрика контекста, привязанная к подключению проверяемой базы.
+    ///
+    /// Нельзя брать ServiceLocator.DbContextFactory: он отдаёт контекст «текущей»
+    /// инфобазы приложения, которой в тестовом процессе нет — отсюда ошибка
+    /// «No password has been provided».
+    /// </summary>
+    protected static IAppDbContextFactory CreateFactory(DatabaseCandidate candidate) =>
+        new FixedConnectionDbContextFactory(candidate.ConnectionString);
+
+    private sealed class FixedConnectionDbContextFactory : IAppDbContextFactory
+    {
+        private readonly string _connectionString;
+
+        public FixedConnectionDbContextFactory(string connectionString) => _connectionString = connectionString;
+
+        public Task<AppDbContext> CreateAsync() => Task.FromResult(new AppDbContext(_connectionString));
+    }
+
+    /// <summary>
+    /// Понятное описание ошибки для лога: тип, сообщение, вложенная причина,
+    /// место в коде и подсказка для типовых случаев.
+    /// </summary>
+    protected static string DescribeError(Exception ex, DatabaseCandidate? candidate = null)
+    {
+        var parts = new List<string> { $"{ex.GetType().Name}: {ex.Message}" };
+
+        if (ex.InnerException != null)
+            parts.Add($"причина: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+
+        var text = ex.ToString();
+        if (text.Contains("No password has been provided", StringComparison.OrdinalIgnoreCase))
+            parts.Add("подсказка: в строке подключения нет пароля — проверьте поле «Пароль» в тест-центре и файл testsettings.json");
+        else if (text.Contains("password authentication failed", StringComparison.OrdinalIgnoreCase))
+            parts.Add("подсказка: пароль не подходит к этой базе");
+        else if (text.Contains("does not exist", StringComparison.OrdinalIgnoreCase) &&
+                 text.Contains("database", StringComparison.OrdinalIgnoreCase))
+            parts.Add("подсказка: базы нет на сервере — проверьте имя базы");
+
+        var frame = new System.Diagnostics.StackTrace(ex, true).GetFrames()?
+            .FirstOrDefault(item => item.GetFileName()?.Contains("BIS.ERP", StringComparison.OrdinalIgnoreCase) == true);
+        if (frame != null)
+            parts.Add($"место: {System.IO.Path.GetFileName(frame.GetFileName())}:{frame.GetFileLineNumber()}");
+
+        if (candidate != null)
+            parts.Add($"база: {candidate.DatabaseName}");
+
+        return string.Join(" | ", parts);
+    }
+
+    /// <summary>Строка диагностики подключения (без пароля) — пишется перед проверкой базы.</summary>
+    protected static string DescribeConnection(DatabaseCandidate candidate)
+    {
+        if (!TestSettings.TryParseConnectionString(candidate.ConnectionString, out var settings))
+            return $"{candidate.DatabaseName}: строку подключения разобрать не удалось";
+
+        var passwordState = string.IsNullOrWhiteSpace(settings.Password) ? "НЕ ЗАДАН" : "задан";
+        return $"{settings.Host}:{settings.Port}/{settings.DatabaseName}, пользователь {settings.Username}, пароль: {passwordState}";
+    }
+
+    /// <summary>
+    /// Приводит схему тестовой базы к актуальной теми же миграциями, что и приложение:
+    /// журнал schema_migrations, достройка колонок EF и метаданных.
+    ///
+    /// force: true обязателен — за один прогон несколько сценариев работают с одной базой,
+    /// и без него второй сценарий молча пропустил бы миграции (статический барьер
+    /// ReportedConnections в RuntimeSchemaFixService).
+    /// Открывается собственное подключение: контекст сценария в это время занят.
+    /// </summary>
+    protected static async Task EnsureDatabaseSchemaAsync(
+        DatabaseCandidate candidate,
+        CancellationToken cancellationToken = default)
+    {
+        await using var context = new AppDbContext(candidate.ConnectionString);
+        await new RuntimeSchemaFixService(context).EnsureAsync(force: true);
     }
 
     internal static TestSettings LoadSettings()
@@ -461,10 +539,19 @@ public sealed class SqlQueryConsoleService
                 table.Load(reader);
                 hasRows = table.Columns.Count > 0;
             }
+
+            // RecordsAffected читаем, пока reader открыт: после последнего NextResultAsync
+            // Npgsql закрывает reader, и обращение к свойству даёт «The reader is closed».
+            try
+            {
+                recordsAffected = reader.RecordsAffected;
+            }
+            catch (InvalidOperationException)
+            {
+                // reader уже закрыт — оставляем последнее известное значение
+            }
         }
         while (await reader.NextResultAsync(cancellationToken));
-
-        recordsAffected = reader.RecordsAffected;
 
         var duration = DateTime.Now - startedAt;
         if (hasRows)
