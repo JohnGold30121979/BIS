@@ -503,6 +503,7 @@ namespace BIS.ERP.Services
             var columns = new List<string>();
             var values = new List<string>();
             var parameters = new Dictionary<string, object>();
+            var missingRequired = new List<string>();
 
             // Типы колонок: без приведения строка уйдёт в integer/uuid как text (42804).
             await _context.Database.OpenConnectionAsync();
@@ -511,13 +512,38 @@ namespace BIS.ERP.Services
 
             foreach (var field in SelectFieldsForWrite(catalog, itemData))
             {
-                if (itemData.ContainsKey(field.Name) && itemData[field.Name] != null)
+                // Диалог кладёт в itemData все поля, включая пустые (DBNull.Value),
+                // а DbValueConverter отдаёт DBNull и для пустой строки. Писать такой
+                // NULL в NOT NULL-колонку бессмысленно: PostgreSQL отвечает 23502
+                // («значение NULL в столбце "name" …»). Поэтому пустое значение
+                // не включаем в INSERT, а по обязательным полям сразу говорим,
+                // что именно не заполнено.
+                if (!TryGetFieldValue(itemData, field, out var rawValue) || rawValue is null)
                 {
-                    columns.Add($"\"{field.DbColumnName}\"");
-                    values.Add($"@{field.DbColumnName}");
-                    parameters[$"@{field.DbColumnName}"] =
-                        DbValueConverter.Convert(itemData[field.Name], columnTypes.GetValueOrDefault(field.DbColumnName));
+                    if (field.IsRequired)
+                        missingRequired.Add(field.Name);
+                    continue;
                 }
+
+                var value = DbValueConverter.Convert(
+                    rawValue, columnTypes.GetValueOrDefault(field.DbColumnName));
+
+                if (value is DBNull)
+                {
+                    if (field.IsRequired)
+                        missingRequired.Add(field.Name);
+                    continue;
+                }
+
+                columns.Add($"\"{field.DbColumnName}\"");
+                values.Add($"@{field.DbColumnName}");
+                parameters[$"@{field.DbColumnName}"] = value;
+            }
+
+            if (missingRequired.Count > 0)
+            {
+                throw new Exception(
+                    $"Заполните обязательные поля: {string.Join(", ", missingRequired)}.");
             }
 
             columns.Add("\"Id\"");
@@ -1449,13 +1475,27 @@ namespace BIS.ERP.Services
                 : null;
 
             var setClauses = new List<string>();
+            var missingRequired = new List<string>();
 
             foreach (var field in SelectFieldsForWrite(metadata, data))
             {
                 if (TryGetFieldValue(data, field, out var fieldValue))
                 {
-                    setClauses.Add($"\"{field.DbColumnName}\" = {FormatSqlValue(fieldValue, field.FieldType)}");
+                    var formatted = FormatSqlValue(fieldValue, field.FieldType);
+
+                    // Очищенное обязательное поле дало бы NULL в NOT NULL-колонку
+                    // и 23502 из PostgreSQL — говорим об этом до запроса.
+                    if (field.IsRequired && formatted == "NULL")
+                        missingRequired.Add(field.Name);
+
+                    setClauses.Add($"\"{field.DbColumnName}\" = {formatted}");
                 }
+            }
+
+            if (missingRequired.Count > 0)
+            {
+                throw new Exception(
+                    $"Заполните обязательные поля: {string.Join(", ", missingRequired)}.");
             }
 
             setClauses.Add("\"UpdatedAt\" = NOW()");

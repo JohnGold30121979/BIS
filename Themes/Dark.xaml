@@ -341,6 +341,14 @@
         <Setter Property="Foreground" Value="{DynamicResource AppInputForegroundBrush}"/>
         <Setter Property="Padding" Value="8,5"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <!-- Выравнивание задаётся явно. Системный стиль .NET берёт эти два свойства
+             у предка ItemsControl через RelativeSource; когда пункты добавляют в
+             ComboBox.Items до попадания списка в дерево (панели вида в
+             MainWorkWindow/ConfiguratorWindow), предка ещё нет и в лог идёт
+             Warning «Cannot find source for binding … ItemsControl». Свой сеттер
+             отменяет ту привязку; значения совпадают с системными. -->
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">

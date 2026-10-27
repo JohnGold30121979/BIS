@@ -1438,14 +1438,16 @@ namespace BIS.ERP.Views
             Grid.SetColumn(searchPanel, 0);
             grid.Children.Add(searchPanel);
 
+            // Строки, а не ComboBoxItem: контейнеры создаёт сам ComboBox уже в дереве,
+            // иначе системный стиль пункта не находит предка ItemsControl и пишет
+            // Warning в лог (см. комментарий в теме, Style для ComboBoxItem).
             var viewCombo = new ComboBox
             {
                 Height = 36,
-                Width = 190,
-                SelectedValuePath = "Content"
+                Width = 190
             };
             foreach (var mode in viewModes)
-                viewCombo.Items.Add(new ComboBoxItem { Content = mode });
+                viewCombo.Items.Add(mode);
             var selectedIndex = viewModes.ToList().IndexOf(selectedViewMode);
             viewCombo.SelectedIndex = Math.Max(0, selectedIndex);
 
@@ -1469,7 +1471,7 @@ namespace BIS.ERP.Views
                 isApplying = true;
                 try
                 {
-                    var viewMode = (viewCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? selectedViewMode;
+                    var viewMode = viewCombo.SelectedItem?.ToString() ?? selectedViewMode;
                     onChanged(searchBox.Text, viewMode);
                 }
                 finally

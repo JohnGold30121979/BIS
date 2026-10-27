@@ -84,7 +84,14 @@ namespace BIS.ERP.Views
                     System.Diagnostics.Debug.WriteLine($"Processing field: {field.Name}, Type: {field.FieldType}");
 
                     var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 15) };
-                    var label = new TextBlock { Text = GetFieldLabel(field), FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 5) };
+                    // Звёздочка — обязательное поле: без него запись не сохранится
+                    // (в «Парах счетов» так помечен «Вид расчета»).
+                    var label = new TextBlock
+                    {
+                        Text = field.IsRequired ? $"{GetFieldLabel(field)} *" : GetFieldLabel(field),
+                        FontWeight = FontWeights.Bold,
+                        Margin = new Thickness(0, 0, 0, 5)
+                    };
                     panel.Children.Add(label);
 
                     Control inputControl;
@@ -1306,40 +1313,16 @@ inputControl = AccountPickerControlFactory.Create(
 
                 foreach (var field in GetEditableFields())
                 {
-                    if (!_controls.ContainsKey(field.Name)) continue;
+                    if (!_controls.TryGetValue(field.Name, out var control)) continue;
 
-                    var control = _controls[field.Name];
-                    object value = null;
-
-                    if (control is UserControl && AccountPickerControlFactory.GetSelectedAccount(control) != null)
-                    {
-                        value = AccountPickerControlFactory.GetSelectedAccountValue(field, control);
-                    }
-                    else if (control is ReferencePickerControl referencePicker)
-                    {
-                        value = ShouldStoreReferenceDisplayValue(field)
-                            ? referencePicker.SelectedReferenceItem?.DisplayName ?? referencePicker.ComboBox.Text ?? string.Empty
-                            : referencePicker.SelectedReferenceItem?.Id.ToString() ?? string.Empty;
-                    }
-                    else if (control is ComboBox comboBox)
-                    {
-                        if (comboBox.SelectedItem is ReferenceItem selectedItem)
-                            value = selectedItem.Id.ToString();
-                        else if (comboBox.SelectedItem is ChoiceItem choiceItem)
-                            value = choiceItem.Code;
-                        else
-                            value = comboBox.SelectedItem?.ToString() ?? comboBox.Text ?? "";
-                    }
-                    else
-                    {
-                        value = GetValueFromControl(control, field);
-                    }
-
-                    _itemData[field.Name] = value ?? DBNull.Value;
+                    _itemData[field.Name] = ReadFieldValue(field, control) ?? DBNull.Value;
                 }
 
                 NormalizeCatalogItemDataBeforeSave();
                 NormalizeAccountPairsCurrencyBeforeSave();
+
+                if (!ValidateRequiredFields())
+                    return;
 
                 if (!ValidateOrganizationCountry())
                     return;
@@ -1558,6 +1541,85 @@ inputControl = AccountPickerControlFactory.Create(
                     }
                     return null;
             }
+        }
+
+        /// <summary>
+        /// Значение поля из его контрола — ровно то, что уйдёт в запись. Вынесено
+        /// из OnSaveClick, чтобы проверка обязательных полей смотрела на те же
+        /// значения, а не на текст контрола.
+        /// </summary>
+        private object? ReadFieldValue(MetadataField field, Control control)
+        {
+            if (control is UserControl && AccountPickerControlFactory.GetSelectedAccount(control) != null)
+                return AccountPickerControlFactory.GetSelectedAccountValue(field, control);
+
+            if (control is ReferencePickerControl referencePicker)
+            {
+                return ShouldStoreReferenceDisplayValue(field)
+                    ? referencePicker.SelectedReferenceItem?.DisplayName ?? referencePicker.ComboBox.Text ?? string.Empty
+                    : referencePicker.SelectedReferenceItem?.Id.ToString() ?? string.Empty;
+            }
+
+            if (control is ComboBox comboBox)
+            {
+                if (comboBox.SelectedItem is ReferenceItem selectedItem)
+                    return selectedItem.Id.ToString();
+                if (comboBox.SelectedItem is ChoiceItem choiceItem)
+                    return choiceItem.Code;
+                return comboBox.SelectedItem?.ToString() ?? comboBox.Text ?? string.Empty;
+            }
+
+            return GetValueFromControl(control, field);
+        }
+
+        /// <summary>
+        /// Обязательные поля, которые есть в форме, должны быть заполнены до закрытия
+        /// диалога. Иначе INSERT уходит без значения, и PostgreSQL отвечает 23502
+        /// «значение NULL в столбце "name" нарушает ограничение NOT NULL»
+        /// (лог 26.10.2026 13:33 — «Пары счетов», пустой «Вид расчета»). Здесь же
+        /// видно, что именно не заполнено, и введённое не теряется.
+        /// </summary>
+        private bool ValidateRequiredFields()
+        {
+            var emptyFields = new List<MetadataField>();
+
+            foreach (var field in GetEditableFields())
+            {
+                if (!field.IsRequired)
+                    continue;
+
+                if (!_controls.TryGetValue(field.Name, out var control))
+                    continue;
+
+                if (IsEmptyFieldValue(ReadFieldValue(field, control)))
+                    emptyFields.Add(field);
+            }
+
+            if (emptyFields.Count == 0)
+                return true;
+
+            MessageBox.Show(
+                "Заполните обязательные поля:\n• " +
+                string.Join("\n• ", emptyFields.Select(GetFieldLabel)),
+                _catalog.Name,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            if (_controls.TryGetValue(emptyFields[0].Name, out var firstControl))
+            {
+                firstControl.Focus();
+                if (firstControl is TextBox textBox)
+                    textBox.SelectAll();
+            }
+
+            return false;
+        }
+
+        private static bool IsEmptyFieldValue(object? value)
+        {
+            return value == null ||
+                   value == DBNull.Value ||
+                   (value is string text && string.IsNullOrWhiteSpace(text));
         }
 
         private bool ValidateChartOfAccountsCode()

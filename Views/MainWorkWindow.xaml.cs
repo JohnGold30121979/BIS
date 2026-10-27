@@ -1488,14 +1488,17 @@ namespace BIS.ERP
             Grid.SetColumn(searchPanel, 0);
             grid.Children.Add(searchPanel);
 
+            // Пункты добавляются строками, а не готовыми ComboBoxItem: контейнер
+            // тогда создаёт сам ComboBox уже внутри дерева. У ComboBoxItem, добавленного
+            // в Items до показа окна, системный стиль не находит предка ItemsControl
+            // и пишет в лог Warning «Cannot find source for binding …».
             var viewCombo = new ComboBox
             {
                 Height = 36,
-                Width = 170,
-                SelectedValuePath = "Content"
+                Width = 170
             };
-            viewCombo.Items.Add(new ComboBoxItem { Content = OverviewBlocksMode });
-            viewCombo.Items.Add(new ComboBoxItem { Content = OverviewListMode });
+            viewCombo.Items.Add(OverviewBlocksMode);
+            viewCombo.Items.Add(OverviewListMode);
             viewCombo.SelectedIndex = selectedViewMode == OverviewListMode ? 1 : 0;
 
             var viewPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -1520,7 +1523,7 @@ namespace BIS.ERP
                 isApplying = true;
                 try
                 {
-                    var viewMode = (viewCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? OverviewBlocksMode;
+                    var viewMode = viewCombo.SelectedItem?.ToString() ?? OverviewBlocksMode;
                     onChanged(searchBox.Text, viewMode);
                 }
                 finally

@@ -1,0 +1,8 @@
+﻿[14:12:01] Файл настроек: D:\C#\BIS.ERP\BIS.ERP\BIS.ERP.TESTS\config\testsettings.json
+[14:12:01] Папка логов: D:\C#\BIS.ERP\BIS.ERP\BIS.ERP.TESTS\logs
+[14:12:01] Загружено сценариев: 10.
+[14:12:04] INFO: список информационных баз не прочитан: Failed to connect to 192.168.1.19:5432
+[14:28:05] Файл настроек: D:\C#\BIS.ERP\BIS.ERP\BIS.ERP.TESTS\config\testsettings.json
+[14:28:05] Папка логов: D:\C#\BIS.ERP\BIS.ERP\BIS.ERP.TESTS\logs
+[14:28:05] Загружено сценариев: 10.
+[14:28:07] INFO: список информационных баз не прочитан: Failed to connect to 192.168.1.19:5432

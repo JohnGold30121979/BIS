@@ -1325,14 +1325,14 @@ namespace BIS.ERP.Services
             return (value ?? string.Empty).Replace("'", "''");
         }
 
-        private async Task UpsertCatalogSeedRowAsync(
+        private async Task<int> UpsertCatalogSeedRowAsync(
             string tableName,
             string code,
             IReadOnlyDictionary<string, object?> values)
         {
             var columnSql = string.Join(", ", values.Keys.Select(item => $@"""{item}"""));
             var valueSql = string.Join(", ", values.Values.Select(ToSqlLiteral));
-            await _context.Database.ExecuteSqlRawAsync($@"
+            return await _context.Database.ExecuteSqlRawAsync($@"
                 INSERT INTO ""{tableName}"" ({columnSql})
                 SELECT {valueSql}
                 WHERE NOT EXISTS (
@@ -1342,7 +1342,7 @@ namespace BIS.ERP.Services
                 );");
         }
 
-        private async Task UpsertCatalogSeedRowAsync(
+        private async Task<int> UpsertCatalogSeedRowAsync(
             string tableName,
             string code,
             IReadOnlyDictionary<string, object?> values,
@@ -1372,12 +1372,12 @@ namespace BIS.ERP.Services
                     WHERE ""code"" = {codeLiteral};");
 
                 if (updated > 0)
-                    return;
+                    return updated;
             }
 
             var columnSql = string.Join(", ", values.Keys.Select(item => $@"""{item}"""));
             var valueSql = string.Join(", ", values.Values.Select(ToSqlLiteral));
-            await _context.Database.ExecuteSqlRawAsync($@"
+            return await _context.Database.ExecuteSqlRawAsync($@"
                 INSERT INTO ""{tableName}"" ({columnSql})
                 SELECT {valueSql}
                 WHERE NOT EXISTS (
@@ -1393,12 +1393,12 @@ namespace BIS.ERP.Services
         /// выбранный модуль и признаки участия возвращались к значениям сида при
         /// каждой синхронизации метаданных.
         /// </summary>
-        private async Task UpsertAccountPairsSeedRowAsync(
+        private async Task<int> UpsertAccountPairsSeedRowAsync(
             MetadataObject catalog,
             string code,
             Dictionary<string, object?> values)
         {
-            await UpsertCatalogSeedRowAsync(catalog.TableName, code, values, AccountPairsUserEditableColumns);
+            return await UpsertCatalogSeedRowAsync(catalog.TableName, code, values, AccountPairsUserEditableColumns);
         }
 
         /// <summary>Колонки пары счетов, заполняемые сидом только при вставке.</summary>

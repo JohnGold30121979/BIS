@@ -98,8 +98,33 @@ namespace BIS.ERP.Services
                 new("2026.10.22.02",
                     "doc_postings: colonnes document_table/document_id (восстановление схемы при отсутствии)",
                     true,
-                    EnsurePostingDocumentTableColumnsAsync)
+                    EnsurePostingDocumentTableColumnsAsync),
+
+                new("2026.10.26.01",
+                    "Пары счетов: досид предустановленных записей (счёта — по коду из плана счетов)",
+                    true,
+                    EnsureAccountPairsSeedAsync)
             };
+        }
+
+        /// <summary>
+        /// Предустановленные пары счетов («Виды расчета»).
+        ///
+        /// Шаг повторяемый: досид идёт по коду записи и ничего не перезаписывает,
+        /// поэтому он же лечит базы, созданные до исправления сида. Раньше счёт в сиде
+        /// задавался кодом («18200000»), а debit_account/credit_account — uuid-ссылки
+        /// на план счетов: вставка падала с 22P02, ошибка уходила в Debug, и справочник
+        /// оставался пустым.
+        /// </summary>
+        private static async Task EnsureAccountPairsSeedAsync(AppDbContext ctx)
+        {
+            var added = await new MetadataService(ctx).EnsureAccountPairsSeedDataAsync();
+            if (added > 0)
+            {
+                SystemLogService.Info(
+                    $"Пары счетов: добавлены предустановленные записи — {added}.",
+                    "Schema");
+            }
         }
 
         private static async Task EnsurePostingDocumentTableColumnsAsync(AppDbContext ctx)

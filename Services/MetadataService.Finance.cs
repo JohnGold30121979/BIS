@@ -95,6 +95,12 @@ public partial class MetadataService
         }
         catch (Exception ex)
         {
+            // Раньше ошибка уходила только в Debug: пустой справочник в новой
+            // инфобазе выглядел как «сид не сработал», а причины в логе не было.
+            SystemLogService.Error(
+                $"Не удалось создать справочник '{AccountPairsCatalogName}' с предустановленными записями.",
+                nameof(MetadataService),
+                ex);
             System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
     }
@@ -132,7 +138,20 @@ public partial class MetadataService
 
         await _context.SaveChangesAsync();
         await NormalizeAdvancePaymentRowsAsync(catalog);
-        await AddAdvancePaymentDataToTable(catalog);
+
+        try
+        {
+            await AddAdvancePaymentDataToTable(catalog);
+        }
+        catch (Exception ex)
+        {
+            // Ошибка сида не должна ронять открытие базы, но и молчать о ней нельзя:
+            // из-за проглоченного 22P02 справочник оставался пустым без следов в логе.
+            SystemLogService.Error(
+                $"Не удалось посадить предустановленные записи в справочник '{AccountPairsCatalogName}'.",
+                nameof(MetadataService),
+                ex);
+        }
     }
 
     private static void NormalizeAdvancePaymentField(MetadataField field)
@@ -576,7 +595,7 @@ public partial class MetadataService
             System.Diagnostics.Debug.WriteLine($"Ошибка нормализации кодов справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
     }
-    private async Task AddAdvancePaymentDataToTable(MetadataObject catalog)
+    private async Task<int> AddAdvancePaymentDataToTable(MetadataObject catalog)
     {
         await NormalizeAdvancePaymentSeedCodesAsync(catalog.TableName);
 
@@ -594,9 +613,26 @@ public partial class MetadataService
             new { code = "10", name = "Расчеты по прочим услугам", debit = "14160000", credit = "32160000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = false, internalSettlements = false }
         };
 
+        // debit_account/credit_account — uuid-ссылки на «План счетов», а в сиде счета
+        // заданы кодами («18200000»). Вставка кода в uuid-колонку давала 22P02
+        // («неверный синтаксис для типа uuid»), исключение проглатывалось — и в новой
+        // инфобазе справочник оставался пустым. Ссылку берём по коду счёта.
+        var accountIds = await LoadChartOfAccountIdsByCodeAsync(
+            items.SelectMany(item => new[] { item.debit, item.credit }));
+
+        var skipped = new List<string>();
+        var inserted = 0;
+
         foreach (var item in items)
         {
-            await UpsertAccountPairsSeedRowAsync(catalog, item.code, new Dictionary<string, object?>
+            if (!accountIds.TryGetValue(item.debit, out var debitAccountId) ||
+                !accountIds.TryGetValue(item.credit, out var creditAccountId))
+            {
+                skipped.Add($"{item.code} «{item.name}» — нет счёта {item.debit} или {item.credit}");
+                continue;
+            }
+
+            inserted += await UpsertAccountPairsSeedRowAsync(catalog, item.code, new Dictionary<string, object?>
             {
                 ["Id"] = Guid.NewGuid(),
                 ["code"] = item.code,
@@ -605,8 +641,8 @@ public partial class MetadataService
                 ["use_personnel"] = item.personnel,
                 ["use_currency"] = item.currency,
                 ["module_code"] = item.module,
-                ["debit_account"] = item.debit,
-                ["credit_account"] = item.credit,
+                ["debit_account"] = debitAccountId,
+                ["credit_account"] = creditAccountId,
                 ["use_settlements"] = item.settlements,
                 ["generate_postings"] = item.postings,
                 ["use_internal_settlements"] = item.internalSettlements,
@@ -616,7 +652,83 @@ public partial class MetadataService
             });
         }
 
+        if (skipped.Count > 0)
+        {
+            SystemLogService.Warning(
+                "Пары счетов: предустановленные записи не созданы — в плане счетов нет нужных счетов. " +
+                string.Join("; ", skipped),
+                nameof(MetadataService));
+        }
+
         await DeactivateLegacyAdvancePaymentRowsAsync(catalog.TableName);
+
+        return inserted;
+    }
+
+    /// <summary>
+    /// Досид предустановленных пар счетов в уже существующей инфобазе. Вызывается
+    /// миграцией SchemaMigrationService: у баз, созданных до исправления сида,
+    /// справочник остался пустым.
+    /// </summary>
+    public async Task<int> EnsureAccountPairsSeedDataAsync()
+    {
+        var catalog = await GetAccountPairsCatalogAsync();
+        if (catalog == null)
+            return 0;
+
+        return await AddAdvancePaymentDataToTable(catalog);
+    }
+
+    /// <summary>
+    /// «План счетов»: код счёта → Id. Нужен сиду пар счетов: в нём счета заданы
+    /// кодами, а колонки debit_account/credit_account — uuid-ссылки.
+    /// </summary>
+    private async Task<Dictionary<string, Guid>> LoadChartOfAccountIdsByCodeAsync(IEnumerable<string> codes)
+    {
+        var result = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        var wanted = codes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (wanted.Length == 0)
+            return result;
+
+        var connection = _context.Database.GetDbConnection();
+        var openedHere = connection.State != System.Data.ConnectionState.Open;
+        if (openedHere)
+            await _context.Database.OpenConnectionAsync();
+
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+                SELECT ""code"", ""Id""
+                FROM ""catalog_plan_schetov""
+                WHERE ""code"" = ANY(@codes)";
+
+            var codesParameter = command.CreateParameter();
+            codesParameter.ParameterName = "codes";
+            codesParameter.Value = wanted;
+            command.Parameters.Add(codesParameter);
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (reader.IsDBNull(0) || reader.IsDBNull(1))
+                    continue;
+
+                result[reader.GetString(0).Trim()] = reader.GetGuid(1);
+            }
+        }
+        finally
+        {
+            if (openedHere)
+                await _context.Database.CloseConnectionAsync();
+        }
+
+        return result;
     }
 
     private async Task DeactivateLegacyAdvancePaymentRowsAsync(string tableName)
