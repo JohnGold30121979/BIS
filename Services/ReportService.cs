@@ -1887,6 +1887,10 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
         {
             var query = _context.Set<Report>().AsNoTracking()
                 .Where(report => report.IsActive && !report.IsPrintForm)
+                // Отчёты с параметрами (оборотная ведомость, счёт-фактура НДС и т. п.)
+                // живут во вкладке «Бухгалтерские отчёты»: в общем списке отчётов
+                // они дублируются и путают, потому что без параметров не строятся.
+                .Where(report => !report.ShowInAccountingReports)
                 .Where(report => !(report.SourceFormat == "Native" && EF.Functions.Like(report.Code, "standard.%")));
 
             var reports = await SelectReportHeaders(query).OrderBy(report => report.Name).ToListAsync();
