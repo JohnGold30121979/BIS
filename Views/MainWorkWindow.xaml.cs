@@ -1232,7 +1232,9 @@ namespace BIS.ERP
             // ========== РАЗДЕЛ: ОТЧЕТЫ ==========
             var reports = await _reportService.GetReportsAsync();
             var navigationReports = reports
-                .Where(report => report.IsActive && !report.IsPrintForm && !IsHiddenByUnavailableModule(report, new HashSet<Guid>(), activeModuleCodes))
+                // Отчёты с параметрами показываются во вкладке «Бухгалтерские отчёты».
+                .Where(report => report.IsActive && !report.IsPrintForm && !report.ShowInAccountingReports)
+                .Where(report => !IsHiddenByUnavailableModule(report, new HashSet<Guid>(), activeModuleCodes))
                 .Where(IsReportAvailableForNavigation)
                 .ToList();
             if (navigationReports.Any())
