@@ -51,6 +51,9 @@ namespace BIS.ERP.Views
                 Content = "?",
                 Width = 34,
                 Height = 30,
+                Padding = new Thickness(0), // в теме у Button Padding 14,7 — иначе «?» не помещается
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(5, 0, 0, 0)
             };
 

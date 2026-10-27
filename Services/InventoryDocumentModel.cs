@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using BIS.ERP.Models;
 
 namespace BIS.ERP.Services
@@ -35,7 +36,11 @@ namespace BIS.ERP.Services
         public const string OutgoingLinesTable = "doc_inventory_outgoing_lines";
         public const string MovementLinesTable = "doc_inventory_movement_lines";
 
-        public const string EntryCatalogName = "Ввод нового документа ТМЗ";
+        public const string EntryCatalogName = "Вид операции ТМЗ";
+
+        /// <summary>Прежнее имя справочника видов операций — переименовывается на существующих базах.</summary>
+        public const string EntryCatalogLegacyName = "Ввод нового документа ТМЗ";
+
         public const string EntryCatalogTable = "catalog_inventory_document_entries";
 
         public const string MaterialCatalogName = "Справочник материалов";
@@ -142,6 +147,18 @@ namespace BIS.ERP.Services
                 "Автоматическое перемещение между местами хранения")
         };
 
+        /// <summary>
+        /// Вид движения (<c>movement_kind</c>) документа ТМЗ: Incoming / Outgoing / Movement.
+        /// По нему окно документа отбирает виды операций для списка «Вид операции».
+        /// </summary>
+        public static string MovementKindForDocument(string documentName)
+        {
+            var kind = Kinds.FirstOrDefault(item =>
+                string.Equals(item.DocumentName, documentName, StringComparison.OrdinalIgnoreCase));
+
+            return kind?.MovementKind ?? string.Empty;
+        }
+
         /// <summary>Документы, которые удаляются: их роль перешла к виду операции.</summary>
         public static IReadOnlyList<string> ObsoleteDocumentNames { get; } = new[]
         {
@@ -231,7 +248,7 @@ namespace BIS.ERP.Services
             ("description", "varchar(500) NULL")
         };
 
-        /// <summary>Поля справочника «Ввод нового документа ТМЗ».</summary>
+        /// <summary>Поля справочника «Вид операции ТМЗ».</summary>
         public static List<MetadataField> EntryCatalogFields(Guid metadataObjectId) => new()
         {
             Field(metadataObjectId, "Код", "code", "String", 1, required: true, length: 50, unique: true),

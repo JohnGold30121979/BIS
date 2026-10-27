@@ -96,7 +96,7 @@ Loaded += async (_, _) => await InitializeAsync();
    - `Участки` — поля «Участок-получатель» (`destination_site_id`) и колонка строк «Участок».
    - `МОЛ` — поля «МОЛ-получатель» (`destination_person_id`) и колонка строк «МОЛ».
    - `Справочник материалов` — источник для колонки «Материал» в строках (кэш `_materialRows`).
-   - `Ввод нового документа ТМЗ` (`EntryCatalogName`) — поле «Вид операции» (`document_entry_id`), кэш `_entryCodes` для получения кода операции.
+   - `Вид операции ТМЗ` (`EntryCatalogName`) — поле «Вид операции» (`document_entry_id`). В списке — только виды операций вида `movement_kind` этого документа: у «Поступления ТМЗ» — `Incoming` (приход), у выбытия — `Outgoing`, у перемещения — `Movement`; кэш `_entryOperationKinds` для получения кода операции.
 3. **Построение заголовка** — для каждого поля метаданных создаётся редактор (`TextBox`, `DatePicker`, `ComboBox`) на `HeaderPanel` (WrapPanel).
 4. **Применение существующих значений** — для режима редактирования значения полей из `_existing` устанавливаются в соответствующие элементы управления.
 5. **Генерация номера документа** — для новой записи, если поле `doc_number` пустое, вызывается `_metadataService.GetNextDocumentNumberAsync(_document)`.
@@ -109,7 +109,7 @@ Loaded += async (_, _) => await InitializeAsync();
 
 ## Обновление справочников
 
-Данные справочника «Ввод нового документа ТМЗ» (`catalog_inventory_document_entries`) загружаются один раз при открытии диалога и кэшируются в `_entryCodes` (соответствие `Id` → `operation_kind`). Если reference-данные изменяются в БД пока окно открыто, изменения не отображаются автоматически.
+Данные справочника «Вид операции ТМЗ» (`catalog_inventory_document_entries`) загружаются один раз при открытии диалога и кэшируются в `_entryOperationKinds` (соответствие `Id` → `operation_kind`). Список обрезается по документу: `FilterEntriesForDocument()` оставляет записи с `movement_kind` = `Incoming` / `Outgoing` / `Movement` (для старых записей — по `document_name`); уже сохранённый вид операции остаётся в списке, даже если не проходит фильтр. Если reference-данные изменяются в БД пока окно открыто, изменения не отображаются автоматически.
 
 ### Кнопка «Обновить справочники»
 
@@ -117,7 +117,7 @@ Loaded += async (_, _) => await InitializeAsync();
 
 1. Снова загружает все каталоги через `MetadataService.GetCatalogsAsync()`.
 2. Перезагружает строки `catalog_inventory_document_entries` через `MetadataService.GetCatalogDataAsync()`.
-3. Очищает кэш `_entryCodes` и заполняет его заново из свежих данных.
+3. Очищает кэш `_entryOperationKinds` и заполняет его заново из свежих данных.
 4. Обновляет `ItemsSource` ComboBox «Вид операции».
 5. Сбрасывает выбранное значение в ComboBox.
 
@@ -131,7 +131,7 @@ Loaded += async (_, _) => await InitializeAsync();
 |---|---|---|---|---|
 | Номер | `doc_number` | TextBox | — | Генерируется автоматически для новой записи |
 | Дата | `doc_date` | DatePicker | — | Глобальная маска `DatePickerInputMaskBehavior`: посимвольный ввод и шаблон `DD/MM/YYYY` + календарь. Значение читается через `SelectedDate`. По умолчанию `DateTime.Today` |
-| Вид операции | `document_entry_id` | ComboBox | Ввод нового документа ТМЗ | Код операции сохраняется в `operation_kind` |
+| Вид операции | `document_entry_id` | ComboBox | Вид операции ТМЗ | Только виды операций своего `movement_kind`; код операции сохраняется в `operation_kind` |
 | № пачки | `pack_number` | TextBox | — | |
 | Серия/№ бланка | `tax_blank_number` | TextBox | — | |
 | Номер ЭСФ | `esf_number` | TextBox | — | |
@@ -219,7 +219,7 @@ LineTotal = Round(AmountWithoutTax + VatAmount + SalesTaxAmount, 2);
    - Для каждого поля метаданных считывается значение из соответствующего редактора (`ReadEditorValue`).
    - Пустые текстовые значения пропускаются (`null`).
    - Добавляются итоговые суммы: `amount_without_tax`, `vat_total`, `sales_tax_total`, `amount`, `amount_currency`.
-   - Для поля «Вид операции» (`document_entry_id`) из выбранного элемента combo берется код операции через `_entryCodes` и сохраняется в `operation_kind`. Если выбранный элемент не найден в `_entryCodes`, выбрасывается `InvalidOperationException` с сообщением о необходимости указать вид документа ТМЗ.
+   - Для поля «Вид операции» (`document_entry_id`) из выбранного элемента combo берется код операции через `_entryOperationKinds` и сохраняется в `operation_kind`. Если выбранный элемент не найден в `_entryOperationKinds`, выбрасывается `InvalidOperationException` с сообщением о необходимости указать вид документа ТМЗ.
    - Для новой записи устанавливается `is_posted = false`.
 3. **Создание или обновление записи шапки**:
    - Редактирование: `_metadataService.UpdateDynamicRecordAsync(document.Id, recordId, data)`.
@@ -337,7 +337,7 @@ sequenceDiagram
 - `IncomingName`, `OutgoingName`, `MovementName` — имена документов.
 - `IncomingTable`, `OutgoingTable`, `MovementTable` — таблицы шапок.
 - `IncomingLinesTable`, `OutgoingLinesTable`, `MovementLinesTable` — таблицы строк.
-- `EntryCatalogName = "Ввод нового документа ТМЗ"` — каталог видов операций.
+- `EntryCatalogName = "Вид операции ТМЗ"` — каталог видов операций (`EntryCatalogLegacyName` — прежнее имя для переименования баз).
 - `DocumentDefinition` — описание документа (имя, таблица, строки, колонка-родитель, иконка, порядок, описание, legacy-имена).
 - `KindDefinition` — описание вида операции (код, название, документ, группа движения, порядок, описание). Всего 8 видов операций.
 
@@ -365,6 +365,6 @@ sequenceDiagram
 - Сборка проекта: `dotnet build .\BIS.ERP.sln`.
 - Диалог работает с PostgreSQL через Npgsql (страницы строк — прямые SQL-запросы через `AppDbContext`).
 - Поле `counterparty_account` (Счет шапки) — ссылка на справочник «План счетов», хранится как uuid.
-- Вид операции из поля `document_entry_id` сохраняется отдельно в `operation_kind` (код из `_entryCodes`).
+- Вид операции из поля `document_entry_id` сохраняется отдельно в `operation_kind` (код из `_entryOperationKinds`).
 - Номер документа генерируется только для новых записей и только если поле пустое.
 - Поле `doc_date` (Дата шапки) реализовано как `DatePicker` (метод `AddDateText`); оно использует глобальную маску `DatePickerInputMaskBehavior` (инициализируется в `App.xaml.cs` на `DatePicker.Loaded`) — посимвольный ввод, шаблон `DD/MM/YYYY` и календарь. Значение засевается через `SetDateEditor` (`SelectedDate`), применяется в `ApplyExistingValues`, читается при сохранении в `ReadEditorValue` (`case DatePicker`).

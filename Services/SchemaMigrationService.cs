@@ -103,7 +103,12 @@ namespace BIS.ERP.Services
                 new("2026.10.26.01",
                     "Пары счетов: досид предустановленных записей (счёта — по коду из плана счетов)",
                     true,
-                    EnsureAccountPairsSeedAsync)
+                    EnsureAccountPairsSeedAsync),
+
+                new("2026.10.27.01",
+                    "Справочник «Ввод нового документа ТМЗ» → «Вид операции ТМЗ»",
+                    false,
+                    RenameInventoryEntryCatalogAsync)
             };
         }
 
@@ -267,6 +272,26 @@ namespace BIS.ERP.Services
 
             await using var isolated = new AppDbContext(connectionString);
             await new InventoryDocumentSchemaService(isolated).EnsureEntryCatalogOperationKindAsync();
+        }
+
+        /// <summary>
+        /// Справочник видов операций ТМЗ переименован: «Ввод нового документа ТМЗ» → «Вид операции ТМЗ».
+        /// Шаг разовый; идемпотентен: на базе с новым именем ничего не делает.
+        /// </summary>
+        private static async Task RenameInventoryEntryCatalogAsync(AppDbContext context)
+        {
+            var connectionString = context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось определить строку подключения инфобазы.");
+
+            await using var isolated = new AppDbContext(connectionString);
+            var report = await new InventoryDocumentSchemaService(isolated).EnsureEntryCatalogRenamedAsync();
+
+            foreach (var action in report.Actions)
+                SystemLogService.Info($"ТМЗ: {action}", "Migration");
+
+            foreach (var warning in report.Warnings)
+                SystemLogService.Warning($"ТМЗ: {warning}", "Migration");
         }
 
         /// <summary>

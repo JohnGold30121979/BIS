@@ -69,6 +69,10 @@ namespace BIS.ERP.Services
 
         private async Task EnsureEntryCatalogAsync(InventorySchemaReport report)
         {
+            // Справочник переименован: «Ввод нового документа ТМЗ» → «Вид операции ТМЗ».
+            // Ищем его по актуальному имени только после переименования.
+            await RenameEntryCatalogAsync(report);
+
             var catalog = await _context.MetadataObjects
                 .Include(item => item.Fields)
                 .FirstOrDefaultAsync(item =>
@@ -108,6 +112,53 @@ namespace BIS.ERP.Services
             }
 
             await SeedKindsAsync(catalog, report);
+        }
+
+        /// <summary>
+        /// Переименовывает справочник видов операций («Ввод нового документа ТМЗ» → «Вид операции ТМЗ»)
+        /// и правит поля-ссылки: <see cref="MetadataField.ReferenceCatalog"/> хранит имя справочника.
+        /// Идемпотентно: на базе с новым именем ничего не меняет.
+        /// </summary>
+        private async Task RenameEntryCatalogAsync(InventorySchemaReport report)
+        {
+            var legacy = await _context.MetadataObjects
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Catalog" && item.Name == InventoryDocumentModel.EntryCatalogLegacyName);
+
+            if (legacy != null)
+            {
+                var renamedExists = await _context.MetadataObjects.AnyAsync(item =>
+                    item.ObjectType == "Catalog" && item.Name == InventoryDocumentModel.EntryCatalogName);
+
+                if (renamedExists)
+                {
+                    report.Warnings.Add(
+                        $"Справочники «{InventoryDocumentModel.EntryCatalogLegacyName}» и " +
+                        $"«{InventoryDocumentModel.EntryCatalogName}» есть одновременно — переименование пропущено");
+                }
+                else
+                {
+                    legacy.Name = InventoryDocumentModel.EntryCatalogName;
+                    report.Actions.Add(
+                        $"Справочник «{InventoryDocumentModel.EntryCatalogLegacyName}» → " +
+                        $"«{InventoryDocumentModel.EntryCatalogName}»");
+                }
+            }
+
+            var references = await _context.MetadataFields
+                .Where(field => field.ReferenceCatalog == InventoryDocumentModel.EntryCatalogLegacyName)
+                .ToListAsync();
+
+            foreach (var field in references)
+                field.ReferenceCatalog = InventoryDocumentModel.EntryCatalogName;
+
+            if (references.Count > 0)
+            {
+                report.Actions.Add(
+                    $"Ссылки на «{InventoryDocumentModel.EntryCatalogName}»: обновлено полей — {references.Count}");
+            }
+
+            await _context.SaveChangesAsync();
         }
 
         private async Task SeedKindsAsync(MetadataObject catalog, InventorySchemaReport report)
@@ -156,6 +207,20 @@ namespace BIS.ERP.Services
         {
             var report = new InventorySchemaReport();
             await EnsureEntryCatalogAsync(report);
+        }
+
+        /// <summary>
+        /// Точечное переименование справочника видов операций и его ссылок
+        /// («Ввод нового документа ТМЗ» → «Вид операции ТМЗ»).
+        /// Используется шагом миграции, чтобы не гонять весь сервис.
+        /// </summary>
+        public async Task<InventorySchemaReport> EnsureEntryCatalogRenamedAsync()
+        {
+            _context.ChangeTracker.Clear();
+
+            var report = new InventorySchemaReport();
+            await RenameEntryCatalogAsync(report);
+            return report;
         }
 
         // ---------- Документы ----------

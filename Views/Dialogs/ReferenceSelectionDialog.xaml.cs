@@ -376,8 +376,8 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
                 Header = isLogical ? GetCompactHeader(key) : key,
                 Width = isName || isAccount
                     ? new DataGridLength(isName ? 3 : 2, DataGridLengthUnitType.Star)
-                    : new DataGridLength(isLogical ? LogicalColumnWidth : GetFixedColumnWidth(key)),
-                MinWidth = isName ? 180 : isAccount ? 140 : isLogical ? 40 : 70,
+                    : new DataGridLength(isLogical ? GetLogicalColumnWidth(key) : GetFixedColumnWidth(key)),
+                MinWidth = isName ? 240 : isAccount ? 140 : isLogical ? 40 : 70,
                 CanUserSort = true,
                 CanUserResize = true,
                 CanUserReorder = true,
@@ -392,11 +392,22 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
         /// </summary>
         private const double LogicalColumnWidth = 72;
 
+        /// <summary>
+        /// Ширина логической колонки: «Да/Нет» хватает 72 px, но у «Активен»
+        /// заголовок длиннее значения — даём 90 px, чтобы он не обрезался.
+        /// </summary>
+        private static double GetLogicalColumnWidth(string key) => key switch
+        {
+            "Активен" or "is_active" => 90,
+            _ => LogicalColumnWidth
+        };
+
         private static double GetFixedColumnWidth(string key)
         {
             return key switch
             {
                 "Код" or "code" => 56,
+                "Тип счета" or "account_type" => 120,
                 "Остаток брать из модуля" => 78,
                 "Табельный номер" => 92,
                 _ => 110

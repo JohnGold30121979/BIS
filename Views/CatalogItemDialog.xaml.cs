@@ -721,7 +721,7 @@ inputControl = AccountPickerControlFactory.Create(
         }
 
         /// <summary>
-        /// Выпадающие списки для справочника «Ввод нового документа ТМЗ»,
+        /// Выпадающие списки для справочника «Вид операции ТМЗ»,
         /// чтобы пользователь без технических знаний мог создать запись,
         /// не вводя вручную названия документов и видов движения.
         /// </summary>
@@ -738,9 +738,9 @@ inputControl = AccountPickerControlFactory.Create(
                 "Вид движения" => BuildFixedChoiceComboBox(field,
                     new[]
                     {
-                        new ChoiceItem("Приход", "Приход"),
-                        new ChoiceItem("Расход", "Расход"),
-                        new ChoiceItem("Перемещение", "Перемещение"),
+                        new ChoiceItem("Incoming", "Приход"),
+                        new ChoiceItem("Outgoing", "Расход"),
+                        new ChoiceItem("Movement", "Перемещение"),
                     }, existingValue, "Выберите вид движения операции"),
                 _ => null
             };
@@ -1406,7 +1406,7 @@ inputControl = AccountPickerControlFactory.Create(
             string.Equals(_catalog.TableName, "catalog_cash_desks", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Кассы", StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>Справочник «Ввод нового документа ТМЗ» (виды операций с ТМЗ).</summary>
+        /// <summary>Справочник «Вид операции ТМЗ» (виды операций с ТМЗ).</summary>
         private bool IsInventoryEntryCatalog() =>
             string.Equals(_catalog.Name, InventoryDocumentModel.EntryCatalogName, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, InventoryDocumentModel.EntryCatalogTable, StringComparison.OrdinalIgnoreCase);
@@ -1679,7 +1679,7 @@ inputControl = AccountPickerControlFactory.Create(
             return false;
         }
 
-        /// <summary>Проверка обязательных полей при добавлении в «Ввод нового документа ТМЗ».</summary>
+        /// <summary>Проверка обязательных полей при добавлении в «Вид операции ТМЗ».</summary>
         private async Task<bool> ValidateInventoryEntryRequired()
         {
             if (!IsInventoryEntryCatalog())
@@ -1690,7 +1690,7 @@ inputControl = AccountPickerControlFactory.Create(
             {
                 MessageBox.Show(
                     "Заполните поле «Наименование».",
-                    "Ввод нового документа ТМЗ",
+                    InventoryDocumentModel.EntryCatalogName,
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
 
@@ -1724,7 +1724,7 @@ inputControl = AccountPickerControlFactory.Create(
                     {
                         MessageBox.Show(
                             $"Не удалось сгенерировать код для поля «{codeField.Name}». Введите код вручную.",
-                            "Ввод нового документа ТМЗ",
+                            InventoryDocumentModel.EntryCatalogName,
                             MessageBoxButton.OK,
                             MessageBoxImage.Warning);
 

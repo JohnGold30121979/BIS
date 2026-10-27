@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using BIS.ERP.Data;
 using BIS.ERP.Models;
@@ -110,7 +111,7 @@ namespace BIS.ERP.Views.Dialogs
                 var materials = await LoadRowsAsync(catalogs, "Справочник материалов");
                 var entries = await LoadRowsAsync(catalogs, InventoryDocumentModel.EntryCatalogName);
 
-                BuildTopRow(entries);
+                BuildTopRow(FilterEntriesForDocument(entries));
                 BuildSupplierCard(accounts, organizations, employees, supplyKinds, sites, responsible);
 
                 var documentDate = GetDocumentDate();
@@ -163,59 +164,126 @@ namespace BIS.ERP.Views.Dialogs
             AddText(HeaderTopPanel, "Номер", "doc_number", 110);
             _dateBox = AddDateText(HeaderTopPanel, "Дата", "doc_date", 130);
             _dateBox.LostFocus += async (_, _) => await ReloadTaxesAsync();
-            _entryEditor = AddCombo(HeaderTopPanel, "Вид операции", "document_entry_id", entries,
-                row =>
-                {
-                    var id = ReadGuid(row);
-                    if (id.HasValue)
-                        _entryOperationKinds[id.Value] = Read(row, "operation_kind", "Код операции", "code", "Код");
-                    return Read(row, "Наименование");
-                }, 250);
+            _rowsByColumn["document_entry_id"] = entries;
+            _entryEditor = AddComboItems(HeaderTopPanel, "Вид операции", "document_entry_id",
+                BuildEntryItems(entries), 250);
             AddText(HeaderTopPanel, "№ пачки", "pack_number", 80);
             AddText(HeaderTopPanel, "Серия/№ бланка", "tax_blank_number", 130);
             AddText(HeaderTopPanel, "Номер ЭСФ", "esf_number", 150);
         }
 
-        /// <summary>
-        /// Перезагружает записи справочника «Ввод нового документа ТМЗ»
-        /// (catalog_inventory_document_entries) из базы данных.
-        /// Очищает кэш _entryCodes и обновляет ComboBox вида операции.
-        /// </summary>
-        private async Task RefreshEntriesAsync()
-        {
-            try
-            {
-                var catalogs = await _metadataService.GetCatalogsAsync();
-                var entries = await LoadRowsAsync(catalogs, InventoryDocumentModel.EntryCatalogName);
 
-                _entryOperationKinds.Clear();
-                foreach (var row in entries)
-                {
-                    var id = ReadGuid(row);
-                    if (id.HasValue)
-                        _entryOperationKinds[id.Value] = Read(row, "operation_kind", "Код операции", "code", "Код");
-                }
-
-                if (_entryEditor != null)
-                {
-                    _entryEditor.ItemsSource = ToItems(entries, BuildEntryDisplay);
-                    _entryEditor.SelectedItem = null;
-                }
-
-                _rowsByColumn["document_entry_id"] = entries;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Не удалось обновить справочник видов операций: {ex.Message}",
-                    "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
+        //Исправлено document_entry_id вид операции только наименование. код убран
+        private string BuildEntryDisplay(Dictionary<string, object> row)
+        {            
+            var name = Read(row, "Наименование", "Наименование");
+            return (name).Trim(' ', '-');
         }
 
-        private string BuildEntryDisplay(Dictionary<string, object> row)
+        /// <summary>
+        /// Виды операций только для этого документа: в «Поступление ТМЗ» попадают
+        /// записи справочника с movement_kind = Incoming (выбытие — Outgoing,
+        /// перемещение — Movement).
+        /// </summary>
+        private List<Dictionary<string, object>> FilterEntriesForDocument(List<Dictionary<string, object>> entries)
         {
-            var code = Read(row, "Код", "Код");
-            var name = Read(row, "Наименование", "Наименование");
-            return (code + " - " + name).Trim(' ', '-');
+            var movementKind = InventoryDocumentModel.MovementKindForDocument(_definition.Name);
+
+            // Неизвестный документ — фильтровать не по чему, показываем всё как раньше.
+            if (string.IsNullOrWhiteSpace(movementKind))
+                return entries;
+
+            var filtered = entries
+                .Where(row => EntryBelongsToDocument(row, movementKind))
+                .ToList();
+
+            // У открытого документа вид операции мог быть выбран до появления фильтра —
+            // сохраняем выбранное значение в списке, иначе оно потерялось бы при записи.
+            var savedId = ReadSavedEntryId();
+            if (savedId.HasValue && filtered.All(row => ReadGuid(row) != savedId.Value))
+            {
+                var saved = entries.FirstOrDefault(row => ReadGuid(row) == savedId.Value);
+                if (saved != null)
+                    filtered.Add(saved);
+            }
+
+            return filtered;
+        }
+
+        private bool EntryBelongsToDocument(Dictionary<string, object> row, string movementKind)
+        {
+            var rowMovementKind = Read(row, "Вид движения", "movement_kind");
+            if (rowMovementKind.Length > 0)
+            {
+                return string.Equals(NormalizeMovementKind(rowMovementKind), movementKind,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            // Старые записи справочника могли сохранить только документ — сверяем по нему.
+            var rowDocument = Read(row, "Документ ТМЗ", "document_name");
+            return string.Equals(rowDocument, _definition.Name, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Вид движения в записях справочника встречается и кодом (Incoming), и по-русски
+        /// (Приход) — приводим к коду, чтобы фильтр не зависел от способа ввода.
+        /// </summary>
+        private static string NormalizeMovementKind(string value)
+        {
+            var text = value.Trim();
+
+            if (text.StartsWith("Incoming", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Приход", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Поступление", StringComparison.OrdinalIgnoreCase))
+                return "Incoming";
+
+            if (text.StartsWith("Outgoing", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Расход", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Выбытие", StringComparison.OrdinalIgnoreCase))
+                return "Outgoing";
+
+            if (text.StartsWith("Movement", StringComparison.OrdinalIgnoreCase) ||
+                text.Equals("Перемещение", StringComparison.OrdinalIgnoreCase))
+                return "Movement";
+
+            return text;
+        }
+
+        private Guid? ReadSavedEntryId()
+        {
+            if (!_existing.TryGetValue("Вид операции", out var value) || value == null || value == DBNull.Value)
+                return null;
+
+            if (value is Guid guid)
+                return guid;
+
+            return Guid.TryParse(value.ToString(), out var parsed) ? parsed : null;
+        }
+
+        /// <summary>Элементы списка «Вид операции»: только наименование, в порядке справочника.</summary>
+        private List<RefItem> BuildEntryItems(List<Dictionary<string, object>> entries)
+        {
+            var items = new List<RefItem>();
+
+            foreach (var row in entries
+                         .OrderBy(EntrySortOrder)
+                         .ThenBy(item => Read(item, "Наименование", "name"), StringComparer.CurrentCulture))
+            {
+                var id = ReadGuid(row);
+                if (!id.HasValue)
+                    continue;
+
+                _entryOperationKinds[id.Value] = Read(row, "operation_kind", "Код операции", "code", "Код");
+                items.Add(new RefItem { Id = id.Value, Display = BuildEntryDisplay(row) });
+            }
+
+            return items;
+        }
+
+        private static int EntrySortOrder(Dictionary<string, object> row)
+        {
+            var text = Read(row, "Порядок", "sort_order");
+            return int.TryParse(text, out var order) ? order : int.MaxValue;
         }
 
         private void BuildSupplierCard(
@@ -489,11 +557,23 @@ namespace BIS.ERP.Views.Dialogs
 
             var line = new StackPanel { Orientation = Orientation.Horizontal };
             var box = new TextBox { Width = width, Height = 28, Padding = new Thickness(6, 3, 6, 3) };
+
+            // Счёт — восьмизначный код из цифр: ручной ввод без букв и не длиннее 8 знаков.
+            if (string.Equals(column, "counterparty_account", StringComparison.OrdinalIgnoreCase))
+            {
+                box.MaxLength = 8;
+                box.ToolTip = "Только цифры, до 8 знаков";
+                AttachDigitsOnlyInput(box);
+            }
+
             var pick = new Button
             {
                 Content = "?",
-                Width = 30,
+                Width = 34,
                 Height = 28,
+                Padding = new Thickness(0), // в теме у Button Padding 14,7 — при узкой кнопке знак «?» не помещался
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(4, 0, 0, 0),
                 ToolTip = "Выбрать из справочника"
             };
@@ -515,6 +595,58 @@ namespace BIS.ERP.Views.Dialogs
             _referencePanels[column] = container;
         }
 
+        /// <summary>
+        /// Ручной ввод кода счёта: только цифры. Восемь знаков ограничивает MaxLength,
+        /// клавиатура и вставка из буфера проверяются здесь.
+        /// </summary>
+        private static void AttachDigitsOnlyInput(TextBox box)
+        {
+            box.PreviewTextInput += (_, args) =>
+            {
+                if (!IsAsciiDigits(args.Text))
+                {
+                    args.Handled = true;
+                    return;
+                }
+
+                // После выбора из справочника в поле стоит «код - наименование» (или GUID из базы):
+                // первая же набранная цифра начинает код заново, иначе MaxLength не даст печатать.
+                if (box.Text.Length > box.MaxLength ||
+                    box.Text.Contains(" - ", StringComparison.Ordinal))
+                    box.Clear();
+            };
+
+            box.PreviewKeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Space)
+                    args.Handled = true;
+            };
+
+            DataObject.AddPastingHandler(box, (_, args) =>
+            {
+                var text = args.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true)
+                    ? args.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty
+                    : string.Empty;
+
+                if (!IsAsciiDigits(text))
+                    args.CancelCommand();
+            });
+        }
+
+        private static bool IsAsciiDigits(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
+        }
+
         private void AddEditor(Panel panel, string label, string column, Control control)
         {
             var container = new StackPanel { Margin = new Thickness(0, 0, 10, 8) };
@@ -533,11 +665,25 @@ namespace BIS.ERP.Views.Dialogs
                 return;
 
             // Приводим строки к единым полям, чтобы диалог выбора показывал их одинаково.
-            var pickRows = rows.Select(row => new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            var isAccount = string.Equals(column, "counterparty_account", StringComparison.OrdinalIgnoreCase);
+
+            var pickRows = rows.Select(row =>
             {
-                ["Id"] = row.TryGetValue("Id", out var id) ? id : DBNull.Value,
-                ["Код"] = Read(row, "Код", "code"),
-                ["Наименование"] = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала")
+                var pick = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = row.TryGetValue("Id", out var id) ? id : DBNull.Value,
+                    ["Код"] = Read(row, "Код", "code"),
+                    ["Наименование"] = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала")
+                };
+
+                // У плана счетов в окне выбора нужны ещё «Тип счета» и «Активен».
+                if (isAccount)
+                {
+                    pick["Тип счета"] = Read(row, "Тип счета", "account_type");
+                    pick["Активен"] = row.GetValueOrDefault("Активен") ?? row.GetValueOrDefault("is_active") ?? DBNull.Value;
+                }
+
+                return pick;
             }).ToList();
 
             var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
@@ -732,7 +878,7 @@ namespace BIS.ERP.Views.Dialogs
                     }
 
                     row.Recalculate();
-                    LinesGrid.Items.Refresh();
+                   // LinesGrid.Items.Refresh();
                     UpdateTotals();
                 }
             }));
@@ -837,7 +983,7 @@ namespace BIS.ERP.Views.Dialogs
                 else
                 {
                     throw new InvalidOperationException(
-                        "Не выбран вид операции. Укажите вид документа ТМЗ из справочника «Ввод нового документа ТМЗ».");
+                        $"Не выбран вид операции. Укажите вид документа ТМЗ из справочника «{InventoryDocumentModel.EntryCatalogName}».");
                 }
             }
 
