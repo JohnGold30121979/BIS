@@ -142,6 +142,20 @@ public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>
             ExtraActionButton.IsEnabled = ItemsGrid.SelectedItem != null;
         }
 
+        /// <summary>
+        /// Заранее заполняет поле поиска: окно открывается уже отфильтрованным по тексту,
+        /// введённому в ячейку (поиск материала по коду или наименованию).
+        /// </summary>
+        public void SetSearchText(string? text)
+        {
+            var value = text?.Trim();
+            if (string.IsNullOrEmpty(value))
+                return;
+
+            SearchBox.Text = value;
+            SearchBox.CaretIndex = SearchBox.Text.Length;
+        }
+
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             var search = SearchBox.Text?.Trim() ?? string.Empty;

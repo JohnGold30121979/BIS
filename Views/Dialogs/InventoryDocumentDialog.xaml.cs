@@ -5,7 +5,9 @@ using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using BIS.ERP.Data;
 using BIS.ERP.Models;
@@ -42,6 +44,17 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<string, StackPanel> _referencePanels = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<Dictionary<string, object>>> _rowsByColumn = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Guid, Dictionary<string, object>> _materialRows = new();
+        private List<Dictionary<string, object>> _materials = new();
+        private List<Dictionary<string, object>> _currencyRows = new();
+        private List<Dictionary<string, object>> _accountRows = new();
+        // Защита от двойного открытия окна выбора (мышь + Click).
+        private bool _pickerOpening;
+        // Какая кнопка «?» нажата в таблице: ждём отпускания мыши.
+        private (InventoryLineRow Row, string Kind)? _pendingPick;
+        // Валюта, подставленная из счёта («Валюта счета» в плане счетов).
+        private Guid? _accountCurrencyId;
+        // Первый проход после загрузки: курс из документа не перетираем.
+        private bool _currencySynced;
         private readonly Dictionary<Guid, string> _entryOperationKinds = new();
         private ComboBox? _entryEditor;
 
@@ -57,8 +70,6 @@ namespace BIS.ERP.Views.Dialogs
         private TextBox? _salesTaxRateBox;
         private DatePicker? _dateBox;
         private List<Dictionary<string, object>> _taxRows = new();
-
-        private StackPanel? _currencyPanel;
 
         public Guid SavedRecordId { get; private set; }
 
@@ -89,6 +100,14 @@ namespace BIS.ERP.Views.Dialogs
                 : $"Новый документ ТМЗ: {document.Name}";
 
             LinesGrid.ItemsSource = _lines;
+
+            // Клик по «?» в ячейке DataGrid съедает на выделение строки — слушаем
+            // туннелирующие события с handledEventsToo и открываем окно уже на отпускании кнопки.
+            LinesGrid.AddHandler(PreviewMouseDownEvent,
+                new MouseButtonEventHandler(OnLinesGridPreviewMouseDown), handledEventsToo: true);
+            LinesGrid.AddHandler(PreviewMouseUpEvent,
+                new MouseButtonEventHandler(OnLinesGridPreviewMouseUp), handledEventsToo: true);
+
             Loaded += async (_, _) => await InitializeAsync();
         }
 
@@ -119,16 +138,19 @@ namespace BIS.ERP.Views.Dialogs
                 var salesItems = await BuildTaxItemsAsync(TaxKind.Sales, taxRows, documentDate);
                 var paymentItems = BuildPaymentItems(paymentKinds);
 
-                BuildTaxCard(vatItems, salesItems, paymentItems, currencies);
+                BuildTaxCard(vatItems, salesItems, paymentItems);
+                BuildCurrencyCard(currencies);
 
-                MaterialColumn.ItemsSource = ToItems(materials, row =>
+                _materials = materials;
+                _currencyRows = currencies;
+                foreach (var material in materials)
                 {
-                    var id = ReadGuid(row);
-                    if (id.HasValue)
-                        _materialRows[id.Value] = row;
-                    return $"{Read(row, "Код")} - {Read(row, "Наименование материала", "Наименование")}".Trim(' ', '-');
-                });
-                AccountColumn.ItemsSource = ToItems(accounts, AccountDisplay, idAsCode: true);
+                    var materialId = ReadGuid(material);
+                    if (materialId.HasValue)
+                        _materialRows[materialId.Value] = material;
+                }
+
+                _accountRows = accounts;
                 SiteColumn.ItemsSource = ToItems(sites, row => Read(row, "Наименование"));
 
                 ApplyExistingValues();
@@ -149,6 +171,7 @@ namespace BIS.ERP.Views.Dialogs
 
                 await LoadLinesAsync();
                 UpdateTotals();
+                FocusFirstEntryCell(_lines.FirstOrDefault());
             }
             catch (Exception ex)
             {
@@ -294,10 +317,10 @@ namespace BIS.ERP.Views.Dialogs
             List<Dictionary<string, object>> sites,
             List<Dictionary<string, object>> responsible)
         {
-            AddReference(SupplierPanel, "Счет", "counterparty_account", 260, accounts);
-            AddReference(SupplierPanel, "Организация", "organization_id", 260, organizations);
-            AddReference(SupplierPanel, "Сотрудник", "employee_id", 220, employees);
-            AddReference(SupplierPanel, "Вид покупки", "supply_kind", 220, supplyKinds);
+            AddReference(SupplierPanel, "Счет", "counterparty_account", accounts);
+            AddReference(SupplierPanel, "Организация", "organization_id", organizations);
+            AddReference(SupplierPanel, "Сотрудник", "employee_id", employees);
+            AddReference(SupplierPanel, "Вид покупки", "supply_kind", supplyKinds);
 
             // Организация и сотрудник показываются по привязкам счёта.
             SetPanelVisibility("organization_id", false);
@@ -307,34 +330,55 @@ namespace BIS.ERP.Views.Dialogs
             // Для внутреннего перемещения нужны получатель и его МОЛ.
             if (string.Equals(_definition.Name, InventoryDocumentModel.MovementName, StringComparison.OrdinalIgnoreCase))
             {
-                AddReference(SupplierPanel, "Участок-получатель", "destination_site_id", 220, sites);
-                AddReference(SupplierPanel, "МОЛ-получатель", "destination_person_id", 220, responsible);
+                AddReference(SupplierPanel, "Участок-получатель", "destination_site_id", sites);
+                AddReference(SupplierPanel, "МОЛ-получатель", "destination_person_id", responsible);
             }
         }
 
         private void BuildTaxCard(
             List<RefItem> vatItems,
             List<RefItem> salesItems,
-            List<RefItem> paymentItems,
-            List<Dictionary<string, object>> currencies)
+            List<RefItem> paymentItems)
         {
+            // Каждый контрол налогов — отдельная строка на всю ширину блока, как в «Поставщике».
             _vatCombo = AddComboItems(TaxPanel, "Вид НДС", "vat_type", vatItems, 220);
+            StretchControl(_vatCombo);
             _vatRateBox = AddText(TaxPanel, "Ставка НДС, %", "vat_rate", 80);
+            StretchControl(_vatRateBox);
             _paymentCombo = AddComboItems(TaxPanel, "Вид оплаты", "payment_kind", paymentItems, 180);
+            StretchControl(_paymentCombo);
             _salesTaxCombo = AddComboItems(TaxPanel, "Налог", "sales_tax_type", salesItems, 220);
+            StretchControl(_salesTaxCombo);
             _salesTaxRateBox = AddText(TaxPanel, "Ставка налога, %", "sales_tax_rate", 80);
+            StretchControl(_salesTaxRateBox);
 
             if (_vatCombo != null)
                 _vatCombo.SelectionChanged += (_, _) => ApplyTaxRate(_vatCombo, _vatRateBox);
             if (_salesTaxCombo != null)
                 _salesTaxCombo.SelectionChanged += (_, _) => ApplyTaxRate(_salesTaxCombo, _salesTaxRateBox);
+        }
 
-            _currencyPanel = new StackPanel { Orientation = Orientation.Horizontal };
-            AddCombo(_currencyPanel, "Валюта", "currency_id", currencies,
-                row => Read(row, "Наименование", "Код"), 150);
-            AddText(_currencyPanel, "Курс", "exchange_rate", 90);
-            _currencyPanel.Visibility = Visibility.Collapsed;
-            TaxPanel.Children.Add(_currencyPanel);
+        /// <summary>
+        /// Валюта — как в счёте-фактуре: отдельный блок под «Поставщиком» и налогами.
+        /// Виден только для счёта с признаком «Связь с валютами».
+        /// </summary>
+        private void BuildCurrencyCard(List<Dictionary<string, object>> currencies)
+        {
+            CurrencyCombo.ItemsSource = ToItems(currencies, row => Read(row, "Наименование", "Код"));
+            CurrencyCombo.SelectionChanged += (_, _) => UpdateTotals();
+            ExchangeRateBox.TextChanged += (_, _) => UpdateTotals();
+
+            _editors["currency_id"] = CurrencyCombo;
+            _editors["exchange_rate"] = ExchangeRateBox;
+
+            CurrencyCard.Visibility = Visibility.Collapsed;
+        }
+
+        /// <summary>Контрол в отдельной строке карточки — на всю её ширину.</summary>
+        private static void StretchControl(Control control)
+        {
+            control.Width = double.NaN;
+            control.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
 
         private ComboBox AddComboItems(Panel panel, string label, string column, List<RefItem> items, double width)
@@ -522,41 +566,29 @@ namespace BIS.ERP.Views.Dialogs
             return datePicker;
         }
 
-        private ComboBox AddCombo(
-            Panel panel,
-            string label,
-            string column,
-            List<Dictionary<string, object>> rows,
-            Func<Dictionary<string, object>, string> display,
-            double width)
-        {
-            _rowsByColumn[column] = rows;
-            var combo = new ComboBox
-            {
-                Width = width,
-                Height = 28,
-                ItemsSource = ToItems(rows, display),
-                DisplayMemberPath = "Display",
-                SelectedValuePath = "Id"
-            };
-            AddEditor(panel, label, column, combo);
-            return combo;
-        }
-
         private void AddReference(
             Panel panel,
             string label,
             string column,
-            double width,
             List<Dictionary<string, object>> rows)
         {
             _rowsByColumn[column] = rows;
 
-            var container = new StackPanel { Margin = new Thickness(0, 0, 10, 8) };
+            // Каждый контрол карточки «Поставщик» — отдельная строка: подпись сверху,
+            // поле растянуто на всю ширину карточки, кнопка выбора — справа.
+            var container = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
             container.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 3) });
 
-            var line = new StackPanel { Orientation = Orientation.Horizontal };
-            var box = new TextBox { Width = width, Height = 28, Padding = new Thickness(6, 3, 6, 3) };
+            var line = new Grid();
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var box = new TextBox
+            {
+                Height = 28,
+                Padding = new Thickness(6, 3, 6, 3),
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
 
             // Счёт — восьмизначный код из цифр: ручной ввод без букв и не длиннее 8 знаков.
             if (string.Equals(column, "counterparty_account", StringComparison.OrdinalIgnoreCase))
@@ -587,6 +619,7 @@ namespace BIS.ERP.Views.Dialogs
             };
 
             line.Children.Add(box);
+            Grid.SetColumn(pick, 1);
             line.Children.Add(pick);
             container.Children.Add(line);
             panel.Children.Add(container);
@@ -736,14 +769,220 @@ namespace BIS.ERP.Views.Dialogs
 
             SetPanelVisibility("organization_id", linkOrganizations);
             SetPanelVisibility("employee_id", linkEmployees);
-            if (_currencyPanel != null)
-                _currencyPanel.Visibility = linkCurrency ? Visibility.Visible : Visibility.Collapsed;
+            CurrencyCard.Visibility = linkCurrency ? Visibility.Visible : Visibility.Collapsed;
+
+            // Валюта привязана к счёту: берём её из «Валюты счёта» плана счетов.
+            if (linkCurrency && account != null)
+                _ = ApplyAccountCurrencyAsync(account);
+            else
+                ResetAccountCurrency();
+        }
+
+        /// <summary>Счёт без валютной привязки — выбор валюты остаётся пользователю.</summary>
+        private void ResetAccountCurrency()
+        {
+            _accountCurrencyId = null;
+            _currencySynced = true;
+            CurrencyCombo.IsEnabled = true;
+            CurrencyCombo.ToolTip = null;
+        }
+
+        /// <summary>Валюта счёта: «Валюта счета» / `account_currency_id` из плана счетов.</summary>
+        private Guid? ResolveAccountCurrencyId(Dictionary<string, object> account)
+        {
+            if (!account.TryGetValue("Валюта счета", out var value) || value == null || value == DBNull.Value)
+                account.TryGetValue("account_currency_id", out value);
+
+            if (value == null || value == DBNull.Value)
+                return null;
+
+            if (value is Guid direct)
+                return direct == Guid.Empty ? null : direct;
+
+            var text = Convert.ToString(value, CultureInfo.CurrentCulture)?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+                return null;
+
+            if (Guid.TryParse(text, out var parsed))
+                return parsed == Guid.Empty ? null : parsed;
+
+            // Ссылка может прийти подписью «USD - Доллар США» — ищем по коду валюты.
+            var code = text.Split(" - ")[0].Trim();
+            var row = _currencyRows.FirstOrDefault(item =>
+                string.Equals(Read(item, "Код", "code"), code, StringComparison.OrdinalIgnoreCase));
+
+            return row == null ? null : ReadGuid(row);
+        }
+
+        /// <summary>
+        /// Подставляет валюту, закреплённую за счётом, и блокирует выбор: в документе
+        /// она уже известна и не должна расходиться со счётом. Курс подтягивается
+        /// из справочника курсов валют на дату документа.
+        /// </summary>
+        private async Task ApplyAccountCurrencyAsync(Dictionary<string, object> account)
+        {
+            var currencyId = ResolveAccountCurrencyId(account);
+            if (!currencyId.HasValue)
+            {
+                // У валютного счёта валюта не заполнена — оставляем ручной выбор.
+                _accountCurrencyId = null;
+                _currencySynced = true;
+                CurrencyCombo.IsEnabled = true;
+                CurrencyCombo.ToolTip = "У счёта не заполнена «Валюта счета» — выберите валюту вручную";
+                return;
+            }
+
+            if (_accountCurrencyId == currencyId.Value)
+            {
+                _currencySynced = true;
+                return;
+            }
+
+            // В списке могут быть только активные валюты — проверяем, что валюта счёта есть.
+            var known = CurrencyCombo.Items.OfType<RefItem>().Any(item => item.Id is Guid id && id == currencyId.Value);
+            if (!known)
+            {
+                _currencySynced = true;
+                return;
+            }
+
+            // При первой загрузке курс уже пришёл из документа — не перетираем его.
+            var keepDocumentRate = !_currencySynced && !string.IsNullOrWhiteSpace(ExchangeRateBox.Text);
+
+            CurrencyCombo.SelectedValue = currencyId.Value;
+            CurrencyCombo.IsEnabled = false;
+            CurrencyCombo.ToolTip = "Валюта задаётся в плане счетов («Валюта счета»)";
+            _accountCurrencyId = currencyId.Value;
+            _currencySynced = true;
+
+            await ApplyRateFromCatalogAsync(currencyId.Value, overwrite: !keepDocumentRate);
+        }
+
+        /// <summary>Курс на дату документа из справочника курсов валют; базовая валюта — 1.</summary>
+        private async Task ApplyRateFromCatalogAsync(Guid currencyId, bool overwrite)
+        {
+            if (!overwrite && !string.IsNullOrWhiteSpace(ExchangeRateBox.Text))
+                return;
+
+            try
+            {
+                var rate = IsBaseCurrency(currencyId)
+                    ? 1m
+                    : (await _metadataService.GetCurrencyRateForDateAsync(currencyId, GetDocumentDate()))?.Rate;
+
+                if (rate is > 0)
+                {
+                    ExchangeRateBox.Text = rate.Value.ToString("0.####", CultureInfo.CurrentCulture);
+                    UpdateTotals();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Документ ТМЗ: курс валюты не получен: {ex.Message}");
+            }
+        }
+
+        private bool IsBaseCurrency(Guid currencyId)
+        {
+            var row = _currencyRows.FirstOrDefault(item => ReadGuid(item) == currencyId);
+            if (row == null)
+                return false;
+
+            return IsTrue(row, "Базовая") || IsTrue(row, "is_base") ||
+                   string.Equals(Read(row, "Код", "code"), "KGS", StringComparison.OrdinalIgnoreCase);
         }
 
         private void SetPanelVisibility(string column, bool visible)
         {
             if (_referencePanels.TryGetValue(column, out var panel))
                 panel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // ---------- Курс валюты ----------
+
+        /// <summary>Кнопка «?» у курса: окно курсов валют — история, выбор, загрузка курсов НБКР.</summary>
+        private void OnRequestExchangeRateClick(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetSelectedCurrencyId(out var currencyId))
+            {
+                MessageBox.Show("Сначала выберите валюту.", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var rateDate = GetDocumentDate();
+            var currencyName = (CurrencyCombo.SelectedItem as RefItem)?.Display ?? string.Empty;
+            var dialog = new CurrencyRatesDialog(_metadataService, currencyId, currencyName, rateDate);
+
+            var owner = Window.GetWindow(this);
+            if (owner != null && !ReferenceEquals(owner, this) && owner.IsVisible)
+                dialog.Owner = owner;
+            else if (Application.Current?.MainWindow is { IsVisible: true } mainWindow)
+                dialog.Owner = mainWindow;
+
+            if (dialog.ShowDialog() != true || dialog.SelectedRate is not decimal rate)
+                return;
+
+            ExchangeRateBox.Text = rate.ToString("0.####", CultureInfo.CurrentCulture);
+            UpdateTotals();
+        }
+
+        /// <summary>Кнопка «Текущий курс»: последний известный курс валюты.</summary>
+        private async void OnCurrentRateClick(object sender, RoutedEventArgs e)
+        {
+            if (!TryGetSelectedCurrencyId(out var currencyId))
+            {
+                MessageBox.Show("Сначала выберите валюту.", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                Cursor = Cursors.Wait;
+
+                // Опрос нового курса: тянем свежие официальные курсы НБКР, затем берём курс из справочника.
+                try
+                {
+                    await _metadataService.ImportLatestOfficialCurrencyRatesAsync();
+                }
+                catch (Exception importError)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Документ ТМЗ: курсы НБКР не загружены: {importError.Message}");
+                }
+
+                var rate = await _metadataService.GetLatestCurrencyRateAsync(currencyId);
+                if (rate == null)
+                {
+                    MessageBox.Show(
+                        "Курс валюты не найден. Введите курс вручную или выберите в окне курсов по кнопке «?».",
+                        "Курс валюты", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                ExchangeRateBox.Text = rate.Rate.ToString("0.####", CultureInfo.CurrentCulture);
+                UpdateTotals();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Курс валюты", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                Cursor = null;
+            }
+        }
+
+        private bool TryGetSelectedCurrencyId(out Guid currencyId)
+        {
+            if (CurrencyCombo.SelectedValue is Guid id && id != Guid.Empty)
+            {
+                currencyId = id;
+                return true;
+            }
+
+            currencyId = Guid.Empty;
+            return false;
         }
 
         // ---------- Значения ----------
@@ -822,6 +1061,9 @@ namespace BIS.ERP.Views.Dialogs
             {
                 if (row.MaterialId.HasValue && _materialRows.TryGetValue(row.MaterialId.Value, out var material))
                     row.MaterialCode = Read(material, "Код", "code");
+
+                row.MaterialText = FormatMaterialText(row.MaterialCode, row.MaterialName);
+                row.AccountText = FormatLoadedAccountText(row.AccountCode);
                 _lines.Add(row);
             }
 
@@ -831,7 +1073,11 @@ namespace BIS.ERP.Views.Dialogs
 
         // ---------- Строки ----------
 
-        private void OnAddLineClick(object sender, RoutedEventArgs e) => AddLine();
+        private void OnAddLineClick(object sender, RoutedEventArgs e)
+        {
+            AddLine();
+            FocusFirstEntryCell(_lines[^1]);
+        }
 
         private void AddLine()
         {
@@ -893,6 +1139,480 @@ namespace BIS.ERP.Views.Dialogs
             TotalVatText.Text = vat.ToString("N2");
             TotalSalesTaxText.Text = salesTax.ToString("N2");
             TotalAmountText.Text = total.ToString("N2");
+
+            // «Сумма в валюте» — как в счёте-фактуре: сумма документа по курсу шапки.
+            var rate = ReadDecimalEditor("exchange_rate");
+            AmountCurrencyBox.Text = rate > 0
+                ? Math.Round(total / rate, 2, MidpointRounding.AwayFromZero).ToString("N2")
+                : "0,00";
+        }
+
+        // ---------- Материал в строках ----------
+
+        /// <summary>
+        /// Клик по «?» в ячейке: DataGrid перехватывает первый клик на выделение строки,
+        /// поэтому запоминаем кнопку и открываем справочник на отпускании мыши.
+        /// </summary>
+        private void OnLinesGridPreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            _pendingPick = null;
+
+            if (e.ChangedButton != MouseButton.Left ||
+                FindVisualAncestor<Button>(e.OriginalSource as DependencyObject) is not { } button ||
+                button.DataContext is not InventoryLineRow row)
+            {
+                return;
+            }
+
+            var kind = button.Tag as string;
+            if (kind != "material" && kind != "account")
+                return;
+
+            _pendingPick = (row, kind);
+            e.Handled = true;
+        }
+
+        private void OnLinesGridPreviewMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left || _pendingPick is not { } pending)
+                return;
+
+            _pendingPick = null;
+            e.Handled = true;
+
+            OpenPickerAfterClick(pending.Kind == "material"
+                ? () => OpenMaterialPickerAsync(pending.Row)
+                : () => OpenAccountPickerAsync(pending.Row));
+        }
+
+        /// <summary>Кнопка «?» в ячейке материала открывает справочник материалов с поиском.</summary>
+        private async void OnPickMaterialClick(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is InventoryLineRow row)
+                await OpenMaterialPickerAsync(row);
+        }
+
+        /// <summary>Кнопка «?» в ячейке «Дебет» — выбор счёта из плана счетов.</summary>
+        private async void OnPickAccountClick(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is InventoryLineRow row)
+                await OpenAccountPickerAsync(row);
+        }
+
+        /// <summary>Окно выбора открываем после завершения клика, чтобы не мешать DataGrid.</summary>
+        private void OpenPickerAfterClick(Func<Task> open)
+        {
+            if (_pickerOpening)
+                return;
+
+            _pickerOpening = true;
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try
+                {
+                    await open();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                finally
+                {
+                    _pickerOpening = false;
+                }
+            }), DispatcherPriority.Input);
+        }
+
+        private void OnAccountTextLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox box && box.DataContext is InventoryLineRow row)
+                ApplyAccountText(row, box.Text);
+        }
+
+        private async Task OpenAccountPickerAsync(InventoryLineRow row)
+        {
+            var pickRows = BuildAccountPickRows();
+            if (pickRows.Count == 0)
+                return;
+
+            var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
+            dialog.SetSearchText(AccountSearchText(row.AccountText));
+
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this), dialog, "Выбор счёта") != true ||
+                dialog.SelectedItem == null)
+            {
+                return;
+            }
+
+            ApplyAccount(row, dialog.SelectedItem);
+        }
+
+        /// <summary>Строки окна выбора счёта: код, наименование и тип — как в шапке документа.</summary>
+        private List<Dictionary<string, object>> BuildAccountPickRows()
+        {
+            var result = new List<Dictionary<string, object>>();
+            foreach (var account in _accountRows)
+            {
+                result.Add(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = account.TryGetValue("Id", out var id) ? id : DBNull.Value,
+                    ["Код"] = Read(account, "Код", "code"),
+                    ["Наименование"] = Read(account, "Наименование", "name"),
+                    ["Тип счета"] = Read(account, "Тип счета", "account_type")
+                });
+            }
+
+            return result;
+        }
+
+        private void ApplyAccount(InventoryLineRow row, Dictionary<string, object> picked)
+        {
+            var code = Read(picked, "Код", "code");
+            row.AccountCode = code;
+            row.AccountText = FormatAccountText(code, Read(picked, "Наименование", "name"));
+        }
+
+        /// <summary>Ручной ввод в ячейке «Дебет»: код счёта сопоставляется с планом счетов.</summary>
+        private void ApplyAccountText(InventoryLineRow row, string? text)
+        {
+            var value = text?.Trim() ?? string.Empty;
+            var code = value.Split(" - ")[0].Trim();
+
+            var account = code.Length == 0
+                ? null
+                : _accountRows.FirstOrDefault(item =>
+                    string.Equals(Read(item, "Код", "code"), code, StringComparison.OrdinalIgnoreCase));
+
+            if (account == null)
+            {
+                // Не нашли счёт — возвращаем последний корректный код без мусора.
+                row.AccountText = FormatAccountText(row.AccountCode, string.Empty);
+                return;
+            }
+
+            row.AccountCode = Read(account, "Код", "code");
+            row.AccountText = FormatAccountText(row.AccountCode, Read(account, "Наименование", "name"));
+        }
+
+        private string FormatLoadedAccountText(string code)
+        {
+            var account = _accountRows.FirstOrDefault(item =>
+                string.Equals(Read(item, "Код", "code"), code?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            return FormatAccountText(code, account == null ? string.Empty : Read(account, "Наименование", "name"));
+        }
+
+        private static string FormatAccountText(string? code, string? name)
+        {
+            var accountCode = code?.Trim() ?? string.Empty;
+            var accountName = name?.Trim() ?? string.Empty;
+
+            if (accountCode.Length == 0)
+                return accountName;
+            if (accountName.Length == 0)
+                return accountCode;
+
+            return $"{accountCode} - {accountName}";
+        }
+
+        private static string AccountSearchText(string? text)
+        {
+            var value = text?.Trim() ?? string.Empty;
+            var separator = value.IndexOf(" - ", StringComparison.Ordinal);
+            return separator > 0 && separator + 3 < value.Length ? value[(separator + 3)..] : value;
+        }
+
+        /// <summary>Уход из ячейки: введённый текст сопоставляется со справочником.</summary>
+        private void OnMaterialTextLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox box && box.DataContext is InventoryLineRow row)
+                ApplyMaterialText(row, box.Text);
+        }
+
+        private async Task OpenMaterialPickerAsync(InventoryLineRow row)
+        {
+            var pickRows = BuildMaterialPickRows();
+            if (pickRows.Count == 0)
+                return;
+
+            var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
+            dialog.SetSearchText(MaterialSearchText(row.MaterialText));
+
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this), dialog, "Выбор материала") != true ||
+                dialog.SelectedItem == null)
+            {
+                return;
+            }
+
+            ApplyMaterial(row, dialog.SelectedItem);
+        }
+
+        /// <summary>Строки окна выбора: код, наименование и единица измерения — как у плана счетов.</summary>
+        private List<Dictionary<string, object>> BuildMaterialPickRows()
+        {
+            var result = new List<Dictionary<string, object>>();
+            foreach (var material in _materials)
+            {
+                result.Add(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = material.TryGetValue("Id", out var id) ? id : DBNull.Value,
+                    ["Код"] = Read(material, "Код", "code"),
+                    ["Наименование"] = Read(material, "Наименование материала", "Наименование"),
+                    ["Ед. изм."] = Read(material, "Ед изм", "Единица")
+                });
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Сопоставляет введённый текст со справочником: точный код, точное наименование,
+        /// затем единственное совпадение по началу кода или части наименования.
+        /// </summary>
+        private bool ApplyMaterialText(InventoryLineRow row, string? text)
+        {
+            var value = text?.Trim() ?? string.Empty;
+            if (value.Length == 0)
+            {
+                row.MaterialId = null;
+                row.MaterialCode = string.Empty;
+                row.MaterialName = string.Empty;
+                row.MaterialText = string.Empty;
+                row.Recalculate();
+                UpdateTotals();
+                return true;
+            }
+
+            var material = ResolveMaterial(value);
+            if (material == null)
+                return false;
+
+            ApplyMaterial(row, material);
+            return true;
+        }
+
+        private Dictionary<string, object>? ResolveMaterial(string text)
+        {
+            var value = text.Trim();
+            var separator = value.IndexOf(" - ", StringComparison.Ordinal);
+            var code = separator > 0 ? value[..separator].Trim() : value;
+            var name = separator > 0 ? value[(separator + 3)..].Trim() : value;
+
+            var exact = _materials.FirstOrDefault(row =>
+                string.Equals(Read(row, "Код", "code"), code, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Read(row, "Наименование материала", "Наименование"), value, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Read(row, "Наименование материала", "Наименование"), name, StringComparison.OrdinalIgnoreCase));
+
+            if (exact != null)
+                return exact;
+
+            var matches = _materials.Where(row =>
+                Read(row, "Код", "code").StartsWith(code, StringComparison.OrdinalIgnoreCase) ||
+                Read(row, "Наименование материала", "Наименование").Contains(name, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        private void ApplyMaterial(InventoryLineRow row, Dictionary<string, object> picked)
+        {
+            var id = ReadGuid(picked);
+            var material = id.HasValue && _materialRows.TryGetValue(id.Value, out var source) ? source : picked;
+
+            row.MaterialId = id;
+            row.MaterialCode = Read(material, "Код", "code");
+            row.MaterialName = Read(material, "Наименование материала", "Наименование");
+            row.MaterialText = FormatMaterialText(row.MaterialCode, row.MaterialName);
+
+            var unit = Read(material, "Ед изм", "Единица");
+            if (unit.Length > 0)
+                row.UnitName = unit;
+
+            row.Recalculate();
+            UpdateTotals();
+        }
+
+        private static string FormatMaterialText(string? code, string? name)
+        {
+            var materialCode = code?.Trim() ?? string.Empty;
+            var materialName = name?.Trim() ?? string.Empty;
+
+            if (materialCode.Length == 0)
+                return materialName;
+            if (materialName.Length == 0)
+                return materialCode;
+
+            return $"{materialCode} - {materialName}";
+        }
+
+        /// <summary>Текст поиска: из «Код - Наименование» берём наименование.</summary>
+        private static string MaterialSearchText(string? text)
+        {
+            var value = text?.Trim() ?? string.Empty;
+            var separator = value.IndexOf(" - ", StringComparison.Ordinal);
+            return separator > 0 && separator + 3 < value.Length ? value[(separator + 3)..] : value;
+        }
+
+        // ---------- Навигация по строкам ----------
+
+        /// <summary>
+        /// Enter в таблице: переход к следующей колонке, после последней — на следующую
+        /// строку, а в конце последней строки — создание новой.
+        /// </summary>
+        private void OnLinesGridPreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter || Keyboard.Modifiers != ModifierKeys.None)
+                return;
+
+            e.Handled = true;
+
+            LinesGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+            LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+
+            MoveToNextEntryCell();
+        }
+
+        private void MoveToNextEntryCell()
+        {
+            var column = LinesGrid.CurrentCell.Column;
+            if (column == null || LinesGrid.CurrentCell.Item is not InventoryLineRow row)
+                return;
+
+            var index = LinesGrid.Columns.IndexOf(column);
+            for (var next = index + 1; next < LinesGrid.Columns.Count; next++)
+            {
+                var candidate = LinesGrid.Columns[next];
+                if (candidate.IsReadOnly || candidate.Visibility != Visibility.Visible)
+                    continue;
+
+                FocusCell(row, candidate);
+                return;
+            }
+
+            // Колонки закончились: идём на следующую строку, а в конце — создаём новую.
+            var rowIndex = _lines.IndexOf(row);
+            if (rowIndex >= 0 && rowIndex + 1 < _lines.Count)
+            {
+                FocusFirstEntryCell(_lines[rowIndex + 1]);
+                return;
+            }
+
+            AddLine();
+            FocusFirstEntryCell(_lines[^1]);
+        }
+
+        /// <summary>Ставит курсор в первую вводимую колонку строки.</summary>
+        private void FocusFirstEntryCell(InventoryLineRow? row)
+        {
+            if (row == null)
+                return;
+
+            foreach (var column in LinesGrid.Columns)
+            {
+                if (column.IsReadOnly || column.Visibility != Visibility.Visible)
+                    continue;
+
+                FocusCell(row, column);
+                return;
+            }
+        }
+
+        /// <summary>
+        /// Ставит курсор в ячейку и открывает её редактор: у шаблонных колонок — поле
+        /// внутри шаблона, у текстовых — режим редактирования DataGrid.
+        /// </summary>
+        private void FocusCell(InventoryLineRow row, DataGridColumn column)
+        {
+            LinesGrid.SelectedItem = row;
+            LinesGrid.CurrentCell = new DataGridCellInfo(row, column);
+            LinesGrid.ScrollIntoView(row, column);
+            LinesGrid.Focus();
+
+            if (!column.IsReadOnly)
+                LinesGrid.BeginEdit();
+
+            LinesGrid.Dispatcher.BeginInvoke(
+                new Action(() => FocusCellEditor(row, column, 0)), DispatcherPriority.Input);
+        }
+
+        private void FocusCellEditor(InventoryLineRow row, DataGridColumn column, int attempt)
+        {
+            var cell = FindCell(row, column);
+            if (cell == null)
+            {
+                if (attempt < 3)
+                {
+                    LinesGrid.Dispatcher.BeginInvoke(
+                        new Action(() => FocusCellEditor(row, column, attempt + 1)), DispatcherPriority.Background);
+                    return;
+                }
+
+                LinesGrid.Focus();
+                if (!column.IsReadOnly)
+                    LinesGrid.BeginEdit();
+
+                return;
+            }
+
+            cell.Focus();
+
+            var textBox = FindVisualChild<TextBox>(cell);
+            if (textBox != null)
+            {
+                textBox.Focus();
+                textBox.SelectAll();
+                return;
+            }
+
+            FindVisualChild<ComboBox>(cell)?.Focus();
+        }
+
+        private DataGridCell? FindCell(InventoryLineRow row, DataGridColumn column)
+        {
+            if (LinesGrid.ItemContainerGenerator.ContainerFromItem(row) is not DataGridRow container)
+                return null;
+
+            var index = LinesGrid.Columns.IndexOf(column);
+            var presenter = FindVisualChild<DataGridCellsPresenter>(container);
+            if (presenter == null || index < 0)
+                return null;
+
+            return presenter.ItemContainerGenerator.ContainerFromIndex(index) as DataGridCell;
+        }
+
+        private static T? FindVisualChild<T>(DependencyObject? parent) where T : DependencyObject
+        {
+            if (parent == null)
+                return null;
+
+            var count = VisualTreeHelper.GetChildrenCount(parent);
+            for (var index = 0; index < count; index++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, index);
+                if (child is T typed)
+                    return typed;
+
+                var nested = FindVisualChild<T>(child);
+                if (nested != null)
+                    return nested;
+            }
+
+            return null;
+        }
+
+        private static T? FindVisualAncestor<T>(DependencyObject? child) where T : DependencyObject
+        {
+            var current = child;
+            while (current != null)
+            {
+                if (current is T typed)
+                    return typed;
+
+                current = VisualTreeHelper.GetParent(current);
+            }
+
+            return null;
         }
 
         // ---------- Сохранение ----------
@@ -901,6 +1621,21 @@ namespace BIS.ERP.Views.Dialogs
         {
             try
             {
+                // Пустые строки (их создаёт Enter в конце таблицы) не сохраняем.
+                foreach (var empty in _lines
+                             .Where(line => !line.MaterialId.HasValue && line.Quantity == 0 && line.Price == 0)
+                             .ToList())
+                {
+                    _lines.Remove(empty);
+                }
+
+                if (_lines.Count == 0)
+                {
+                    MessageBox.Show("Добавьте хотя бы одну строку с материалом и количеством.",
+                        "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
                 if (_lines.Any(line => !line.MaterialId.HasValue || line.Quantity <= 0))
                 {
                     MessageBox.Show("В каждой строке выберите материал и укажите количество.",
@@ -971,7 +1706,12 @@ namespace BIS.ERP.Views.Dialogs
             SetField(data, "vat_total", vat);
             SetField(data, "sales_tax_total", salesTax);
             SetField(data, "amount", total);
-            SetField(data, "amount_currency", total);
+
+            // «Сумма в валюте» — как в счёте-фактуре: сумма документа по курсу шапки.
+            var rate = CurrencyCard.Visibility == Visibility.Visible ? ReadDecimalEditor("exchange_rate") : 0m;
+            SetField(data, "amount_currency", rate > 0
+                ? Math.Round(total / rate, 2, MidpointRounding.AwayFromZero)
+                : total);
 
             if (_editors.TryGetValue("document_entry_id", out var entryEditor) &&
                 entryEditor is ComboBox { SelectedValue: Guid entryId })

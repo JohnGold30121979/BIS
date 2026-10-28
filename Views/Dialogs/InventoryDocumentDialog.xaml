@@ -1,7 +1,7 @@
 <Window x:Class="BIS.ERP.Views.Dialogs.InventoryDocumentDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Документ ТМЗ" Height="760" Width="1280"
+        Title="Документ ТМЗ" Height="820" Width="1280"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource AppSurfaceBrush}">
 
@@ -21,17 +21,64 @@
 
             <Grid Margin="0,10,0,0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*"/>
                     <ColumnDefinition Width="1*"/>
+                    <ColumnDefinition Width="2*"/>
                 </Grid.ColumnDefinitions>
 
+                <!-- Поставщик — узкая колонка: каждый контрол в отдельной строке и растянут
+                     на всю ширину карточки; налоги и оплата занимают две трети ширины. -->
                 <GroupBox Header="Поставщик" Padding="8">
-                    <WrapPanel x:Name="SupplierPanel" Orientation="Horizontal"/>
+                    <StackPanel x:Name="SupplierPanel"/>
                 </GroupBox>
 
-                <GroupBox Grid.Column="2" Header="Налоги и оплата" Padding="8">
-                    <WrapPanel x:Name="TaxPanel" Orientation="Horizontal"/>
+                <GroupBox Grid.Column="1" Header="Налоги и оплата" Padding="8">
+                    <StackPanel x:Name="TaxPanel"/>
                 </GroupBox>
+            </Grid>
+
+            <!-- Валюта — как в счёте-фактуре: отдельный блок под «Поставщиком» и налогами,
+                 на всю ширину; виден только для счёта с признаком «Связь с валютами». -->
+            <Grid x:Name="CurrencyCard" Margin="0,10,0,0" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                    <TextBlock Text="Валюта"/>
+                    <ComboBox x:Name="CurrencyCombo" Height="28"
+                              DisplayMemberPath="Display" SelectedValuePath="Id"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Margin="10,0,10,0">
+                    <TextBlock Text="Курс"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="ExchangeRateBox" Height="28" Padding="6,3,6,3"/>
+                        <Button Grid.Column="1" Content="?" Width="28" Height="28" Margin="4,0,0,0"
+                                Padding="0"
+                                HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                Click="OnRequestExchangeRateClick"
+                                ToolTip="Курс валюты на дату документа из справочника курсов"/>
+                    </Grid>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Margin="10,0,10,0">
+                    <TextBlock Text="Сумма в валюте"/>
+                    <TextBox x:Name="AmountCurrencyBox" Height="28" Padding="6,3,6,3"
+                             IsReadOnly="True" Text="0,00"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3" VerticalAlignment="Bottom">
+                    <Button Content="Текущий курс" Width="110" Height="28" Padding="0"
+                            Click="OnCurrentRateClick"
+                            ToolTip="Подставить последний известный курс валюты"/>
+                </StackPanel>
             </Grid>
         </StackPanel>
 
@@ -39,16 +86,65 @@
                   AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                   HeadersVisibility="Column" RowHeight="26" GridLinesVisibility="Horizontal"
                   CellEditEnding="OnCellEditEnding" CanUserReorderColumns="True"
+                  PreviewKeyDown="OnLinesGridPreviewKeyDown"
                   VerticalScrollBarVisibility="Auto">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="80"/>
-                <DataGridComboBoxColumn x:Name="MaterialColumn" Header="Материал" Width="230"
-                                        SelectedValueBinding="{Binding MaterialId, UpdateSourceTrigger=PropertyChanged}"
-                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
-                <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="60"/>
-                <DataGridComboBoxColumn x:Name="AccountColumn" Header="Дебет" Width="150"
-                                        SelectedValueBinding="{Binding AccountCode, UpdateSourceTrigger=PropertyChanged}"
-                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
+                <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="80" IsReadOnly="True"/>
+                <!-- Материал — как счёт в шапке: поле с ручным вводом и кнопкой «?»
+                     (справочник материалов с поиском). -->
+                <DataGridTemplateColumn x:Name="MaterialColumn" Header="Материал" Width="300"
+                                        SortMemberPath="MaterialText">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Height="22" Padding="2,0,2,0"
+                                         VerticalContentAlignment="Center"
+                                         BorderThickness="0" Background="Transparent"
+                                         Text="{Binding MaterialText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Введите код или наименование материала; «?» — поиск по справочнику"
+                                         LostFocus="OnMaterialTextLostFocus"/>
+                                <Button Grid.Column="1" Content="?" Width="24" Height="22" Padding="0"
+                                        Margin="2,0,0,0"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center"
+                                        ToolTip="Выбрать материал из справочника"
+                                        Tag="material"
+                                        Click="OnPickMaterialClick"/>
+                            </Grid>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="60" IsReadOnly="True"/>
+                <!-- Дебет — как счёт в шапке: поле ввода с кнопкой «?» (план счетов). -->
+                <DataGridTemplateColumn x:Name="AccountColumn" Header="Дебет" Width="180">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Height="22" Padding="2,0,2,0"
+                                         VerticalContentAlignment="Center"
+                                         BorderThickness="0" Background="Transparent"
+                                         Text="{Binding AccountText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Введите код счёта; «?» — выбор из плана счетов"
+                                         LostFocus="OnAccountTextLostFocus"/>
+                                <Button Grid.Column="1" Content="?" Width="24" Height="22" Padding="0"
+                                        Margin="2,0,0,0"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center"
+                                        ToolTip="Выбрать счёт из плана счетов"
+                                        Tag="account"
+                                        Click="OnPickAccountClick"/>
+                            </Grid>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridComboBoxColumn x:Name="SiteColumn" Header="Участок" Width="140"
                                         SelectedValueBinding="{Binding SiteId, UpdateSourceTrigger=PropertyChanged}"
                                         DisplayMemberPath="Display" SelectedValuePath="Id"/>

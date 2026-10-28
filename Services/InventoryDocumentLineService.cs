@@ -15,8 +15,11 @@ namespace BIS.ERP.Services
         private int _lineNumber;
         private Guid? _materialId;
         private string _materialName = string.Empty;
+        private string _materialCode = string.Empty;
+        private string _materialText = string.Empty;
         private string _unitName = string.Empty;
         private string _accountCode = string.Empty;
+        private string _accountText = string.Empty;
         private Guid? _siteId;
         private Guid? _responsiblePersonId;
         private decimal _quantity;
@@ -34,9 +37,18 @@ namespace BIS.ERP.Services
         public int LineNumber { get => _lineNumber; set => Set(ref _lineNumber, value); }
         public Guid? MaterialId { get => _materialId; set => Set(ref _materialId, value); }
         public string MaterialName { get => _materialName; set => Set(ref _materialName, value); }
-        public string MaterialCode { get; set; } = string.Empty;
+        public string MaterialCode { get => _materialCode; set => Set(ref _materialCode, value); }
+
+        /// <summary>
+        /// Текст ячейки «Материал» («Код - Наименование»): вводится вручную
+        /// или заполняется при выборе из справочника материалов.
+        /// </summary>
+        public string MaterialText { get => _materialText; set => Set(ref _materialText, value); }
         public string UnitName { get => _unitName; set => Set(ref _unitName, value); }
         public string AccountCode { get => _accountCode; set => Set(ref _accountCode, value); }
+
+        /// <summary>Текст ячейки «Дебет»: «Код - Наименование» счёта плана счетов.</summary>
+        public string AccountText { get => _accountText; set => Set(ref _accountText, value); }
         public Guid? SiteId { get => _siteId; set => Set(ref _siteId, value); }
         public Guid? ResponsiblePersonId { get => _responsiblePersonId; set => Set(ref _responsiblePersonId, value); }
         public decimal Quantity { get => _quantity; set => Set(ref _quantity, value); }
