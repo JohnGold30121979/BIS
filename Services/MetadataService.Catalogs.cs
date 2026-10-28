@@ -166,6 +166,187 @@ namespace BIS.ERP.Services
             }
         }
 
+        /// <summary>
+        /// Системный справочник «Справочник типов услуг» (модуль «Абонентский отдел»).
+        /// Создаётся один раз на базу: объект метаданных → таблица → стартовые записи.
+        /// </summary>
+        private async Task CreateServiceTypesCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Справочник типов услуг",
+                    TableName = "catalog_service_types",
+                    ObjectType = "Catalog",
+                    Description = "Типы услуг абонентского отдела: водоснабжение, канализация, отопление",
+                    Icon = "🚿",
+                    Order = 41,                       // после «Настроек XML ЭСФ» (40)
+                    IsSystem = true,                  // системный: из конфигуратора не удаляется
+                    MetadataConfigId = config.Id,
+                    Fields = GetServiceTypeFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                // Метаданные сохраняем ДО создания таблицы: поля должны уже иметь Id и FK.
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddServiceTypesDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Типы услуг' создан");
+            }
+            catch (Exception ex)
+            {
+                // Ошибку пробрасываем: иначе сбой развёртывания нового справочника виден только
+                // в Debug-выводе. Внешний catch в InitializePredefinedCatalogsAsync её залогирует
+                // и очистит трекер, приложение продолжит запуск.
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Типы услуг': {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Догоняет структуру «Справочника типов услуг» в уже созданных базах:
+        /// недостающие поля добавляет и в метаданные, и в таблицу, а описание
+        /// существующих приводит к шаблону. Нужен, когда состав полей меняется
+        /// после того, как справочник уже развернулся.
+        /// </summary>
+        private async Task EnsureServiceTypesCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(metadata =>
+                    metadata.ObjectType == "Catalog" &&
+                    (metadata.Name == "Справочник типов услуг" ||
+                     metadata.TableName == "catalog_service_types"));
+
+            if (catalog == null)
+                return;
+
+            // Лечим случай, когда в прошлый раз метаданные сохранились, а CREATE TABLE упал:
+            // CREATE TABLE IF NOT EXISTS ничего не сломает, если таблица уже есть.
+            await CreateTableForCatalogAsync(catalog);
+
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetServiceTypeFields(catalog.Id))
+            {
+                if (!existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    desired.Id = Guid.NewGuid();
+                    desired.MetadataObjectId = catalog.Id;
+                    await _context.MetadataFields.AddAsync(desired);
+                    await AddColumnToTableAsync(catalog.TableName, desired);
+                    catalog.Fields.Add(desired);
+                    continue;
+                }
+
+                existing.Name = desired.Name;
+                existing.FieldType = desired.FieldType;
+                existing.Length = desired.Length;
+                existing.IsRequired = desired.IsRequired;
+                existing.IsUnique = desired.IsUnique;
+                existing.Order = desired.Order;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Системный справочник «Справочник производственных участков»
+        /// (модуль «Абонентский отдел»). Создаётся один раз на базу:
+        /// объект метаданных → таблица → стартовые записи.
+        /// </summary>
+        private async Task CreateProductionSitesCatalog(MetadataConfiguration config)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "Справочник производственных участков",
+                    TableName = "catalog_production_sites",
+                    ObjectType = "Catalog",
+                    Description = "Производственные участки абонентского отдела и процент начисления",
+                    Icon = "🏭",
+                    Order = 42,                       // после «Справочника типов услуг» (41)
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = GetProductionSiteFields(Guid.NewGuid())
+                };
+
+                await _context.MetadataObjects.AddAsync(catalog);
+                // Метаданные сохраняем ДО создания таблицы: поля должны уже иметь Id и FK.
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                await AddProductionSitesDataToTable(catalog);
+
+                System.Diagnostics.Debug.WriteLine("Справочник 'Производственные участки' создан");
+            }
+            catch (Exception ex)
+            {
+                // Ошибку пробрасываем: внешний catch в InitializePredefinedCatalogsAsync
+                // залогирует её и очистит трекер, приложение продолжит запуск.
+                System.Diagnostics.Debug.WriteLine(
+                    $"Ошибка создания справочника 'Производственные участки': {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Догоняет структуру «Справочника производственных участков» в уже созданных базах:
+        /// недостающие поля добавляет и в метаданные, и в таблицу, описание существующих
+        /// приводит к шаблону. Нужен, когда состав полей меняется после развёртывания.
+        /// </summary>
+        private async Task EnsureProductionSitesCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(metadata =>
+                    metadata.ObjectType == "Catalog" &&
+                    (metadata.Name == "Справочник производственных участков" ||
+                     metadata.TableName == "catalog_production_sites"));
+
+            if (catalog == null)
+                return;
+
+            // Лечим случай, когда в прошлый раз метаданные сохранились, а CREATE TABLE упал.
+            await CreateTableForCatalogAsync(catalog);
+
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetProductionSiteFields(catalog.Id))
+            {
+                if (!existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    desired.Id = Guid.NewGuid();
+                    desired.MetadataObjectId = catalog.Id;
+                    await _context.MetadataFields.AddAsync(desired);
+                    await AddColumnToTableAsync(catalog.TableName, desired);
+                    catalog.Fields.Add(desired);
+                    continue;
+                }
+
+                existing.Name = desired.Name;
+                existing.FieldType = desired.FieldType;
+                existing.Length = desired.Length;
+                existing.Precision = desired.Precision;
+                existing.Scale = desired.Scale;
+                existing.IsRequired = desired.IsRequired;
+                existing.IsUnique = desired.IsUnique;
+                existing.Order = desired.Order;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
         private async Task CreateMaterialCatalog(MetadataConfiguration config)
         {
             try
@@ -193,6 +374,60 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника 'Справочник материалов на складе': {ex.Message}");
             }
         }     
+
+        /// <summary>
+        /// Догоняем структуру «Справочника материалов» в уже созданных базах:
+        /// счёт хранения становится выбором из плана счетов (как счета карточки
+        /// ОС), добавляются счёт дохода, счёт себестоимости и код товара ТНВЭД.
+        /// Колонки остаются текстовыми — в них хранится код счёта, поэтому
+        /// накопленные значения читаются без миграции.
+        /// </summary>
+        private async Task EnsureMaterialCatalogStructureAsync()
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(metadata =>
+                    metadata.ObjectType == "Catalog" &&
+                    (metadata.Name == "Справочник материалов" ||
+                     metadata.TableName == "catalog_materials"));
+
+            if (catalog == null)
+                return;
+
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in GetMaterialFields(catalog.Id))
+            {
+                if (!existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    desired.Id = Guid.NewGuid();
+                    desired.MetadataObjectId = catalog.Id;
+                    await _context.MetadataFields.AddAsync(desired);
+                    await AddColumnToTableAsync(catalog.TableName, desired);
+                    catalog.Fields.Add(desired);
+                    continue;
+                }
+
+                // Поля описаны в одном месте (GetMaterialFields), поэтому
+                // существующую запись просто приводим к тому же описанию.
+                existing.Name = desired.Name;
+                existing.FieldType = desired.FieldType;
+                existing.Length = desired.Length;
+                existing.Precision = desired.Precision;
+                existing.Scale = desired.Scale;
+                existing.IsRequired = desired.IsRequired;
+                existing.IsUnique = desired.IsUnique;
+                existing.Order = desired.Order;
+                existing.ReferenceCatalog = desired.ReferenceCatalog;
+                existing.DisplayPattern = desired.DisplayPattern;
+                existing.DisplayFields = desired.DisplayFields;
+            }
+
+            await _context.SaveChangesAsync();
+        }
 
         private async Task CreateMaterialCategoriesCatalog(MetadataConfiguration config)
         {

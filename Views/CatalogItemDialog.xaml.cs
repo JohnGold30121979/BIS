@@ -107,11 +107,15 @@ inputControl = AccountPickerControlFactory.Create(
                     _accountAnalytics!,
                     GetExistingValue(field, existingData),
                     this,
-                    moduleCodeOrName: _assignedModuleName,
+                    // Счета материала не делятся по модулю: хранение относится к ТМЦ,
+                    // а доход и себестоимость — к финансовым/затратным счетам. Поэтому
+                    // в карточке материала показывается весь план счетов.
+                    moduleCodeOrName: IsMaterialsCatalog() ? null : _assignedModuleName,
                     // В «Парах счетов» счёт дебета/кредита вводится вручную так же,
                     // как в остальных документах: только цифры, до 8 знаков, плюс
-                    // выбор из плана счетов кнопкой «?».
-                    allowManualInput: IsAccountPairsCatalog());
+                    // выбор из плана счетов кнопкой «?». В карточке материала счёт
+                    // тоже набирается кодом, как в прежней форме (см. макет).
+                    allowManualInput: IsAccountPairsCatalog() || IsMaterialsCatalog());
                     }
                     // УНИВЕРСАЛЬНАЯ ОБРАБОТКА REFERENCE ПОЛЕЙ
                     else if (!string.IsNullOrEmpty(field.ReferenceCatalog))
@@ -126,12 +130,21 @@ inputControl = AccountPickerControlFactory.Create(
                     await ApplyGeneratedCodeAsync(field, inputControl);
                     ApplyOrganizationCountryDefault(field, inputControl);
                     ApplyCatalogFieldState(field, inputControl);
+                    ApplyMaterialFieldHints(field, inputControl);
 
                     panel.Children.Add(inputControl);
-                    FieldsPanel.Children.Add(panel);
+
+                    // У материала код ТН ВЭД не смешивается с остальными реквизитами:
+                    // он уезжает в блок «Международные коды товаров/услуг» под полями.
+                    var targetPanel = IsMaterialsCatalog() && IsInternationalCodeField(field)
+                        ? ExtraBlockFields
+                        : FieldsPanel;
+                    targetPanel.Children.Add(panel);
                     _controls[field.Name] = inputControl;
                     _fieldPanels[field.Name] = panel;
                 }
+
+                UpdateExtraBlockVisibility();
 
                 // «Валютный учет» в «Парах счетов» включает выбор валюты пары.
                 AttachAccountPairsCurrencyFlag();
@@ -1411,6 +1424,37 @@ inputControl = AccountPickerControlFactory.Create(
             string.Equals(_catalog.Name, InventoryDocumentModel.EntryCatalogName, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.TableName, InventoryDocumentModel.EntryCatalogTable, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>Справочник материалов: у него есть счета и международные коды.</summary>
+        private bool IsMaterialsCatalog() =>
+            string.Equals(_catalog.TableName, "catalog_materials", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_catalog.Name, "Справочник материалов", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Поле международной классификации (код товара/услуги ТН ВЭД). Такое поле
+        /// показывается отдельным блоком под остальными реквизитами материала.
+        /// </summary>
+        private static bool IsInternationalCodeField(MetadataField field) =>
+            string.Equals(field.DbColumnName, "tnved_code", StringComparison.OrdinalIgnoreCase) ||
+            field.Name.Contains("ТНВЭД", StringComparison.OrdinalIgnoreCase) ||
+            field.Name.Contains("ТН ВЭД", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Блок международных кодов нужен, только если в нём есть поля.</summary>
+        private void UpdateExtraBlockVisibility()
+        {
+            ExtraBlockGroup.Visibility = ExtraBlockFields.Children.Count > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private void ApplyMaterialFieldHints(MetadataField field, Control inputControl)
+        {
+            if (!IsMaterialsCatalog() || !IsInternationalCodeField(field) || inputControl is not TextBox textBox)
+                return;
+
+            textBox.MaxLength = field.Length > 0 ? field.Length : 30;
+            textBox.ToolTip = "Код товара или услуги по международной классификации (ТН ВЭД)";
+        }
+
         private async Task<string?> ResolveDefaultCurrencyIdAsync(
             IReadOnlyDictionary<string, MetadataObject> catalogsDict)
         {
@@ -1552,6 +1596,16 @@ inputControl = AccountPickerControlFactory.Create(
         {
             if (control is UserControl && AccountPickerControlFactory.GetSelectedAccount(control) != null)
                 return AccountPickerControlFactory.GetSelectedAccountValue(field, control);
+
+            // Счёт мог быть сохранён кодом, которого нет в плане счетов (старые
+            // карточки материалов). Пикер такой код не узнаёт, но терять его при
+            // сохранении нельзя — отдаём введённый текст.
+            if (control is UserControl and not ReferencePickerControl)
+            {
+                var accountCode = AccountPickerControlFactory.GetAccountCode(control);
+                if (!string.IsNullOrWhiteSpace(accountCode))
+                    return accountCode;
+            }
 
             if (control is ReferencePickerControl referencePicker)
             {

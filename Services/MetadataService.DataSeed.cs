@@ -478,205 +478,62 @@ namespace BIS.ERP.Services
             System.Diagnostics.Debug.WriteLine($"Добавлено видов материалов: {materialTypes.Count}");
         }
 
+        /// <summary>
+        /// Стартовые записи «Справочника типов услуг». Вызывается сразу после создания
+        /// таблицы, поэтому таблица гарантированно пустая — повторных вставок не будет.
+        /// </summary>
+        private async Task AddServiceTypesDataToTable(MetadataObject catalog)
+        {
+            var serviceTypes = InitialDataProvider.GetServiceTypes();
+
+            foreach (var serviceType in serviceTypes)
+            {
+                var sql = $@"
+            INSERT INTO ""{catalog.TableName}""
+            (""Id"", ""code"", ""service_type"", ""CreatedAt"", ""UpdatedAt"")
+            VALUES (
+                '{Guid.NewGuid()}',
+                '{serviceType.Code}',
+                '{serviceType.Name.Replace("'", "''")}',
+                NOW(),
+                NOW()
+            )";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Добавлено типов услуг: {serviceTypes.Count}");
+        }
+
+        /// <summary>
+        /// Стартовые записи «Справочника производственных участков». Вызывается сразу после
+        /// создания таблицы, поэтому таблица гарантированно пустая.
+        /// </summary>
+        private async Task AddProductionSitesDataToTable(MetadataObject catalog)
+        {
+            var sites = InitialDataProvider.GetProductionSites();
+
+            foreach (var site in sites)
+            {
+                var sql = $@"
+            INSERT INTO ""{catalog.TableName}""
+            (""Id"", ""code"", ""site_name"", ""percent"", ""CreatedAt"", ""UpdatedAt"")
+            VALUES (
+                '{Guid.NewGuid()}',
+                '{site.Code}',
+                '{site.Name.Replace("'", "''")}',
+                {site.Percent.ToString(CultureInfo.InvariantCulture)},
+                NOW(),
+                NOW()
+            )";
+                await _context.Database.ExecuteSqlRawAsync(sql);
+            }
+
+            System.Diagnostics.Debug.WriteLine($"Добавлено производственных участков: {sites.Count}");
+        }
+
         private async Task AddCountriesDataToTable(MetadataObject catalog)
         {
-            var countries = new[]
-           {
-            new { code = "AF", name = "Афганистан", is_active = true },
-            new { code = "AL", name = "Албания", is_active = true },
-            new { code = "DZ", name = "Алжир", is_active = true },
-            new { code = "AD", name = "Андорра", is_active = true },
-            new { code = "AO", name = "Ангола", is_active = true },
-            new { code = "AG", name = "Антигуа и Барбуда", is_active = true },
-            new { code = "AR", name = "Аргентина", is_active = true },
-            new { code = "AM", name = "Армения", is_active = true },
-            new { code = "AU", name = "Австралия", is_active = true },
-            new { code = "AT", name = "Австрия", is_active = true },
-            new { code = "AZ", name = "Азербайджан", is_active = true },
-            new { code = "BS", name = "Багамы", is_active = true },
-            new { code = "BH", name = "Бахрейн", is_active = true },
-            new { code = "BD", name = "Бангладеш", is_active = true },
-            new { code = "BB", name = "Барбадос", is_active = true },
-            new { code = "BY", name = "Беларусь", is_active = true },
-            new { code = "BE", name = "Бельгия", is_active = true },
-            new { code = "BZ", name = "Белиз", is_active = true },
-            new { code = "BJ", name = "Бенин", is_active = true },
-            new { code = "BT", name = "Бутан", is_active = true },
-            new { code = "BO", name = "Боливия", is_active = true },
-            new { code = "BA", name = "Босния и Герцеговина", is_active = true },
-            new { code = "BW", name = "Ботсвана", is_active = true },
-            new { code = "BR", name = "Бразилия", is_active = true },
-            new { code = "BN", name = "Бруней", is_active = true },
-            new { code = "BG", name = "Болгария", is_active = true },
-            new { code = "BF", name = "Буркина-Фасо", is_active = true },
-            new { code = "BI", name = "Бурунди", is_active = true },
-            new { code = "KH", name = "Камбоджа", is_active = true },
-            new { code = "CM", name = "Камерун", is_active = true },
-            new { code = "CA", name = "Канада", is_active = true },
-            new { code = "CV", name = "Кабо-Верде", is_active = true },
-            new { code = "CF", name = "Центральноафриканская Республика", is_active = true },
-            new { code = "TD", name = "Чад", is_active = true },
-            new { code = "CL", name = "Чили", is_active = true },
-            new { code = "CN", name = "Китай", is_active = true },
-            new { code = "CO", name = "Колумбия", is_active = true },
-            new { code = "KM", name = "Коморы", is_active = true },
-            new { code = "CG", name = "Конго", is_active = true },
-            new { code = "CD", name = "Демократическая Республика Конго", is_active = true },
-            new { code = "CR", name = "Коста-Рика", is_active = true },
-            new { code = "CI", name = "Кот-д'Ивуар", is_active = true },
-            new { code = "HR", name = "Хорватия", is_active = true },
-            new { code = "CU", name = "Куба", is_active = true },
-            new { code = "CY", name = "Кипр", is_active = true },
-            new { code = "CZ", name = "Чехия", is_active = true },
-            new { code = "DK", name = "Дания", is_active = true },
-            new { code = "DJ", name = "Джибути", is_active = true },
-            new { code = "DM", name = "Доминика", is_active = true },
-            new { code = "DO", name = "Доминиканская Республика", is_active = true },
-            new { code = "EC", name = "Эквадор", is_active = true },
-            new { code = "EG", name = "Египет", is_active = true },
-            new { code = "SV", name = "Сальвадор", is_active = true },
-            new { code = "GQ", name = "Экваториальная Гвинея", is_active = true },
-            new { code = "ER", name = "Эритрея", is_active = true },
-            new { code = "EE", name = "Эстония", is_active = true },
-            new { code = "SZ", name = "Эсватини", is_active = true },
-            new { code = "ET", name = "Эфиопия", is_active = true },
-            new { code = "FJ", name = "Фиджи", is_active = true },
-            new { code = "FI", name = "Финляндия", is_active = true },
-            new { code = "FR", name = "Франция", is_active = true },
-            new { code = "GA", name = "Габон", is_active = true },
-            new { code = "GM", name = "Гамбия", is_active = true },
-            new { code = "GE", name = "Грузия", is_active = true },
-            new { code = "DE", name = "Германия", is_active = true },
-            new { code = "GH", name = "Гана", is_active = true },
-            new { code = "GR", name = "Греция", is_active = true },
-            new { code = "GD", name = "Гренада", is_active = true },
-            new { code = "GT", name = "Гватемала", is_active = true },
-            new { code = "GN", name = "Гвинея", is_active = true },
-            new { code = "GW", name = "Гвинея-Бисау", is_active = true },
-            new { code = "GY", name = "Гайана", is_active = true },
-            new { code = "HT", name = "Гаити", is_active = true },
-            new { code = "HN", name = "Гондурас", is_active = true },
-            new { code = "HU", name = "Венгрия", is_active = true },
-            new { code = "IS", name = "Исландия", is_active = true },
-            new { code = "IN", name = "Индия", is_active = true },
-            new { code = "ID", name = "Индонезия", is_active = true },
-            new { code = "IR", name = "Иран", is_active = true },
-            new { code = "IQ", name = "Ирак", is_active = true },
-            new { code = "IE", name = "Ирландия", is_active = true },
-            new { code = "IL", name = "Израиль", is_active = true },
-            new { code = "IT", name = "Италия", is_active = true },
-            new { code = "JM", name = "Ямайка", is_active = true },
-            new { code = "JP", name = "Япония", is_active = true },
-            new { code = "JO", name = "Иордания", is_active = true },
-            new { code = "KZ", name = "Казахстан", is_active = true },
-            new { code = "KE", name = "Кения", is_active = true },
-            new { code = "KI", name = "Кирибати", is_active = true },
-            new { code = "KP", name = "Северная Корея", is_active = true },
-            new { code = "KR", name = "Южная Корея", is_active = true },
-            new { code = "KW", name = "Кувейт", is_active = true },
-            new { code = "KG", name = "Кыргызстан", is_active = true },
-            new { code = "LA", name = "Лаос", is_active = true },
-            new { code = "LV", name = "Латвия", is_active = true },
-            new { code = "LB", name = "Ливан", is_active = true },
-            new { code = "LS", name = "Лесото", is_active = true },
-            new { code = "LR", name = "Либерия", is_active = true },
-            new { code = "LY", name = "Ливия", is_active = true },
-            new { code = "LI", name = "Лихтенштейн", is_active = true },
-            new { code = "LT", name = "Литва", is_active = true },
-            new { code = "LU", name = "Люксембург", is_active = true },
-            new { code = "MG", name = "Мадагаскар", is_active = true },
-            new { code = "MW", name = "Малави", is_active = true },
-            new { code = "MY", name = "Малайзия", is_active = true },
-            new { code = "MV", name = "Мальдивы", is_active = true },
-            new { code = "ML", name = "Мали", is_active = true },
-            new { code = "MT", name = "Мальта", is_active = true },
-            new { code = "MH", name = "Маршалловы Острова", is_active = true },
-            new { code = "MR", name = "Мавритания", is_active = true },
-            new { code = "MU", name = "Маврикий", is_active = true },
-            new { code = "MX", name = "Мексика", is_active = true },
-            new { code = "FM", name = "Микронезия", is_active = true },
-            new { code = "MD", name = "Молдова", is_active = true },
-            new { code = "MC", name = "Монако", is_active = true },
-            new { code = "MN", name = "Монголия", is_active = true },
-            new { code = "ME", name = "Черногория", is_active = true },
-            new { code = "MA", name = "Марокко", is_active = true },
-            new { code = "MZ", name = "Мозамбик", is_active = true },
-            new { code = "MM", name = "Мьянма", is_active = true },
-            new { code = "NA", name = "Намибия", is_active = true },
-            new { code = "NR", name = "Науру", is_active = true },
-            new { code = "NP", name = "Непал", is_active = true },
-            new { code = "NL", name = "Нидерланды", is_active = true },
-            new { code = "NZ", name = "Новая Зеландия", is_active = true },
-            new { code = "NI", name = "Никарагуа", is_active = true },
-            new { code = "NE", name = "Нигер", is_active = true },
-            new { code = "NG", name = "Нигерия", is_active = true },
-            new { code = "NO", name = "Норвегия", is_active = true },
-            new { code = "OM", name = "Оман", is_active = true },
-            new { code = "PK", name = "Пакистан", is_active = true },
-            new { code = "PW", name = "Палау", is_active = true },
-            new { code = "PA", name = "Панама", is_active = true },
-            new { code = "PG", name = "Папуа-Новая Гвинея", is_active = true },
-            new { code = "PY", name = "Парагвай", is_active = true },
-            new { code = "PE", name = "Перу", is_active = true },
-            new { code = "PH", name = "Филиппины", is_active = true },
-            new { code = "PL", name = "Польша", is_active = true },
-            new { code = "PT", name = "Португалия", is_active = true },
-            new { code = "QA", name = "Катар", is_active = true },
-            new { code = "RO", name = "Румыния", is_active = true },
-            new { code = "RU", name = "Россия", is_active = true },
-            new { code = "RW", name = "Руанда", is_active = true },
-            new { code = "KN", name = "Сент-Китс и Невис", is_active = true },
-            new { code = "LC", name = "Сент-Люсия", is_active = true },
-            new { code = "VC", name = "Сент-Винсент и Гренадины", is_active = true },
-            new { code = "WS", name = "Самоа", is_active = true },
-            new { code = "SM", name = "Сан-Марино", is_active = true },
-            new { code = "ST", name = "Сан-Томе и Принсипи", is_active = true },
-            new { code = "SA", name = "Саудовская Аравия", is_active = true },
-            new { code = "SN", name = "Сенегал", is_active = true },
-            new { code = "RS", name = "Сербия", is_active = true },
-            new { code = "SC", name = "Сейшелы", is_active = true },
-            new { code = "SL", name = "Сьерра-Леоне", is_active = true },
-            new { code = "SG", name = "Сингапур", is_active = true },
-            new { code = "SK", name = "Словакия", is_active = true },
-            new { code = "SI", name = "Словения", is_active = true },
-            new { code = "SB", name = "Соломоновы Острова", is_active = true },
-            new { code = "SO", name = "Сомали", is_active = true },
-            new { code = "ZA", name = "Южная Африка", is_active = true },
-            new { code = "SS", name = "Южный Судан", is_active = true },
-            new { code = "ES", name = "Испания", is_active = true },
-            new { code = "LK", name = "Шри-Ланка", is_active = true },
-            new { code = "SD", name = "Судан", is_active = true },
-            new { code = "SR", name = "Суринам", is_active = true },
-            new { code = "SE", name = "Швеция", is_active = true },
-            new { code = "CH", name = "Швейцария", is_active = true },
-            new { code = "SY", name = "Сирия", is_active = true },
-            new { code = "TW", name = "Тайвань", is_active = true },
-            new { code = "TJ", name = "Таджикистан", is_active = true },
-            new { code = "TZ", name = "Танзания", is_active = true },
-            new { code = "TH", name = "Таиланд", is_active = true },
-            new { code = "TL", name = "Тимор-Лесте", is_active = true },
-            new { code = "TG", name = "Того", is_active = true },
-            new { code = "TO", name = "Тонга", is_active = true },
-            new { code = "TT", name = "Тринидад и Тобаго", is_active = true },
-            new { code = "TN", name = "Тунис", is_active = true },
-            new { code = "TR", name = "Турция", is_active = true },
-            new { code = "TM", name = "Туркменистан", is_active = true },
-            new { code = "TV", name = "Тувалу", is_active = true },
-            new { code = "UG", name = "Уганда", is_active = true },
-            new { code = "UA", name = "Украина", is_active = true },
-            new { code = "AE", name = "Объединенные Арабские Эмираты", is_active = true },
-            new { code = "GB", name = "Великобритания", is_active = true },
-            new { code = "US", name = "США", is_active = true },
-            new { code = "UY", name = "Уругвай", is_active = true },
-            new { code = "UZ", name = "Узбекистан", is_active = true },
-            new { code = "VU", name = "Вануату", is_active = true },
-            new { code = "VA", name = "Ватикан", is_active = true },
-            new { code = "VE", name = "Венесуэла", is_active = true },
-            new { code = "VN", name = "Вьетнам", is_active = true },
-            new { code = "YE", name = "Йемен", is_active = true },
-            new { code = "ZM", name = "Замбия", is_active = true },
-            new { code = "ZW", name = "Зимбабве", is_active = true }
-            };
+            var countries = InitialDataProvider.GetCountries();
 
             foreach (var country in countries)
             {
@@ -685,17 +542,17 @@ namespace BIS.ERP.Services
                 (""Id"", ""code"", ""name"", ""description"", ""is_active"", ""CreatedAt"", ""UpdatedAt"") 
                 VALUES (
                     '{Guid.NewGuid()}',
-                    '{country.code}',
-                    '{country.name.Replace("'", "''")}',
+                    '{country.Code}',
+                    '{country.Name.Replace("'", "''")}',
                     '',
-                    {country.is_active.ToString().ToLower()},
+                    {country.IsActive.ToString().ToLower()},
                     NOW(),
                     NOW()
                 )";
                         await _context.Database.ExecuteSqlRawAsync(sql);
             }
 
-            System.Diagnostics.Debug.WriteLine($"Добавлено государств: {countries.Length}");
+            System.Diagnostics.Debug.WriteLine($"Добавлено государств: {countries.Count}");
         }
 
         private async Task AddInitialCashDeskData(MetadataObject catalog)
@@ -807,7 +664,6 @@ namespace BIS.ERP.Services
                 var defaultsSql = $@"
 
                     DO $$
-
                     BEGIN
                         IF EXISTS (
                             SELECT 1
@@ -815,82 +671,43 @@ namespace BIS.ERP.Services
                             WHERE table_name = '{catalog.TableName}'
                               AND column_name = 'country_id'
                         ) THEN
-
                             UPDATE ""{catalog.TableName}""
-
                             SET ""country_id"" = (
-
                                     SELECT ""Id""
-
                                     FROM ""catalog_countries""
-
                                     WHERE ""code"" = 'KG'
-
                                        OR ""name"" = 'Кыргызстан'
-
                                        OR ""name"" ILIKE 'Киргиз%'
-
                                     ORDER BY CASE WHEN ""code"" = 'KG' THEN 0 ELSE 1 END
-
                                     LIMIT 1
-
                                 ),
-
                                 ""UpdatedAt"" = NOW()
-
                             WHERE ""country_id"" IS NULL
-
                               AND EXISTS (
-
                                     SELECT 1
-
                                     FROM ""catalog_countries""
-
                                     WHERE ""code"" = 'KG'
-
                                        OR ""name"" = 'Кыргызстан'
-
                                        OR ""name"" ILIKE 'Киргиз%'
-
                                 );
-
                         END IF;
-
-
                         IF EXISTS (
-
                             SELECT 1
-
                             FROM information_schema.columns
-
                             WHERE table_name = '{catalog.TableName}'
-
                               AND column_name = 'code'
-
                         ) THEN
-
                             UPDATE ""{catalog.TableName}""
-
                             SET ""code"" = '1',
-
                                 ""UpdatedAt"" = NOW()
-
                             WHERE ""code"" = '0001'
-
                               AND NOT EXISTS (
-
                                     SELECT 1
-
                                     FROM ""{catalog.TableName}""
-
                                     WHERE ""code"" = '1'
-
                                 );
-
                         END IF;
-
                     END $$;";
-
 
                 await _context.Database.ExecuteSqlRawAsync(defaultsSql);
             }
@@ -1461,5 +1278,6 @@ namespace BIS.ERP.Services
         }
     }
 }
+
 
 

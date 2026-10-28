@@ -419,9 +419,14 @@ public partial class MetadataService
             Precision = 18,
             Scale = 6,
             IsRequired = false,
-            Order = 6,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         },
+        // Счета материала выбираются из плана счетов кнопкой «?» — так же, как
+        // счета карточки основных средств. Тип поля остаётся String: в колонке
+        // хранится код счёта («16200000»), а не uuid, поэтому уже накопленные
+        // значения читаются без миграции. Идут сразу после «Вид материала»,
+        // как в прежней карточке материала.
         new MetadataField
         {
             Id = Guid.NewGuid(),
@@ -429,8 +434,39 @@ public partial class MetadataService
             DbColumnName = "storage_account",
             FieldType = "String",
             Length = 50,
+            ReferenceCatalog = "План счетов",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            IsRequired = false,
+            Order = 6,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Счет дохода",
+            DbColumnName = "income_account",
+            FieldType = "String",
+            Length = 50,
+            ReferenceCatalog = "План счетов",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
             IsRequired = false,
             Order = 7,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Счет себестоимости",
+            DbColumnName = "cost_account",
+            FieldType = "String",
+            Length = 50,
+            ReferenceCatalog = "План счетов",
+            DisplayPattern = "{Код} - {Наименование}",
+            DisplayFields = "Код,Наименование",
+            IsRequired = false,
+            Order = 8,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -440,7 +476,7 @@ public partial class MetadataService
             DbColumnName = "is_active",
             FieldType = "Bool",                   // ← "Bool"
             IsRequired = true,
-            Order = 8,
+            Order = 10,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -451,7 +487,20 @@ public partial class MetadataService
             FieldType = "String",
             Length = 500,
             IsRequired = false,
-            Order = 9,
+            Order = 11,
+            MetadataObjectId = metadataObjectId
+        },
+        // Международная классификация: код товара/услуги ТН ВЭД. Показывается
+        // отдельным блоком справа от счётов (см. CatalogItemDialog).
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код товара ТНВЭД",
+            DbColumnName = "tnved_code",
+            FieldType = "String",
+            Length = 30,
+            IsRequired = false,
+            Order = 12,
             MetadataObjectId = metadataObjectId
         }
       };
@@ -1478,6 +1527,89 @@ public partial class MetadataService
                 Order = 4,
                 MetadataObjectId = metadataObjectId
            }
+        };
+    }
+
+    /// <summary>
+    /// Поля системного справочника «Справочник типов услуг» (модуль «Абонентский отдел»).
+    /// <c>Order</c> задаёт и порядок в форме карточки, и порядок колонок в списке.
+    /// </summary>
+    private List<MetadataField> GetServiceTypeFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Код",
+                DbColumnName = "code",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Тип услуги",
+                DbColumnName = "service_type",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            }
+        };
+    }
+
+    /// <summary>
+    /// Поля системного справочника «Справочник производственных участков»
+    /// (модуль «Абонентский отдел»). «Процент» — доля начисления участку.
+    /// </summary>
+    private List<MetadataField> GetProductionSiteFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Код",
+                DbColumnName = "code",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Наименование участка",
+                DbColumnName = "site_name",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Процент",
+                DbColumnName = "percent",
+                FieldType = "Decimal",
+                Precision = 18,
+                Scale = 2,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            }
         };
     }
 

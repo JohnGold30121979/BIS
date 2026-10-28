@@ -1271,6 +1271,7 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Справочник материалов"))
                     await CreateMaterialCatalog(config);
+                await EnsureMaterialCatalogStructureAsync();
 
                 if (!existingCatalogs.Contains("Справочник валют"))
                     await CreateCurrencyCatalog(config);
@@ -1329,7 +1330,17 @@ namespace BIS.ERP.Services
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
                 await EnsureStandardReportTemplatesAsync(config);
 
+                // Системные справочники абонентского отдела.
+                if (!existingCatalogs.Contains("Справочник типов услуг"))
+                    await CreateServiceTypesCatalog(config);
+                await EnsureServiceTypesCatalogStructureAsync();
 
+                if (!existingCatalogs.Contains("Справочник производственных участков"))
+                    await CreateProductionSitesCatalog(config);
+                await EnsureProductionSitesCatalogStructureAsync();
+
+                // Модуль «Абонентский отдел» и привязка к нему его справочников.
+                await new ModuleMetadataService(_context).EnsureAbonentModuleCatalogsAsync();
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }

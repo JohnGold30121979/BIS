@@ -15,6 +15,8 @@ namespace BIS.ERP.Services
         public const string SalesCode = "Sales";
         public const string RawMaterialsCode = "RawMaterials";
         public const string CostAccountingCode = "CostAccounting";
+        /// <summary>Модуль «Абонентский отдел»: справочники типов услуг и производственных участков.</summary>
+        public const string AbonentModuleCode = "abonent";
         public const int FinalBalanceCloseOrder = 10000;
 
         private readonly AppDbContext _context;
@@ -166,6 +168,11 @@ namespace BIS.ERP.Services
                 "🧮", 80, 800,
                 requirePreviousModulesClosed: true,
                 isActiveByDefault: false);
+            await EnsureModuleAsync(
+                AbonentModuleCode, "Абонентский отдел", "Абоненты, типы услуг и производственные участки",
+                "🚿", 90, 90,
+                participatesInPeriodClose: false,
+                isActiveByDefault: true);
             await SynchronizeDefaultAssignmentsAsync();
         }
 
@@ -384,6 +391,8 @@ namespace BIS.ERP.Services
                 "Журнал переоценки ОС", "Журнал реализации ОС", "Журнал ликвидации ОС");
             await AssignMissingByNameAsync(modules[InventoryCode].Id, "Report", reports.Select(item => (item.Id, item.Name)),
                 "Ведомость наличия материалов");
+            await AssignMissingByNameAsync(modules[AbonentModuleCode].Id, "Catalog",
+                catalogs.Select(item => (item.Id, item.Name)), AbonentCatalogNames);
         }
 
         private async Task AssignMissingByNameAsync(
@@ -544,6 +553,81 @@ namespace BIS.ERP.Services
             return string.IsNullOrWhiteSpace(normalized) ? $"Module{Guid.NewGuid():N}" : normalized;
         }
 
+        /// <summary>
+        /// Развёртывание модуля «Абонентский отдел» и привязка к нему его справочников
+        /// (<see cref="AbonentCatalogNames"/>): «Справочник типов услуг» и
+        /// «Справочник производственных участков».
+        ///
+        /// Автосинхронизация состава (<see cref="SynchronizeDefaultAssignmentsAsync"/>) выполняется
+        /// только на «пустой» базе, а посадка документации/отчётов на настроенной базе
+        /// пропускается по seed-гейту — поэтому модуль и связи досоздаются здесь, идемпотентно.
+        /// Вызывается из <c>MetadataService.InitializePredefinedCatalogsAsync</c> при каждом старте,
+        /// то есть до построения дерева навигации.
+        /// </summary>
+        public async Task EnsureAbonentModuleCatalogsAsync()
+        {
+            // На совсем новой базе таблиц модулей ещё может не быть.
+            await EnsureSchemaAsync();
+
+            var module = await _context.MetadataModules
+                .FirstOrDefaultAsync(item => item.Code == AbonentModuleCode);
+
+            if (module == null)
+            {
+                // Модуля ещё нет (настроенная база: EnsureDefaultModulesAsync мог не выполниться).
+                await EnsureModuleAsync(
+                    AbonentModuleCode, "Абонентский отдел", "Абоненты, типы услуг и производственные участки",
+                    "🚿", 90, 90,
+                    participatesInPeriodClose: false,
+                    isActiveByDefault: true);
+
+                module = await _context.MetadataModules
+                    .FirstOrDefaultAsync(item => item.Code == AbonentModuleCode);
+                if (module == null)
+                    return;
+            }
+
+            var names = AbonentCatalogNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var catalogs = (await _context.MetadataObjects.AsNoTracking()
+                    .Where(item => item.ObjectType == "Catalog")
+                    .ToListAsync())
+                .Where(item => names.Contains(item.Name))
+                .ToList();
+            if (catalogs.Count == 0)
+                return;
+
+            // Индекс (ObjectType, ObjectId) уникальный: каталог может быть только в одном модуле.
+            var assigned = (await _context.MetadataModuleItems.AsNoTracking()
+                    .Where(item => item.ObjectType == "Catalog")
+                    .ToListAsync())
+                .Select(item => item.ObjectId)
+                .ToHashSet();
+
+            var order = await _context.MetadataModuleItems
+                .Where(item => item.ModuleId == module.Id)
+                .MaxAsync(item => (int?)item.Order) ?? 0;
+
+            var added = 0;
+            foreach (var catalog in catalogs.Where(item => !assigned.Contains(item.Id)))
+            {
+                await _context.MetadataModuleItems.AddAsync(new MetadataModuleItem
+                {
+                    ModuleId = module.Id,
+                    ObjectId = catalog.Id,
+                    ObjectType = "Catalog",
+                    Order = ++order
+                });
+                added++;
+            }
+
+            if (added == 0)
+                return;
+
+            await _context.SaveChangesAsync();
+            SystemLogService.Info(
+                $"Модуль «{module.Name}»: привязано справочников — {added}.", nameof(ModuleMetadataService));
+        }
+
         public static readonly string[] FixedAssetCatalogNames =
         {
             "Основные средства", "Соответствия счетов ОС", "Группы ОС", "Подгруппы ОС",
@@ -563,6 +647,13 @@ namespace BIS.ERP.Services
             "Виды поставки", "Типы поставки", "Классификация платежей",
             "Налоги", "Настройки XML ЭСФ", "XML Настройки XML ЭСФ",
             "Государства", "Сотрудники (Списочный состав)", "Подразделения"
+        };
+
+        /// <summary>Справочники модуля «Абонентский отдел».</summary>
+        public static readonly string[] AbonentCatalogNames =
+        {
+            "Справочник типов услуг",
+            "Справочник производственных участков"
         };
 
         public static readonly string[] FixedAssetDocumentNames =
