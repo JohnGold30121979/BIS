@@ -20,12 +20,14 @@ namespace BIS.ERP.Views
         private readonly ObservableCollection<Dictionary<string, object>> _postingDetails = new();
         private AccountAnalyticsRegistry _accountAnalytics = new();
         private string _periodStatusSuffix = string.Empty;
+        private bool _isLoading;
 
         public PostingsView(MetadataObject document, MetadataService metadataService)
         {
             InitializeComponent();
             _document = document;
-            _metadataService = metadataService;
+            // Своё подключение на вкладку: контекст не переносит параллельных команд.
+            _metadataService = metadataService.CreateIndependent();
             _postings = new ObservableCollection<Dictionary<string, object>>();
             PostingsGrid.ItemsSource = _postings;
             PostingDetailsGrid.ItemsSource = _postingDetails;
@@ -41,6 +43,10 @@ namespace BIS.ERP.Views
 
         private async Task LoadData()
         {
+            if (_isLoading)
+                return;
+
+            _isLoading = true;
             try
             {
                 StatusText.Text = "Загрузка...";
@@ -85,6 +91,10 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = $"❌ Ошибка: {ex.Message}";
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _isLoading = false;
             }
         }
 

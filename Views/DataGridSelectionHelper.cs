@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Data;
 using System.Windows;
 using System.Windows.Controls;
@@ -100,6 +101,7 @@ namespace BIS.ERP.Views
             var deadline = DateTime.UtcNow.AddMilliseconds(RetryWindowMs);
             var stableTicks = 0;
             DispatcherTimer? timer = null;
+            NotifyCollectionChangedEventHandler? itemsChanged = null;
 
             void Stop()
             {
@@ -111,9 +113,27 @@ namespace BIS.ERP.Views
                 activeTimer.Stop();
                 activeTimer.Tick -= OnTick;
                 grid.Unloaded -= OnGridUnloaded;
+                grid.IsVisibleChanged -= OnGridVisibilityChanged;
+
+                if (itemsChanged != null && grid.Items is INotifyCollectionChanged notify)
+                    notify.CollectionChanged -= itemsChanged;
+                itemsChanged = null;
             }
 
             void OnGridUnloaded(object sender, RoutedEventArgs e) => Stop();
+
+            // Вкладка MDI на время диалога прячется, а после закрытия показывается
+            // снова и заново грузит данные. Пока таблица невидима, выделять строку
+            // бессмысленно, но и бросать попытки нельзя: дождёмся появления.
+            void OnGridVisibilityChanged(object? sender, DependencyPropertyChangedEventArgs e)
+            {
+                if (!grid.IsVisible)
+                    return;
+
+                grid.IsVisibleChanged -= OnGridVisibilityChanged;
+                grid.Unloaded -= OnGridUnloaded;
+                KeepRowSelected(grid, findTargetRow, isTargetRow);
+            }
 
             void OnTick(object? sender, EventArgs e)
             {
@@ -171,7 +191,24 @@ namespace BIS.ERP.Views
             }
 
             if (!grid.IsVisible)
+            {
+                // Таблица скрыта (вкладка MDI не активна / контент переприкрепляется).
+                // Раньше здесь был простой return — и после повторной загрузки списка
+                // выделение терялось: строка выглядела невыделенной (в т.ч. в «Парах
+                // счетов» после правки). Ждём появления таблицы и продолжаем удержание.
+                grid.IsVisibleChanged += OnGridVisibilityChanged;
+                grid.Unloaded += OnGridUnloaded;
                 return;
+            }
+
+            if (grid.Items is INotifyCollectionChanged observableItems)
+            {
+                // Список перезагрузили (ItemsSource заменили) — отсчёт стабильности
+                // начинается заново, иначе удержание прекращалось раньше, чем
+                // приходили новые строки, и выделение снова слетало.
+                itemsChanged = (_, _) => stableTicks = 0;
+                observableItems.CollectionChanged += itemsChanged;
+            }
 
             timer = new DispatcherTimer(DispatcherPriority.Background, grid.Dispatcher)
             {

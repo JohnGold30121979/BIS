@@ -25,6 +25,14 @@ namespace BIS.ERP.Views
         private Dictionary<string, Dictionary<string, string>> _referenceCache;
         private Dictionary<string, MetadataObject> _catalogsDict;
         private readonly Dictionary<Guid, Dictionary<string, object>> _rawRowsById = new();
+
+        /// <summary>
+        /// Запись, которую только что добавили или изменили. Нужна, чтобы остаться
+        /// на ней после перезагрузки списка: MDI заново прикрепляет вкладку-вызыватель,
+        /// её Loaded повторно зовёт LoadData() — и без этого выделение слетало
+        /// (в «Парах счетов» правка выглядела «невыделенной»).
+        /// </summary>
+        private Guid? _recordToKeepSelected;
         private static readonly IValueConverter AccountTypeConverter = new AccountTypeDisplayConverter();
         private static readonly IValueConverter YesNoConverter = new BooleanYesNoDisplayConverter();
         private static readonly IValueConverter LinkFlagConverter = new BooleanPlusDisplayConverter();
@@ -353,6 +361,17 @@ namespace BIS.ERP.Views
             DeleteButton.IsEnabled = hasSelection;
             if (IsCurrencyRatesCatalog && ActivateRateButton != null)
                 ActivateRateButton.IsEnabled = hasSelection;
+
+            // Пользователь сам выбрал другую запись — удержание больше не нужно.
+            if (hasSelection &&
+                DataGrid.SelectedItem is DataRowView selectedRow &&
+                selectedRow.Row.Table.Columns.Contains("Id") &&
+                TryReadGuid(selectedRow["Id"], out var selectedId) &&
+                _recordToKeepSelected is { } pending &&
+                pending != selectedId)
+            {
+                _recordToKeepSelected = null;
+            }
 
             UpdateOrganizationDetailsPanel();
         }
@@ -892,6 +911,10 @@ namespace BIS.ERP.Views
                 // добавления/изменения/удаления записи или обновления панель
                 // реквизитов и блок «Расчётные счета организации» оставались скрытыми.
                 RestoreOrganizationSelection(previousOrganizationId);
+
+                // И запись, которую только что добавили/изменили: LoadData()
+                // вызывается повторно при переприкреплении вкладки MDI.
+                RestorePendingSelection();
             }
             catch (Exception ex)
             {
@@ -1406,6 +1429,42 @@ namespace BIS.ERP.Views
 
             // SelectionChanged выставляет кнопки, но подстрахуемся на случай, если
             // выделение уже стояло на этой строке и событие не сгенерировалось.
+            EditButton.IsEnabled = true;
+            DeleteButton.IsEnabled = true;
+        }
+
+        /// <summary>
+        /// Возвращает выделение на запись, которую только что добавили или изменили.
+        /// В «Парах счетов» после правки строка должна оставаться подсвеченной:
+        /// без этого список перезагружался, выделение слетало, и было непонятно,
+        /// какую пару правили.
+        /// </summary>
+        private void RestorePendingSelection()
+        {
+            if (_dataTable == null || _recordToKeepSelected is not { } target || target == Guid.Empty)
+                return;
+
+            DataRowView? match = null;
+
+            // Ищем в отфильтрованном представлении: скрытую поиском строку выделять нельзя.
+            foreach (DataRowView candidate in _dataTable.DefaultView)
+            {
+                if (!candidate.Row.Table.Columns.Contains("Id"))
+                    continue;
+
+                if (TryReadGuid(candidate["Id"], out var id) && id == target)
+                {
+                    match = candidate;
+                    break;
+                }
+            }
+
+            if (match == null)
+                return;
+
+            DataGrid.SelectedItem = match;
+            DataGrid.ScrollIntoView(match);
+
             EditButton.IsEnabled = true;
             DeleteButton.IsEnabled = true;
         }
@@ -2514,6 +2573,7 @@ namespace BIS.ERP.Views
                         StatusText.Text = "💾 Сохранение...";
                         ProgressText.Text = "⏳ Сохранение...";
                         var createdId = await _metadataService.CreateDynamicRecordAsync(_catalog.Id, fixedAssetDialog.ItemData);
+                        _recordToKeepSelected = createdId;
                         await LoadData();
                         // Остаёмся на только что созданном основном средстве.
                         DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
@@ -2548,6 +2608,7 @@ namespace BIS.ERP.Views
                     StatusText.Text = "💾 Сохранение...";
                     ProgressText.Text = "⏳ Сохранение...";
                     var createdId = await _metadataService.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
+                    _recordToKeepSelected = createdId;
                     await LoadData();
                     // Остаёмся на только что созданной записи справочника.
                     DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
@@ -2598,6 +2659,7 @@ namespace BIS.ERP.Views
                         StatusText.Text = "💾 Обновление...";
                         ProgressText.Text = "⏳ Обновление...";
                         await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, fixedAssetDialog.ItemData);
+                        _recordToKeepSelected = id;
                         await LoadData();
                         // Возвращаем выделение на отредактированное основное средство.
                         DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
@@ -2631,6 +2693,7 @@ namespace BIS.ERP.Views
                     StatusText.Text = "💾 Обновление...";
                     ProgressText.Text = "⏳ Обновление...";
                     await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, dialog.ItemData);
+                    _recordToKeepSelected = id;
                     await LoadData();
                     // Возвращаем выделение на отредактированную запись.
                     DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
@@ -2669,6 +2732,7 @@ namespace BIS.ERP.Views
                     StatusText.Text = "🗑️ Удаление...";
                     ProgressText.Text = "⏳ Удаление...";
                     await _metadataService.DeleteDynamicRecordAsync(_catalog.Id, id);
+                    _recordToKeepSelected = null;
                     await LoadData();
                     StatusText.Text = "✅ Запись удалена";
                 }

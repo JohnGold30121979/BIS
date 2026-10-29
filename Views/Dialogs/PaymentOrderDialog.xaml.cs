@@ -41,7 +41,8 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             _document = document;
-            _metadataService = metadataService;
+            // Своё подключение: загрузка идёт в Task.Run, контекст окна делить нельзя.
+            _metadataService = metadataService.CreateIndependent();
             _editId = null;
             DialogTitle.Text = $"Добавление: {document.Name}";
             DatePicker.SelectedDate = DateTime.Today;
@@ -55,7 +56,8 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             _document = document;
-            _metadataService = metadataService;
+            // Своё подключение: загрузка идёт в Task.Run, контекст окна делить нельзя.
+            _metadataService = metadataService.CreateIndependent();
             _editId = editId;
             DialogTitle.Text = $"Редактирование: {document.Name}";
             SetDescriptionVisibility(false);

@@ -116,6 +116,17 @@ namespace BIS.ERP.Services
                 .Where(item => item.Code.StartsWith("cash.receipt.") || item.Code.StartsWith("cash.payment."))
                 .ToListAsync();
 
+            // На каждом старте метод заново собирал макеты ClosedXML (сериализация
+            // шаблонов) и писал 4 отчёта в базу, хотя формы уже есть. На удалённой
+            // базе это заметные сотни миллисекунд. Если всё на месте — выходим.
+            if (await CashOrderFormsAreReadyAsync(existingReports, deletedReportCodes))
+            {
+                SystemLogService.Info(
+                    "Печатные формы кассовых ордеров уже посажены — пропуск.",
+                    nameof(PrintFormService));
+                return;
+            }
+
             /// <summary>
             /// Заводит или обновляет печатную форму кассового ордера на макете ClosedXML.
             /// Источник — объект набора данных (ReportSource), макет сеется один раз.
@@ -306,6 +317,46 @@ namespace BIS.ERP.Services
                 ClosedXmlLayoutTemplates.CreateCashPaymentOrder("Расходный кассовый ордер"));
 
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Все неудалённые печатные формы кассовых ордеров уже созданы и содержат
+        /// макет (нативный шаблон или ClosedXML-раскладку), а набор данных для
+        /// ClosedXML-бланков существует. Тогда пересобирать формы не нужно.
+        /// </summary>
+        private async Task<bool> CashOrderFormsAreReadyAsync(
+            IReadOnlyCollection<Report> reports,
+            ISet<string> deletedCodes)
+        {
+            var required = new[]
+            {
+                new { Code = "cash.receipt.native", ClosedXml = false },
+                new { Code = "cash.payment.native", ClosedXml = false },
+                new { Code = "cash.receipt.closedxml", ClosedXml = true },
+                new { Code = "cash.payment.closedxml", ClosedXml = true }
+            };
+
+            foreach (var item in required)
+            {
+                if (deletedCodes.Contains(item.Code))
+                    continue; // код помечен удалённым — полноценный путь его тоже не создаёт
+
+                var report = reports.FirstOrDefault(report => report.Code == item.Code);
+                if (report == null || report.DataSourceId == null)
+                    return false;
+
+                if (string.IsNullOrWhiteSpace(item.ClosedXml ? report.ClosedXmlLayout : report.Template))
+                    return false;
+
+                if (item.ClosedXml &&
+                    !await _context.ReportDataSets.AsNoTracking()
+                        .AnyAsync(dataSet => dataSet.MetadataObjectId == report.DataSourceId))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public async Task SeedPaymentOrderFormsAsync()

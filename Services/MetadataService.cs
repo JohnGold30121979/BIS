@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Internal;
 using Npgsql;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text;
@@ -80,7 +81,7 @@ namespace BIS.ERP.Services
         /// Каждый вызов возвращает НОВОЕ короткоживущее соединение, чтобы исключить
         /// ошибку "A command is already in progress" при одновременном чтении/записи.
         /// </summary>
-        private AppDbContext CreateIndependentContext()
+        public AppDbContext CreateIndependentContext()
         {
             // Если есть фабрика — используем её (безопасно и контролируемо через DI).
             if (_contextFactory != null)
@@ -96,6 +97,29 @@ namespace BIS.ERP.Services
                 ?? AppSettings.Instance.GetMasterConnectionString();
             return new AppDbContext(connString);
         }
+
+        /// <summary>
+        /// Экземпляр сервиса на СВОЁМ подключении (окно, диалог, фоновая задача).
+        ///
+        /// Окна и диалоги не должны делить один контекст: он не переносит параллельных
+        /// команд, и одно окно ловит «A second operation was started on this context
+        /// instance…» из-за загрузки в другом окне. Своё подключение даёт окнам
+        /// независимость и позволяет им действительно работать параллельно.
+        ///
+        /// Контекст живёт столько же, сколько окно/диалог. Вызывающий может получить
+        /// его же через <see cref="CreateIndependent(out AppDbContext)"/>, чтобы
+        /// построить на этом подключении другие сервисы (например, InvoiceService).
+        /// </summary>
+        public MetadataService CreateIndependent(out AppDbContext context)
+        {
+            context = CreateIndependentContext();
+            return _contextFactory == null
+                ? new MetadataService(context)
+                : new MetadataService(context, _contextFactory);
+        }
+
+        /// <summary>То же, что <see cref="CreateIndependent(out AppDbContext)"/>, без контекста.</summary>
+        public MetadataService CreateIndependent() => CreateIndependent(out _);
 
         // Инициализация базовых метаданных (как в 1С)
         public async Task InitializeDefaultMetadataAsync(Guid infoBaseId)
@@ -509,6 +533,9 @@ namespace BIS.ERP.Services
             await _context.Database.OpenConnectionAsync();
             var columnTypes = await DbValueConverter.LoadColumnTypesAsync(
                 _context.Database.GetDbConnection(), catalog.TableName);
+
+            // Счёт из диалога приходит кодом, а колонка в новой базе — uuid.
+            await NormalizeAccountReferenceValuesAsync(catalog, itemData, columnTypes);
 
             foreach (var field in SelectFieldsForWrite(catalog, itemData))
             {
@@ -1185,12 +1212,155 @@ namespace BIS.ERP.Services
             };
         }
 
+        /// <summary>
+        /// Приводит ссылки на «План счетов» к фактическому типу колонки.
+        ///
+        /// Базы создавались разными версиями: до перехода «Reference → uuid»
+        /// (см. GetSqlTypeForField) ссылочные колонки были text и хранили КОД счёта
+        /// («14160000»), после перехода — uuid и хранят Id. Диалог выбора счёта
+        /// (AccountPickerControlFactory → AccountAnalyticsRules.GetAccountValueForField)
+        /// отдаёт код всегда, поэтому на uuid-базе UPDATE падал с
+        /// «22P02: неверный синтаксис для типа uuid: "14160000"» — так и не сохранялись
+        /// пары счетов у партнёров. Здесь код превращается в Id, но только для
+        /// uuid-колонок: текстовые колонки старых баз продолжают хранить код.
+        /// </summary>
+        private async Task NormalizeAccountReferenceValuesAsync(
+            MetadataObject metadata,
+            Dictionary<string, object> data,
+            IReadOnlyDictionary<string, string>? columnTypes = null)
+        {
+            if (data == null || string.IsNullOrWhiteSpace(metadata.TableName))
+                return;
+
+            var accountFields = metadata.Fields
+                .Where(IsAccountReferenceField)
+                .ToList();
+            if (accountFields.Count == 0)
+                return;
+
+            columnTypes ??= await LoadColumnTypesAsync(metadata.TableName);
+            if (columnTypes.Count == 0)
+                return;
+
+            var pending = new List<(MetadataField Field, string Code)>();
+            var codes = new List<string>();
+
+            foreach (var field in accountFields)
+            {
+                if (!columnTypes.TryGetValue(field.DbColumnName, out var columnType) ||
+                    !string.Equals(columnType, "uuid", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!TryGetFieldValue(data, field, out var rawValue) || rawValue is null or DBNull)
+                    continue;
+
+                if (rawValue is Guid)
+                {
+                    // Уже Id ссылки — приводить нечего.
+                    continue;
+                }
+
+                var text = rawValue.ToString()?.Trim() ?? string.Empty;
+                if (text.Length == 0 || Guid.TryParse(text, out _))
+                    continue;
+
+                var code = NormalizeAccountCodeText(text);
+                if (code.Length == 0)
+                    continue;
+
+                pending.Add((field, code));
+                if (!codes.Contains(code, StringComparer.OrdinalIgnoreCase))
+                    codes.Add(code);
+            }
+
+            if (pending.Count == 0)
+                return;
+
+            var idsByCode = await LoadChartOfAccountIdsByCodeAsync(codes);
+
+            foreach (var (field, code) in pending)
+            {
+                if (!idsByCode.TryGetValue(code, out var accountId))
+                {
+                    throw new InvalidOperationException(
+                        $"Счет «{code}» не найден в плане счетов (поле «{field.Name}»). " +
+                        "Выберите счёт из плана счетов и сохраните запись повторно.");
+                }
+
+                data[field.Name] = accountId;
+            }
+        }
+
+        /// <summary>
+        /// Поле — ссылка на план счетов (Reference). Только такие поля могут лежать
+        /// в uuid-колонке, поэтому только их и нормализуем.
+        /// </summary>
+        private static bool IsAccountReferenceField(MetadataField field)
+        {
+            if (string.IsNullOrWhiteSpace(field.DbColumnName))
+                return false;
+
+            if (!string.Equals(field.FieldType, "Reference", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true ||
+                   AccountAnalyticsRules.IsAccountSelectorField(field);
+        }
+
+        /// <summary>
+        /// «14160000 - Расчеты по прочим услугам» → «14160000»: в поле мог попасть
+        /// не только код, но и подпись из выпадающего списка.
+        /// </summary>
+        private static string NormalizeAccountCodeText(string text)
+        {
+            var trimmed = (text ?? string.Empty).Trim();
+            var separatorIndex = trimmed.IndexOf(" - ", StringComparison.Ordinal);
+            return separatorIndex > 0 ? trimmed[..separatorIndex].Trim() : trimmed;
+        }
+
+        /// <summary>Фактические типы колонок таблицы (information_schema).</summary>
+        private async Task<Dictionary<string, string>> LoadColumnTypesAsync(string tableName)
+        {
+            var connection = _context.Database.GetDbConnection();
+            var openedHere = connection.State != ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+
+            try
+            {
+                return await DbValueConverter.LoadColumnTypesAsync(connection, tableName);
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
+        }
+
         // ==================== ПРЕДУСТАНОВЛЕННЫЕ СПРАВОЧНИКИ ====================
 
         public async Task InitializePredefinedCatalogsAsync(Guid infoBaseId)
         {
             try
             {
+                var stageWatch = System.Diagnostics.Stopwatch.StartNew();
+
+                // Замеры внутри «Предустановленных справочников»: этап мерится целиком,
+                // а на удалённой базе важно видеть, какая группа справочников тормозит.
+                void ReportStage(string stage)
+                {
+                    if (stageWatch.ElapsedMilliseconds >= 200)
+                    {
+                        SystemLogService.Warning(
+                            $"⏱ Справочники: {stage}: {stageWatch.ElapsedMilliseconds} мс",
+                            "Startup");
+                    }
+
+                    stageWatch.Restart();
+                }
+
                 // Получаем конфигурацию по переданному Id
                 var config = await _context.MetadataConfigurations
                     .FirstOrDefaultAsync(c => c.InfoBaseId == infoBaseId);
@@ -1223,6 +1393,8 @@ namespace BIS.ERP.Services
                     .Select(m => m.Name)
                     .ToListAsync();
 
+                ReportStage("конфигурация и списки метаданных");
+
                 // Создаём  справочники
                 await EnsureUnifiedCashOrderDocumentAsync(config);
                 var existingDocumentsWithFields = await _context.MetadataObjects
@@ -1230,6 +1402,8 @@ namespace BIS.ERP.Services
                     .Where(m => m.ObjectType == "Document")
                     .ToListAsync();
                 await EnsureCashOrderDocumentStructureAsync(existingDocumentsWithFields);
+
+                ReportStage("документ КО");
 
                 if (!existingCatalogs.Contains("Участки"))
                     await CreateSitesCatalog(config);
@@ -1287,11 +1461,15 @@ namespace BIS.ERP.Services
                     await CreateCashDesksCatalog(config);
                 await EnsureCashDesksCatalogStructureAsync();
 
+                ReportStage("базовые справочники");
+
                 // Новые справочники                
 
                 if (!existingCatalogs.Contains("Налоги"))
                     await CreateTaxCatalog(config);
                 await EnsureTaxCatalogStructureAsync();
+
+                ReportStage("материалы, валюты, налоги");
 
                 if (!existingCatalogs.Contains("Подразделения"))
                     await CreateDivisionCatalog(config);
@@ -1315,6 +1493,8 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Должности"))
                     await CreatePositionsCatalog(config);
 
+                ReportStage("виды, классификация, типы поставки");
+
                 if (!existingCatalogs.Contains(AccountPairsCatalogName) &&
                     !existingCatalogs.Contains(LegacyAdvancePaymentsCatalogName))
                     await CreateAdvancePaymentsCatalog(config);
@@ -1327,8 +1507,12 @@ namespace BIS.ERP.Services
                     await CreateExchangeRateDiffCatalog(config);
                 await EnsureExchangeRateDiffCatalogStructureAsync();
 
+                ReportStage("пары счетов и курсовые разницы");
+
                 await EnsureAccountAnalyticsLinksCatalogAsync(config);
                 await EnsureStandardReportTemplatesAsync(config);
+
+                ReportStage("аналитика счетов и шаблоны отчётов");
 
                 // Системные справочники абонентского отдела.
                 if (!existingCatalogs.Contains("Справочник типов услуг"))
@@ -1339,8 +1523,12 @@ namespace BIS.ERP.Services
                     await CreateProductionSitesCatalog(config);
                 await EnsureProductionSitesCatalogStructureAsync();
 
+                ReportStage("абонентский отдел");
+
                 // Модуль «Абонентский отдел» и привязка к нему его справочников.
                 await new ModuleMetadataService(_context).EnsureAbonentModuleCatalogsAsync();
+
+                ReportStage("модуль «Абонентский отдел»");
 
                 System.Diagnostics.Debug.WriteLine("Все предустановленные справочники созданы");
             }
@@ -1379,6 +1567,9 @@ namespace BIS.ERP.Services
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
             ValidateChartOfAccountsCode(metadata, data);
+
+            // Счета-ссылки: код из диалога → uuid для новых баз (иначе 22P02).
+            await NormalizeAccountReferenceValuesAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
@@ -1474,6 +1665,9 @@ namespace BIS.ERP.Services
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
             ValidateChartOfAccountsCode(metadata, data);
+
+            // Счета-ссылки: код из диалога → uuid для новых баз (иначе 22P02).
+            await NormalizeAccountReferenceValuesAsync(metadata, data);
 
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data, recordId);

@@ -484,14 +484,24 @@ namespace BIS.ERP.Services
             };
         }
 
+        /// <summary>
+        /// Значение счёта для записи в поле. Ссылочное поле хранит Id (uuid-колонка),
+        /// строковое — код счёта: в проводках, кассах и счетах материала колонки
+        /// текстовые, и там исторически лежит код («14160000»).
+        ///
+        /// Раньше код возвращался для любого поля с ReferenceCatalog «План счетов»,
+        /// и на базах, созданных после перехода Reference → uuid, UPDATE падал с
+        /// «22P02: неверный синтаксис для типа uuid» — так не сохранялись пары счетов.
+        /// </summary>
         public static object GetAccountValueForField(MetadataField field, AccountReferenceItem account)
         {
-            if (field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true)
-                return account.Code;
+            if (string.Equals(field.FieldType, "Reference", StringComparison.OrdinalIgnoreCase))
+                return account.Id.ToString();
 
             var normalizedName = NormalizeFieldName(field.Name);
             var normalizedColumn = NormalizeFieldName(field.DbColumnName);
-            if (normalizedName is "дебет" or "кредит" or "счет дебета" or "счет кредита" or
+            if (field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true ||
+                normalizedName is "дебет" or "кредит" or "счет дебета" or "счет кредита" or
                 "корр счет" or "коррсчет" or "счет кассы" or "счет учета" or
                 "счет амортизации" or "затратный счет" or "новый затратный счет" ||
                 normalizedColumn is "debit account" or "credit account" or "corr account" or

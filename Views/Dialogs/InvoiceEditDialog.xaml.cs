@@ -111,8 +111,17 @@ namespace BIS.ERP.Views.Dialogs
             InitializeComponent();
             _document = document;
             ApplyAccountFieldLabels();
-            _metadataService = metadataService;
-            _invoiceService = invoiceService;
+
+            // Диалог работает на своём подключении: окно-список и другие вкладки
+            // могут грузиться одновременно, а один контекст параллельных команд
+            // не переносит («A second operation was started…»). InvoiceService
+            // строится на том же подключении, чтобы диалог был сам с собой
+            // последовательным. Параметр invoiceService оставлен для совместимости
+            // вызовов — его состояние (Configure) здесь выставляется заново.
+            _metadataService = metadataService.CreateIndependent(out var dialogContext);
+            _invoiceService = new InvoiceService(dialogContext);
+            _invoiceService.Configure(document);
+
             _editId = editId;
             _isReadOnlyMode = isReadOnly;
             DataContext = this;

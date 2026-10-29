@@ -24,13 +24,23 @@ namespace BIS.ERP.Views
         private readonly List<InvoiceListRow> _allInvoices = new();
         private readonly ObservableCollection<InvoiceListRow> _filteredInvoices = new();
 
+        /// <summary>
+        /// Последовательный доступ к <see cref="_invoiceService"/>: загрузка списка и
+        /// выбор строки (строки счёта-фактуры) могут наложиться друг на друга —
+        /// у сервиса одно подключение, параллельные команды оно не переносит.
+        /// </summary>
+        private readonly System.Threading.SemaphoreSlim _invoiceGate = new(1, 1);
+        private bool _isLoadingInvoices;
+
         public InvoiceWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
             _isRegistrationMode = InvoiceDocumentTypes.IsPurchase(documentMetadata.Name);
             _isSalesMode = InvoiceDocumentTypes.IsSales(documentMetadata.Name);
             InitializeComponent();
             _documentMetadata = documentMetadata;
-            _metadataService = metadataService;
+            // Своё подключение: вкладки MDI не должны делить контекст — иначе
+            // загрузка одного окна роняет запросы другого («A second operation…»).
+            _metadataService = metadataService.CreateIndependent();
             TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";
             DescriptionText.Text = documentMetadata.Description;
             ConfigureModeUi();
@@ -68,12 +78,16 @@ namespace BIS.ERP.Views
         }
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
-            var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-            await new InvoiceMetadataSeedService(context).EnsureAsync();
-            _invoiceService = new InvoiceService(context);
-            _invoiceService.Configure(_documentMetadata);
-            await _invoiceService.EnsureSchemaAsync();
-            _invoiceEsfExchangeService = new InvoiceEsfExchangeService(context, _invoiceService);
+            if (_invoiceService == null)
+            {
+                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                await new InvoiceMetadataSeedService(context).EnsureAsync();
+                _invoiceService = new InvoiceService(context);
+                _invoiceService.Configure(_documentMetadata);
+                await _invoiceService.EnsureSchemaAsync();
+                _invoiceEsfExchangeService = new InvoiceEsfExchangeService(context, _invoiceService);
+            }
+
             await LoadDataAsync();
         }
 
@@ -121,9 +135,11 @@ namespace BIS.ERP.Views
 
         private async Task LoadDataAsync()
         {
-            if (_invoiceService == null)
+            if (_invoiceService == null || _isLoadingInvoices)
                 return;
 
+            await _invoiceGate.WaitAsync();
+            _isLoadingInvoices = true;
             try
             {
                 StatusText.Text = "Загрузка...";
@@ -150,6 +166,11 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "Ошибка загрузки";
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _isLoadingInvoices = false;
+                _invoiceGate.Release();
             }
         }
 
@@ -229,7 +250,15 @@ namespace BIS.ERP.Views
 
             try
             {
-                LinesGrid.ItemsSource = await _invoiceService.GetLinesAsync(selected.Id);
+                await _invoiceGate.WaitAsync();
+                try
+                {
+                    LinesGrid.ItemsSource = await _invoiceService.GetLinesAsync(selected.Id);
+                }
+                finally
+                {
+                    _invoiceGate.Release();
+                }
             }
             catch (Exception ex)
             {
@@ -311,7 +340,16 @@ namespace BIS.ERP.Views
 
             try
             {
-                await _invoiceService.DeleteInvoiceAsync(selected.Id);
+                await _invoiceGate.WaitAsync();
+                try
+                {
+                    await _invoiceService.DeleteInvoiceAsync(selected.Id);
+                }
+                finally
+                {
+                    _invoiceGate.Release();
+                }
+
                 await LoadDataAsync();
             }
             catch (Exception ex)

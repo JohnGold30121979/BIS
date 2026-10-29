@@ -78,7 +78,8 @@ namespace BIS.ERP.Views
             InitializeComponent();
             PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
-            _metadataService = metadataService;
+            // Своё подключение: загрузка идёт в Task.Run, контекст окна делить нельзя.
+            _metadataService = metadataService.CreateIndependent();
             _editId = null;
             _orderKind = NormalizeOrderKind(orderKind, document.Name);
             DialogTitle.Text = BuildDialogTitle();
@@ -92,7 +93,8 @@ namespace BIS.ERP.Views
             InitializeComponent();
             PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
-            _metadataService = metadataService;
+            // Своё подключение: загрузка идёт в Task.Run, контекст окна делить нельзя.
+            _metadataService = metadataService.CreateIndependent();
             _editId = editId;
             DialogTitle.Text = "Редактирование: кассовый ордер";
 
@@ -104,7 +106,8 @@ namespace BIS.ERP.Views
             InitializeComponent();
             PostingsPreviewGrid.ItemsSource = _postingPreviewRows;
             _document = document;
-            _metadataService = metadataService;
+            // Своё подключение: загрузка идёт в Task.Run, контекст окна делить нельзя.
+            _metadataService = metadataService.CreateIndependent();
             _editId = editId;
             _isReadOnly = isReadOnly;
             DialogTitle.Text = isReadOnly ? "Просмотр: кассовый ордер" : "Редактирование: кассовый ордер";

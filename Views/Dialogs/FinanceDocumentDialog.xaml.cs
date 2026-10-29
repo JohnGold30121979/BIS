@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Models;
+using BIS.ERP.Models;
 using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
@@ -59,7 +59,9 @@ namespace BIS.ERP.Views
             InitializeComponent();
             ConfigureWindowPlacement();
             _document = document;
-            _metadataService = metadataService;
+            // Диалог работает на своём подключении: окно-список может перезагружаться
+            // одновременно, а один контекст параллельных команд не переносит.
+            _metadataService = metadataService.CreateIndependent();
             _documentKind = FinanceDocumentKindHelper.FromName(document.Name);
             DialogTitle.Text = $"Добавление: {document.Name}";
             DatePicker.SelectedDate = DateTime.Today;
@@ -75,7 +77,9 @@ namespace BIS.ERP.Views
             InitializeComponent();
             ConfigureWindowPlacement();
             _document = document;
-            _metadataService = metadataService;
+            // Диалог работает на своём подключении: окно-список может перезагружаться
+            // одновременно, а один контекст параллельных команд не переносит.
+            _metadataService = metadataService.CreateIndependent();
             _editId = editId;
             _documentKind = FinanceDocumentKindHelper.FromName(document.Name);
             DialogTitle.Text = $"Редактирование: {document.Name}";

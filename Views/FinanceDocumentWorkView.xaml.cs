@@ -35,7 +35,8 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             _documentMetadata = documentMetadata;
-            _metadataService = metadataService;
+            // Своё подключение на вкладку: контекст не переносит параллельных команд.
+            _metadataService = metadataService.CreateIndependent();
             _documentKind = FinanceDocumentKindHelper.FromName(documentMetadata.Name);
 
             TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";

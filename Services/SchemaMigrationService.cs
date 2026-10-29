@@ -108,8 +108,39 @@ namespace BIS.ERP.Services
                 new("2026.10.27.01",
                     "Справочник «Ввод нового документа ТМЗ» → «Вид операции ТМЗ»",
                     false,
-                    RenameInventoryEntryCatalogAsync)
+                    RenameInventoryEntryCatalogAsync),
+
+                new("2026.10.29.01",
+                    "Ссылочные колонки пар счетов: text → uuid (код счёта переносится в Id)",
+                    true,
+                    EnsureAccountPairsReferenceTypesAsync)
             };
+        }
+
+        /// <summary>
+        /// Шаг 3.3 для «Пар счетов»: в базах, созданных до перехода Reference → uuid,
+        /// debit_account/credit_account/currency_id остались text, а приложение
+        /// (и новые базы) работают с uuid. Значения-коды («14160000») переводятся
+        /// в Id по плану счетов; если хоть одно значение не разобралось, колонка
+        /// не меняется — данные важнее схемы.
+        ///
+        /// Почему не «все ссылочные колонки сразу»: массовый перевод ломает сырой
+        /// SQL, который передаёт в такие колонки строковые параметры
+        /// (doc_postings.organization_id и подобные). Список проверенных колонок
+        /// живёт в ReferenceColumnMigrationService и пополняется по мере ревизии.
+        /// </summary>
+        private static async Task EnsureAccountPairsReferenceTypesAsync(AppDbContext ctx)
+        {
+            var result = await new ReferenceColumnMigrationService(ctx).ConvertAsync();
+            foreach (var item in result.Converted)
+            {
+                SystemLogService.Info($"Пары счетов: {item} → uuid.", "Schema");
+            }
+
+            foreach (var problem in result.Problems)
+            {
+                SystemLogService.Warning($"Пары счетов: {problem}", "Schema");
+            }
         }
 
         /// <summary>
@@ -163,9 +194,20 @@ namespace BIS.ERP.Services
 
                 try
                 {
+                    // Замер шага: на удалённой базе дорог каждый запрос, нужно видеть,
+                    // какой шаг съедает время (этап «Схема и миграции» мерится целиком).
+                    var watch = System.Diagnostics.Stopwatch.StartNew();
                     await step.Apply(_context);
                     await RecordAsync(step);
+                    watch.Stop();
                     applied++;
+
+                    if (watch.ElapsedMilliseconds >= 200)
+                    {
+                        SystemLogService.Warning(
+                            $"⏱ Миграция {step.Version} ({step.Description}): {watch.ElapsedMilliseconds} мс",
+                            "Migration");
+                    }
                 }
                 catch (Exception ex)
                 {

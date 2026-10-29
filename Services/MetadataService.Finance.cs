@@ -265,6 +265,36 @@ public partial class MetadataService
     {
         try
         {
+            // currency_id в старых базах — text, в новых — uuid. Сравнение uuid
+            // с '' (NULLIF("currency_id", '')) давало 22P02 «неверный синтаксис для
+            // типа uuid: ""», и нормализация пар молча не выполнялась ни разу.
+            // Поэтому SQL собирается по фактическому типу колонки.
+            var columnTypes = await LoadColumnTypesAsync(catalog.TableName);
+            var currencyIsUuid = columnTypes.TryGetValue("currency_id", out var currencyType) &&
+                                 string.Equals(currencyType, "uuid", StringComparison.OrdinalIgnoreCase);
+
+            var currencyAssignment = currencyIsUuid
+                ? @"""currency_id"" = CASE
+                        WHEN ""currency_id"" IS NOT NULL THEN ""currency_id""
+                        WHEN NOT COALESCE(""use_currency"", false) THEN NULL
+                        ELSE COALESCE(
+                            (SELECT c.""Id"" FROM ""catalog_currencies"" c
+                             WHERE COALESCE(c.""is_base"", false) = true ORDER BY c.""code"" LIMIT 1),
+                            (SELECT c.""Id"" FROM ""catalog_currencies"" c
+                             WHERE UPPER(c.""code"") = 'KGS' LIMIT 1)
+                        )
+                    END"
+                : @"""currency_id"" = CASE
+                        WHEN COALESCE(NULLIF(""currency_id"", ''), '') <> '' THEN ""currency_id""
+                        WHEN NOT COALESCE(""use_currency"", false) THEN NULL
+                        ELSE COALESCE(
+                            (SELECT c.""Id""::text FROM ""catalog_currencies"" c
+                             WHERE COALESCE(c.""is_base"", false) = true ORDER BY c.""code"" LIMIT 1),
+                            (SELECT c.""Id""::text FROM ""catalog_currencies"" c
+                             WHERE UPPER(c.""code"") = 'KGS' LIMIT 1)
+                        )
+                    END";
+
             await _context.Database.ExecuteSqlRawAsync($@"
                 UPDATE ""{catalog.TableName}""
                 SET
@@ -282,23 +312,14 @@ public partial class MetadataService
                     ""generate_postings"" = COALESCE(""generate_postings"", true),
                     ""use_internal_settlements"" = COALESCE(""use_internal_settlements"", false),
                     ""is_active"" = COALESCE(""is_active"", true),
-                    -- Валютная пара должна ссылаться на валюту: подставляем базовую
-                    -- (is_base), а при её отсутствии — с кодом KGS. Невалютным парам
-                    -- поле очищается, чтобы ссылка не сохранялась «про запас».
-                    ""currency_id"" = CASE
-                        WHEN COALESCE(NULLIF(""currency_id"", ''), '') <> '' THEN ""currency_id""
-                        WHEN NOT COALESCE(""use_currency"", false) THEN NULL
-                        ELSE COALESCE(
-                            (SELECT c.""Id""::text FROM ""catalog_currencies"" c
-                             WHERE COALESCE(c.""is_base"", false) = true ORDER BY c.""code"" LIMIT 1),
-                            (SELECT c.""Id""::text FROM ""catalog_currencies"" c
-                             WHERE UPPER(c.""code"") = 'KGS' LIMIT 1)
-                        )
-                    END
+                    {currencyAssignment}
                 WHERE true;");
         }
         catch (Exception ex)
         {
+            SystemLogService.Warning(
+                $"Не удалось нормализовать справочник '{AccountPairsCatalogName}': {ex.Message}",
+                nameof(MetadataService));
             System.Diagnostics.Debug.WriteLine($"Ошибка нормализации справочника '{AccountPairsCatalogName}': {ex.Message}");
         }
     }
@@ -597,8 +618,6 @@ public partial class MetadataService
     }
     private async Task<int> AddAdvancePaymentDataToTable(MetadataObject catalog)
     {
-        await NormalizeAdvancePaymentSeedCodesAsync(catalog.TableName);
-
         var items = new[]
         {
             new { code = "1", name = "Расчеты по услугам", debit = "18200000", credit = "31200000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = true, internalSettlements = false },
@@ -613,17 +632,41 @@ public partial class MetadataService
             new { code = "10", name = "Расчеты по прочим услугам", debit = "14160000", credit = "32160000", module = "Финансы", organizations = true, personnel = false, currency = false, settlements = true, postings = false, internalSettlements = false }
         };
 
+        // Сид вызывается дважды за старт (шаг миграции + предустановленные
+        // справочники) и раньше каждый раз делал по 10 «INSERT … WHERE NOT EXISTS».
+        // На удалённой базе это десятки round-trip'ов и секунды ожидания. Сначала
+        // одним запросом выясняем, каких кодов не хватает, и работаем только с ними.
+        var existingCodes = await LoadAccountPairCodesAsync(catalog.TableName);
+        if (items.All(item => existingCodes.Contains(item.code)))
+        {
+            // Все пары на месте: легаси-коды (SERVICES, SUPPLIERS, …) уже не нужны
+            // и удаляются одним запросом; нормализация кодов при этом не требуется.
+            await DeactivateLegacyAdvancePaymentRowsAsync(catalog.TableName);
+            return 0;
+        }
+
+        await NormalizeAdvancePaymentSeedCodesAsync(catalog.TableName);
+
+        // После нормализации набор кодов мог измениться (SERVICES → 1).
+        existingCodes = await LoadAccountPairCodesAsync(catalog.TableName);
+        var missingItems = items.Where(item => !existingCodes.Contains(item.code)).ToList();
+        if (missingItems.Count == 0)
+        {
+            await DeactivateLegacyAdvancePaymentRowsAsync(catalog.TableName);
+            return 0;
+        }
+
         // debit_account/credit_account — uuid-ссылки на «План счетов», а в сиде счета
         // заданы кодами («18200000»). Вставка кода в uuid-колонку давала 22P02
         // («неверный синтаксис для типа uuid»), исключение проглатывалось — и в новой
         // инфобазе справочник оставался пустым. Ссылку берём по коду счёта.
         var accountIds = await LoadChartOfAccountIdsByCodeAsync(
-            items.SelectMany(item => new[] { item.debit, item.credit }));
+            missingItems.SelectMany(item => new[] { item.debit, item.credit }));
 
         var skipped = new List<string>();
         var inserted = 0;
 
-        foreach (var item in items)
+        foreach (var item in missingItems)
         {
             if (!accountIds.TryGetValue(item.debit, out var debitAccountId) ||
                 !accountIds.TryGetValue(item.credit, out var creditAccountId))
@@ -677,6 +720,48 @@ public partial class MetadataService
             return 0;
 
         return await AddAdvancePaymentDataToTable(catalog);
+    }
+
+    /// <summary>
+    /// Коды, которые уже есть в справочнике пар. Один запрос вместо десяти
+    /// «INSERT … WHERE NOT EXISTS» при каждом старте (на удалённой базе это
+    /// заметные секунды: сид вызывается и миграцией, и предустановленными справочниками).
+    /// </summary>
+    private async Task<HashSet<string>> LoadAccountPairCodesAsync(string tableName)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var connection = _context.Database.GetDbConnection();
+        var openedHere = connection.State != System.Data.ConnectionState.Open;
+        if (openedHere)
+            await _context.Database.OpenConnectionAsync();
+
+        try
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = $@"
+                SELECT ""code""
+                FROM ""{tableName}""
+                WHERE COALESCE(""code"", '') <> '';";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (reader.IsDBNull(0))
+                    continue;
+
+                var code = reader.GetString(0)?.Trim();
+                if (!string.IsNullOrWhiteSpace(code))
+                    result.Add(code);
+            }
+        }
+        finally
+        {
+            if (openedHere)
+                await _context.Database.CloseConnectionAsync();
+        }
+
+        return result;
     }
 
     /// <summary>

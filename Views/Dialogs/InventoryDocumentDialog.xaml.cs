@@ -72,6 +72,7 @@ namespace BIS.ERP.Views.Dialogs
         private TextBox? _vatRateBox;
         private TextBox? _salesTaxRateBox;
         private DatePicker? _dateBox;
+        private Guid? _defaultEntryId;
         private List<Dictionary<string, object>> _taxRows = new();
 
         public Guid SavedRecordId { get; private set; }
@@ -301,6 +302,10 @@ namespace BIS.ERP.Views.Dialogs
                          .ThenBy(item => Read(item, "Наименование", "name"), StringComparer.CurrentCulture))
             {
                 var id = ReadGuid(row);
+
+                if (_defaultEntryId == null && id.HasValue)
+                    _defaultEntryId = id.Value;
+
                 if (!id.HasValue)
                     continue;
 
@@ -494,6 +499,9 @@ namespace BIS.ERP.Views.Dialogs
 
             if (_paymentCombo != null && _defaultPaymentId.HasValue)
                 _paymentCombo.SelectedValue = _defaultPaymentId.Value;
+
+            if (_entryEditor != null && _entryEditor.SelectedValue == null && _defaultEntryId.HasValue)
+                _entryEditor.SelectedValue = _defaultEntryId.Value;
 
             ApplyTaxRates();
         }
