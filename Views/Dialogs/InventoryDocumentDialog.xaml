@@ -13,6 +13,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <ScrollViewer MaxHeight="440" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel>
             <Border Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1" CornerRadius="7" Padding="10">
@@ -81,15 +82,46 @@
                 </StackPanel>
             </Grid>
         </StackPanel>
+        </ScrollViewer>
 
-        <DataGrid x:Name="LinesGrid" Grid.Row="1" Margin="0,10,0,0"
+        <DataGrid x:Name="LinesGrid" Grid.Row="1" Margin="0,10,0,0" MinHeight="120"
                   AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                   HeadersVisibility="Column" RowHeight="26" GridLinesVisibility="Horizontal"
                   CellEditEnding="OnCellEditEnding" CanUserReorderColumns="True"
                   PreviewKeyDown="OnLinesGridPreviewKeyDown"
                   VerticalScrollBarVisibility="Auto">
+            <!-- Строки без системной синей заливки: фон и текст — из темы,
+                 выделенная ячейка показывает только акцентную рамку. -->
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+                    <Setter Property="BorderThickness" Value="1"/>
+                    <Setter Property="BorderBrush" Value="Transparent"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AppBodyTextBrush}"/>
+                            <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.CellStyle>
             <DataGrid.Columns>
-                <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="80" IsReadOnly="True"/>
+                <DataGridTextColumn Header="№" Binding="{Binding LineNumber}" Width="40" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="70" IsReadOnly="True"/>
                 <!-- Материал — как счёт в шапке: поле с ручным вводом и кнопкой «?»
                      (справочник материалов с поиском). -->
                 <DataGridTemplateColumn x:Name="MaterialColumn" Header="Материал" Width="300"
@@ -145,25 +177,58 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridComboBoxColumn x:Name="SiteColumn" Header="Участок" Width="140"
-                                        SelectedValueBinding="{Binding SiteId, UpdateSourceTrigger=PropertyChanged}"
-                                        DisplayMemberPath="Display" SelectedValuePath="Id"/>
-                <DataGridTextColumn Header="%" Binding="{Binding VatRate}" Width="60"/>
-                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity}" Width="90"/>
-                <DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="100"/>
+                <!-- Участок — тоже поле с ручным вводом и кнопкой «?». -->
+                <DataGridTemplateColumn x:Name="SiteColumn" Header="Участок" Width="170">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Height="22" Padding="2,0,2,0"
+                                         VerticalContentAlignment="Center"
+                                         BorderThickness="0" Background="Transparent"
+                                         Text="{Binding SiteText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Введите наименование участка; «?» — выбор из справочника"
+                                         LostFocus="OnSiteTextLostFocus"/>
+                                <Button Grid.Column="1" Content="?" Width="24" Height="22" Padding="0"
+                                        Margin="2,0,0,0"
+                                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                        ToolTip="Выбрать участок из справочника"
+                                        Tag="site"
+                                        Click="OnPickSiteClick"/>
+                            </Grid>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
+                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
                 <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="100" IsReadOnly="True"/>
             </DataGrid.Columns>
         </DataGrid>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
-            <Button Content="Добавить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
-            <Button Content="Удалить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnDeleteLineClick"/>
-            <Button Content="Пересчет" Width="110" Height="32" Margin="0,0,8,0" Click="OnRecalculateClick"/>
-            <Button Content="Запись" Width="110" Height="32" Margin="24,0,8,0" Click="OnSaveClick"
-                    Background="{DynamicResource AppAccentBrush}" Foreground="White"/>
-            <Button Content="Отмена" Width="110" Height="32" Click="OnCancelClick"/>
-        </StackPanel>
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Добавить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
+                <Button Content="Удалить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnDeleteLineClick"/>
+                <Button Content="Пересчет" Width="110" Height="32" Margin="0,0,8,0" Click="OnRecalculateClick"/>
+            </StackPanel>
+
+            <!-- Завершающие кнопки — как в счёте-фактуре, справа под таблицей. -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button x:Name="SaveButton" Content="Запись" Width="110" Height="32" Margin="0,0,8,0"
+                        Click="OnSaveClick" Background="{DynamicResource AppAccentBrush}" Foreground="White"/>
+                <Button Content="Отмена" Width="110" Height="32" Click="OnCancelClick"/>
+            </StackPanel>
+        </Grid>
 
         <Border Grid.Row="3" Margin="0,10,0,0" Padding="8"
                 Background="{DynamicResource AppSurfaceBrush}" BorderBrush="{DynamicResource AppBorderBrush}"

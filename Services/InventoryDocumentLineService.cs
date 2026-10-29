@@ -21,6 +21,7 @@ namespace BIS.ERP.Services
         private string _accountCode = string.Empty;
         private string _accountText = string.Empty;
         private Guid? _siteId;
+        private string _siteText = string.Empty;
         private Guid? _responsiblePersonId;
         private decimal _quantity;
         private decimal _price;
@@ -50,6 +51,9 @@ namespace BIS.ERP.Services
         /// <summary>Текст ячейки «Дебет»: «Код - Наименование» счёта плана счетов.</summary>
         public string AccountText { get => _accountText; set => Set(ref _accountText, value); }
         public Guid? SiteId { get => _siteId; set => Set(ref _siteId, value); }
+
+        /// <summary>Текст ячейки «Участок»: наименование участка (вводится или выбирается).</summary>
+        public string SiteText { get => _siteText; set => Set(ref _siteText, value); }
         public Guid? ResponsiblePersonId { get => _responsiblePersonId; set => Set(ref _responsiblePersonId, value); }
         public decimal Quantity { get => _quantity; set => Set(ref _quantity, value); }
         public decimal Price { get => _price; set => Set(ref _price, value); }

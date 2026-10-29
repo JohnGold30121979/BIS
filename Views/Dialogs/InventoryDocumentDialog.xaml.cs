@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Windows;
@@ -47,6 +48,8 @@ namespace BIS.ERP.Views.Dialogs
         private List<Dictionary<string, object>> _materials = new();
         private List<Dictionary<string, object>> _currencyRows = new();
         private List<Dictionary<string, object>> _accountRows = new();
+        private List<Dictionary<string, object>> _sites = new();
+        private MetadataObject? _materialsCatalog;
         // Защита от двойного открытия окна выбора (мышь + Click).
         private bool _pickerOpening;
         // Какая кнопка «?» нажата в таблице: ждём отпускания мыши.
@@ -99,6 +102,8 @@ namespace BIS.ERP.Views.Dialogs
                 ? $"Документ ТМЗ: {document.Name}"
                 : $"Новый документ ТМЗ: {document.Name}";
 
+            SaveButton.Content = recordId.HasValue ? "Запись" : "Добавить";
+
             LinesGrid.ItemsSource = _lines;
 
             // Клик по «?» в ячейке DataGrid съедает на выделение строки — слушаем
@@ -127,7 +132,10 @@ namespace BIS.ERP.Views.Dialogs
                 var currencies = await LoadRowsAsync(catalogs, "Справочник валют");
                 var sites = await LoadRowsAsync(catalogs, "Участки");
                 var responsible = await LoadRowsAsync(catalogs, "МОЛ");
-                var materials = await LoadRowsAsync(catalogs, "Справочник материалов");
+                var materials = await LoadRowsAsync(catalogs, "Справочник материалов", "Материалы");
+                _materialsCatalog = catalogs.FirstOrDefault(item =>
+                    string.Equals(item.Name, "Справочник материалов", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Name, "Материалы", StringComparison.OrdinalIgnoreCase));
                 var entries = await LoadRowsAsync(catalogs, InventoryDocumentModel.EntryCatalogName);
 
                 BuildTopRow(FilterEntriesForDocument(entries));
@@ -151,7 +159,7 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 _accountRows = accounts;
-                SiteColumn.ItemsSource = ToItems(sites, row => Read(row, "Наименование"));
+                _sites = sites;
 
                 ApplyExistingValues();
 
@@ -1064,11 +1072,15 @@ namespace BIS.ERP.Views.Dialogs
 
                 row.MaterialText = FormatMaterialText(row.MaterialCode, row.MaterialName);
                 row.AccountText = FormatLoadedAccountText(row.AccountCode);
+                row.SiteText = FormatLoadedSiteText(row.SiteId);
+                row.PropertyChanged += OnLinePropertyChanged;
                 _lines.Add(row);
             }
 
             if (_lines.Count == 0)
                 AddLine();
+
+            RenumberLines();
         }
 
         // ---------- Строки ----------
@@ -1081,11 +1093,23 @@ namespace BIS.ERP.Views.Dialogs
 
         private void AddLine()
         {
-            _lines.Add(new InventoryLineRow
+            var line = new InventoryLineRow
             {
                 VatRate = ReadDecimalEditor("vat_rate"),
                 SalesTaxRate = ReadDecimalEditor("sales_tax_rate")
-            });
+            };
+
+            line.PropertyChanged += OnLinePropertyChanged;
+            _lines.Add(line);
+
+            RenumberLines();
+        }
+
+        /// <summary>Номера строк в таблице — как в счёте-фактуре: 1, 2, 3…</summary>
+        private void RenumberLines()
+        {
+            for (var index = 0; index < _lines.Count; index++)
+                _lines[index].LineNumber = index + 1;
         }
 
         private void OnDeleteLineClick(object sender, RoutedEventArgs e)
@@ -1093,6 +1117,7 @@ namespace BIS.ERP.Views.Dialogs
             if (LinesGrid.SelectedItem is InventoryLineRow row)
             {
                 _lines.Remove(row);
+                RenumberLines();
                 UpdateTotals();
             }
         }
@@ -1147,6 +1172,25 @@ namespace BIS.ERP.Views.Dialogs
                 : "0,00";
         }
 
+        /// <summary>
+        /// Количество, цена и ставки пересчитывают строку и итоги сразу при вводе:
+        /// не надо ждать окончания редактирования ячейки.
+        /// </summary>
+        private void OnLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not InventoryLineRow row)
+                return;
+
+            if (e.PropertyName is not (nameof(InventoryLineRow.Quantity) or nameof(InventoryLineRow.Price)
+                or nameof(InventoryLineRow.VatRate) or nameof(InventoryLineRow.SalesTaxRate)))
+            {
+                return;
+            }
+
+            row.Recalculate();
+            UpdateTotals();
+        }
+
         // ---------- Материал в строках ----------
 
         /// <summary>
@@ -1165,7 +1209,7 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             var kind = button.Tag as string;
-            if (kind != "material" && kind != "account")
+            if (kind is not ("material" or "account" or "site"))
                 return;
 
             _pendingPick = (row, kind);
@@ -1180,26 +1224,40 @@ namespace BIS.ERP.Views.Dialogs
             _pendingPick = null;
             e.Handled = true;
 
-            OpenPickerAfterClick(pending.Kind == "material"
-                ? () => OpenMaterialPickerAsync(pending.Row)
-                : () => OpenAccountPickerAsync(pending.Row));
+            OpenPickerAfterClick(() => OpenRowPickerAsync(pending.Row, pending.Kind));
         }
 
-        /// <summary>Кнопка «?» в ячейке материала открывает справочник материалов с поиском.</summary>
+        private Task OpenRowPickerAsync(InventoryLineRow row, string kind) => kind switch
+        {
+            "material" => OpenMaterialPickerAsync(row),
+            "account" => OpenAccountPickerAsync(row),
+            "site" => OpenSitePickerAsync(row),
+            _ => Task.CompletedTask
+        };
+
+        /// <summary>Кнопки «?» в ячейках — те же действия с клавиатуры.</summary>
         private async void OnPickMaterialClick(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is InventoryLineRow row)
                 await OpenMaterialPickerAsync(row);
         }
 
-        /// <summary>Кнопка «?» в ячейке «Дебет» — выбор счёта из плана счетов.</summary>
         private async void OnPickAccountClick(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is InventoryLineRow row)
                 await OpenAccountPickerAsync(row);
         }
 
-        /// <summary>Окно выбора открываем после завершения клика, чтобы не мешать DataGrid.</summary>
+        private async void OnPickSiteClick(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is InventoryLineRow row)
+                await OpenSitePickerAsync(row);
+        }
+
+        /// <summary>
+        /// Окно выбора открываем модально поверх документа: так оно гарантированно
+        /// появляется, а не уходит отдельной вкладкой в рабочую область.
+        /// </summary>
         private void OpenPickerAfterClick(Func<Task> open)
         {
             if (_pickerOpening)
@@ -1223,6 +1281,18 @@ namespace BIS.ERP.Views.Dialogs
             }), DispatcherPriority.Input);
         }
 
+        /// <summary>
+        /// Справочник открывается вкладкой в MDI-области, как в остальных документах;
+        /// если рабочая область недоступна, MdiDialogService покажет модальное окно.
+        /// </summary>
+        private async Task<bool> ShowPickerAsync(ReferenceSelectionDialog dialog, string title)
+        {
+            if (await MdiDialogService.ShowInWorkspaceForResultAsync(Window.GetWindow(this), dialog, title) != true)
+                return false;
+
+            return dialog.SelectedItem != null;
+        }
+
         private void OnAccountTextLostFocus(object sender, RoutedEventArgs e)
         {
             if (sender is TextBox box && box.DataContext is InventoryLineRow row)
@@ -1233,19 +1303,105 @@ namespace BIS.ERP.Views.Dialogs
         {
             var pickRows = BuildAccountPickRows();
             if (pickRows.Count == 0)
+            {
+                MessageBox.Show("План счетов пуст или не найден.", "Документ ТМЗ",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
+            }
 
             var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
             dialog.SetSearchText(AccountSearchText(row.AccountText));
 
-            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
-                    Window.GetWindow(this), dialog, "Выбор счёта") != true ||
-                dialog.SelectedItem == null)
+            if (await ShowPickerAsync(dialog, "Выбор счёта"))
+                ApplyAccount(row, dialog.SelectedItem);
+        }
+
+        private async Task OpenSitePickerAsync(InventoryLineRow row)
+        {
+            var pickRows = BuildSitePickRows();
+            if (pickRows.Count == 0)
             {
+                MessageBox.Show("Справочник участков пуст или не найден.", "Документ ТМЗ",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            ApplyAccount(row, dialog.SelectedItem);
+            var dialog = new ReferenceSelectionDialog(pickRows, "Наименование");
+            dialog.SetSearchText(row.SiteText);
+
+            if (await ShowPickerAsync(dialog, "Выбор участка"))
+                ApplySite(row, dialog.SelectedItem);
+        }
+
+        /// <summary>Строки окна выбора участка — справочник «Участки».</summary>
+        private List<Dictionary<string, object>> BuildSitePickRows()
+        {
+            var result = new List<Dictionary<string, object>>();
+            foreach (var site in _sites)
+            {
+                result.Add(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = site.TryGetValue("Id", out var id) ? id : DBNull.Value,
+                    ["Наименование"] = Read(site, "Наименование", "name")
+                });
+            }
+
+            return result;
+        }
+
+        private void ApplySite(InventoryLineRow row, Dictionary<string, object> picked)
+        {
+            row.SiteId = ReadGuid(picked);
+            row.SiteText = Read(picked, "Наименование", "name");
+        }
+
+        private void OnSiteTextLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox box && box.DataContext is InventoryLineRow row)
+                ApplySiteText(row, box.Text);
+        }
+
+        /// <summary>Ручной ввод в ячейке «Участок»: наименование сопоставляется со справочником.</summary>
+        private void ApplySiteText(InventoryLineRow row, string? text)
+        {
+            var value = text?.Trim() ?? string.Empty;
+            if (value.Length == 0)
+            {
+                row.SiteId = null;
+                row.SiteText = string.Empty;
+                return;
+            }
+
+            var site = _sites.FirstOrDefault(item =>
+                string.Equals(Read(item, "Наименование", "name"), value, StringComparison.OrdinalIgnoreCase));
+
+            if (site == null)
+            {
+                var matches = _sites
+                    .Where(item => Read(item, "Наименование", "name")
+                        .Contains(value, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                site = matches.Count == 1 ? matches[0] : null;
+            }
+
+            if (site == null)
+            {
+                // Не нашли участок — возвращаем последнее корректное значение.
+                row.SiteText = FormatLoadedSiteText(row.SiteId);
+                return;
+            }
+
+            ApplySite(row, site);
+        }
+
+        private string FormatLoadedSiteText(Guid? siteId)
+        {
+            if (!siteId.HasValue)
+                return string.Empty;
+
+            var site = _sites.FirstOrDefault(item => ReadGuid(item) == siteId.Value);
+            return site == null ? string.Empty : Read(site, "Наименование", "name");
         }
 
         /// <summary>Строки окна выбора счёта: код, наименование и тип — как в шапке документа.</summary>
@@ -1333,20 +1489,46 @@ namespace BIS.ERP.Views.Dialogs
         private async Task OpenMaterialPickerAsync(InventoryLineRow row)
         {
             var pickRows = BuildMaterialPickRows();
-            if (pickRows.Count == 0)
-                return;
-
             var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
+
+            // Справочник может быть пустым — в окне выбора доступны «Добавить» и «Изменить».
+            if (_materialsCatalog != null)
+                dialog.ConfigureCatalogEditing(_materialsCatalog, _metadataService);
+
             dialog.SetSearchText(MaterialSearchText(row.MaterialText));
 
-            if (await MdiDialogService.ShowInWorkspaceForResultAsync(
-                    Window.GetWindow(this), dialog, "Выбор материала") != true ||
-                dialog.SelectedItem == null)
-            {
-                return;
-            }
+            var picked = await ShowPickerAsync(dialog, "Выбор материала");
 
-            ApplyMaterial(row, dialog.SelectedItem);
+            // В окне могли добавить новую запись — обновляем кэш справочника.
+            await ReloadMaterialsAsync();
+
+            if (picked)
+                ApplyMaterial(row, dialog.SelectedItem);
+        }
+
+        /// <summary>Перечитывает справочник материалов после добавления записи в окне выбора.</summary>
+        private async Task ReloadMaterialsAsync()
+        {
+            if (_materialsCatalog == null)
+                return;
+
+            try
+            {
+                var rows = await _metadataService.GetCatalogDataAsync(_materialsCatalog.Id);
+                _materials = rows;
+                _materialRows.Clear();
+
+                foreach (var material in rows)
+                {
+                    var id = ReadGuid(material);
+                    if (id.HasValue)
+                        _materialRows[id.Value] = material;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Документ ТМЗ: справочник материалов не перечитан: {ex.Message}");
+            }
         }
 
         /// <summary>Строки окна выбора: код, наименование и единица измерения — как у плана счетов.</summary>
@@ -1527,13 +1709,14 @@ namespace BIS.ERP.Views.Dialogs
             LinesGrid.SelectedItem = row;
             LinesGrid.CurrentCell = new DataGridCellInfo(row, column);
             LinesGrid.ScrollIntoView(row, column);
+            LinesGrid.UpdateLayout();
             LinesGrid.Focus();
 
             if (!column.IsReadOnly)
                 LinesGrid.BeginEdit();
 
             LinesGrid.Dispatcher.BeginInvoke(
-                new Action(() => FocusCellEditor(row, column, 0)), DispatcherPriority.Input);
+                new Action(() => FocusCellEditor(row, column, 0)), DispatcherPriority.Loaded);
         }
 
         private void FocusCellEditor(InventoryLineRow row, DataGridColumn column, int attempt)
@@ -1658,7 +1841,7 @@ namespace BIS.ERP.Views.Dialogs
                 await _lineService.ReplaceLinesAsync(
                     _definition.LinesTable, _definition.ParentColumn, SavedRecordId, _lines.ToList());
 
-                DialogResult = true;
+                MdiDialogService.CloseWithResult(this, true);
             }
             catch (Exception ex)
             {
@@ -1666,7 +1849,7 @@ namespace BIS.ERP.Views.Dialogs
             }
         }
 
-        private void OnCancelClick(object sender, RoutedEventArgs e) => DialogResult = false;
+        private void OnCancelClick(object sender, RoutedEventArgs e) => MdiDialogService.CloseWithResult(this, false);
 
         private Dictionary<string, object> BuildItemData()
         {
@@ -1814,10 +1997,10 @@ namespace BIS.ERP.Views.Dialogs
 
         private async Task<List<Dictionary<string, object>>> LoadRowsAsync(
             List<MetadataObject> catalogs,
-            string catalogName)
+            params string[] catalogNames)
         {
-            var catalog = catalogs.FirstOrDefault(item =>
-                string.Equals(item.Name, catalogName, StringComparison.OrdinalIgnoreCase));
+            var catalog = catalogs.FirstOrDefault(item => catalogNames.Any(name =>
+                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)));
 
             return catalog == null
                 ? new List<Dictionary<string, object>>()
