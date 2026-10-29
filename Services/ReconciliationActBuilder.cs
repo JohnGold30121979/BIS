@@ -160,21 +160,26 @@ namespace BIS.ERP.Services
         {
             "operation_name", "debit_account", "credit_account",
             "debit_amount", "credit_amount", "debit_begin", "credit_begin",
-            "document_number", "document_date", "module",
-            "report_title", "report_summary", "period_start", "period_end"
+            "document_number", "document_date", "posting_date", "module", "module_code",
+            "report_title", "report_summary", "period_start", "period_end",
+            // Стороны акта: значения читает блок подписей макета, в сетке не нужны.
+            "our_organization", "our_director", "our_accountant",
+            "counterparty", "counterparty_director", "counterparty_accountant"
         };
 
         /// <summary>Создаёт таблицу акта сверки с колонками отчёта и служебными колонками макета.</summary>
         public static DataTable CreateTable()
         {
             var table = new DataTable("Акт сверки");
+            // Первыми идут дата и номер документа: так акт читается слева направо,
+            // а описание операции и суммы — уже после них.
+            table.Columns.Add("Дата", typeof(string));
+            table.Columns.Add("N докум", typeof(string));
             table.Columns.Add("Наименование материала, вид операции", typeof(string));
             table.Columns.Add("Дебет", typeof(string));
             table.Columns.Add("Кредит", typeof(string));
             table.Columns.Add("Сумма Дт", typeof(decimal));
             table.Columns.Add("Сумма Кт", typeof(decimal));
-            table.Columns.Add("N докум", typeof(string));
-            table.Columns.Add("Дата", typeof(string));
             table.Columns.Add("Модуль", typeof(string));
 
             // Колонки под канонические имена макета: механизм подстановки ищет

@@ -1294,15 +1294,15 @@ namespace BIS.ERP.Services
         }
 
         /// <summary>
-        /// Поле — ссылка на план счетов (Reference). Только такие поля могут лежать
-        /// в uuid-колонке, поэтому только их и нормализуем.
+        /// Поле — ссылка на план счетов. Тип поля в метаданных здесь не решает:
+        /// в старых базах «Дебет»/«Кредит» могли остаться строковыми, а колонка
+        /// уже uuid. Что делать со значением, решает фактический тип колонки
+        /// (проверяется в NormalizeAccountReferenceValuesAsync), а этот метод
+        /// отвечает только на вопрос «относится ли поле к счёту».
         /// </summary>
         private static bool IsAccountReferenceField(MetadataField field)
         {
             if (string.IsNullOrWhiteSpace(field.DbColumnName))
-                return false;
-
-            if (!string.Equals(field.FieldType, "Reference", StringComparison.OrdinalIgnoreCase))
                 return false;
 
             return field.ReferenceCatalog?.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) == true ||

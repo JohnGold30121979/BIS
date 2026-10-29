@@ -745,6 +745,9 @@ namespace BIS.ERP.Services
             if (catalog == null)
                 return result;
 
+            // is_active не фильтруем: импорт НБКР оставляет активным только
+            // последний курс валюты, а история прошлых дат должна быть видна —
+            // иначе окно «Курсы валют» показывает одну строку на валюту.
             var sql = $@"
                 SELECT rate_date,
                        COALESCE(NULLIF(rate_nb, 0), NULLIF(rate_commercial, 0), 0) AS rate,
@@ -757,7 +760,6 @@ namespace BIS.ERP.Services
                 WHERE currency_id::text = @currencyId
                   AND rate_date::date >= @fromDate
                   AND rate_date::date <= @toDate
-                  AND COALESCE(is_active, true) = true
                 ORDER BY rate_date DESC
                 LIMIT {Math.Clamp(limit, 1, 500)};";
 
@@ -826,6 +828,8 @@ namespace BIS.ERP.Services
             if (catalog == null)
                 return null;
 
+            // is_active не фильтруем: импорт НБКР делает активным только последний
+            // курс, а для документа на прошлую дату нужен именно исторический курс.
             var sql = $@"
                 SELECT rate_date,
                        COALESCE(NULLIF(rate_nb, 0), NULLIF(rate_commercial, 0), 0) AS rate,
@@ -837,7 +841,6 @@ namespace BIS.ERP.Services
                 FROM {QuoteIdentifier(catalog.TableName)}
                 WHERE currency_id::text = @currencyId
                   AND rate_date::date <= @documentDate
-                  AND COALESCE(is_active, true) = true
                 ORDER BY rate_date DESC
                 LIMIT 1;";
 
@@ -1297,10 +1300,32 @@ namespace BIS.ERP.Services
             }
 
             await RemoveLegacyOrganizationBankFieldsAsync(catalog);
+            await EnsureLegacyOrganizationBankColumnsAsync(catalog);
 
             await _context.SaveChangesAsync();
             await EnsureOrganizationGroupReferenceColumnAsync(catalog);
             await EnsurePrimaryOrganizationDataAsync(catalog);
+        }
+
+        /// <summary>
+        /// Легаси-колонки «Банк»/«Расчётный счёт»/«БИК» в справочнике организаций.
+        ///
+        /// Из метаданных эти реквизиты удалены (банки и расчётные счета ведутся
+        /// отдельными справочниками), но физические колонки читают печатные формы
+        /// и SQL-наборы отчётов. В базах, созданных после удаления полей, колонки
+        /// никто не создавал — отчёты падали:
+        /// «42703: столбец o.bank_name не существует». Держим колонки на месте.
+        /// </summary>
+        private async Task EnsureLegacyOrganizationBankColumnsAsync(MetadataObject catalog)
+        {
+            if (string.IsNullOrWhiteSpace(catalog.TableName))
+                return;
+
+            var table = QuoteIdentifier(catalog.TableName);
+            await _context.Database.ExecuteSqlRawAsync($@"
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS ""bank_name"" varchar(250);
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS ""bank_account"" varchar(100);
+                ALTER TABLE {table} ADD COLUMN IF NOT EXISTS ""bic"" varchar(50);");
         }
 
         private async Task EnsureOrganizationGroupReferenceColumnAsync(MetadataObject catalog)

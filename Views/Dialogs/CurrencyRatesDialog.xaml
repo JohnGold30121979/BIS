@@ -15,7 +15,8 @@
 
         <DataGrid x:Name="RatesGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" AlternatingRowBackground="#F5F7FA"
-                  SelectionMode="Single" MouseDoubleClick="OnRatesGridDoubleClick">
+                  SelectionMode="Single" MouseDoubleClick="OnRatesGridDoubleClick"
+                  LoadingRow="OnRatesGridLoadingRow">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Дата" Binding="{Binding DateText}" Width="130"/>
                 <DataGridTextColumn Header="Курс" Binding="{Binding RateText}" Width="140"/>

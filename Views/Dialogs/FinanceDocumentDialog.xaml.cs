@@ -1,5 +1,6 @@
 using BIS.ERP.Models;
 using BIS.ERP.Services;
+using BIS.ERP.Views.Dialogs;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -688,7 +689,11 @@ namespace BIS.ERP.Views
             if (!_editId.HasValue)
                 data["Проведен"] = false;
 
-            SetFieldValueIfExists(data, "Организация", GetSelectedReferenceId(OrganizationCombo));
+            // В авансовом отчёте организация пишется только при видимой панели
+            // (см. ApplyAdvanceReportData): иначе в документ попадало бы значение
+            // от другой пары счетов или счёта затрат.
+            if (_documentKind != FinanceDocumentKind.AdvanceReport)
+                SetFieldValueIfExists(data, "Организация", GetSelectedReferenceId(OrganizationCombo));
             SetFieldValueIfExists(data, "Счет дебета", GetAccountValueForSave(_debitAccountValue));
             SetFieldValueIfExists(data, "Счет кредита", GetAccountValueForSave(_creditAccountValue));
             SetCurrencyValues(data);
@@ -725,8 +730,14 @@ namespace BIS.ERP.Views
             {
                 var organizationId = GetSelectedReferenceId(OrganizationCombo);
                 if (organizationId == Guid.Empty)
-                    throw new InvalidOperationException("Выберите организацию для выбранной пары счетов.");
+                    throw new InvalidOperationException("Выберите организацию для выбранного счета затрат.");
                 SetFieldValueIfExists(data, "Организация", organizationId);
+            }
+            else
+            {
+                // Скрытая панель не должна записывать организацию, оставшуюся
+                // от другой пары счетов или счёта затрат.
+                SetFieldValueIfExists(data, "Организация", string.Empty);
             }
 
             data["Сумма"] = total;
@@ -795,6 +806,10 @@ namespace BIS.ERP.Views
 
             RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
+
+            // Загруженные строки могли принести счёт затрат со связью с
+            // организациями: панель организации зависит и от него.
+            UpdateAdvanceOrganizationVisibility();
         }
 
         private void AddLegacyAdvanceExpenseLine(IReadOnlyDictionary<string, object> record)
@@ -1103,7 +1118,8 @@ namespace BIS.ERP.Views
         /// видимость колонок зависит от пары счетов в шапке, а не от счёта строки,
         /// и любое переключение Visible/Collapsed заставляет DataGrid перестроить
         /// колонки вместе с находящимся в фокусе полем ввода — после этого Enter
-        /// уходил бы из таблицы на первый элемент формы.
+        /// уходил бы из таблицы на первый элемент формы. Панель организации
+        /// обновляется отдельно и легко — UpdateAdvanceOrganizationVisibility().
         /// </summary>
         private void ApplyExpenseAccount(
             AdvanceExpenseLineRow row,
@@ -1664,16 +1680,12 @@ namespace BIS.ERP.Views
         private async Task UpdateAdvanceAccountDependentVisibilityCoreAsync()
         {
             var pairRows = GetSelectedAdvancePairRows().ToList();
-            var settings = _advanceExpenseLines
-                .Select(row => _accountAnalytics.GetSettingsFromValue(row.ExpenseAccountValue))
-                .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "debit_account", "Дебет"))))
-                .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "credit_account", "Кредит"))))
-                .ToList();
 
-            // «Сотрудник» и «Организация» видны только когда в выбранной паре счетов
-            // стоят соответствующие пометки справочника «Пары счетов».
+            // «Сотрудник» виден по пометке пары счетов; «Организация» — ещё и
+            // когда выбранный счёт затрат ведётся в разрезе организаций
+            // («Связь с организациями» в плане счетов).
             var showEmployee = pairRows.Any(row => ReadBool(row, "use_personnel", "Сотрудники"));
-            var showOrganization = pairRows.Any(row => ReadBool(row, "use_organizations", "Организации"));
+            var showOrganization = ResolveAdvanceOrganizationVisibility(pairRows);
 
             FinanceEmployeePanel.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
             OrganizationPanel.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
@@ -1701,6 +1713,58 @@ namespace BIS.ERP.Views
             // с панелью валюты шапки.
             AdvanceExchangeRateColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
             AdvanceAmountCurrencyColumn.Visibility = showCurrency ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Настройки аналитики всех счетов, влияющих на шапку авансового отчёта:
+        /// счета затрат из строк и дебет/кредит выбранной пары счетов.
+        /// </summary>
+        private List<AccountAnalyticsSettings?> GetAdvanceAccountSettings(
+            IReadOnlyList<Dictionary<string, object>> pairRows)
+        {
+            return _advanceExpenseLines
+                .Select(row => _accountAnalytics.GetSettingsFromValue(row.ExpenseAccountValue))
+                .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "debit_account", "Дебет"))))
+                .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "credit_account", "Кредит"))))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Организация в авансовом отчёте нужна и тогда, когда её включает пара
+        /// счетов («Организации» в справочнике пар), и тогда, когда выбранный
+        /// счёт затрат ведётся в разрезе организаций («Связь с организациями»
+        /// в плане счетов). Второе раньше не учитывалось: поле организации
+        /// оставалось скрытым при счёте затрат со связью с организациями.
+        /// </summary>
+        private bool ResolveAdvanceOrganizationVisibility(
+            IReadOnlyList<Dictionary<string, object>> pairRows)
+        {
+            if (pairRows.Any(row => ReadBool(row, "use_organizations", "Организации")))
+                return true;
+
+            return AccountAnalyticsRules.ShouldShowField(
+                "Организация",
+                GetAdvanceAccountSettings(pairRows),
+                _accountAnalytics.Definitions,
+                "Организации",
+                showWhenNoAccountSelected: false,
+                showUnmappedFields: false);
+        }
+
+        /// <summary>
+        /// Лёгкое обновление только панели организации: счёт затрат меняется
+        /// в таблице строк, а полный UpdateAdvanceAccountDependentVisibility
+        /// переключает колонки DataGrid и сбрасывает фокус из поля ввода счёта.
+        /// </summary>
+        private void UpdateAdvanceOrganizationVisibility()
+        {
+            if (_documentKind != FinanceDocumentKind.AdvanceReport)
+                return;
+
+            var pairRows = GetSelectedAdvancePairRows().ToList();
+            OrganizationPanel.Visibility = ResolveAdvanceOrganizationVisibility(pairRows)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         /// <summary>
@@ -1818,13 +1882,46 @@ namespace BIS.ERP.Views
             RecalculateHeaderAmountCurrency();
         }
 
-        /// <summary>Кнопка «?» рядом с курсом в шапке: запрос курса валюты.</summary>
-        private async void RequestHeaderExchangeRate_Click(object sender, RoutedEventArgs e)
+        /// <summary>Кнопка «?» рядом с курсом в шапке: окно истории курсов валют.</summary>
+        private void RequestHeaderExchangeRate_Click(object sender, RoutedEventArgs e)
         {
             if (_documentKind != FinanceDocumentKind.AdvanceReport)
                 return;
 
-            await ApplyHeaderExchangeRateAsync(interactive: true);
+            if (CurrencyCombo.SelectedItem is not ReferenceItem currency)
+            {
+                MessageBox.Show("Сначала выберите валюту.", "Курс валюты",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (IsBaseCurrency(currency))
+            {
+                SetHeaderExchangeRate("1");
+                ApplyHeaderCurrencyToLines(currency.Id);
+                return;
+            }
+
+            var documentDate = DatePicker.SelectedDate ?? DateTime.Today;
+            var dialog = new CurrencyRatesDialog(
+                _metadataService,
+                currency.Id,
+                currency.DisplayName ?? string.Empty,
+                documentDate);
+
+            // Owner — только видимому чужому окну: иначе WPF падает на
+            // «объект Window, который не был показан ранее».
+            var owner = Window.GetWindow(this);
+            if (owner != null && !ReferenceEquals(owner, this) && owner.IsVisible)
+                dialog.Owner = owner;
+            else if (Application.Current?.MainWindow is { IsVisible: true } mainWindow)
+                dialog.Owner = mainWindow;
+
+            if (dialog.ShowDialog() != true || dialog.SelectedRate is not decimal rate)
+                return;
+
+            SetHeaderExchangeRate(rate.ToString("0.####", CultureInfo.CurrentCulture));
+            ApplyHeaderCurrencyToLines(currency.Id);
         }
 
         /// <summary>
@@ -1947,6 +2044,13 @@ namespace BIS.ERP.Views
                 case nameof(AdvanceExpenseLineRow.ExchangeRate):
                     RecalculateAdvanceExpenseLineCurrency(row);
                     RecalculateAdvanceExpenseTotal();
+                    break;
+                case nameof(AdvanceExpenseLineRow.ExpenseAccountValue):
+                case nameof(AdvanceExpenseLineRow.PairId):
+                    // Счёт затрат и пара строки решают, нужна ли организация
+                    // (аналитика счёта). Обновляем только панель шапки,
+                    // не трогая колонки DataGrid.
+                    UpdateAdvanceOrganizationVisibility();
                     break;
             }
         }

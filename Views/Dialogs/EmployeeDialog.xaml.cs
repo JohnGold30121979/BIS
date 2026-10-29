@@ -23,6 +23,7 @@ namespace BIS.ERP.Views.Dialogs
         public EmployeeDialog(Employee employee = null, MetadataService metadataService = null)
         {
             InitializeComponent();
+            ConfigurePersonnelNumberInput();
 
             if (employee != null)
             {
@@ -88,6 +89,51 @@ namespace BIS.ERP.Views.Dialogs
                 MessageBox.Show($"Ошибка загрузки справочников: {ex.Message}", "Ошибка", 
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+        }
+
+        /// <summary>
+        /// «Табельный номер» — целое число: только цифры, без пробелов и букв.
+        /// В метаданных поле помечено как String (исторически), поэтому
+        /// ограничение ставится в самой форме; на сохранении есть ещё проверка.
+        /// </summary>
+        private void ConfigurePersonnelNumberInput()
+        {
+            txtPersonnelNumber.MaxLength = 10; // int — до 10 цифр
+            txtPersonnelNumber.ToolTip = "Только цифры, целое число";
+
+            txtPersonnelNumber.PreviewTextInput += (_, args) => args.Handled = !IsAsciiDigits(args.Text);
+            txtPersonnelNumber.PreviewKeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Space)
+                    args.Handled = true;
+            };
+
+            DataObject.AddPastingHandler(txtPersonnelNumber, (_, args) =>
+            {
+                if (!args.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+                {
+                    args.CancelCommand();
+                    return;
+                }
+
+                var text = args.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+                if (!IsAsciiDigits(text))
+                    args.CancelCommand();
+            });
+        }
+
+        private static bool IsAsciiDigits(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                if (character is < '0' or > '9')
+                    return false;
+            }
+
+            return true;
         }
 
         private static MetadataObject? FindReferenceCatalog(IEnumerable<MetadataObject> catalogs, string catalogName)
@@ -195,7 +241,19 @@ namespace BIS.ERP.Views.Dialogs
         {
             try
             {
-                Employee.PersonnelNumber = txtPersonnelNumber.Text;
+                var personnelNumber = txtPersonnelNumber.Text?.Trim() ?? string.Empty;
+                if (personnelNumber.Length > 0 &&
+                    !int.TryParse(personnelNumber, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                {
+                    MessageBox.Show(
+                        "Табельный номер должен быть целым числом — только цифры.",
+                        "Сотрудник", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    txtPersonnelNumber.Focus();
+                    txtPersonnelNumber.SelectAll();
+                    return;
+                }
+
+                Employee.PersonnelNumber = personnelNumber;
                 Employee.FullName = txtFullName.Text;
                 Employee.Gender = GetOptionalComboBoxValue(cmbGender);
                 Employee.MaritalStatus = GetOptionalComboBoxValue(cmbMaritalStatus);

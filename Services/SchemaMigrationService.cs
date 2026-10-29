@@ -4,6 +4,7 @@ using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace BIS.ERP.Services
@@ -113,7 +114,12 @@ namespace BIS.ERP.Services
                 new("2026.10.29.01",
                     "Ссылочные колонки пар счетов: text → uuid (код счёта переносится в Id)",
                     true,
-                    EnsureAccountPairsReferenceTypesAsync)
+                    EnsureAccountPairsReferenceTypesAsync),
+
+                new("2026.10.30.01",
+                    "Акт сверки (ClosedXML): порядок колонок — дата и номер документа первыми",
+                    false,
+                    EnsureReconciliationActColumnOrderAsync)
             };
         }
 
@@ -141,6 +147,66 @@ namespace BIS.ERP.Services
             {
                 SystemLogService.Warning($"Пары счетов: {problem}", "Schema");
             }
+        }
+
+        /// <summary>
+        /// Порядок колонок стандартного макета «Акт сверки (ClosedXML)» до правки:
+        /// операция первой, дата и номер документа — в конце. Макет хранится в
+        /// Reports."ClosedXmlLayout" и после первичного посева кодом не перетирается,
+        /// поэтому старые базы нужно обновить один раз этим шагом.
+        /// </summary>
+        private static readonly string[] LegacyReconciliationActColumns =
+        {
+            ClosedXmlLayoutTemplates.ActLabelField, "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "N докум", "Дата", "Модуль"
+        };
+
+        private const string ReconciliationActClosedXmlCode = "standard.finance.reconciliation-act-closedxml";
+
+        /// <summary>
+        /// Обновляет сохранённый макет акта сверки: «Дата», «N докум», затем операция,
+        /// дебет/кредит, суммы и модуль — как в экранной сетке. Меняем только макет,
+        /// который в точности совпадает со старым стандартным: пользовательскую
+        /// разметку шаг не трогает.
+        /// </summary>
+        private static async Task EnsureReconciliationActColumnOrderAsync(AppDbContext ctx)
+        {
+            var report = await ctx.Reports
+                .FirstOrDefaultAsync(item => item.Code == ReconciliationActClosedXmlCode);
+            if (report == null || string.IsNullOrWhiteSpace(report.ClosedXmlLayout))
+                return;
+
+            var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out var error);
+            if (layout == null)
+            {
+                SystemLogService.Warning($"Акт сверки (ClosedXML): макет не разобран — {error}", "Reports");
+                return;
+            }
+
+            var section = layout.Sheets
+                .SelectMany(sheet => sheet.Blocks)
+                .Where(block => string.Equals(block.Type, "TabularSection", StringComparison.OrdinalIgnoreCase))
+                .Select(block => block.Table)
+                .FirstOrDefault(table => table != null);
+            if (section == null)
+                return;
+
+            var fields = section.Columns.Select(column => column.Field).ToArray();
+            if (fields.Length != LegacyReconciliationActColumns.Length ||
+                !fields.SequenceEqual(LegacyReconciliationActColumns, StringComparer.OrdinalIgnoreCase))
+            {
+                // Уже новый порядок или макет изменён в конструкторе — не трогаем.
+                return;
+            }
+
+            var updated = ClosedXmlLayoutTemplates.CreateReconciliationAct(report.Name);
+            report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(updated);
+            report.TemplateVersion = Math.Max(report.TemplateVersion, 2);
+            report.UpdatedAt = DateTime.UtcNow;
+            await ctx.SaveChangesAsync();
+
+            SystemLogService.Info(
+                "Акт сверки (ClosedXML): порядок колонок — дата и номер документа первыми.",
+                "Reports");
         }
 
         /// <summary>

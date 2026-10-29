@@ -1834,6 +1834,25 @@ namespace BIS.ERP.Views.Dialogs
                     return;
                 }
 
+                // Вид операции — обязательный реквизит шапки. Без него сервис
+                // отвечал «Поле 'Вид операции' обязательно для заполнения» уже
+                // после нажатия «Сохранить»; проверяем до записи и говорим понятно.
+                if (_editors.TryGetValue("document_entry_id", out var entryEditor))
+                {
+                    var selectedEntryId = entryEditor is ComboBox { SelectedValue: Guid entryValue }
+                        ? entryValue
+                        : Guid.Empty;
+
+                    if (selectedEntryId == Guid.Empty)
+                    {
+                        MessageBox.Show(
+                            $"Выберите вид операции из справочника «{InventoryDocumentModel.EntryCatalogName}».",
+                            "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        (entryEditor as ComboBox)?.Focus();
+                        return;
+                    }
+                }
+
                 var data = BuildItemData();
 
                 if (_recordId.HasValue)
@@ -1932,6 +1951,11 @@ namespace BIS.ERP.Views.Dialogs
             var code = text.Split(" - ")[0].Trim();
 
             var row = rows.FirstOrDefault(item =>
+                // В поле мог оказаться сам Id (Guid строкой) — например, значение
+                // подставилось программно. Раньше такой текст не находился:
+                // «Не найдено значение для поля «Вид покупки»: eb608619-…».
+                string.Equals(Read(item, "Id"), text, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Read(item, "Id"), code, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Read(item, "Код", "code"), code, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Read(item, "Наименование", "ФИО", "Полное наименование", "Наименование материала"),
                     text, StringComparison.OrdinalIgnoreCase) ||

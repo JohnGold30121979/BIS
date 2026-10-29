@@ -1613,6 +1613,9 @@ namespace BIS.ERP.Views
             "debit_amount", "credit_amount", "debit_begin", "credit_begin",
             "document_number", "document_date", "module",
             "report_title", "report_summary", "period_start", "period_end",
+            // Стороны акта сверки: подписи читает макет, в сетке они лишние.
+            "our_organization", "our_director", "our_accountant",
+            "counterparty", "counterparty_director", "counterparty_accountant",
             // Оборотно-сальдовая ведомость.
             "account_code", "account_name",
             "opening_debit", "opening_credit", "turnover_debit", "turnover_credit",

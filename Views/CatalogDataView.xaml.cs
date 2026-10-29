@@ -76,8 +76,10 @@ namespace BIS.ERP.Views
             if (IsCurrencyRatesCatalog)
             {
                 CurrencyRateFilterPanel.Visibility = Visibility.Visible;
+                // По умолчанию показываем год истории, а не только текущий месяц:
+                // иначе загруженные курсы прошлых месяцев выглядели как «не записались».
                 var today = DateTime.Today;
-                CurrencyRatePeriodStartPicker.SelectedDate = new DateTime(today.Year, today.Month, 1);
+                CurrencyRatePeriodStartPicker.SelectedDate = today.AddMonths(-12);
                 CurrencyRatePeriodEndPicker.SelectedDate = today;
                 SearchBox.ToolTip = "Поиск по истории курсов валют";
             }
@@ -555,6 +557,17 @@ namespace BIS.ERP.Views
             return DateTime.TryParse(value.ToString(), CultureInfo.CurrentCulture, DateTimeStyles.None, out date) ||
                    DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
         }
+        private static DateTime? GetCurrencyRateDateValue(IReadOnlyDictionary<string, object> row)
+        {
+            foreach (var key in new[] { "Дата", "rate_date", "date" })
+            {
+                if (row.TryGetValue(key, out var value) && TryParseDateValue(value, out var date))
+                    return date;
+            }
+
+            return null;
+        }
+
         private static bool TryGetCurrencyRateDate(
             IReadOnlyDictionary<string, object>? raw,
             DataRow row,
@@ -778,7 +791,8 @@ namespace BIS.ERP.Views
                     data = SortRowsByNumericCode(data).ToList();
                 if (IsCurrencyRatesCatalog)
                     data = data
-                        .OrderByDescending(row => row.GetValueOrDefault("rate_date") as DateTime? ?? DateTime.MinValue)
+                        .OrderByDescending(row => GetCurrencyRateDateValue(row) ?? DateTime.MinValue)
+                        .ThenBy(row => Convert.ToString(row.GetValueOrDefault("Валюта")) ?? string.Empty)
                         .ToList();
 
                 _rawRowsById.Clear();
@@ -804,7 +818,11 @@ namespace BIS.ERP.Views
                 dataTable.Columns.Add("Дата создания", typeof(DateTime));
                 dataTable.Columns.Add("Дата изменения", typeof(DateTime));
                 if (IsCurrencyRatesCatalog)
+                {
                     dataTable.Columns.Add("CurrencyFilterFlag", typeof(bool));
+                    // Признак «последний курс валюты»: подсвечиваем верхнюю строку.
+                    dataTable.Columns.Add("CurrencyRateLatestFlag", typeof(bool));
+                }
 
                 // Загружаем данные справочников для подстановки имен (универсально)
                 await LoadReferenceDataAsync();
@@ -817,6 +835,7 @@ namespace BIS.ERP.Views
                     : new Dictionary<Guid, decimal>();
 
                 // Добавляем строки
+                var latestCurrencyIds = new HashSet<Guid>();
                 foreach (var row in data)
                 {
                     var dataRow = dataTable.NewRow();
@@ -827,6 +846,12 @@ namespace BIS.ERP.Views
                     foreach (var pair in row)
                         rawCopy[pair.Key] = pair.Value;
                     _rawRowsById[rowId] = rawCopy;
+
+                    // Данные уже отсортированы по дате убыванию, поэтому первая
+                    // встреченная строка валюты — её последний курс.
+                    var isLatestCurrencyRate = IsCurrencyRatesCatalog &&
+                                               TryGetCurrencyId(rawCopy, out var rateCurrencyId) &&
+                                               latestCurrencyIds.Add(rateCurrencyId);
 
                     foreach (var field in visibleFields)
                     {
@@ -856,7 +881,10 @@ namespace BIS.ERP.Views
                     dataRow["Дата создания"] = row.ContainsKey("CreatedAt") ? row["CreatedAt"] : DateTime.Now;
                     dataRow["Дата изменения"] = row.ContainsKey("UpdatedAt") ? row["UpdatedAt"] : DateTime.Now;
                     if (IsCurrencyRatesCatalog)
+                    {
                         dataRow["CurrencyFilterFlag"] = true;
+                        dataRow["CurrencyRateLatestFlag"] = isLatestCurrencyRate;
+                    }
 
                     dataTable.Rows.Add(dataRow);
                 }
@@ -2337,6 +2365,24 @@ namespace BIS.ERP.Views
 
         private void DataGrid_LoadingRow(object sender, DataGridRowEventArgs e)
         {
+            if (IsCurrencyRatesCatalog)
+            {
+                // Строка последнего курса валюты — сверху и подсвечена.
+                e.Row.ClearValue(Control.BackgroundProperty);
+                e.Row.ClearValue(Control.FontWeightProperty);
+
+                if (e.Row.Item is DataRowView rateView &&
+                    rateView.Row.Table.Columns.Contains("CurrencyRateLatestFlag") &&
+                    rateView.Row["CurrencyRateLatestFlag"] is bool isLatestRate &&
+                    isLatestRate)
+                {
+                    e.Row.Background = new SolidColorBrush(Color.FromRgb(232, 248, 233));
+                    e.Row.FontWeight = FontWeights.Bold;
+                }
+
+                return;
+            }
+
             if (!IsFixedAssetsCatalog)
                 return;
 

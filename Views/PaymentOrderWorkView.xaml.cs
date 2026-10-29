@@ -17,6 +17,13 @@ namespace BIS.ERP.Views
 {
     public partial class PaymentOrderWorkView : UserControl
     {
+        /// <summary>
+        /// Название раздела в дереве навигации, вкладке и заголовке окна.
+        /// Сам документ по-прежнему называется «Платежное поручение» —
+        /// переименован только раздел (банковские операции).
+        /// </summary>
+        public const string SectionTitle = "Банковские операции";
+
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
         private const string PaymentOrderPrintReportCode = "standard.frx.finance.payment-order.pr-pl23";
@@ -34,7 +41,7 @@ namespace BIS.ERP.Views
             // Своё подключение на вкладку: контекст не переносит параллельных команд.
             _metadataService = metadataService.CreateIndependent();
 
-            TitleText.Text = $"{documentMetadata.Icon} {documentMetadata.Name}";
+            TitleText.Text = $"{documentMetadata.Icon} {SectionTitle}";
             DescriptionText.Text = documentMetadata.Description;
             PostingDetailsGrid.ItemsSource = _postingDetails;
 

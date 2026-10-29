@@ -3,7 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 
 namespace BIS.ERP.Views.Dialogs
 {
@@ -49,10 +51,11 @@ namespace BIS.ERP.Views.Dialogs
                 var rates = await _metadataService.GetCurrencyRatesAsync(
                     _currencyId,
                     _documentDate.AddMonths(-6),
-                    _documentDate);
+                    _documentDate,
+                    limit: 500);
 
                 _rows = rates
-                    .Select(rate => new RateRow(rate.RateDate, rate.Rate, rate.Source))
+                    .Select((rate, index) => new RateRow(rate.RateDate, rate.Rate, rate.Source, index == 0))
                     .ToList();
 
                 RatesGrid.ItemsSource = _rows;
@@ -100,6 +103,22 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnApplyClick(object sender, RoutedEventArgs e) => ApplySelected();
 
+        /// <summary>
+        /// Первая строка списка — последний курс валюты. Подсвечиваем её
+        /// светло-зелёным и делаем жирной, чтобы её было видно сразу.
+        /// </summary>
+        private void OnRatesGridLoadingRow(object sender, DataGridRowEventArgs e)
+        {
+            e.Row.ClearValue(Control.BackgroundProperty);
+            e.Row.ClearValue(Control.FontWeightProperty);
+
+            if (e.Row.Item is RateRow { IsLatest: true })
+            {
+                e.Row.Background = new SolidColorBrush(Color.FromRgb(232, 248, 233));
+                e.Row.FontWeight = FontWeights.Bold;
+            }
+        }
+
         private void OnRatesGridDoubleClick(object sender, MouseButtonEventArgs e) => ApplySelected();
 
         private void ApplySelected()
@@ -117,7 +136,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void OnCloseClick(object sender, RoutedEventArgs e) => DialogResult = false;
 
-        private sealed record RateRow(DateTime Date, decimal Rate, string Source)
+        private sealed record RateRow(DateTime Date, decimal Rate, string Source, bool IsLatest)
         {
             public string DateText => Date.ToString("dd.MM.yyyy");
             public string RateText => Rate.ToString("0.####");

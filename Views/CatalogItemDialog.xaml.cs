@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -999,12 +1000,14 @@ inputControl = AccountPickerControlFactory.Create(
             {
                 case "Int":
                     var intBox = new TextBox { Height = 35, Padding = new Thickness(10) };
+                    ConfigureIntegerInput(intBox, 10);
                     if (existingValue != null)
                         intBox.Text = existingValue.ToString();
                     return intBox;
 
                 case "Decimal":
                     var decimalBox = new TextBox { Height = 35, Padding = new Thickness(10) };
+                    ConfigureDecimalInput(decimalBox);
                     if (existingValue != null)
                         decimalBox.Text = existingValue.ToString();
                     return decimalBox;
@@ -1030,6 +1033,10 @@ inputControl = AccountPickerControlFactory.Create(
 
                     if (IsChartOfAccountsCatalog() && IsCatalogCodeField(field))
                         ConfigureChartOfAccountsCodeInput(textBox);
+                    // «Табельный номер» в метаданных исторически String, но по смыслу
+                    // это целое число: буквы в него попадать не должны.
+                    else if (IsPersonnelNumberField(field))
+                        ConfigureIntegerInput(textBox, 10);
 
                     // ФИО в самом справочнике сотрудников вводится вручную; в остальных местах поле может быть автозаполняемым.
                     if (!IsEmployeesCatalog() &&
@@ -1119,6 +1126,136 @@ inputControl = AccountPickerControlFactory.Create(
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Целое поле: только цифры. Закрыты и вставка, и пробел — в числовом
+        /// поле текст появляться не должен (табельный номер, количества и т. п.).
+        /// </summary>
+        private void ConfigureIntegerInput(TextBox textBox, int maxLength)
+        {
+            if (maxLength > 0)
+                textBox.MaxLength = maxLength;
+
+            textBox.ToolTip ??= "Только целое число";
+            textBox.PreviewTextInput += (_, args) => args.Handled = !IsAsciiDigits(args.Text);
+            textBox.PreviewKeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Space)
+                    args.Handled = true;
+            };
+
+            DataObject.AddPastingHandler(textBox, (_, args) =>
+            {
+                if (!args.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+                {
+                    args.CancelCommand();
+                    return;
+                }
+
+                var text = args.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+                if (!IsAsciiDigits(text))
+                    args.CancelCommand();
+            });
+        }
+
+        /// <summary>
+        /// Дробное поле: цифры и один разделитель (запятая или точка), плюс знак.
+        /// </summary>
+        private void ConfigureDecimalInput(TextBox textBox)
+        {
+            textBox.ToolTip ??= "Число; разделитель — запятая или точка";
+            textBox.PreviewTextInput += (_, args) => args.Handled = !IsDecimalText(args.Text);
+            textBox.PreviewKeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Space)
+                    args.Handled = true;
+            };
+
+            DataObject.AddPastingHandler(textBox, (_, args) =>
+            {
+                if (!args.SourceDataObject.GetDataPresent(DataFormats.UnicodeText, true))
+                {
+                    args.CancelCommand();
+                    return;
+                }
+
+                var text = args.SourceDataObject.GetData(DataFormats.UnicodeText) as string ?? string.Empty;
+                if (!IsDecimalText(text))
+                    args.CancelCommand();
+            });
+        }
+
+        private static bool IsDecimalText(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return true;
+
+            foreach (var character in text)
+            {
+                var allowed = character is >= '0' and <= '9' or ',' or '.' or '-' or '+';
+                if (!allowed)
+                    return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// «Табельный номер»: поле помечено в метаданных как String, но по смыслу
+        /// это целое число — проверяем и по имени, и по колонке.
+        /// </summary>
+        private static bool IsPersonnelNumberField(MetadataField field)
+        {
+            return string.Equals(field.DbColumnName, "personnel_number", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(field.Name, "Табельный номер", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsIntegerField(MetadataField field)
+        {
+            return string.Equals(field.FieldType, "Int", StringComparison.OrdinalIgnoreCase) ||
+                   IsPersonnelNumberField(field);
+        }
+
+        /// <summary>
+        /// Страховка на сохранении: даже если текст попал в поле в обход фильтра
+        /// (вставка, программная подстановка), запись не уйдёт с буквами в числе.
+        /// </summary>
+        private bool ValidateNumericFields()
+        {
+            var invalid = new List<string>();
+
+            foreach (var field in GetEditableFields())
+            {
+                if (!_controls.TryGetValue(field.Name, out var control) || control is not TextBox textBox)
+                    continue;
+
+                var text = textBox.Text?.Trim() ?? string.Empty;
+                if (text.Length == 0)
+                    continue;
+
+                if (IsIntegerField(field))
+                {
+                    if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                        invalid.Add($"{GetFieldLabel(field)} — целое число");
+                }
+                else if (string.Equals(field.FieldType, "Decimal", StringComparison.OrdinalIgnoreCase) &&
+                         !decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out _) &&
+                         !decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+                {
+                    invalid.Add($"{GetFieldLabel(field)} — число");
+                }
+            }
+
+            if (invalid.Count == 0)
+                return true;
+
+            MessageBox.Show(
+                "Проверьте числовые поля:\n• " + string.Join("\n• ", invalid),
+                _catalog.Name,
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return false;
         }
 
         private void ApplyCatalogFieldState(MetadataField field, Control inputControl)
@@ -1333,6 +1470,9 @@ inputControl = AccountPickerControlFactory.Create(
 
                 NormalizeCatalogItemDataBeforeSave();
                 NormalizeAccountPairsCurrencyBeforeSave();
+
+                if (!ValidateNumericFields())
+                    return;
 
                 if (!ValidateRequiredFields())
                     return;

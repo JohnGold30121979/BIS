@@ -960,7 +960,7 @@ namespace BIS.ERP
             return new NavigationItem
             {
                 Id = "CashOrders",
-                Name = "Расходный/Приходный КО",
+                Name = CashOrderWorkView.SectionTitle,
                 Icon = "💵",
                 Type = "CashOrder",
                 Tag = cashOrderDocuments,
@@ -981,7 +981,11 @@ namespace BIS.ERP
             };
             return new NavigationItem
             {
-                Id = document.Id.ToString(), Name = document.Name, Icon = document.Icon,
+                Id = document.Id.ToString(),
+                // Раздел кассовых ордеров называется «Банковские операции»
+                // (переименован только заголовок, документ остаётся «Расходный/Приходный КО»).
+                Name = type == "CashOrder" ? CashOrderWorkView.SectionTitle : document.Name,
+                Icon = document.Icon,
                 Type = type, Tag = document, Order = document.Order
             };
         }
@@ -1109,7 +1113,7 @@ namespace BIS.ERP
                             docsGroup.Children.Add(new NavigationItem
                             {
                                 Id = "CashOrders",
-                                Name = "Расходный/Приходный КО",
+                                Name = CashOrderWorkView.SectionTitle,
                                 Icon = "💵",
                                 Type = "CashOrder",
                                 Tag = cashOrderDocuments.ToArray(),
@@ -1120,13 +1124,15 @@ namespace BIS.ERP
 
                         continue;
                     }
-                    // Для платежных поручений используем кастомный тип
+                    // Для платежных поручений используем кастомный тип.
+                    // Раздел называется «Банковские операции» — переименован только
+                    // заголовок окна/дерева, сам документ остаётся «Платежное поручение».
                     else if (doc.Name == "Платежное поручение")
                     {
                         docsGroup.Children.Add(new NavigationItem
                         {
                             Id = doc.Id.ToString(),
-                            Name = doc.Name,
+                            Name = PaymentOrderWorkView.SectionTitle,
                             Icon = doc.Icon,
                             Type = "PaymentOrder",
                             Tag = doc,

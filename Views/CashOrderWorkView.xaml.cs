@@ -20,6 +20,13 @@ namespace BIS.ERP.Views
 {
     public partial class CashOrderWorkView : UserControl
     {
+        /// <summary>
+        /// Название раздела в дереве навигации, вкладке и заголовке окна.
+        /// Сам документ по-прежнему «Расходный/Приходный КО» — переименован
+        /// только раздел (банковские операции).
+        /// </summary>
+        public const string SectionTitle = "Банковские операции";
+
         private const string CashOrderDocumentName = "Расходный/Приходный КО";
         private const string CashOrderReceiptKind = "Receipt";
         private const string CashOrderPaymentKind = "Payment";
@@ -50,7 +57,7 @@ namespace BIS.ERP.Views
             PeriodEndDatePicker.SelectedDate = today;
             CashDayDatePicker.SelectedDate = today;
             PostingDetailsGrid.ItemsSource = _postingDetails;
-            InitializeHeader(documentMetadata.Icon, CashOrderDocumentName, documentMetadata.Description);
+            InitializeHeader(documentMetadata.Icon, SectionTitle, documentMetadata.Description);
         }
 
         public CashOrderWorkView(MetadataObject receiptDocumentMetadata, MetadataObject paymentDocumentMetadata, MetadataService metadataService)
