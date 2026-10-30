@@ -53,6 +53,12 @@
                                VerticalAlignment="Center" Margin="16,0,0,0"
                                Foreground="{DynamicResource AppSecondaryTextBrush}"/>
                 </WrapPanel>
+                <WrapPanel x:Name="TurnoverPairPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                    <TextBlock Text="Пара счетов:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox x:Name="TurnoverPairTextBox" Width="460" Height="32" Padding="8,4" IsReadOnly="True"/>
+                    <Button Content="?" Width="34" Height="32" Margin="6,0,0,0"
+                            Click="OnSelectTurnoverPairClick" ToolTip="Выбрать из справочника пар счетов"/>
+                </WrapPanel>
                 <WrapPanel x:Name="ReconciliationVariantPanel" Margin="0,10,0,0" Visibility="Collapsed">
                     <TextBlock Text="Вариант акта сверки:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <ComboBox x:Name="ReconciliationVariantCombo" Width="360" Height="32"

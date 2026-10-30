@@ -42,6 +42,18 @@ public partial class MetadataService
         await SeedStateService.MarkAsync(_context, SeedStateService.StandardReportsKey, "Стандартные отчёты");
     }
 
+    /// <summary>Досадка нового отчёта в существующие базы, независимо от версии общего сида.</summary>
+    public async Task EnsureAccountPairTurnoverReportAsync()
+    {
+        var deleted = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
+        if (deleted.Contains(AccountPairTurnoverBuilder.ReportCode)) return;
+        var reports = await _context.Reports.ToListAsync();
+        var sources = await _context.MetadataObjects.AsNoTracking().Include(item => item.Fields).ToListAsync();
+        var definition = BuildStandardReportDefinitions().Single(item => item.Code == AccountPairTurnoverBuilder.ReportCode);
+        await EnsureStandardReportAsync(definition, reports, sources);
+        await _context.SaveChangesAsync();
+    }
+
     private async Task EnsureCashOrderTurnoverReportSourceAsync()
     {
         var source = await _context.MetadataObjects
@@ -255,6 +267,7 @@ public partial class MetadataService
             // ведомости и журнала счет-фактур свои наборы колонок.
             var seedLayout = definition.ReportType switch
             {
+                "AccountPairTurnover" => AccountPairTurnoverLayout.Create(definition.Name),
                 "TrialBalance" => ClosedXmlLayoutTemplates.CreateTrialBalance(definition.Name),
                 "TurnoverByAccount" => ClosedXmlLayoutTemplates.CreateTurnoverByAccount(definition.Name),
                 "InvoiceJournal" => ClosedXmlLayoutTemplates.CreateInvoiceJournal(definition.Name),
@@ -519,6 +532,17 @@ public partial class MetadataService
                 "posting_date", "doc_number", "document_type", "debit_account",
                 "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
             }),
+        new StandardReportDefinition(
+            Code: AccountPairTurnoverBuilder.ReportCode,
+            Name: AccountPairTurnoverBuilder.ReportName,
+            Description: "Движения каждого счёта выбранной пары с остатками и оборотами по организациям.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Проводки",
+            SourceObjectType: "Document",
+            ReportType: AccountPairTurnoverBuilder.ReportType,
+            Icon: "📊", Order: 152, PageOrientation: "Portrait",
+            Fields: new[] { "posting_date", "doc_number", "debit_account", "credit_account", "amount_kgs", "organization_id", "description", "module_code" },
+            SourceFormat: "ClosedXml", SeedClosedXmlLayout: true, ShowInAccountingReports: true),
         new StandardReportDefinition(
             Code: "standard.finance.reconciliation-act-closedxml",
             Name: "Акт сверки (ClosedXML)",

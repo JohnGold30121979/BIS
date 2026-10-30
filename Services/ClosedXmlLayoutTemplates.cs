@@ -22,7 +22,7 @@ namespace BIS.ERP.Services
         /// <summary>Заголовки акта — те же, что печатает программный экспорт.</summary>
         private static readonly string[] ActHeaders =
         {
-            ActLabelField, "Дата", "N докум", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль"
+            ActLabelField, "Дата", "N докум", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Сумма вал.", "Модуль"
         };
 
         /// <summary>Колонка набора ведомости, в которой лежат заголовок и период.</summary>
@@ -84,6 +84,9 @@ namespace BIS.ERP.Services
         /// </summary>
         public static ClosedXmlReportLayout CreateForReport(Report? report)
         {
+            if (report?.ReportType == AccountPairTurnoverBuilder.ReportType)
+                return AccountPairTurnoverLayout.Create(report.Name);
+
             if (IsReconciliationAct(report))
                 return CreateReconciliationAct(report!.Name);
 
@@ -159,7 +162,7 @@ namespace BIS.ERP.Services
                                     {
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 1, MergeToColumn = 8, Text = "АКТ СВЕРКИ",
+                                            Column = 1, MergeToColumn = 9, Text = "АКТ СВЕРКИ",
                                             Bold = true, Align = "Center"
                                         }
                                     }
@@ -171,7 +174,7 @@ namespace BIS.ERP.Services
                                     {
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 1, MergeToColumn = 8,
+                                            Column = 1, MergeToColumn = 9,
                                             TakeFromRow = 1, TakeFromField = ActLabelField,
                                             Bold = true, Align = "Center"
                                         }
@@ -184,7 +187,7 @@ namespace BIS.ERP.Services
                                     {
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 1, MergeToColumn = 8,
+                                            Column = 1, MergeToColumn = 9,
                                             TakeFromRow = 2, TakeFromField = ActLabelField,
                                             Align = "Center"
                                         }
@@ -196,7 +199,7 @@ namespace BIS.ERP.Services
                                     // Объединение задано специально — иначе пустая ячейка не переживёт
                                     // сохранение в конструкторе (там строка собирается из непустых ячеек).
                                     Row = 4,
-                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 8, Text = string.Empty } }
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = string.Empty } }
                                 }
                             }
                         },
@@ -215,7 +218,8 @@ namespace BIS.ERP.Services
                                     new ClosedXmlColumn { Field = ActHeaders[4], Header = ActHeaders[4], Width = 12, Align = "Center" },
                                     new ClosedXmlColumn { Field = ActHeaders[5], Header = ActHeaders[5], Width = 12, Align = "Center", NumberFormat = "#,##0.00", SuppressZero = true },
                                     new ClosedXmlColumn { Field = ActHeaders[6], Header = ActHeaders[6], Width = 12, Align = "Center", NumberFormat = "#,##0.00", SuppressZero = true },
-                                    new ClosedXmlColumn { Field = ActHeaders[7], Header = ActHeaders[7], Width = 12, Align = "Center" }
+                                    new ClosedXmlColumn { Field = ActHeaders[7], Header = ActHeaders[7], Width = 12, Align = "Right", NumberFormat = "#,##0.00", SuppressZero = true },
+                                    new ClosedXmlColumn { Field = ActHeaders[8], Header = ActHeaders[8], Width = 12, Align = "Center" }
                                 },
                                 HeaderFill = "#D9E6F2",
                                 HeaderBold = true,
@@ -257,7 +261,7 @@ namespace BIS.ERP.Services
                                     {
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 1, MergeToColumn = 8,
+                                            Column = 1, MergeToColumn = 9,
                                             TakeFromRow = -1, TakeFromField = ActLabelField,
                                             Bold = true
                                         }
@@ -277,7 +281,7 @@ namespace BIS.ERP.Services
                                 new ClosedXmlTextRow
                                 {
                                     Row = 1,
-                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 8, Text = string.Empty } }
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = string.Empty } }
                                 },
                                 new ClosedXmlTextRow
                                 {
@@ -293,7 +297,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 5, MergeToColumn = 6, Text = "Руководитель", Bold = true },
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 7, MergeToColumn = 8, Bold = true,
+                                            Column = 7, MergeToColumn = 9, Bold = true,
                                             TakeFromRow = 1, TakeFromField = "counterparty"
                                         }
                                     }
@@ -304,7 +308,7 @@ namespace BIS.ERP.Services
                                     Cells =
                                     {
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 4, Text = "___________________________ подпись" },
-                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 8, Text = "___________________________ подпись" }
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 9, Text = "___________________________ подпись" }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -319,7 +323,7 @@ namespace BIS.ERP.Services
                                         },
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 5, MergeToColumn = 8, Align = "Center",
+                                            Column = 5, MergeToColumn = 9, Align = "Center",
                                             TakeFromRow = 1, TakeFromField = "counterparty_director"
                                         }
                                     }
@@ -327,7 +331,7 @@ namespace BIS.ERP.Services
                                 new ClosedXmlTextRow
                                 {
                                     Row = 5,
-                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 8, Text = string.Empty } }
+                                    Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 9, Text = string.Empty } }
                                 },
                                 new ClosedXmlTextRow
                                 {
@@ -343,7 +347,7 @@ namespace BIS.ERP.Services
                                         new ClosedXmlTextCell { Column = 5, MergeToColumn = 6, Text = "Гл. бухгалтер", Bold = true },
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 7, MergeToColumn = 8, Bold = true,
+                                            Column = 7, MergeToColumn = 9, Bold = true,
                                             TakeFromRow = 1, TakeFromField = "counterparty"
                                         }
                                     }
@@ -354,7 +358,7 @@ namespace BIS.ERP.Services
                                     Cells =
                                     {
                                         new ClosedXmlTextCell { Column = 1, MergeToColumn = 4, Text = "___________________________ подпись" },
-                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 8, Text = "___________________________ подпись" }
+                                        new ClosedXmlTextCell { Column = 5, MergeToColumn = 9, Text = "___________________________ подпись" }
                                     }
                                 },
                                 new ClosedXmlTextRow
@@ -369,7 +373,7 @@ namespace BIS.ERP.Services
                                         },
                                         new ClosedXmlTextCell
                                         {
-                                            Column = 5, MergeToColumn = 8, Align = "Center",
+                                            Column = 5, MergeToColumn = 9, Align = "Center",
                                             TakeFromRow = 1, TakeFromField = "counterparty_accountant"
                                         }
                                     }

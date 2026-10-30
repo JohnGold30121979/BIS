@@ -668,6 +668,9 @@ namespace BIS.ERP.Views
             DateTime start,
             DateTime end)
         {
+            if (selected.ReportType == AccountPairTurnoverBuilder.ReportType)
+                return await BuildAccountPairTurnoverAsync(start, end);
+
             if (IsReconciliationType(selected.ReportType))
                 return await BuildOrganizationReconciliationAsync(start, end, closedXml: true);
 
@@ -1103,6 +1106,7 @@ namespace BIS.ERP.Views
             SetReportFieldWidth(report, "Кредит", 75);
             SetReportFieldWidth(report, "Сумма Дт", 90, "Right", "N2");
             SetReportFieldWidth(report, "Сумма Кт", 90, "Right", "N2");
+            SetReportFieldWidth(report, "Сумма вал.", 90, "Right", "N2");
             SetReportFieldWidth(report, "N докум", 70);
             SetReportFieldWidth(report, "Дата", 70);
             SetReportFieldWidth(report, "Модуль", 45);
@@ -1348,6 +1352,9 @@ namespace BIS.ERP.Views
             var selected = SelectedAccountingReport;
             var isReconciliation = selected != null && IsReconciliationType(selected.ReportType);
             var isTurnover = selected != null && IsTurnoverType(selected.ReportType);
+            if (TurnoverPairPanel != null)
+                TurnoverPairPanel.Visibility = selected?.ReportType == AccountPairTurnoverBuilder.ReportType
+                    ? Visibility.Visible : Visibility.Collapsed;
 
             if (ClosedXmlReconciliationPanel != null)
             {
@@ -1612,7 +1619,7 @@ namespace BIS.ERP.Views
             "operation_name", "debit_account", "credit_account",
             "debit_amount", "credit_amount", "debit_begin", "credit_begin",
             "document_number", "document_date", "module",
-            "report_title", "report_summary", "period_start", "period_end",
+            "report_title", "report_summary", "period_start", "period_end", "period_text",
             // Стороны акта сверки: подписи читает макет, в сетке они лишние.
             "our_organization", "our_director", "our_accountant",
             "counterparty", "counterparty_director", "counterparty_accountant",

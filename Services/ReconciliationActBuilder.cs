@@ -179,6 +179,7 @@ namespace BIS.ERP.Services
             table.Columns.Add("Кредит", typeof(string));
             table.Columns.Add("Сумма Дт", typeof(decimal));
             table.Columns.Add("Сумма Кт", typeof(decimal));
+            table.Columns.Add("Сумма вал.", typeof(decimal));
             table.Columns.Add("Модуль", typeof(string));
 
             // Колонки под канонические имена макета: механизм подстановки ищет
@@ -421,15 +422,21 @@ namespace BIS.ERP.Services
 
                 var pairName = string.IsNullOrWhiteSpace(pair.AccountPairName) ? pair.CounterAccountName : pair.AccountPairName;
                 AddRow(table, $"Пара счетов : {pair.AccountCode} - {pair.CounterAccountCode} ({pairName})");
-                AddRow(table, $"САЛЬДО НА {start:dd/MM/yyyy}",
-                    debitAmount: NonZeroAmount(pair.OpeningDebit),
-                    creditAmount: NonZeroAmount(pair.OpeningCredit));
-
                 var pairMovements = movements
                     .Where(movement => AccountInPair(movement.DebitAccount, pair) || AccountInPair(movement.CreditAccount, pair))
                     .OrderBy(movement => movement.Date)
                     .ThenBy(movement => movement.DocumentNumber, StringComparer.CurrentCultureIgnoreCase)
                     .ToList();
+
+                var currencyCodes = pairMovements.Select(movement => movement.CurrencyCode)
+                    .Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var showCurrencyTotals = pair.UsesCurrency && currencyCodes.Count <= 1;
+                AddRow(table, $"САЛЬДО НА {start:dd/MM/yyyy}",
+                    debitAmount: NonZeroAmount(pair.OpeningDebit),
+                    creditAmount: NonZeroAmount(pair.OpeningCredit),
+                    currencyAmount: showCurrencyTotals ? pair.OpeningDebitCurrency - pair.OpeningCreditCurrency : null);
+                if (currencyCodes.Count > 1)
+                    AddRow(table, "Валютные итоги не суммируются: в паре несколько валют. Суммы указаны в движениях.");
 
                 if (pairMovements.Count == 0 && (pair.TurnoverDebit != 0 || pair.TurnoverCredit != 0))
                     AddRow(table, "Движения найдены в остатках, но детализация проводок недоступна.");
@@ -438,33 +445,39 @@ namespace BIS.ERP.Services
                 {
                     var movementDate = movement.Date == default ? end : movement.Date;
                     AddRow(table,
-                        BuildMovementDescription(movement),
+                        BuildMovementDescription(movement) + (string.IsNullOrWhiteSpace(movement.CurrencyCode) ? "" : $" ({movement.CurrencyCode})"),
                         movement.DebitAccount,
                         movement.CreditAccount,
                         AccountInPair(movement.DebitAccount, pair) ? movement.Amount : null,
                         AccountInPair(movement.CreditAccount, pair) ? movement.Amount : null,
                         movement.DocumentNumber,
                         movementDate.ToString("dd/MM/yyyy"),
-                        movement.ModuleCode);
+                        movement.ModuleCode, currencyAmount: movement.AmountCurrency);
                 }
 
                 AddRow(table, "ИТОГО ОБОРОТОВ",
                     debitAmount: NonZeroAmount(pair.TurnoverDebit),
-                    creditAmount: NonZeroAmount(pair.TurnoverCredit));
+                    creditAmount: NonZeroAmount(pair.TurnoverCredit),
+                    currencyAmount: showCurrencyTotals ? pair.TurnoverDebitCurrency - pair.TurnoverCreditCurrency : null);
                 AddRow(table, $"САЛЬДО НА {end:dd/MM/yyyy}",
                     debitAmount: NonZeroAmount(pair.ClosingDebit),
-                    creditAmount: NonZeroAmount(pair.ClosingCredit));
+                    creditAmount: NonZeroAmount(pair.ClosingCredit),
+                    currencyAmount: showCurrencyTotals ? pair.ClosingDebitCurrency - pair.ClosingCreditCurrency : null);
             }
 
             if (total != null && pairs.Count > 1)
             {
                 AddRow(table, string.Empty);
+                var oneCurrency = movements.Select(movement => movement.CurrencyCode)
+                    .Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1;
                 AddRow(table, "ИТОГО ОБОРОТОВ ПО ОРГАНИЗАЦИИ",
                     debitAmount: NonZeroAmount(total.TurnoverDebit),
-                    creditAmount: NonZeroAmount(total.TurnoverCredit));
+                    creditAmount: NonZeroAmount(total.TurnoverCredit),
+                    currencyAmount: oneCurrency ? total.TurnoverDebitCurrency - total.TurnoverCreditCurrency : null);
                 AddRow(table, $"САЛЬДО НА {end:dd/MM/yyyy} ПО ОРГАНИЗАЦИИ",
                     debitAmount: NonZeroAmount(total.ClosingDebit),
-                    creditAmount: NonZeroAmount(total.ClosingCredit));
+                    creditAmount: NonZeroAmount(total.ClosingCredit),
+                    currencyAmount: oneCurrency ? total.ClosingDebitCurrency - total.ClosingCreditCurrency : null);
             }
         }
 
@@ -521,12 +534,13 @@ namespace BIS.ERP.Services
             decimal? creditAmount = null,
             string documentNumber = "",
             string date = "",
-            string moduleCode = "")
+            string moduleCode = "", decimal? currencyAmount = null)
         {
             var row = table.NewRow();
             row["Наименование материала, вид операции"] = operation;
             row["Дебет"] = debit;
             row["Кредит"] = credit;
+            row["Сумма вал."] = (object?)currencyAmount ?? DBNull.Value;
             row["Сумма Дт"] = debitAmount.HasValue ? debitAmount.Value : DBNull.Value;
             row["Сумма Кт"] = creditAmount.HasValue ? creditAmount.Value : DBNull.Value;
             row["N докум"] = documentNumber;

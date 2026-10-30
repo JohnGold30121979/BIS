@@ -1,4 +1,4 @@
-using BIS.ERP.Models;
+﻿using BIS.ERP.Models;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -18,7 +18,7 @@ namespace BIS.ERP.Views
         private readonly List<Dictionary<string, object>> _items;
         private readonly string _firstField;
         private readonly string _secondField;
-        private readonly IReadOnlyDictionary<string, Dictionary<Guid, string>>? _referenceMaps;
+        private IReadOnlyDictionary<string, Dictionary<Guid, string>>? _referenceMaps;
         private List<Dictionary<string, object>> _filteredItems;
         private Func<Dictionary<string, object>?, Task>? _extraAction;
         private MetadataObject? _catalog;
@@ -58,6 +58,29 @@ namespace BIS.ERP.Views
             EditButton.Visibility = Visibility.Visible;
             AddButton.IsEnabled = true;
             EditButton.IsEnabled = ItemsGrid.SelectedItem != null;
+
+            if (catalog.TableName.Equals("catalog_advance_payments", StringComparison.OrdinalIgnoreCase))
+            {
+                // В выборе пары служебные признаки идут сразу за валютой.
+                string FieldName(string column) => catalog.Fields.FirstOrDefault(field =>
+                    field.DbColumnName.Equals(column, StringComparison.OrdinalIgnoreCase))?.Name ?? column;
+                var currency = FieldName("currency_id");
+                var active = FieldName("is_active");
+                var note = FieldName("description");
+                var columns = ItemsGrid.Columns.OrderBy(column => column.DisplayIndex).ToList();
+                var trailing = new[] { active, note }.Select(name => columns.FirstOrDefault(column =>
+                    string.Equals(column.Header?.ToString(), name, StringComparison.OrdinalIgnoreCase)))
+                    .OfType<DataGridColumn>().ToList();
+                columns.RemoveAll(column => trailing.Contains(column));
+                var currencyIndex = columns.FindIndex(column =>
+                    string.Equals(column.Header?.ToString(), currency, StringComparison.OrdinalIgnoreCase));
+                if (currencyIndex >= 0)
+                {
+                    columns.InsertRange(currencyIndex + 1, trailing);
+                    for (var index = 0; index < columns.Count; index++)
+                        columns[index].DisplayIndex = index;
+                }
+            }
         }
 
         private void RebuildGrid()
@@ -308,6 +331,9 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
                 return;
 
             var rows = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+            // Пока была открыта карточка, пользователь мог создать счёт или валюту.
+            // Карта, полученная при открытии выбора, таких Id ещё не содержит.
+            _referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(_catalog, _metadataService);
             var reloaded = _referenceMaps != null && _referenceMaps.Count > 0
                 ? ReferenceDisplayHelper.ResolveRows(rows, _referenceMaps)
                 : rows;
@@ -497,6 +523,12 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
 
                 if (current == null)
                     return "—";
+
+                if (key is "Остаток брать из модуля" or "module_code")
+                {
+                    var moduleName = ChartOfAccountsSelectionMetadata.NormalizeModuleDisplayName(current);
+                    return string.IsNullOrWhiteSpace(moduleName) ? current : moduleName;
+                }
 
                 if (current.Equals("True", StringComparison.OrdinalIgnoreCase) ||
                     current.Equals("False", StringComparison.OrdinalIgnoreCase))

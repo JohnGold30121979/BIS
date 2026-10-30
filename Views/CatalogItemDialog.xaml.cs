@@ -23,6 +23,7 @@ namespace BIS.ERP.Views
         private AccountAnalyticsRegistry? _accountAnalytics;
         private string? _assignedModuleName;
         private readonly TaskCompletionSource<bool> _formBuilt = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private bool _isSaving;
 
         public Dictionary<string, object> ItemData => _itemData;
 
@@ -1449,6 +1450,9 @@ inputControl = AccountPickerControlFactory.Create(
         /// </summary>
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            if (_isSaving)
+                return;
+            _isSaving = true;
             try
             {
                 // Ждём завершения построения формы, чтобы не выполнять команды
@@ -1460,6 +1464,9 @@ inputControl = AccountPickerControlFactory.Create(
                     await _formBuilt.Task;
                     Cursor = null;
                 }
+
+                if (!await EnsureAccountPairAccountsExistAsync())
+                    return;
 
                 foreach (var field in GetEditableFields())
                 {
@@ -1502,6 +1509,79 @@ inputControl = AccountPickerControlFactory.Create(
             {
                 MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+            finally
+            {
+                _isSaving = false;
+            }
+        }
+
+        /// <summary>Не закрывает пару с неизвестным счётом; предлагает создать его штатной формой.</summary>
+        private async Task<bool> EnsureAccountPairAccountsExistAsync()
+        {
+            if (!IsAccountPairsCatalog())
+                return true;
+
+            async Task<AccountAnalyticsRegistry> ReloadAccountsAsync()
+            {
+                var fresh = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                // Пикеры держат общий экземпляр реестра в обработчиках «?».
+                // Обновляем список на месте, чтобы новые счета были видны без закрытия пары.
+                if (_accountAnalytics != null)
+                {
+                    _accountAnalytics.Accounts.Clear();
+                    _accountAnalytics.Accounts.AddRange(fresh.Accounts);
+                }
+                return fresh;
+            }
+
+            var accounts = await ReloadAccountsAsync();
+            foreach (var field in GetEditableFields().Where(field =>
+                         field.DbColumnName is "debit_account" or "credit_account"))
+            {
+                if (!_controls.TryGetValue(field.Name, out var control))
+                    continue;
+                var value = ReadFieldValue(field, control);
+                var code = value?.ToString()?.Trim() ?? string.Empty;
+                if (value == DBNull.Value || code.Length == 0)
+                    continue; // Пустое поле проверяется штатной проверкой обязательности.
+
+                var account = accounts.FindAccount(value);
+                if (account != null)
+                {
+                    AccountPickerControlFactory.SetSelectedAccount(control, account);
+                    continue;
+                }
+
+                var answer = MessageBox.Show(
+                    $"Счёт «{code}» не найден в плане счетов (поле «{field.Name}»).\n\n" +
+                    "Открыть форму добавления счёта в план счетов?\n" +
+                    "Счёт будет создан только после заполнения карточки и нажатия «Сохранить».\n\n" +
+                    "«Нет» — вернуться к паре счетов. Вы сможете выбрать другой счёт или добавить его самостоятельно.",
+                    "Счёт не найден", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+                if (answer != MessageBoxResult.Yes)
+                {
+                    control.Focus();
+                    return false;
+                }
+
+                var catalogs = await _metadataService.GetCatalogsAsync();
+                var chart = catalogs.FirstOrDefault(item => item.Name.Equals("План счетов", StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException("Справочник «План счетов» не найден.");
+                var codeField = chart.Fields.FirstOrDefault(item => item.DbColumnName == "code");
+                var initial = new Dictionary<string, object>();
+                if (codeField != null && code.Length <= 8 && code.All(char.IsDigit))
+                    initial[codeField.Name] = code;
+                var dialog = new CatalogItemDialog(chart, _metadataService, initial, isNewRecord: true);
+                if (await MdiDialogService.ShowInWorkspaceForResultAsync(this, dialog, "Добавление счёта в план счетов") != true)
+                    return false;
+
+                var createdId = await _metadataService.AddCatalogItemAsync(chart.Id, dialog.ItemData);
+                accounts = await ReloadAccountsAsync();
+                var created = accounts.FindAccount(createdId)
+                    ?? throw new InvalidOperationException("Счёт сохранён, но не найден при обновлении плана счетов.");
+                AccountPickerControlFactory.SetSelectedAccount(control, created);
+            }
+            return true;
         }
 
         /// <summary>

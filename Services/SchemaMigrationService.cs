@@ -139,8 +139,76 @@ namespace BIS.ERP.Services
                 new("2026.10.30.05",
                     "Журнал счет-фактур и Счет-фактура НДС: скрыть по умолчанию",
                     false,
-                    HideInvoiceReportsAsync)
+                    HideInvoiceReportsAsync),
+
+                new("2026.10.30.06",
+                    "Ведомость по выбранной паре счетов ClosedXML и подпись Модуль в актах",
+                    false,
+                    EnsureAccountPairTurnoverReportAsync),
+
+                new("2026.10.30.07",
+                    "Акт ClosedXML: Сумма Дт, Сумма Кт и одна Сумма вал.",
+                    false,
+                    EnsureReconciliationCurrencyColumnAsync)
             };
+        }
+
+        private static async Task EnsureReconciliationCurrencyColumnAsync(AppDbContext ctx)
+        {
+            var reports = await ctx.Reports.Where(report => report.ReportType.StartsWith("ReconciliationAct")).ToListAsync();
+            foreach (var report in reports)
+            {
+                if (string.IsNullOrWhiteSpace(report.ClosedXmlLayout)) continue;
+                var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out _);
+                if (layout == null) continue;
+                var changed = false;
+                foreach (var block in layout.Sheets.SelectMany(sheet => sheet.Blocks).Where(block => block.Table != null))
+                {
+                    var columns = block.Table!.Columns;
+                    if (columns.Any(column => column.Field == "Сумма вал.")) continue;
+                    var creditIndex = columns.FindIndex(column => column.Field == "Сумма Кт");
+                    if (creditIndex < 0) continue;
+                    columns.Insert(creditIndex + 1, new BIS.ERP.Models.ClosedXmlColumn
+                    {
+                        Field = "Сумма вал.", Header = "Сумма вал.", Width = 12,
+                        NumberFormat = "#,##0.00", SuppressZero = true, Align = "Right"
+                    });
+                    // Восьмиколоночные объединения шапки стандартного акта расширяем на новую графу.
+                    foreach (var cell in layout.Sheets.SelectMany(sheet => sheet.Blocks).SelectMany(item => item.Rows).SelectMany(row => row.Cells))
+                        if (cell.MergeToColumn == 8) cell.MergeToColumn = 9;
+                    changed = true;
+                }
+                if (!changed) continue;
+                report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(layout);
+                report.UpdatedAt = DateTime.UtcNow;
+            }
+            await ctx.SaveChangesAsync();
+        }
+
+        private static async Task EnsureAccountPairTurnoverReportAsync(AppDbContext ctx)
+        {
+            await new MetadataService(ctx).EnsureAccountPairTurnoverReportAsync();
+            var reports = await ctx.Reports.Where(report => report.ReportType.StartsWith("ReconciliationAct")).ToListAsync();
+            foreach (var report in reports)
+            {
+                if (string.IsNullOrWhiteSpace(report.ClosedXmlLayout)) continue;
+                var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out _);
+                if (layout == null) continue;
+                var changed = false;
+                bool Legacy(string text) => text.Replace(" ", "").Equals("КодАРМ", StringComparison.OrdinalIgnoreCase);
+                foreach (var block in layout.Sheets.SelectMany(sheet => sheet.Blocks))
+                {
+                    if (block.Table == null) continue;
+                    foreach (var column in block.Table.Columns.Where(column => Legacy(column.Header)))
+                    { column.Header = "Модуль"; changed = true; }
+                    foreach (var cell in block.Table.HeaderLevels.SelectMany(level => level.Cells).Where(cell => Legacy(cell.Text)))
+                    { cell.Text = "Модуль"; changed = true; }
+                }
+                if (!changed) continue;
+                report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(layout);
+                report.UpdatedAt = DateTime.UtcNow;
+            }
+            await ctx.SaveChangesAsync();
         }
 
         /// <summary>
