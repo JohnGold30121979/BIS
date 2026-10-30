@@ -22,7 +22,7 @@ namespace BIS.ERP.Services
         /// <summary>Заголовки акта — те же, что печатает программный экспорт.</summary>
         private static readonly string[] ActHeaders =
         {
-            "Дата", "N докум", ActLabelField, "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль"
+            ActLabelField, "Дата", "N докум", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль"
         };
 
         /// <summary>Колонка набора ведомости, в которой лежат заголовок и период.</summary>
@@ -208,9 +208,9 @@ namespace BIS.ERP.Services
                             {
                                 Columns =
                                 {
-                                    new ClosedXmlColumn { Field = ActHeaders[0], Header = ActHeaders[0], Width = 12, Align = "Center" },
+                                    new ClosedXmlColumn { Field = ActHeaders[0], Header = ActHeaders[0], Width = 44, Align = "Left" },
                                     new ClosedXmlColumn { Field = ActHeaders[1], Header = ActHeaders[1], Width = 12, Align = "Center" },
-                                    new ClosedXmlColumn { Field = ActHeaders[2], Header = ActHeaders[2], Width = 44, Align = "Left" },
+                                    new ClosedXmlColumn { Field = ActHeaders[2], Header = ActHeaders[2], Width = 12, Align = "Center" },
                                     new ClosedXmlColumn { Field = ActHeaders[3], Header = ActHeaders[3], Width = 12, Align = "Center" },
                                     new ClosedXmlColumn { Field = ActHeaders[4], Header = ActHeaders[4], Width = 12, Align = "Center" },
                                     new ClosedXmlColumn { Field = ActHeaders[5], Header = ActHeaders[5], Width = 12, Align = "Center", NumberFormat = "#,##0.00", SuppressZero = true },

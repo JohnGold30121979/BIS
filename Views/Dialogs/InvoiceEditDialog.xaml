@@ -150,7 +150,10 @@
 
             <StackPanel Grid.Row="6" Grid.Column="0" Margin="0,0,10,0">
                 <TextBlock Text="Тип поставки ЭСФ" FontWeight="Bold"/>
-                <ComboBox x:Name="SupplyKindCombo" Height="28" DisplayMemberPath="DisplayName" SelectedValuePath="Value"/>
+                <ComboBox x:Name="SupplyKindCombo" Height="28"
+                            DisplayMemberPath="DisplayName"
+                            SelectedValuePath="Value"
+                            SelectionChanged="OnSupplyKindChanged"/>
             </StackPanel>
 
             <Grid x:Name="CurrencyPanel" Grid.Row="7" Grid.ColumnSpan="2" Visibility="Collapsed">

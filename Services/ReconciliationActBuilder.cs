@@ -171,11 +171,10 @@ namespace BIS.ERP.Services
         public static DataTable CreateTable()
         {
             var table = new DataTable("Акт сверки");
-            // Первыми идут дата и номер документа: так акт читается слева направо,
-            // а описание операции и суммы — уже после них.
+            // Первой идёт операция, затем дата и номер документа, потом суммы.
+            table.Columns.Add("Наименование материала, вид операции", typeof(string));
             table.Columns.Add("Дата", typeof(string));
             table.Columns.Add("N докум", typeof(string));
-            table.Columns.Add("Наименование материала, вид операции", typeof(string));
             table.Columns.Add("Дебет", typeof(string));
             table.Columns.Add("Кредит", typeof(string));
             table.Columns.Add("Сумма Дт", typeof(decimal));

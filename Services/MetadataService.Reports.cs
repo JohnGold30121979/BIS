@@ -236,7 +236,8 @@ public partial class MetadataService
         {
             // Обычные native-отчёты скрыты, пока не сделан точный вывод.
             // Отчёт с посеянным ClosedXML-макетом доступен сразу: макет хранится в базе.
-            report.IsActive = definition.SeedClosedXmlLayout;
+            // Незаконченные образцы (СТ-1) скрыты до включения администратором.
+            report.IsActive = definition.SeedClosedXmlLayout && definition.IsActiveByDefault;
             report.IsPrintForm = false;
             report.IsDefault = false;
 
@@ -555,7 +556,7 @@ public partial class MetadataService
                 "posted_state", "supply_kind", "report_title", "period_start", "period_end"
             },
             SourceFormat: "ClosedXml",
-            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
+            SeedClosedXmlLayout: true, ShowInAccountingReports: false, IsActiveByDefault: false),
         new StandardReportDefinition(
             Code: "standard.finance.vat-invoice-st1",
             Name: "Счёт-фактура по форме СТ-1",
@@ -577,7 +578,7 @@ public partial class MetadataService
                 "seller_bank_text", "report_title", "period_start", "period_end", "esf_number"
             },
             SourceFormat: "ClosedXml",
-            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
+            SeedClosedXmlLayout: true, ShowInAccountingReports: false, IsActiveByDefault: false),
         new StandardReportDefinition(
             Code: "standard.finance.vat-invoice-vat-nds",
             Name: "Счет-фактура НДС (ClosedXML)",
@@ -599,7 +600,7 @@ public partial class MetadataService
                 "report_title", "period_start", "period_end", "esf_number"
             },
             SourceFormat: "ClosedXml",
-            SeedClosedXmlLayout: true, ShowInAccountingReports: true),
+            SeedClosedXmlLayout: true, ShowInAccountingReports: false, IsActiveByDefault: false),
         new StandardReportDefinition(
             Code: "standard.finance.trial-balance-closedxml",
             Name: "Оборотная ведомость (ClosedXML)",
@@ -905,7 +906,13 @@ public partial class MetadataService
         /// Отметить отчёт для списка окна «Бухгалтерская отчётность».
         /// Администратор может снять или поставить отметку в конструкторе.
         /// </summary>
-        bool ShowInAccountingReports = false);
+        bool ShowInAccountingReports = false,
+
+        /// <summary>
+        /// Показывать отчёт в списках сразу после посева. Для незаконченных
+        /// образцов (например, СТ-1) ставится false — админ включает вручную.
+        /// </summary>
+        bool IsActiveByDefault = true);
 }
 
 

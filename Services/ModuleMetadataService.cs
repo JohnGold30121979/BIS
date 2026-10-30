@@ -653,7 +653,11 @@ namespace BIS.ERP.Services
         public static readonly string[] AbonentCatalogNames =
         {
             "Справочник типов услуг",
-            "Справочник производственных участков"
+            "Справочник производственных участков",
+            "Участки абонентского отдела",
+            "Льготы",
+            "Улицы",
+            "Лицевые счета"
         };
 
         public static readonly string[] FixedAssetDocumentNames =

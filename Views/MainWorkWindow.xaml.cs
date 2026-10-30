@@ -982,8 +982,8 @@ namespace BIS.ERP
             return new NavigationItem
             {
                 Id = document.Id.ToString(),
-                // Раздел кассовых ордеров называется «Банковские операции»
-                // (переименован только заголовок, документ остаётся «Расходный/Приходный КО»).
+                // Для кассовых ордеров раздел называется так же, как документ:
+                // «Расходный/Приходный КО» (переименование в «Банковские операции» отменено).
                 Name = type == "CashOrder" ? CashOrderWorkView.SectionTitle : document.Name,
                 Icon = document.Icon,
                 Type = type, Tag = document, Order = document.Order

@@ -117,9 +117,29 @@ namespace BIS.ERP.Services
                     EnsureAccountPairsReferenceTypesAsync),
 
                 new("2026.10.30.01",
-                    "Акт сверки (ClosedXML): порядок колонок — дата и номер документа первыми",
+                    "Акт сверки (ClosedXML): обновление сохранённого макета (порядок колонок)",
                     false,
-                    EnsureReconciliationActColumnOrderAsync)
+                    EnsureReconciliationActColumnOrderAsync),
+
+                new("2026.10.30.02",
+                    "Акт сверки (ClosedXML): операция, дата и номер документа первыми",
+                    false,
+                    EnsureReconciliationActColumnOrderAsync),
+
+                new("2026.10.30.03",
+                    "Возврат названия документа КО: «Банковские операции» → «Расходный/Приходный КО»",
+                    false,
+                    RestoreCashOrderDocumentNameAsync),
+
+                new("2026.10.30.04",
+                    "Счёт-фактура по форме СТ-1: скрыть по умолчанию",
+                    false,
+                    HideVatInvoiceSt1Async),
+
+                new("2026.10.30.05",
+                    "Журнал счет-фактур и Счет-фактура НДС: скрыть по умолчанию",
+                    false,
+                    HideInvoiceReportsAsync)
             };
         }
 
@@ -150,23 +170,115 @@ namespace BIS.ERP.Services
         }
 
         /// <summary>
-        /// Порядок колонок стандартного макета «Акт сверки (ClosedXML)» до правки:
-        /// операция первой, дата и номер документа — в конце. Макет хранится в
-        /// Reports."ClosedXmlLayout" и после первичного посева кодом не перетирается,
-        /// поэтому старые базы нужно обновить один раз этим шагом.
+        /// Возвращает документу кассовых ордеров исходное имя. Переименование
+        /// раздела в «Банковские операции» было ошибкой: на имя документа
+        /// опираются открытие источника проводки, печатные формы и отчёты.
+        /// Меняем только имя «Банковские операции»; другое имя не трогаем.
+        /// </summary>
+        private static async Task RestoreCashOrderDocumentNameAsync(AppDbContext ctx)
+        {
+            const string cashOrderName = "Расходный/Приходный КО";
+            var document = await ctx.MetadataObjects
+                .FirstOrDefaultAsync(item =>
+                    item.ObjectType == "Document" && item.TableName == "doc_cash_orders");
+
+            if (document == null ||
+                string.Equals(document.Name, cashOrderName, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(document.Name, "Банковские операции", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            document.Name = cashOrderName;
+            await ctx.SaveChangesAsync();
+
+            SystemLogService.Info(
+                "Документ КО: название возвращено — «Расходный/Приходный КО».",
+                "Reports");
+        }
+
+        /// <summary>
+        /// Скрывает образец «Счёт-фактура по форме СТ-1»: отчёт незаконченный,
+        /// по умолчанию не должен появляться ни в «Бухгалтерской отчётности»,
+        /// ни в общем списке отчётов. Администратор может включить его вручную.
+        /// </summary>
+        private static async Task HideVatInvoiceSt1Async(AppDbContext ctx)
+        {
+            var report = await ctx.Reports
+                .FirstOrDefaultAsync(item => item.Code == "standard.finance.vat-invoice-st1");
+            if (report == null)
+                return;
+
+            if (!report.IsActive && !report.ShowInAccountingReports)
+                return;
+
+            report.IsActive = false;
+            report.ShowInAccountingReports = false;
+            await ctx.SaveChangesAsync();
+
+            SystemLogService.Info("Счёт-фактура по форме СТ-1 скрыта по умолчанию.", "Reports");
+        }
+
+        /// <summary>
+        /// Скрывает «Журнал счет-фактур» и «Счет-фактура НДС» по умолчанию:
+        /// это образцы, которые не должны появляться в «Бухгалтерской отчётности»
+        /// и общем списке отчётов, пока администратор не включит их вручную.
+        /// </summary>
+        private static async Task HideInvoiceReportsAsync(AppDbContext ctx)
+        {
+            var codes = new[]
+            {
+                "standard.finance.invoice-journal",
+                "standard.finance.vat-invoice-vat-nds"
+            };
+
+            var reports = await ctx.Reports
+                .Where(item => codes.Contains(item.Code))
+                .ToListAsync();
+
+            var changed = 0;
+            foreach (var report in reports)
+            {
+                if (!report.IsActive && !report.ShowInAccountingReports)
+                    continue;
+
+                report.IsActive = false;
+                report.ShowInAccountingReports = false;
+                changed++;
+            }
+
+            if (changed == 0)
+                return;
+
+            await ctx.SaveChangesAsync();
+            SystemLogService.Info(
+                $"Скрыты отчёты по умолчанию: {changed} (журнал счет-фактур, счет-фактура НДС).",
+                "Reports");
+        }
+
+        /// <summary>
+        /// Порядки колонок стандартного макета «Акт сверки (ClosedXML)», которые
+        /// могли остаться в базе: исходный (операция, суммы, номер и дата в конце)
+        /// и промежуточный (дата и номер первыми). Текущий порядок — операция,
+        /// дата, номер, затем суммы.
         /// </summary>
         private static readonly string[] LegacyReconciliationActColumns =
         {
             ClosedXmlLayoutTemplates.ActLabelField, "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "N докум", "Дата", "Модуль"
         };
 
+        private static readonly string[] DateFirstReconciliationActColumns =
+        {
+            "Дата", "N докум", ClosedXmlLayoutTemplates.ActLabelField, "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль"
+        };
+
         private const string ReconciliationActClosedXmlCode = "standard.finance.reconciliation-act-closedxml";
 
         /// <summary>
-        /// Обновляет сохранённый макет акта сверки: «Дата», «N докум», затем операция,
-        /// дебет/кредит, суммы и модуль — как в экранной сетке. Меняем только макет,
-        /// который в точности совпадает со старым стандартным: пользовательскую
-        /// разметку шаг не трогает.
+        /// Обновляет сохранённый макет акта сверки: «Наименование материала, вид
+        /// операции», затем «Дата», «N докум», затем дебет/кредит, суммы и модуль.
+        /// Меняем только макет, который совпадает с одним из старых стандартных
+        /// порядков: пользовательскую разметку шаг не трогает.
         /// </summary>
         private static async Task EnsureReconciliationActColumnOrderAsync(AppDbContext ctx)
         {
@@ -191,8 +303,11 @@ namespace BIS.ERP.Services
                 return;
 
             var fields = section.Columns.Select(column => column.Field).ToArray();
-            if (fields.Length != LegacyReconciliationActColumns.Length ||
-                !fields.SequenceEqual(LegacyReconciliationActColumns, StringComparer.OrdinalIgnoreCase))
+            var isLegacy = fields.Length == LegacyReconciliationActColumns.Length &&
+                           fields.SequenceEqual(LegacyReconciliationActColumns, StringComparer.OrdinalIgnoreCase);
+            var isDateFirst = fields.Length == DateFirstReconciliationActColumns.Length &&
+                              fields.SequenceEqual(DateFirstReconciliationActColumns, StringComparer.OrdinalIgnoreCase);
+            if (!isLegacy && !isDateFirst)
             {
                 // Уже новый порядок или макет изменён в конструкторе — не трогаем.
                 return;
@@ -205,7 +320,7 @@ namespace BIS.ERP.Services
             await ctx.SaveChangesAsync();
 
             SystemLogService.Info(
-                "Акт сверки (ClosedXML): порядок колонок — дата и номер документа первыми.",
+                "Акт сверки (ClosedXML): порядок колонок — операция, дата, номер документа, затем остальные.",
                 "Reports");
         }
 
@@ -550,9 +665,7 @@ namespace BIS.ERP.Services
         private static readonly string[] DefaultAccountingReportCodes =
         {
             "standard.finance.trial-balance-closedxml",
-            "standard.finance.reconciliation-act-closedxml",
-            "standard.finance.invoice-journal",
-            "standard.finance.vat-invoice-st1"
+            "standard.finance.reconciliation-act-closedxml"
         };
 
         /// <summary>

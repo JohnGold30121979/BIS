@@ -1414,9 +1414,8 @@ namespace BIS.ERP.Services
             worksheet.Style.Font.FontSize = 9;
             worksheet.ShowGridLines = false;
             worksheet.Columns(1, 8).AdjustToContents();
-            worksheet.Columns(1, 2).Width = 12;
-            worksheet.Column(3).Width = 44;
-            worksheet.Columns(4, 8).Width = 12;
+            worksheet.Column(1).Width = 44;
+            worksheet.Columns(2, 8).Width = 12;
 
             var rows = dataTable.Rows.Cast<DataRow>().ToList();
             var currentRow = 1;
@@ -1439,7 +1438,7 @@ namespace BIS.ERP.Services
                 currentRow += 2;
             }
 
-            var headers = new[] { "Дата", "N докум", "Наименование материала, вид операции", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль" };
+            var headers = new[] { "Наименование материала, вид операции", "Дата", "N докум", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль" };
             for (var column = 0; column < headers.Length; column++)
             {
                 var cell = worksheet.Cell(currentRow, column + 1);
@@ -1475,7 +1474,7 @@ namespace BIS.ERP.Services
 
         private static void AddReconciliationPdfHeader(TableDescriptor table)
         {
-            foreach (var title in new[] { "Дата", "N докум", "Наименование материала, вид операции", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль" })
+            foreach (var title in new[] { "Наименование материала, вид операции", "Дата", "N докум", "Дебет", "Кредит", "Сумма Дт", "Сумма Кт", "Модуль" })
                 table.Cell().Border(1).Background("#D9E6F2").Padding(3).AlignCenter().Text(title).Bold();
         }
 
@@ -1485,9 +1484,9 @@ namespace BIS.ERP.Services
             var isImportant = operation.StartsWith("САЛЬДО", StringComparison.OrdinalIgnoreCase) ||
                               operation.Contains("ИТОГО", StringComparison.OrdinalIgnoreCase) ||
                               operation.Contains("Пара счетов", StringComparison.OrdinalIgnoreCase);
+            AddPdfCell(table, operation, isImportant, false);
             AddPdfCell(table, ReadPreviewText(row, "Дата"), isImportant, true);
             AddPdfCell(table, ReadPreviewText(row, "N докум", "Документ", "Номер"), isImportant, true);
-            AddPdfCell(table, operation, isImportant, false);
             AddPdfCell(table, ReadPreviewText(row, "Дебет"), isImportant, true);
             AddPdfCell(table, ReadPreviewText(row, "Кредит"), isImportant, true);
             AddPdfCell(table, FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Дт")), isImportant, true);
@@ -1509,16 +1508,16 @@ namespace BIS.ERP.Services
         {
             var values = new[]
             {
+                ReadReconciliationOperation(row),
                 ReadPreviewText(row, "Дата"),
                 ReadPreviewText(row, "N докум", "Документ", "Номер"),
-                ReadReconciliationOperation(row),
                 ReadPreviewText(row, "Дебет"),
                 ReadPreviewText(row, "Кредит"),
                 FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Дт")),
                 FormatReconciliationAmount(ReadPreviewObject(row, "Сумма Кт")),
                 ReadPreviewText(row, "Модуль")
             };
-            var operation = values[2];
+            var operation = values[0];
             var important = operation.StartsWith("САЛЬДО", StringComparison.OrdinalIgnoreCase) ||
                             operation.Contains("ИТОГО", StringComparison.OrdinalIgnoreCase) ||
                             operation.Contains("Пара счетов", StringComparison.OrdinalIgnoreCase);
@@ -1529,7 +1528,7 @@ namespace BIS.ERP.Services
                 cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
                 if (important)
                     cell.Style.Font.Bold = true;
-                if (index != 2)
+                if (index > 0)
                     cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             }
         }

@@ -347,6 +347,130 @@ namespace BIS.ERP.Services
             await _context.SaveChangesAsync();
         }
 
+        /// <summary>
+        /// Создаёт системный справочник абонентского отдела с заданным набором полей.
+        /// Используется для «Участков», «Льгот», «Улиц» и «Лицевых счетов».
+        /// </summary>
+        private async Task CreateAbonentCatalog(
+            MetadataConfiguration config,
+            string name,
+            string tableName,
+            string icon,
+            string description,
+            int order,
+            Func<Guid, List<MetadataField>> fieldsFactory)
+        {
+            try
+            {
+                var catalog = new MetadataObject
+                {
+                    Id = Guid.NewGuid(),
+                    Name = name,
+                    TableName = tableName,
+                    ObjectType = "Catalog",
+                    Description = description,
+                    Icon = icon,
+                    Order = order,
+                    IsSystem = true,
+                    MetadataConfigId = config.Id,
+                    Fields = fieldsFactory(Guid.NewGuid())
+                };
+                await _context.MetadataObjects.AddAsync(catalog);
+                await _context.SaveChangesAsync();
+                await CreateTableForCatalogAsync(catalog);
+                System.Diagnostics.Debug.WriteLine($"Справочник '{name}' создан");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Ошибка создания справочника '{name}': {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Догоняет структуру справочника абонентского отдела в уже созданных базах:
+        /// недостающие поля добавляет в метаданные и в таблицу, у существующих
+        /// обновляет имя, тип, обязательность и порядок.
+        /// </summary>
+        private async Task EnsureAbonentCatalogStructureAsync(
+            string catalogName,
+            string tableName,
+            Func<Guid, List<MetadataField>> fieldsFactory)
+        {
+            var catalog = await _context.MetadataObjects
+                .Include(metadata => metadata.Fields)
+                .FirstOrDefaultAsync(metadata =>
+                    metadata.ObjectType == "Catalog" &&
+                    (metadata.Name == catalogName || metadata.TableName == tableName));
+
+            if (catalog == null)
+                return;
+
+            // Лечим случай, когда метаданные сохранились, а CREATE TABLE упал.
+            await CreateTableForCatalogAsync(catalog);
+
+            var existingByColumn = catalog.Fields
+                .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
+                .GroupBy(field => field.DbColumnName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var desired in fieldsFactory(catalog.Id))
+            {
+                if (!existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
+                {
+                    desired.Id = Guid.NewGuid();
+                    desired.MetadataObjectId = catalog.Id;
+                    await _context.MetadataFields.AddAsync(desired);
+                    await AddColumnToTableAsync(catalog.TableName, desired);
+                    catalog.Fields.Add(desired);
+                    continue;
+                }
+
+                existing.Name = desired.Name;
+                existing.FieldType = desired.FieldType;
+                existing.Length = desired.Length;
+                existing.Precision = desired.Precision;
+                existing.Scale = desired.Scale;
+                existing.IsRequired = desired.IsRequired;
+                existing.IsUnique = desired.IsUnique;
+                existing.Order = desired.Order;
+                existing.ReferenceCatalog = desired.ReferenceCatalog;
+                existing.DisplayPattern = desired.DisplayPattern;
+                existing.DisplayFields = desired.DisplayFields;
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private Task EnsureAbonentSitesCatalogStructureAsync() =>
+            EnsureAbonentCatalogStructureAsync(
+                "Участки абонентского отдела", "catalog_abonent_sites", GetAbonentSiteFields);
+
+        private Task EnsureBenefitsCatalogStructureAsync() =>
+            EnsureAbonentCatalogStructureAsync("Льготы", "catalog_benefits", GetBenefitFields);
+
+        private Task EnsureStreetsCatalogStructureAsync() =>
+            EnsureAbonentCatalogStructureAsync("Улицы", "catalog_streets", GetStreetFields);
+
+        private Task EnsurePersonalAccountsCatalogStructureAsync() =>
+            EnsureAbonentCatalogStructureAsync("Лицевые счета", "catalog_personal_accounts", GetPersonalAccountFields);
+
+        private Task CreateAbonentSitesCatalog(MetadataConfiguration config) =>
+            CreateAbonentCatalog(config, "Участки абонентского отдела", "catalog_abonent_sites",
+                "🏘️", "Участки абонентского отдела: номер и наименование", 43, GetAbonentSiteFields);
+
+        private Task CreateBenefitsCatalog(MetadataConfiguration config) =>
+            CreateAbonentCatalog(config, "Льготы", "catalog_benefits",
+                "🎁", "Льготы абонентов: номер, наименование, процент", 44, GetBenefitFields);
+
+        private Task CreateStreetsCatalog(MetadataConfiguration config) =>
+            CreateAbonentCatalog(config, "Улицы", "catalog_streets",
+                "🛣️", "Улицы абонентского отдела: номер и наименование", 45, GetStreetFields);
+
+        private Task CreatePersonalAccountsCatalog(MetadataConfiguration config) =>
+            CreateAbonentCatalog(config, "Лицевые счета", "catalog_personal_accounts",
+                "📇", "Лицевые счета абонентов: участок, улица, дом, квартира, льгота, площадь, объём",
+                46, GetPersonalAccountFields);
+
         private async Task CreateMaterialCatalog(MetadataConfiguration config)
         {
             try

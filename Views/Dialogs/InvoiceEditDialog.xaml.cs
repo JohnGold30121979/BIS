@@ -25,6 +25,9 @@ namespace BIS.ERP.Views.Dialogs
         private readonly InvoiceService _invoiceService;
         private readonly Guid? _editId;
         private readonly bool _isReadOnlyMode;
+        private bool _isApplyingSupplyTaxRule;
+        private const string TaxableSupplyKindCode = "1";
+        private const string NonTaxableSupplyKindCode = "2";
 
         /// <summary>
         /// Идентификатор сохранённой записи. Заполняется после успешного сохранения,
@@ -316,9 +319,10 @@ namespace BIS.ERP.Views.Dialogs
                     SelectDefaultReference(SupplyKindCombo, SupplyKindCombo.Items.OfType<ReferenceOption>(), item => item.IsDefault, "1");
                 }
 
+                _isInitialized = true;
+                ApplySupplyKindTaxRule();
                 RecalculateTotals();
                 UpdateCurrencyPanelVisibility();
-                _isInitialized = true;
                 if (_isReadOnlyMode)
                     DisableReadOnlyMode();
             }
@@ -825,6 +829,59 @@ namespace BIS.ERP.Views.Dialogs
             {
                 _isApplyingHeaderTaxValues = false;
             }
+        }
+
+        private ReferenceOption? GetZeroVatTax()
+        {
+            return VatTaxItems.FirstOrDefault(item => item.Rate == 0m);
+        }
+
+        private void ApplySupplyKindTaxRule()
+        {
+            if (_isApplyingSupplyTaxRule || _isReadOnlyMode)
+                return;
+
+            var supplyKind = GetSelectedReferenceValue(SupplyKindCombo);
+            if (supplyKind != NonTaxableSupplyKindCode)
+                return;
+
+            var zeroVat = GetZeroVatTax();
+            if (zeroVat == null)
+            {
+                MessageBox.Show(
+                    "Для типа поставки «Необлагаемая / без НДС» в справочнике «Налоги» " +
+                    "должна быть активная ставка НДС 0%.",
+                    "Не настроен НДС 0%",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            _isApplyingSupplyTaxRule = true;
+            try
+            {
+                // Шапка остаётся источником истины для всех строк — это соответствует
+                // существующей модели диалога.
+                HeaderVatTaxCombo.SelectedValue = zeroVat.Value;
+                foreach (var line in _lines)
+                {
+                    line.VatTaxCode = zeroVat.Value;
+                    line.VatRate = zeroVat.Rate;
+                }
+            }
+            finally
+            {
+                _isApplyingSupplyTaxRule = false;
+            }
+        }
+
+        private void OnSupplyKindChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_isInitialized || _isReadOnlyMode || _isApplyingSupplyTaxRule)
+                return;
+
+            ApplySupplyKindTaxRule();
+            RecalculateTotals();
         }
         private static string NormalizeLegacyDeliveryKind(string storedValue)
         {
@@ -1599,6 +1656,13 @@ namespace BIS.ERP.Views.Dialogs
             if (_synchronizingHeaderTaxSelection || _isReadOnlyMode)
                 return;
 
+            if (GetSelectedReferenceValue(SupplyKindCombo) == NonTaxableSupplyKindCode &&
+                GetSelectedReferenceOption(HeaderVatTaxCombo)?.Rate > 0m)
+            {
+                ApplySupplyKindTaxRule();
+                return;
+            }
+
             ApplySelectedHeaderTaxesToLines();
             RecalculateTotals();
         }
@@ -1661,6 +1725,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void RecalculateTotals()
         {
+            ApplySupplyKindTaxRule();
             ApplySelectedHeaderTaxesToLines();
 
             foreach (var line in _lines)

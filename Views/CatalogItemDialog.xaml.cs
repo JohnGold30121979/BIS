@@ -1486,6 +1486,9 @@ inputControl = AccountPickerControlFactory.Create(
                 if (!ValidateChartOfAccountsCode())
                     return;
 
+                if (!await ValidateChartOfAccountsCodeUniqueAsync())
+                    return;
+
                 if (!ValidateChartOfAccountsCatalogLinks())
                     return;
 
@@ -1842,6 +1845,45 @@ inputControl = AccountPickerControlFactory.Create(
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// План счетов: не даём добавить второй счёт с тем же кодом.
+        /// Проверяем до закрытия формы, чтобы пользователь исправил код,
+        /// а не получал ошибку уже после сохранения.
+        /// </summary>
+        private async Task<bool> ValidateChartOfAccountsCodeUniqueAsync()
+        {
+            if (!IsChartOfAccountsCatalog() || !_isNewRecord)
+                return true;
+
+            var code = GetItemText("Код", "code").Trim();
+            if (code.Length == 0)
+                return true;
+
+            var rows = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+            var exists = rows.Any(row =>
+            {
+                var value = row.GetValueOrDefault("Код") ?? row.GetValueOrDefault("code");
+                return string.Equals(value?.ToString()?.Trim(), code, StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (!exists)
+                return true;
+
+            MessageBox.Show(
+                $"Счёт с кодом «{code}» уже существует. Укажите другой код счёта.",
+                "План счетов",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            if (_controls.TryGetValue("Код", out var control) && control is TextBox codeBox)
+            {
+                codeBox.Focus();
+                codeBox.SelectAll();
+            }
+
+            return false;
         }
 
         private bool ValidateChartOfAccountsCatalogLinks()

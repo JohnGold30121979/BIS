@@ -84,10 +84,11 @@ namespace BIS.ERP.Services
                     new SystemCalculatorField("Дата", "Дата", "Date"),
                     new SystemCalculatorField("Организация", "Организация"),
                     new SystemCalculatorField("N докум", "Номер документа"),
-                    new SystemCalculatorField("Вид документа", "Вид документа"),
+                    new SystemCalculatorField("Тип документа", "Тип документа"),
                     new SystemCalculatorField("Дебет", "Дебет"),
                     new SystemCalculatorField("Кредит", "Кредит"),
                     new SystemCalculatorField("Сумма", "Сумма", "Number"),
+                    new SystemCalculatorField("Сумма в валюте", "Сумма в валюте", "Number"),
                     new SystemCalculatorField("Содержание", "Содержание"),
                     new SystemCalculatorField("Модуль", "Модуль"),
                     new SystemCalculatorField("posting_date", "Дата (макет)", "Date"),
@@ -280,10 +281,11 @@ namespace BIS.ERP.Services
             table.Columns.Add("Дата", typeof(DateTime));
             table.Columns.Add("Организация", typeof(string));
             table.Columns.Add("N докум", typeof(string));
-            table.Columns.Add("Вид документа", typeof(string));
+            table.Columns.Add("Тип документа", typeof(string));
             table.Columns.Add("Дебет", typeof(string));
             table.Columns.Add("Кредит", typeof(string));
             table.Columns.Add("Сумма", typeof(decimal));
+            table.Columns.Add("Сумма в валюте", typeof(decimal));
             table.Columns.Add("Содержание", typeof(string));
             table.Columns.Add("Модуль", typeof(string));
             table.Columns.Add("posting_date", typeof(DateTime));
@@ -327,10 +329,11 @@ namespace BIS.ERP.Services
                 row["Дата"] = movement.Date;
                 row["Организация"] = movement.OrganizationName;
                 row["N докум"] = movement.DocumentNumber;
-                row["Вид документа"] = movement.DocumentType;
+                row["Тип документа"] = movement.DocumentType;
                 row["Дебет"] = movement.DebitAccount;
                 row["Кредит"] = movement.CreditAccount;
                 row["Сумма"] = movement.Amount;
+                row["Сумма в валюте"] = movement.AmountCurrency;
                 row["Содержание"] = movement.Description;
                 row["Модуль"] = movement.ModuleCode;
 

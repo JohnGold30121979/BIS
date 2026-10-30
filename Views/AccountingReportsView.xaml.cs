@@ -1625,7 +1625,8 @@ namespace BIS.ERP.Views
             "module_code", "report_org", "report_period",
             "opening_balance", "closing_balance",
             "currency_code", "amount_currency", "exchange_rate",
-            "organization_name", "row_kind"
+            "organization_id", "organization_code", "organization_name",
+            "document_type", "amount_kgs", "row_kind"
         };
 
         /// <summary>

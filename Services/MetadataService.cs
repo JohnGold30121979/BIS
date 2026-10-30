@@ -523,6 +523,7 @@ namespace BIS.ERP.Services
             // Дефолты записи (в т.ч. валюта «Киргизский сом» для расчётного счёта):
             // этот путь добавления используется справочниками, а не документами.
             await ApplyCreateRecordDefaultsAsync(catalog, itemData);
+            await EnsureChartOfAccountsCodeUniqueAsync(catalog, itemData);
 
             var columns = new List<string>();
             var values = new List<string>();
@@ -1523,6 +1524,25 @@ namespace BIS.ERP.Services
                     await CreateProductionSitesCatalog(config);
                 await EnsureProductionSitesCatalogStructureAsync();
 
+                // Справочники абонентского отдела: участки, льготы, улицы и лицевые счета.
+                // «Участки абонентского отдела» — отдельный справочник: имя «Участки»
+                // уже занято общим справочником участков предприятия.
+                if (!existingCatalogs.Contains("Участки абонентского отдела"))
+                    await CreateAbonentSitesCatalog(config);
+                await EnsureAbonentSitesCatalogStructureAsync();
+
+                if (!existingCatalogs.Contains("Льготы"))
+                    await CreateBenefitsCatalog(config);
+                await EnsureBenefitsCatalogStructureAsync();
+
+                if (!existingCatalogs.Contains("Улицы"))
+                    await CreateStreetsCatalog(config);
+                await EnsureStreetsCatalogStructureAsync();
+
+                if (!existingCatalogs.Contains("Лицевые счета"))
+                    await CreatePersonalAccountsCatalog(config);
+                await EnsurePersonalAccountsCatalogStructureAsync();
+
                 ReportStage("абонентский отдел");
 
                 // Модуль «Абонентский отдел» и привязка к нему его справочников.
@@ -1567,6 +1587,7 @@ namespace BIS.ERP.Services
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
             ValidateChartOfAccountsCode(metadata, data);
+            await EnsureChartOfAccountsCodeUniqueAsync(metadata, data);
 
             // Счета-ссылки: код из диалога → uuid для новых баз (иначе 22P02).
             await NormalizeAccountReferenceValuesAsync(metadata, data);
@@ -1665,6 +1686,7 @@ namespace BIS.ERP.Services
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
             ValidateChartOfAccountsCode(metadata, data);
+            await EnsureChartOfAccountsCodeUniqueAsync(metadata, data, recordId);
 
             // Счета-ссылки: код из диалога → uuid для новых баз (иначе 22P02).
             await NormalizeAccountReferenceValuesAsync(metadata, data);
@@ -1772,6 +1794,78 @@ namespace BIS.ERP.Services
                 code.Any(character => character is < '0' or > '9'))
             {
                 throw new InvalidOperationException("Код счета должен содержать от 1 до 8 цифр.");
+            }
+        }
+
+        /// <summary>
+        /// План счетов: код счёта должен быть уникальным. Проверяем до INSERT/UPDATE,
+        /// иначе в справочник попадают два счёта с одинаковым кодом, а проводки
+        /// и отчёты начинают ссылаться на неоднозначный счёт.
+        /// </summary>
+        private async Task EnsureChartOfAccountsCodeUniqueAsync(
+            MetadataObject metadata,
+            Dictionary<string, object> data,
+            Guid? excludeRecordId = null)
+        {
+            if (!string.Equals(metadata.Name, "План счетов", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var codeField = metadata.Fields.FirstOrDefault(field =>
+                string.Equals(field.Name, "Код", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(field.DbColumnName, "code", StringComparison.OrdinalIgnoreCase));
+            if (codeField == null ||
+                !TryGetFieldValue(data, codeField, out var value) ||
+                value is null or DBNull)
+            {
+                return;
+            }
+
+            var code = value.ToString()?.Trim() ?? string.Empty;
+            if (code.Length == 0)
+                return;
+
+            var sql = $@"
+                SELECT ""Id""
+                FROM {QuoteIdentifier(metadata.TableName)}
+                WHERE LOWER(TRIM({QuoteIdentifier(codeField.DbColumnName)})) = LOWER(TRIM(@code))";
+            if (excludeRecordId.HasValue)
+                sql += " AND \"Id\" <> @excludeId";
+            sql += " LIMIT 1;";
+
+            var connection = _context.Database.GetDbConnection();
+            var shouldClose = connection.State != System.Data.ConnectionState.Open;
+            if (shouldClose)
+                await connection.OpenAsync();
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = sql;
+
+                var codeParameter = command.CreateParameter();
+                codeParameter.ParameterName = "@code";
+                codeParameter.Value = code;
+                command.Parameters.Add(codeParameter);
+
+                if (excludeRecordId.HasValue)
+                {
+                    var idParameter = command.CreateParameter();
+                    idParameter.ParameterName = "@excludeId";
+                    idParameter.Value = excludeRecordId.Value;
+                    command.Parameters.Add(idParameter);
+                }
+
+                var found = await command.ExecuteScalarAsync();
+                if (found is not null and not DBNull)
+                {
+                    throw new InvalidOperationException(
+                        $"Счёт с кодом «{code}» уже существует. Укажите другой код счёта.");
+                }
+            }
+            finally
+            {
+                if (shouldClose)
+                    await connection.CloseAsync();
             }
         }
 

@@ -22,10 +22,9 @@ namespace BIS.ERP.Views
     {
         /// <summary>
         /// Название раздела в дереве навигации, вкладке и заголовке окна.
-        /// Сам документ по-прежнему «Расходный/Приходный КО» — переименован
-        /// только раздел (банковские операции).
+        /// Совпадает с именем документа «Расходный/Приходный КО».
         /// </summary>
-        public const string SectionTitle = "Банковские операции";
+        public const string SectionTitle = "Расходный/Приходный КО";
 
         private const string CashOrderDocumentName = "Расходный/Приходный КО";
         private const string CashOrderReceiptKind = "Receipt";

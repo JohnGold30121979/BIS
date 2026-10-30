@@ -1613,6 +1613,283 @@ public partial class MetadataService
         };
     }
 
+    /// <summary>
+    /// Поля справочника «Участки абонентского отдела» (модуль «Абонентский отдел»):
+    /// номер участка и его наименование.
+    /// </summary>
+    private List<MetadataField> GetAbonentSiteFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Номер",
+                DbColumnName = "number",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Участок",
+                DbColumnName = "name",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Активен",
+                DbColumnName = "is_active",
+                FieldType = "Bool",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            }
+        };
+    }
+
+    /// <summary>
+    /// Поля справочника «Льготы» (модуль «Абонентский отдел»):
+    /// номер, наименование льготы и процент.
+    /// </summary>
+    private List<MetadataField> GetBenefitFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Номер",
+                DbColumnName = "number",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Льгота",
+                DbColumnName = "name",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Процент",
+                DbColumnName = "percent",
+                FieldType = "Decimal",
+                Precision = 18,
+                Scale = 2,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Активен",
+                DbColumnName = "is_active",
+                FieldType = "Bool",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 4,
+                MetadataObjectId = metadataObjectId
+            }
+        };
+    }
+
+    /// <summary>
+    /// Поля справочника «Улицы» (модуль «Абонентский отдел»):
+    /// номер и наименование улицы.
+    /// </summary>
+    private List<MetadataField> GetStreetFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Номер",
+                DbColumnName = "number",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Улица",
+                DbColumnName = "name",
+                FieldType = "String",
+                Length = 200,
+                IsRequired = true,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Активен",
+                DbColumnName = "is_active",
+                FieldType = "Bool",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            }
+        };
+    }
+
+    /// <summary>
+    /// Поля справочника «Лицевые счета» (модуль «Абонентский отдел»):
+    /// номер лицевого счёта, участок, улица, дом, квартира, льгота, площадь и объём.
+    /// </summary>
+    private List<MetadataField> GetPersonalAccountFields(Guid metadataObjectId)
+    {
+        return new List<MetadataField>
+        {
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Лицевой счет",
+                DbColumnName = "personal_account",
+                FieldType = "String",
+                Length = 50,
+                IsRequired = true,
+                IsUnique = true,
+                Order = 1,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Участок",
+                DbColumnName = "site_id",
+                FieldType = "Reference",
+                ReferenceCatalog = "Участки абонентского отдела",
+                DisplayPattern = "{Номер} - {Участок}",
+                DisplayFields = "Номер,Участок",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 2,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Улица",
+                DbColumnName = "street_id",
+                FieldType = "Reference",
+                ReferenceCatalog = "Улицы",
+                DisplayPattern = "{Номер} - {Улица}",
+                DisplayFields = "Номер,Улица",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 3,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Дом",
+                DbColumnName = "house",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 4,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Кв",
+                DbColumnName = "apartment",
+                FieldType = "String",
+                Length = 20,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 5,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Льгота",
+                DbColumnName = "benefit_id",
+                FieldType = "Reference",
+                ReferenceCatalog = "Льготы",
+                DisplayPattern = "{Номер} - {Льгота}",
+                DisplayFields = "Номер,Льгота",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 6,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Площадь",
+                DbColumnName = "area",
+                FieldType = "Decimal",
+                Precision = 18,
+                Scale = 3,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 7,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Объем",
+                DbColumnName = "volume",
+                FieldType = "Decimal",
+                Precision = 18,
+                Scale = 3,
+                IsRequired = false,
+                IsUnique = false,
+                Order = 8,
+                MetadataObjectId = metadataObjectId
+            },
+            new MetadataField
+            {
+                Id = Guid.NewGuid(),
+                Name = "Активен",
+                DbColumnName = "is_active",
+                FieldType = "Bool",
+                IsRequired = false,
+                IsUnique = false,
+                Order = 9,
+                MetadataObjectId = metadataObjectId
+            }
+        };
+    }
+
     // Поля для справочника "Должности"
     private List<MetadataField> GetPositionFields(Guid metadataObjectId)
     {
