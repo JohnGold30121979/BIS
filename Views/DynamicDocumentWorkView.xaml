@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="BIS.ERP.Views.DynamicDocumentWorkView"
+<UserControl x:Class="BIS.ERP.Views.DynamicDocumentWorkView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Loaded="UserControl_Loaded">
@@ -7,6 +7,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -51,8 +52,41 @@
             </DataGrid.Resources>
         </DataGrid>
 
+        <!-- Строки проводки выбранного документа: таблица, а не карточка — строк может быть много -->
+        <GroupBox Grid.Row="2" Header="Строки проводки" Padding="8" Margin="0,10,0,0" Height="210">
+            <DataGrid x:Name="PostingLinesGrid"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="True"
+                      SelectionMode="Single"
+                      SelectionUnit="FullRow"
+                      HeadersVisibility="Column"
+                      RowHeaderWidth="0"
+                      RowHeight="26"
+                      GridLinesVisibility="Horizontal"
+                      AlternatingRowBackground="#F8F9FA"
+                      Background="White"
+                      BorderBrush="#E0E0E0"
+                      BorderThickness="1">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="№" Binding="{Binding LineNumber}" Width="40"/>
+                    <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="70"/>
+                    <DataGridTextColumn Header="Материал" Binding="{Binding MaterialName}" Width="*"/>
+                    <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="55"/>
+                    <DataGridTextColumn Header="Дебет" Binding="{Binding AccountCode}" Width="90"/>
+                    <DataGridTextColumn Header="Участок" Binding="{Binding SiteText}" Width="140"/>
+                    <DataGridTextColumn Header="%" Binding="{Binding VatRate}" Width="55"/>
+                    <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity}" Width="80"/>
+                    <DataGridTextColumn Header="Цена" Binding="{Binding Price}" Width="90"/>
+                    <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="100"/>
+                    <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="90"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+
         <!-- Статус бар -->
-        <StatusBar Grid.Row="2" Margin="0,5,0,0">
+        <StatusBar Grid.Row="3" Margin="0,5,0,0">
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Готово"/>
             </StatusBarItem>

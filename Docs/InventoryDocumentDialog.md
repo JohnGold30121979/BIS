@@ -1,5 +1,7 @@
 # Документ ТМЗ: диалог `InventoryDocumentDialog`
 
+> Пошаговая инструкция по созданию новых документов ТМЗ (с кодом и точками вставки) — в отдельном файле `Docs/InventoryDocumentHowTo.md`.
+
 ## Назначение
 
 Окно редактирования документа товарно-материальных запасов (ТМЗ) по образцу счёта-фактуры: **шапка документа** (реквизиты заголовка) + **таблица строк** (материалы, количества, цены, налоги, итоги) + панель итогов.
@@ -212,7 +214,7 @@ Loaded += async (_, _) => await InitializeAsync();
 - **Оформление строк** — без системной синей заливки: фон строки прозрачный, текст из темы (`AppBodyTextBrush`), у выделенной ячейки — акцентная рамка (`AppAccentBrush`).
 - **Материалы** ищутся по имени «Справочник материалов» либо «Материалы» (`LoadRowsAsync` принимает несколько имён справочника). Окно выбора открывается даже для пустого справочника: включено `ConfigureCatalogEditing`, поэтому в нём доступны «Добавить» и «Изменить», а после закрытия кэш перечитывается (`ReloadMaterialsAsync`).
 - **Пересчёт строки** — строки подписаны на `PropertyChanged`; изменение `Quantity`, `Price`, `VatRate`, `SalesTaxRate` сразу вызывает `Recalculate()` и `UpdateTotals()` (биндинги этих колонок — с `UpdateSourceTrigger=PropertyChanged`).
-- **Участок** — тоже поле ввода + «?»: введённое наименование сверяется со справочником «Участки» (точное, затем единственное вхождение), в строку пишутся `SiteId` и `SiteText`.
+- **Участок** — тоже поле ввода + «?»: справочник «Участки» (`catalog_sites`, при его отсутствии — «Участки (новые)»); наименование берётся из «Наименование участка» / `site_name`, код — из «Код участка» / `site_code`. Ручной ввод сверяется и по коду, и по наименованию (точное, затем единственное вхождение), в строку пишутся `SiteId` и `SiteText`.
 - **№** — первая колонка таблицы с номером строки (`LineNumber`); перенумеровывается при добавлении/удалении (`RenumberLines`).
 - **Кнопки** — слева «Добавить строку / Удалить строку / Пересчет»; справа завершающие «Добавить» (у нового документа; у существующего — «Запись») и «Отмена». Шапка лежит в `ScrollViewer` (`MaxHeight=440`), чтобы нижние кнопки не уезжали за край окна.
 - **Enter** — переход к следующей вводимой колонке; после последней колонки — на следующую строку, а в конце последней строки — создание новой строки с курсором в «Материал» (`AddLine()` + `FocusFirstEntryCell`). При открытии диалога курсор сразу встаёт в первую колонку первой строки.
@@ -387,3 +389,93 @@ sequenceDiagram
 - Вид операции из поля `document_entry_id` сохраняется отдельно в `operation_kind` (код из `_entryOperationKinds`).
 - Номер документа генерируется только для новых записей и только если поле пустое.
 - Поле `doc_date` (Дата шапки) реализовано как `DatePicker` (метод `AddDateText`); оно использует глобальную маску `DatePickerInputMaskBehavior` (инициализируется в `App.xaml.cs` на `DatePicker.Loaded`) — посимвольный ввод, шаблон `DD/MM/YYYY` и календарь. Значение засевается через `SetDateEditor` (`SelectedDate`), применяется в `ApplyExistingValues`, читается при сохранении в `ReadEditorValue` (`case DatePicker`).
+
+## Строки проводки в основном окне (сделано 29.10.2026)
+
+**Что сделано.** В основном окне документов ТМЗ (`DynamicDocumentWorkView`) внизу, под списком документов, появился грид «Строки проводки» — все строки выбранного документа (их может быть несколько), только для чтения. В самом гриде колонка «Вид операции» теперь показывает наименование из `catalog_inventory_document_entries` (`name`) вместо идентификатора.
+
+### Где
+
+- Окно: `Views/DynamicDocumentWorkView.xaml` / `.xaml.cs` (`DynamicDocumentWorkView : UserControl`) — основное окно документов модуля ТМЗ («Поступление ТМЗ», «Выбытие ТМЗ», «Внутреннее перемещение ТМЗ»).
+- Разметка после правки: `Row 0` — кнопки (Добавить / Провести / Редактировать / Удалить / Обновить), `Row 1` — `DataGrid` со списком документов (`*`), `Row 2` — `GroupBox «Строки проводки»` с гридом строк (высота 210), `Row 3` — `StatusBar`.
+- Список строк — `ObservableCollection<InventoryLineRow> _postingLines`; таблица обновляется при выборе документа и после перезагрузки списка.
+
+### Что показывать
+
+Колонки грида: № (`LineNumber`), Код (`MaterialCode`), Материал (`MaterialName`), Ед. (`UnitName`), Дебет (`AccountCode`), Участок (`SiteText`), % (`VatRate`), Кол-во (`Quantity`), Цена (`Price`), Без НДС (`AmountWithoutTax`), НДС (`VatAmount`). Грид `IsReadOnly=True`, `AutoGenerateColumns=False`, `CanUserAddRows=False`; колонка «Материал» растягивается (`*`).
+
+### Источник данных
+
+- Строки: `InventoryDocumentLineService.GetLinesAsync(linesTable, parentColumn, headerId)` (`Services/InventoryDocumentLineService.cs`), таблица и колонка-родитель — из `InventoryDocumentModel.Documents` по имени документа.
+- «Участок»: один раз читается справочник «Участки» (`catalog_sites`, при отсутствии — «Участки (новые)»), кэш `Id → Наименование участка` (`EnsureSiteNamesAsync`).
+- «Вид операции» — наименование из справочника «Вид операции ТМЗ» (`catalog_inventory_document_entries`, поле `name`); словарь `Id → name` строится в `LoadEntryNamesAsync()`.
+
+### Что изменено в коде
+
+`Views/DynamicDocumentWorkView.xaml`:
+
+| Место | Изменение |
+|---|---|
+| `Grid.RowDefinitions` | Добавлена четвёртая строка: `Row 0` — кнопки, `Row 1` — список документов (`*`), `Row 2` — блок деталей (`Auto`), `Row 3` — статус. |
+| `Row 2` | Новый `GroupBox Header="Детали проводки"` (`Padding=8`, `Margin=0,10,0,0`) с `WrapPanel x:Name="DetailPanel"` — сюда код добавляет пары «подпись — значение». |
+| `StatusBar` | Перенесён на `Grid.Row="3"` (был `2`). |
+
+`Views/DynamicDocumentWorkView.xaml.cs`:
+
+| Место | Изменение |
+|---|---|
+| Поля класса | `EntryFieldName = "Вид операции"`; `ObservableCollection<InventoryLineRow> _postingLines` — источник нижнего грида; кэш `_siteNames` и флаг `_sitesLoaded`. |
+| Конструктор | После `InitializeComponent()`: `PostingLinesGrid.ItemsSource = _postingLines`. |
+| `OnSelectionChanged` | Кроме `UpdateButtonsState()` вызывает `_ = LoadPostingLinesAsync()` — перечитывает строки выбранного документа. |
+| `LoadPostingLinesAsync` (новый) | Берёт `DataGrid.SelectedItem as DataRowView` и `Id`; работает только для документов ТМЗ (`IsInventoryDocument`) и при наличии `AppDbContext`; находит `DocumentDefinition` по имени, вызывает `GetLinesAsync(LinesTable, ParentColumn, id)`, заполняет `_postingLines`, подставляет наименования участков. Ошибка — в `StatusText`, грид остаётся пустым. |
+| `EnsureSiteNamesAsync` (новый) | Один раз читает справочник «Участки» в словарь `Id → Наименование участка`, чтобы колонка «Участок» показывала имя, а не id. |
+| `ReadCatalogText` (новый) | Вспомогательное чтение текста из строки справочника по списку ключей. |
+| `LoadDataCore` | Перед заполнением строк вызывается `await LoadEntryNamesAsync()`; в цикле по полям для «Вид операции» значение подменяется наименованием до общей подстановки справочников. В конце метода (после `ApplyDocumentGridProfile()`) — `UpdateDetails()` для восстановленной строки выбора. |
+| `LoadEntryNamesAsync` (новый) | Читает справочник `InventoryDocumentModel.EntryCatalogName` («Вид операции ТМЗ», таблица `catalog_inventory_document_entries`) и строит словарь `Id → name` (с запасным ключом «Наименование»). Если справочник не найден — словарь пустой, в гриде остаётся прежнее значение. |
+| `ReadCatalogText` (новый) | Вспомогательное чтение текста из строки справочника по списку ключей. |
+
+### Поведение
+
+- Блок обновляется при выборе документа в списке и после перезагрузки данных (добавление, редактирование, удаление, проведение).
+- Поля, которых нет у конкретного документа (например, «Валюта»/«Курс» у сомового счёта), показываются как «—»; сами колонки блока не перестраиваются.
+- В гриде «Вид операции» отображается наименование (`name`), а не GUID; сортировка/фильтр идут по отображаемому тексту.
+- Редактирование в гриде не добавлялось: строки по-прежнему открываются через «Редактировать» в диалоге `InventoryDocumentDialog`.
+
+## История правок
+
+### 30.10.2026
+
+Проводки первичных документов ТМЗ: формирование в `doc_postings` при проведении и удаление до удаления документа.
+
+| Место (файл · метод) | Что изменено |
+|---|---|
+| `Services/MetadataService.cs` · `PostDocumentAsync` | Добавлена ветка `else if (IsInventoryDocumentName(document.Name))` → `ProcessInventoryDocumentAsync(...)`. До этого документы ТМЗ попадали в `else` и падали с «Неизвестный тип документа». |
+| `MetadataService.ProcessInventoryDocumentAsync` (новый) | По одной проводке на строку документа: сумма — `line_total` (или `amount_without_tax`, если 0); для `Incoming` Дт = счёт строки (`account_code`), Кт = счёт шапки (`counterparty_account`), для `Outgoing`/`Movement` — наоборот; `amount_currency` = сумма / курс (`exchange_rate`); заполняются `doc_number`, `posting_date`, `document_type` = имя документа, `document_table`, `document_id`, `organization_id`, `currency_id`, `description`. Строки без счёта, с нулевой суммой и с равными Дт/Кт пропускаются; если ни одной проводки не создано — `InvalidOperationException`. В конце — `is_posted = true`. |
+| `MetadataService.DeleteInventoryPostingsAsync` (новый) | `DELETE FROM doc_postings WHERE document_table = @table AND document_id = @id` (с try/catch — если в старой базе колонок нет, сработает удаление по номеру). |
+| `MetadataService.DeleteDynamicRecordAsync` | Порядок: прочитать запись → `DeleteInventoryPostingsAsync` → `DeleteDocumentPostingsAsync` (по `doc_number` + `document_type`) → `DELETE` шапки. Сначала проводки, потом первичный документ. |
+| `MetadataService.ReadRecordGuid` (новый) | Чтение `Guid` из записи по нескольким ключам (`currency_id` / «Валюта», `organization_id` / «Организация»). |
+| `Docs/InventoryDocumentHowTo.md` | Раздел «Нумерация и проведение» переписан: правила формирования проводок, порядок удаления, новые пункты чек-листа и строки в таблице ошибок. |
+
+### 29.10.2026
+
+Все правки — в `Views/Dialogs/InventoryDocumentDialog.xaml` и `Views/Dialogs/InventoryDocumentDialog.xaml.cs` (если не указано иное).
+
+| Место (файл · метод / элемент) | Что изменено |
+|---|---|
+| `.xaml.cs` · `LoadRowsAsync` | Сигнатура `string catalogName` → `params string[] catalogNames`: справочник ищется по нескольким именам, а не только по одному. |
+| `.xaml.cs` · `InitializeAsync` | Материалы: `LoadRowsAsync(catalogs, "Справочник материалов", "Материалы")`. Добавлено поле `_materialsCatalog` — тот же каталог ищется в `catalogs` по этим именам для окна выбора. Участки: `LoadRowsAsync(catalogs, "Участки", "Участки (новые)")`. |
+| `.xaml.cs` · `OpenMaterialPickerAsync` | Убран ранний `return` с предупреждением при `pickRows.Count == 0`: окно выбора открывается всегда. Добавлен `dialog.ConfigureCatalogEditing(_materialsCatalog, _metadataService)` — в окне доступны «Добавить» и «Изменить». После закрытия — `await ReloadMaterialsAsync()`. |
+| `.xaml.cs` · `ReloadMaterialsAsync` (новый) | Перечитывает `GetCatalogDataAsync(_materialsCatalog.Id)`, заново заполняет `_materials` и `_materialRows`, чтобы только что добавленный материал сразу подставлялся в строку. |
+| `.xaml.cs` · `AddLine`, `LoadLinesAsync` | Для каждой строки добавлена подписка `row.PropertyChanged += OnLinePropertyChanged`. |
+| `.xaml.cs` · `OnLinePropertyChanged` (новый) | При изменении `Quantity`, `Price`, `VatRate`, `SalesTaxRate` — `row.Recalculate()` и `UpdateTotals()`; на остальные свойства не реагирует. Добавлен `using System.ComponentModel;`. |
+| `.xaml` · колонки «%», «Кол-во», «Цена» | Биндинги переведены на `UpdateSourceTrigger=PropertyChanged` — суммы пересчитываются по ходу ввода, а не после ухода из ячейки. |
+| `.xaml.cs` · `OnSaveClick` | `DialogResult = true;` → `MdiDialogService.CloseWithResult(this, true);` — в MDI окно немодальное, и `DialogResult` бросал «DialogResult можно задать только после создания Window и его отображения как диалогового окна». |
+| `.xaml.cs` · `OnCancelClick` | `DialogResult = false;` → `MdiDialogService.CloseWithResult(this, false);` (та же причина). |
+| `.xaml.cs` · `BuildSitePickRows` | Строки окна выбора строятся через `SiteName()` / `SiteCode()`; колонка «Код» добавляется только если хотя бы у одного участка код заполнен. |
+| `.xaml.cs` · `SiteName`, `SiteCode` (новые) | Наименование: «Наименование участка» / `site_name` / «Наименование» / `name`; код: «Код участка» / `site_code` / «Код» / `code`. Раньше читалось только «Наименование» — поэтому строки окна были пустыми. |
+| `.xaml.cs` · `OpenSitePickerAsync` | `new ReferenceSelectionDialog(pickRows, hasCode ? "Код" : "Наименование", hasCode ? "Наименование" : null)` — окно показывает код и наименование, если код есть. |
+| `.xaml.cs` · `ApplySite` | Имя участка читается из «Наименование» / «Наименование участка» / `site_name`; `SiteId` — из `Id` выбранной строки. |
+| `.xaml.cs` · `ApplySiteText` | Ручной ввод сверяется сначала по коду и наименованию, затем по единственному вхождению в наименование; если не найдено — возвращается последнее корректное значение. |
+| `.xaml.cs` · `FormatLoadedSiteText` | Подпись в загруженной строке берётся через `SiteName(site)` вместо несуществующего «Наименование». |
+| `.xaml.cs` · `PickReferenceAsync` (шапка) | В ключи добавлены «Код участка» / `site_code` и «Наименование участка» / `site_name` — «Участок-получатель» у внутреннего перемещения тоже показывает данные. |
+| Проверка | XAML разбирается (`xml.dom.minidom`), синтаксис изменённых `.cs` прогнан через Roslyn (csc.dll, ошибки CS1xxx отсутствуют). Полная сборка не выполнялась: `dotnet build` в среде падает на NuGet/restore (`NETSDK1060`, `project.assets.json`) до компиляции — собирать в Visual Studio. |

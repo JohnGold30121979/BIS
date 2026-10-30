@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
@@ -20,10 +21,19 @@ namespace BIS.ERP.Views
         private readonly AppDbContext? _context;
         private DataTable _dataTable;
 
+        private const string EntryFieldName = "Вид операции";
+
+        /// <summary>Строки выбранного документа — таблица «Строки проводки».</summary>
+        private readonly ObservableCollection<InventoryLineRow> _postingLines = new();
+
+        private readonly Dictionary<Guid, string> _siteNames = new();
+        private bool _sitesLoaded;
+
         public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService, AppDbContext? context = null)
         {
             InitializeComponent();
             AmountColumnsBehavior.Attach(DataGrid); // динамические колонки — суммы с разрядами через пробел
+            PostingLinesGrid.ItemsSource = _postingLines;
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
             _context = context;
@@ -62,6 +72,7 @@ namespace BIS.ERP.Views
         private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateButtonsState();
+            _ = LoadPostingLinesAsync();
         }
 
         /// <summary>
@@ -71,6 +82,122 @@ namespace BIS.ERP.Views
         /// дал бы взаимную блокировку. Повторные вызовы (Loaded) безопасны.
         /// </summary>
         private Task LoadData() => LoadDataCore();
+
+        /// <summary>Загружает строки выбранного документа в нижнюю таблицу «Строки проводки».</summary>
+        private async Task LoadPostingLinesAsync()
+        {
+            _postingLines.Clear();
+
+            if (_context == null || !IsInventoryDocument)
+                return;
+
+            if (DataGrid.SelectedItem is not DataRowView row ||
+                !row.DataView.Table.Columns.Contains("Id") ||
+                row["Id"] is not Guid documentId)
+            {
+                return;
+            }
+
+            var definition = InventoryDocumentModel.Documents.FirstOrDefault(item =>
+                string.Equals(item.Name, _documentMetadata.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (definition == null)
+                return;
+
+            try
+            {
+                var service = new InventoryDocumentLineService(_context);
+                var lines = await service.GetLinesAsync(definition.LinesTable, definition.ParentColumn, documentId);
+
+                await EnsureSiteNamesAsync();
+
+                foreach (var line in lines)
+                {
+                    if (line.SiteId.HasValue && _siteNames.TryGetValue(line.SiteId.Value, out var siteName))
+                        line.SiteText = siteName;
+
+                    _postingLines.Add(line);
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = $"❌ Строки документа: {ex.Message}";
+            }
+        }
+
+        /// <summary>Один раз читает справочник «Участки» — чтобы в строках было наименование, а не id.</summary>
+        private async Task EnsureSiteNamesAsync()
+        {
+            if (_sitesLoaded)
+                return;
+
+            _sitesLoaded = true;
+
+            try
+            {
+                var catalogs = await _metadataService.GetCatalogsAsync();
+                var catalog = catalogs.FirstOrDefault(item =>
+                    string.Equals(item.Name, "Участки", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Name, "Участки (новые)", StringComparison.OrdinalIgnoreCase));
+
+                if (catalog == null)
+                    return;
+
+                foreach (var site in await _metadataService.GetCatalogDataAsync(catalog.Id))
+                {
+                    if (!site.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var siteId))
+                        continue;
+
+                    var name = ReadCatalogText(site, "Наименование участка", "site_name", "Наименование", "name");
+                    if (name.Length > 0)
+                        _siteNames[siteId] = name;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Строки проводки: справочник участков не прочитан: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Идентификаторы видов операций → наименования из справочника
+        /// «Вид операции ТМЗ» (`catalog_inventory_document_entries`, поле `name`).
+        /// </summary>
+        private async Task<Dictionary<string, string>> LoadEntryNamesAsync()
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            var catalog = await _metadataService.GetCatalogByNameAsync(InventoryDocumentModel.EntryCatalogName);
+            if (catalog == null)
+                return result;
+
+            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            foreach (var row in rows)
+            {
+                var id = row.TryGetValue("Id", out var idValue) ? idValue?.ToString()?.Trim() : null;
+                var name = ReadCatalogText(row, "name", "Наименование");
+
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                    result[id] = name;
+            }
+
+            return result;
+        }
+
+        private static string ReadCatalogText(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (row.TryGetValue(key, out var value) && value != null && value != DBNull.Value)
+                {
+                    var text = value.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(text))
+                        return text;
+                }
+            }
+
+            return string.Empty;
+        }
 
         private async Task LoadDataCore()
         {
@@ -119,6 +246,9 @@ namespace BIS.ERP.Views
                     }
                 }
 
+                // «Вид операции» показываем наименованием из справочника видов операций.
+                var entryNames = await LoadEntryNamesAsync();
+
                 // Добавляем строки
                 foreach (var row in data)
                 {
@@ -129,8 +259,14 @@ namespace BIS.ERP.Views
                     {
                         var rawValue = row.ContainsKey(field.Name) ? row[field.Name] : DBNull.Value;
 
+                        if (string.Equals(field.Name, EntryFieldName, StringComparison.OrdinalIgnoreCase) &&
+                            rawValue != DBNull.Value &&
+                            entryNames.TryGetValue(rawValue.ToString()?.Trim() ?? string.Empty, out var entryName))
+                        {
+                            dataRow[field.Name] = entryName;
+                        }
                         // Если поле ссылается на справочник - подставляем Name вместо GUID
-                        if (referenceCatalogs.TryGetValue(field.Name, out var dict) && rawValue != DBNull.Value)
+                        else if (referenceCatalogs.TryGetValue(field.Name, out var dict) && rawValue != DBNull.Value)
                         {
                             var rawText = rawValue?.ToString() ?? string.Empty;
                             var normalized = NormalizeReferenceLookupKey(rawText);
@@ -169,6 +305,8 @@ namespace BIS.ERP.Views
 
                 UpdateAnalyticColumns(data, accountAnalytics);
                 ApplyDocumentGridProfile();
+
+                await LoadPostingLinesAsync();
 
                 StatusText.Text = $"📊 Загружено записей: {_dataTable.Rows.Count}";
             }

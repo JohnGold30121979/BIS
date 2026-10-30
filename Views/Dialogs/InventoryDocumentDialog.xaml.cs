@@ -131,7 +131,7 @@ namespace BIS.ERP.Views.Dialogs
                 _taxRows = taxRows;
                 var paymentKinds = await LoadRowsAsync(catalogs, "Виды оплаты");
                 var currencies = await LoadRowsAsync(catalogs, "Справочник валют");
-                var sites = await LoadRowsAsync(catalogs, "Участки");
+                var sites = await LoadRowsAsync(catalogs, "Участки", "Участки (новые)");
                 var responsible = await LoadRowsAsync(catalogs, "МОЛ");
                 var materials = await LoadRowsAsync(catalogs, "Справочник материалов", "Материалы");
                 _materialsCatalog = catalogs.FirstOrDefault(item =>
@@ -721,8 +721,8 @@ namespace BIS.ERP.Views.Dialogs
                 var pick = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["Id"] = row.TryGetValue("Id", out var id) ? id : DBNull.Value,
-                    ["Код"] = Read(row, "Код", "code"),
-                    ["Наименование"] = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала")
+                    ["Код"] = Read(row, "Код", "code", "Код участка", "site_code"),
+                    ["Наименование"] = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала", "Наименование участка", "site_name")
                 };
 
                 // У плана счетов в окне выбора нужны ещё «Тип счета» и «Активен».
@@ -1334,33 +1334,51 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
-            var dialog = new ReferenceSelectionDialog(pickRows, "Наименование");
+            var hasCode = pickRows.Count > 0 && pickRows[0].ContainsKey("Код");
+            var dialog = new ReferenceSelectionDialog(pickRows,
+                hasCode ? "Код" : "Наименование",
+                hasCode ? "Наименование" : null);
             dialog.SetSearchText(row.SiteText);
 
             if (await ShowPickerAsync(dialog, "Выбор участка"))
                 ApplySite(row, dialog.SelectedItem);
         }
 
-        /// <summary>Строки окна выбора участка — справочник «Участки».</summary>
+        /// <summary>Строки окна выбора участка — справочник «Участки» (`catalog_sites`).</summary>
         private List<Dictionary<string, object>> BuildSitePickRows()
         {
+            var hasCode = _sites.Any(site => SiteCode(site).Length > 0);
             var result = new List<Dictionary<string, object>>();
+
             foreach (var site in _sites)
             {
-                result.Add(new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                var item = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["Id"] = site.TryGetValue("Id", out var id) ? id : DBNull.Value,
-                    ["Наименование"] = Read(site, "Наименование", "name")
-                });
+                    ["Наименование"] = SiteName(site)
+                };
+
+                if (hasCode)
+                    item["Код"] = SiteCode(site);
+
+                result.Add(item);
             }
 
             return result;
         }
 
+        /// <summary>Наименование участка: в справочнике это «Наименование участка» / `site_name`.</summary>
+        private static string SiteName(Dictionary<string, object> site) =>
+            Read(site, "Наименование участка", "site_name", "Наименование", "name");
+
+        /// <summary>Код участка: «Код участка» / `site_code`.</summary>
+        private static string SiteCode(Dictionary<string, object> site) =>
+            Read(site, "Код участка", "site_code", "Код", "code");
+
         private void ApplySite(InventoryLineRow row, Dictionary<string, object> picked)
         {
             row.SiteId = ReadGuid(picked);
-            row.SiteText = Read(picked, "Наименование", "name");
+            row.SiteText = Read(picked, "Наименование", "Наименование участка", "site_name");
         }
 
         private void OnSiteTextLostFocus(object sender, RoutedEventArgs e)
@@ -1381,13 +1399,13 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             var site = _sites.FirstOrDefault(item =>
-                string.Equals(Read(item, "Наименование", "name"), value, StringComparison.OrdinalIgnoreCase));
+                string.Equals(SiteName(item), value, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(SiteCode(item), value, StringComparison.OrdinalIgnoreCase));
 
             if (site == null)
             {
                 var matches = _sites
-                    .Where(item => Read(item, "Наименование", "name")
-                        .Contains(value, StringComparison.OrdinalIgnoreCase))
+                    .Where(item => SiteName(item).Contains(value, StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
                 site = matches.Count == 1 ? matches[0] : null;
@@ -1409,7 +1427,7 @@ namespace BIS.ERP.Views.Dialogs
                 return string.Empty;
 
             var site = _sites.FirstOrDefault(item => ReadGuid(item) == siteId.Value);
-            return site == null ? string.Empty : Read(site, "Наименование", "name");
+            return site == null ? string.Empty : SiteName(site);
         }
 
         /// <summary>Строки окна выбора счёта: код, наименование и тип — как в шапке документа.</summary>

@@ -2275,6 +2275,8 @@ namespace BIS.ERP.Services
             {
                 documentRecord = await GetRecordDataAsync(metadata.TableName, recordId);
                 await EnsureDocumentDateCanBeModifiedAsync(metadata, documentRecord);
+                // Сначала проводки (doc_postings), только потом сам первичный документ.
+                await DeleteInventoryPostingsAsync(metadata, recordId);
                 await DeleteDocumentPostingsAsync(metadata, documentRecord);
             }
 
@@ -2331,6 +2333,153 @@ namespace BIS.ERP.Services
                 WHERE doc_number = @number
                   AND document_type IN ({string.Join(", ", typeParameterNames)});";
             await _context.Database.ExecuteSqlRawAsync(sql, parameters.ToArray());
+        }
+
+        /// <summary>Документ ТМЗ: «Поступление ТМЗ», «Выбытие ТМЗ», «Внутреннее перемещение ТМЗ».</summary>
+        private static bool IsInventoryDocumentName(string name) =>
+            InventoryDocumentModel.Documents.Any(item =>
+                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// Проводки документа ТМЗ — по одной на строку документа:
+        /// поступление — Дт счёт строки («Дебет») и Кт счёт шапки («Счет»);
+        /// выбытие и перемещение — наоборот. Строки без счёта или с одинаковыми
+        /// счетами пропускаются; если не создано ни одной проводки — исключение.
+        /// </summary>
+        private async Task ProcessInventoryDocumentAsync(
+            MetadataObject document,
+            Dictionary<string, object> record,
+            Guid recordId,
+            decimal amount)
+        {
+            var definition = InventoryDocumentModel.Documents.FirstOrDefault(item =>
+                string.Equals(item.Name, document.Name, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Не найдено описание документа ТМЗ «{document.Name}».");
+
+            var lines = await new InventoryDocumentLineService(_context)
+                .GetLinesAsync(definition.LinesTable, definition.ParentColumn, recordId);
+
+            if (lines.Count == 0)
+                throw new InvalidOperationException("У документа нет строк — проводки формировать не из чего.");
+
+            var documentNumber = GetDocumentNumberFromData(record) ?? string.Empty;
+            var postingDate = GetDateValue(record, "doc_date", "Дата") ?? DateTime.Today;
+            var headerAccount = GetStringValue(record, "counterparty_account", "Счет").Trim();
+            var rate = GetDecimalValue(record, "exchange_rate", "Курс валюты", "Курс");
+            var currencyId = ReadRecordGuid(record, "currency_id", "Валюта");
+            var organizationId = ReadRecordGuid(record, "organization_id", "Организация");
+            var isIncoming = string.Equals(
+                InventoryDocumentModel.MovementKindForDocument(document.Name), "Incoming",
+                StringComparison.OrdinalIgnoreCase);
+
+            var created = 0;
+            var skipped = 0;
+
+            foreach (var line in lines)
+            {
+                var rowAmount = line.LineTotal != 0m ? line.LineTotal : line.AmountWithoutTax;
+                if (rowAmount <= 0m)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var lineAccount = (line.AccountCode ?? string.Empty).Trim();
+                var debit = isIncoming ? lineAccount : headerAccount;
+                var credit = isIncoming ? headerAccount : lineAccount;
+
+                if (debit.Length == 0 || credit.Length == 0 ||
+                    string.Equals(debit, credit, StringComparison.OrdinalIgnoreCase))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var amountCurrency = rate > 0
+                    ? Math.Round(rowAmount / rate, 2, MidpointRounding.AwayFromZero)
+                    : 0m;
+
+                var description = $"{document.Name} {documentNumber}: {line.MaterialName}".Trim();
+
+                await _context.Database.ExecuteSqlRawAsync(@"
+                    INSERT INTO ""doc_postings""
+                        (""Id"", ""posting_date"", ""doc_number"", ""document_type"", ""module_code"",
+                         ""debit_account"", ""credit_account"", ""amount_kgs"", ""amount_currency"", ""currency_id"",
+                         ""description"", ""organization_id"", ""document_table"", ""document_id"",
+                         ""is_active"", ""CreatedAt"", ""UpdatedAt"")
+                    VALUES
+                        (@id, @date, @number, @type, @moduleCode,
+                         @debit, @credit, @amount, @amountCurrency, @currencyId,
+                         @description, @org, @documentTable, @documentId,
+                         true, NOW(), NOW())",
+                    new NpgsqlParameter("@id", Guid.NewGuid()),
+                    new NpgsqlParameter("@date", postingDate),
+                    new NpgsqlParameter("@number", documentNumber),
+                    new NpgsqlParameter("@type", document.Name),
+                    new NpgsqlParameter("@moduleCode", DBNull.Value),
+                    new NpgsqlParameter("@debit", debit),
+                    new NpgsqlParameter("@credit", credit),
+                    new NpgsqlParameter("@amount", rowAmount),
+                    new NpgsqlParameter("@amountCurrency", amountCurrency),
+                    new NpgsqlParameter("@currencyId",
+                        currencyId.HasValue ? currencyId.Value.ToString() : (object)DBNull.Value),
+                    new NpgsqlParameter("@description", description),
+                    new NpgsqlParameter("@org", organizationId.HasValue ? organizationId.Value : (object)DBNull.Value),
+                    new NpgsqlParameter("@documentTable", document.TableName),
+                    new NpgsqlParameter("@documentId", recordId));
+
+                created++;
+            }
+
+            if (created == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Не удалось сформировать проводки «{document.Name}»: заполните «Счет» в шапке и счёт дебета в строках (пропущено строк: {skipped}).");
+            }
+
+            await _context.Database.ExecuteSqlRawAsync(
+                $@"UPDATE ""{document.TableName}"" SET ""is_posted"" = true, ""UpdatedAt"" = NOW() WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", recordId));
+
+            System.Diagnostics.Debug.WriteLine(
+                $"Документ ТМЗ {document.Name} {documentNumber}: проводок {created}, пропущено строк {skipped}, сумма {amount}.");
+        }
+
+        /// <summary>
+        /// Удаляет проводки документа ТМЗ по прямой ссылке (document_table + document_id).
+        /// Вызывается до удаления самого документа — в doc_postings уже ничего не остаётся.
+        /// </summary>
+        private async Task DeleteInventoryPostingsAsync(MetadataObject document, Guid recordId)
+        {
+            if (!IsInventoryDocumentName(document.Name))
+                return;
+
+            try
+            {
+                await _context.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM doc_postings WHERE document_table = @table AND document_id = @id;",
+                    new NpgsqlParameter("@table", document.TableName),
+                    new NpgsqlParameter("@id", recordId));
+            }
+            catch (Exception ex)
+            {
+                // Колонок может не быть в старой базе — тогда сработает удаление по номеру.
+                System.Diagnostics.Debug.WriteLine($"Проводки ТМЗ: удаление по ссылке не выполнено: {ex.Message}");
+            }
+        }
+
+        private static Guid? ReadRecordGuid(Dictionary<string, object> record, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (record.TryGetValue(key, out var value) && value != null && value != DBNull.Value &&
+                    Guid.TryParse(value.ToString(), out var parsed) && parsed != Guid.Empty)
+                {
+                    return parsed;
+                }
+            }
+
+            return null;
         }
 
         private static IEnumerable<string> GetPostingDocumentTypesForDocument(
@@ -3175,6 +3324,10 @@ namespace BIS.ERP.Services
                 else if (document.Name == "Ликвидация ОС")
                 {
                     await ProcessFixedAssetDisposalDocumentAsync(document, recordData, recordId, amount, true);
+                }
+                else if (IsInventoryDocumentName(document.Name))
+                {
+                    await ProcessInventoryDocumentAsync(document, recordData, recordId, amount);
                 }
                 else if (document.PostingRules.Any())
                 {
