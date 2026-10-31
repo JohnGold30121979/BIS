@@ -10,6 +10,7 @@ using System.Data;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -1822,7 +1823,12 @@ namespace BIS.ERP.Views
         }
         private async void OnCashBookClick(object sender, RoutedEventArgs e)
         {
-            await OpenCashBookExcelAsync();
+            await OpenCashBookExcelAsync(PrintFormOutputFormat.Excel);
+        }
+
+        private async void OnCashBookPdfClick(object sender, RoutedEventArgs e)
+        {
+            await OpenCashBookExcelAsync(PrintFormOutputFormat.Pdf);
         }
 
         private async void OnReceiptExpenseRegisterClick(object sender, RoutedEventArgs e)
@@ -1830,7 +1836,7 @@ namespace BIS.ERP.Views
             await OpenReceiptExpenseRegisterExcelAsync();
         }
 
-        private async Task OpenCashBookExcelAsync()
+        private async Task OpenCashBookExcelAsync(PrintFormOutputFormat outputFormat)
         {
             const string caption = "Кассовая книга";
             try
@@ -1855,10 +1861,11 @@ namespace BIS.ERP.Views
                 var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
 
                 CashBookButton.IsEnabled = false;
+                CashBookPdfButton.IsEnabled = false;
                 Cursor = Cursors.Wait;
                 StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы кассовой книги..." : "Формирование Excel кассовой книги по.market конфигуратору...";
                 SystemLogService.Info(
-                    $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
+                    $"Старт формирования кассовой книги ({PrintFormOutputFileService.GetDisplayName(outputFormat)}). Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
                     "CashOrderWorkView.CashBook");
 
                 await OpenConfiguredCashReportAsync(
@@ -1869,7 +1876,8 @@ namespace BIS.ERP.Views
                     endDate,
                     cashDeskName,
                     "cash_book",
-                    "CashOrderWorkView.CashBook");
+                    "CashOrderWorkView.CashBook",
+                    outputFormat);
             }
             catch (Exception ex)
             {
@@ -1880,6 +1888,7 @@ namespace BIS.ERP.Views
             finally
             {
                 CashBookButton.IsEnabled = true;
+                CashBookPdfButton.IsEnabled = true;
                 Cursor = null;
             }
         }
@@ -1975,10 +1984,11 @@ namespace BIS.ERP.Views
             DateTime endDate,
             string cashDeskName,
             string outputBaseName,
-            string logSource)
+            string logSource,
+            PrintFormOutputFormat preferredFormat = PrintFormOutputFormat.Excel)
         {
             using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-            await new MetadataService(context).EnsureStandardReportsAsync();
+            await new MetadataService(context).EnsureCashOrderReportsAsync();
 
             var report = await context.Reports
                 .AsNoTracking()
@@ -1991,7 +2001,7 @@ namespace BIS.ERP.Views
                 throw new InvalidOperationException($"Отчет \"{caption}\" отключен в конфигураторе.");
 
             var selectedReport = report;
-            var selectedFormat = PrintFormOutputFormat.Excel;
+            var selectedFormat = preferredFormat;
             if (ChoosePrintFormCheckBox.IsChecked == true)
             {
                 var selectionDialog = new PrintFormSelectionDialog(new[] { report })
@@ -2016,11 +2026,22 @@ namespace BIS.ERP.Views
                 ? await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot, selectedReport))
                 : await Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, selectedReport));
 
-            var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
             var formatName = PrintFormOutputFileService.GetDisplayName(selectedFormat);
+            if (selectedFormat == PrintFormOutputFormat.Pdf)
+            {
+                var previewWindow = new PdfPreviewWindow(output, selectedReport.Name)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+                previewWindow.ShowDialog();
+                StatusText.Text = $"Предпросмотр {caption} в PDF: {dataTable.Rows.Count} строк";
+                SystemLogService.Info($"{caption} открыт в PDF-предпросмотре по настройкам макета.", logSource);
+                return;
+            }
 
-            StatusText.Text = $"{caption} открыть в {formatName}: {dataTable.Rows.Count} строк";
-            SystemLogService.Info($"{caption} открыть по настройкам макета ({formatName}): {outputPath}", logSource);
+            var outputPath = await PrintFormOutputFileService.SaveAndOpenAsync(output, selectedReport.Name, selectedFormat);
+            StatusText.Text = $"{caption} открыт в {formatName}: {dataTable.Rows.Count} строк";
+            SystemLogService.Info($"{caption} открыт по настройкам макета ({formatName}): {outputPath}", logSource);
         }
 
         private DataTable BuildCashBookReportDataTable(
@@ -2030,49 +2051,74 @@ namespace BIS.ERP.Views
             string cashDeskName,
             CashTurnoverSummary turnoverSummary)
         {
+            var orders = rows
+                .OrderBy(row => row.DocDate)
+                .ThenBy(row => TryParseDocumentNumber(row.DocNumber, out var number) ? number : int.MaxValue)
+                .ThenBy(row => row.DocNumber, StringComparer.OrdinalIgnoreCase)
+                .ToList();
             var table = new DataTable("ved2");
-            AddCashReportCommonColumns(table);
-            AddCashOrderColumn(table, "d_xls", typeof(DateTime));
-            AddCashOrderColumn(table, "ved2.d_xls", typeof(DateTime));
-            AddCashOrderColumn(table, "ved2.dok", typeof(string));
-            AddCashOrderColumn(table, "ved2.nuch", typeof(string));
-            AddCashOrderColumn(table, "ved2.d_nuch", typeof(string));
-            AddCashOrderColumn(table, "ved2.name_kod", typeof(string));
-            AddCashOrderColumn(table, "ved2.deb", typeof(decimal));
-            AddCashOrderColumn(table, "ved2.cred", typeof(decimal));
-            AddCashOrderColumn(table, "ved2.sum_debet", typeof(decimal));
-            AddCashOrderColumn(table, "ved2.sum_credit", typeof(decimal));
-            AddCashOrderColumn(table, "ved2.opening_balance", typeof(decimal));
-            AddCashOrderColumn(table, "ved2.closing_balance", typeof(decimal));
-            AddCashOrderColumn(table, "name_kod", typeof(string));
-            AddCashOrderColumn(table, "deb", typeof(decimal));
-            AddCashOrderColumn(table, "cred", typeof(decimal));
+            table.Columns.Add("book_date", typeof(string));
+            table.Columns.Add("book_document", typeof(string));
+            table.Columns.Add("book_description", typeof(string));
+            table.Columns.Add("book_correspondent", typeof(string));
+            table.Columns.Add("book_income", typeof(object));
+            table.Columns.Add("book_expense", typeof(object));
+            table.Columns.Add("period_title", typeof(string));
+            table.Columns.Add("cash_desk_title", typeof(string));
+            table.Columns.Add("generated_at", typeof(string));
+            table.Columns.Add("receipt_count", typeof(int));
+            table.Columns.Add("payment_count", typeof(int));
 
-            foreach (var row in rows)
+            var receipts = orders.Where(row => row.IsReceipt).ToList();
+            var payments = orders.Where(row => !row.IsReceipt).ToList();
+            var incomeTotal = receipts.Sum(row => row.Amount);
+            var expenseTotal = payments.Sum(row => row.Amount);
+            var openingBalance = turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit;
+            var closingBalance = turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit;
+            var periodTitle = $"Кассовая книга с {FormatCashBookDate(startDate)} по {FormatCashBookDate(endDate)}";
+            var cashDeskTitle = $"КАССА {cashDeskName}";
+            var generatedAt = DateTime.Now.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+
+            void AddRow(string date, string document, string description, string correspondent, object? income, object? expense)
             {
-                var receiptAmount = row.IsReceipt ? row.Amount : 0m;
-                var paymentAmount = row.IsReceipt ? 0m : row.Amount;
                 var dataRow = table.NewRow();
-                FillCashReportCommonValues(dataRow, row, startDate, endDate, cashDeskName, turnoverSummary);
-                SetCashOrderValue(dataRow, "d_xls", row.DocDate);
-                SetCashOrderValue(dataRow, "ved2.d_xls", row.DocDate);
-                SetCashOrderValue(dataRow, "ved2.dok", row.DocNumber);
-                SetCashOrderValue(dataRow, "ved2.nuch", row.DocNumber);
-                SetCashOrderValue(dataRow, "ved2.d_nuch", row.DocNumber);
-                SetCashOrderValue(dataRow, "ved2.name_kod", BuildCashBookText(row));
-                SetCashOrderValue(dataRow, "ved2.deb", receiptAmount);
-                SetCashOrderValue(dataRow, "ved2.cred", paymentAmount);
-                SetCashOrderValue(dataRow, "ved2.sum_debet", receiptAmount);
-                SetCashOrderValue(dataRow, "ved2.sum_credit", paymentAmount);
-                SetCashOrderValue(dataRow, "ved2.opening_balance", turnoverSummary.OpeningDebit - turnoverSummary.OpeningCredit);
-                SetCashOrderValue(dataRow, "ved2.closing_balance", turnoverSummary.ClosingDebit - turnoverSummary.ClosingCredit);
-                SetCashOrderValue(dataRow, "name_kod", BuildCashBookText(row));
-                SetCashOrderValue(dataRow, "deb", receiptAmount);
-                SetCashOrderValue(dataRow, "cred", paymentAmount);
+                dataRow["book_date"] = date;
+                dataRow["book_document"] = document;
+                dataRow["book_description"] = description;
+                dataRow["book_correspondent"] = correspondent;
+                dataRow["book_income"] = income ?? string.Empty;
+                dataRow["book_expense"] = expense ?? string.Empty;
+                dataRow["period_title"] = periodTitle;
+                dataRow["cash_desk_title"] = cashDeskTitle;
+                dataRow["generated_at"] = generatedAt;
+                dataRow["receipt_count"] = receipts.Count;
+                dataRow["payment_count"] = payments.Count;
                 table.Rows.Add(dataRow);
             }
 
+            AddRow(string.Empty, string.Empty, "ОСТАТОК НА НАЧАЛО", string.Empty,
+                openingBalance >= 0 ? openingBalance : string.Empty, "X");
+
+            foreach (var row in orders)
+                AddRow(
+                    row.DocDate.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture),
+                    row.DocNumber,
+                    BuildCashBookText(row),
+                    ExtractAccountCode(ResolveCorrespondentAccount(row)),
+                    row.IsReceipt ? row.Amount : null,
+                    row.IsReceipt ? null : row.Amount);
+
+            AddRow(string.Empty, string.Empty, "ИТОГО", string.Empty, incomeTotal, expenseTotal);
+            AddRow(string.Empty, string.Empty, "ОСТАТОК НА КОНЕЦ", string.Empty,
+                closingBalance >= 0 ? closingBalance : string.Empty, "X");
+
             return table;
+        }
+
+        private static string FormatCashBookDate(DateTime date)
+        {
+            var month = date.ToString("MMMM", CultureInfo.GetCultureInfo("ru-RU")).ToUpperInvariant();
+            return $"{date.Day} {month} {date.Year} г.";
         }
 
         private DataTable BuildReceiptExpenseRegisterReportDataTable(
@@ -2096,6 +2142,7 @@ namespace BIS.ERP.Views
             AddCashOrderColumn(table, "pr_ras2.d_nuch", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.nuch", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.dovf", typeof(string));
+            AddCashOrderColumn(table, "order_type", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.tex", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.deb", typeof(string));
             AddCashOrderColumn(table, "pr_ras2.sum", typeof(decimal));
@@ -2125,6 +2172,7 @@ namespace BIS.ERP.Views
                 SetCashOrderValue(dataRow, "pr_ras2.d_nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "pr_ras2.nuch", row.DocNumber);
                 SetCashOrderValue(dataRow, "pr_ras2.dovf", party);
+                SetCashOrderValue(dataRow, "order_type", row.OrderTypeDisplay);
                 SetCashOrderValue(dataRow, "pr_ras2.tex", basis);
                 SetCashOrderValue(dataRow, "pr_ras2.deb", correspondentAccount);
                 SetCashOrderValue(dataRow, "pr_ras2.sum", row.Amount);

@@ -1299,6 +1299,12 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
+            if (IsClosedXmlReport(report))
+            {
+                var layout = GetClosedXmlLayout(report);
+                return ClosedXmlReportRenderer.RenderToPdfBytes(layout, dataTable, ToNullableParameters(reportParameters));
+            }
+
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
@@ -1316,12 +1322,37 @@ namespace BIS.ERP.Services
             Report report,
             IReadOnlyDictionary<string, object>? reportParameters)
         {
+            if (IsClosedXmlReport(report))
+            {
+                var layout = GetClosedXmlLayout(report);
+                return ClosedXmlReportRenderer.RenderToBytes(layout, dataTable, ToNullableParameters(reportParameters));
+            }
+
             if (string.IsNullOrWhiteSpace(report.Template))
                 report.Template = JsonSerializer.Serialize(CreateBlankNativeTemplate());
 
             var data = BuildReportPreviewData(dataTable, report, reportParameters);
             return BuildTemplateLayoutExcel(report, data, report.ElementMappings.ToList(), dataTable);
         }
+
+        private static bool IsClosedXmlReport(Report report) =>
+            string.Equals(report.SourceFormat, "ClosedXml", StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(report.ClosedXmlLayout);
+
+        private static ClosedXmlReportLayout GetClosedXmlLayout(Report report)
+        {
+            var layout = ClosedXmlReportRenderer.ParseLayout(report.ClosedXmlLayout, out var error);
+            if (layout == null)
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
+                    ? $"В отчете «{report.Name}» не задан макет ClosedXML."
+                    : $"Не удалось прочитать макет ClosedXML отчета «{report.Name}»: {error}");
+
+            return layout;
+        }
+
+        private static IReadOnlyDictionary<string, object?>? ToNullableParameters(
+            IReadOnlyDictionary<string, object>? parameters) =>
+            parameters?.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.OrdinalIgnoreCase);
 
         public byte[] ExportProgrammaticReconciliationActPreview(DataTable dataTable, Report report)
         {

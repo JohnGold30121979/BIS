@@ -1,6 +1,7 @@
 using BIS.ERP.Models;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace BIS.ERP.Services
 {
@@ -84,6 +85,12 @@ namespace BIS.ERP.Services
         /// </summary>
         public static ClosedXmlReportLayout CreateForReport(Report? report)
         {
+            if (report != null && string.Equals(report.ReportType, "CashBook", StringComparison.OrdinalIgnoreCase))
+                return CreateCashBook(report.Name);
+
+            if (report != null && string.Equals(report.ReportType, "CashReceiptExpenseRegister", StringComparison.OrdinalIgnoreCase))
+                return CreateCashReceiptExpenseRegister(report.Name);
+
             if (report?.ReportType == AccountPairTurnoverBuilder.ReportType)
                 return AccountPairTurnoverLayout.Create(report.Name);
 
@@ -107,6 +114,136 @@ namespace BIS.ERP.Services
 
             return CreateBlank();
         }
+
+        public static ClosedXmlReportLayout CreateCashBook(string? sheetName) => new()
+        {
+            Sheets =
+            {
+                new ClosedXmlSheet
+                {
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Кассовая книга" : sheetName,
+                    LayoutKind = ClosedXmlLayoutKinds.Simple,
+                    PageSetup = new ClosedXmlPageSetup
+                    {
+                        Orientation = "Landscape",
+                        FontName = "Times New Roman",
+                        FontSize = 10,
+                        ShowGridLines = false,
+                        ShowPageHeader = false,
+                        FitToPagesWide = 1
+                    },
+                    Blocks =
+                    {
+                        new ClosedXmlBlock
+                        {
+                            Type = "TitleRows",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 6, TakeFromRow = 1, TakeFromField = "period_title", Bold = true, FontSize = 16, Align = "Center" } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 6, TakeFromRow = 1, TakeFromField = "cash_desk_title", Bold = true, FontSize = 12, Align = "Center" } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 5, TakeFromRow = 1, TakeFromField = "generated_at", FontSize = 8, Align = "Right" }, new ClosedXmlTextCell { Column = 6, Text = "Лист 1", FontSize = 8, Align = "Right" } } }
+                            }
+                        },
+                        new ClosedXmlBlock
+                        {
+                            Type = "TabularSection",
+                            Table = new ClosedXmlTableSection
+                            {
+                                HeaderFill = "#FFFFFF",
+                                HeaderBold = true,
+                                HeaderRowHeight = 28,
+                                RowBorder = "All",
+                                Columns =
+                                {
+                                    new ClosedXmlColumn { Field = "book_date", Header = "Дата", Width = 13, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "book_document", Header = "Документ", Width = 12, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "book_description", Header = "От кого получено или кому выдано", Width = 42 },
+                                    new ClosedXmlColumn { Field = "book_correspondent", Header = "Корр. счет", Width = 16, Align = "Center" },
+                                    new ClosedXmlColumn { Field = "book_income", Header = "Приход", Width = 16, NumberFormat = "#,##0.00", Align = "Right" },
+                                    new ClosedXmlColumn { Field = "book_expense", Header = "Расход", Width = 16, NumberFormat = "#,##0.00", Align = "Right" }
+                                },
+                                EmphasisRules =
+                                {
+                                    new ClosedXmlEmphasisRule { Match = "Contains", Text = "ОСТАТОК НА НАЧАЛО", Bold = true, Fill = "#F2F2F2" },
+                                    new ClosedXmlEmphasisRule { Match = "Equals", Text = "ИТОГО", Bold = true, Fill = "#E6E6E6" },
+                                    new ClosedXmlEmphasisRule { Match = "Contains", Text = "ОСТАТОК НА КОНЕЦ", Bold = true, Fill = "#F2F2F2" }
+                                }
+                            }
+                        },
+                        new ClosedXmlBlock
+                        {
+                            Type = "FreeRows",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Кассир  ______________________________________________" } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 6, Text = "Записи в кассовой книге проверил и документы в количестве" , Bold = true } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, TakeFromRow = -1, TakeFromField = "receipt_count", Align = "Center", Bold = true }, new ClosedXmlTextCell { Column = 4, MergeToColumn = 6, Text = "приходных", Bold = true } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, TakeFromRow = -1, TakeFromField = "payment_count", Align = "Center", Bold = true }, new ClosedXmlTextCell { Column = 4, MergeToColumn = 6, Text = "расходных получил", Bold = true } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = 3, Text = "Бухгалтер  ___________________________________________" } } }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        public static ClosedXmlReportLayout CreateCashReceiptExpenseRegister(string? sheetName) => CreateCashOrderRegisterLayout(
+            sheetName,
+            new[]
+            {
+                ("d_xls", "Дата", 13d, "dd.MM.yyyy", "Center"),
+                ("d_nuch", "Документ", 12d, "@", "Center"),
+                ("order_type", "Вид операции", 18d, "@", "Left"),
+                ("dovf", "От кого получено / кому выдано", 38d, "@", "Left"),
+                ("tex", "Основание", 40d, "@", "Left"),
+                ("deb", "Корр. счет", 16d, "@", "Center"),
+                ("sum", "Сумма", 16d, "#,##0.00", "Right")
+            });
+
+        private static ClosedXmlReportLayout CreateCashOrderRegisterLayout(
+            string? sheetName,
+            IReadOnlyList<(string Field, string Header, double Width, string NumberFormat, string Align)> columns) => new()
+        {
+            Sheets =
+            {
+                new ClosedXmlSheet
+                {
+                    Name = string.IsNullOrWhiteSpace(sheetName) ? "Кассовый отчет" : sheetName,
+                    LayoutKind = ClosedXmlLayoutKinds.Simple,
+                    PageSetup = new ClosedXmlPageSetup { Orientation = "Landscape", FontName = "Times New Roman", FontSize = 10 },
+                    Blocks =
+                    {
+                        new ClosedXmlBlock
+                        {
+                            Type = "TitleRows",
+                            Rows =
+                            {
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = columns.Count, Text = sheetName ?? "Кассовый отчет", Bold = true, FontSize = 16, Align = "Center" } } },
+                                new ClosedXmlTextRow { Cells = { new ClosedXmlTextCell { Column = 1, MergeToColumn = columns.Count, TakeFromRow = 1, TakeFromField = "subtitle", Bold = true, FontSize = 12, Align = "Center" } } }
+                            }
+                        },
+                        new ClosedXmlBlock
+                        {
+                            Type = "TabularSection",
+                            Table = new ClosedXmlTableSection
+                            {
+                                RowBorder = "All",
+                                HeaderFill = "#D9E6F2",
+                                Columns = columns.Select(column => new ClosedXmlColumn
+                                {
+                                    Field = column.Field,
+                                    Header = column.Header,
+                                    Width = column.Width,
+                                    NumberFormat = column.NumberFormat,
+                                    Align = column.Align,
+                                    SuppressZero = column.NumberFormat == "#,##0.00"
+                                }).ToList()
+                            }
+                        }
+                    }
+                }
+            }
+        };
 
         // =============================================================
         // Акт сверки — ТОЧНЫЙ перенос программного Excel

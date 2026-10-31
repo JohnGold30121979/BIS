@@ -183,7 +183,8 @@
             <Border Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F8FBFE" CornerRadius="5">
                 <WrapPanel>
                     <TextBlock Text="Отчеты по кассе:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
-                    <Button x:Name="CashBookButton" Content="Кассовая книга" Width="125" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
+                    <Button x:Name="CashBookButton" Content="Кассовая книга Excel" Width="150" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
+                    <Button x:Name="CashBookPdfButton" Content="Кассовая книга PDF предпросмотр" Width="230" Height="32" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnCashBookPdfClick"/>
                     <Button x:Name="ReceiptExpenseRegisterButton" Content="Реестр приходов/расходов" Width="185" Height="32" Margin="0,0,8,0" Background="#34495E" Foreground="White" Click="OnReceiptExpenseRegisterClick"/>
                     <Button x:Name="PrintExcelButton" Content="📊 Excel" Width="110" Height="32" Margin="0,0,8,0"
                             Background="#27AE60" Foreground="White" IsEnabled="False" Click="OnPrintFormExcelClick"

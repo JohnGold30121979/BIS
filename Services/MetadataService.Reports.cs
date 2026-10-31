@@ -13,6 +13,7 @@ public partial class MetadataService
         if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.StandardReportsKey))
         {
             SystemLogService.Info("Стандартные отчёты уже посажены — пропуск.", "Seed");
+            await EnsureCashOrderReportsAsync();
             return;
         }
 
@@ -40,6 +41,24 @@ public partial class MetadataService
         await _context.SaveChangesAsync();
 
         await SeedStateService.MarkAsync(_context, SeedStateService.StandardReportsKey, "Стандартные отчёты");
+    }
+
+    /// <summary>Добавляет кассовые отчёты в существующие базы без перезаписи настроек пользователей.</summary>
+    public async Task EnsureCashOrderReportsAsync()
+    {
+        var deletedCodes = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
+        var definitions = BuildStandardReportDefinitions()
+            .Where(item => item.ReportType == "CashBook" || item.ReportType == "CashReceiptExpenseRegister")
+            .Where(item => !deletedCodes.Contains(item.Code))
+            .ToArray();
+        if (definitions.Length == 0)
+            return;
+
+        var reports = await _context.Reports.ToListAsync();
+        var sources = await _context.MetadataObjects.AsNoTracking().Include(item => item.Fields).ToListAsync();
+        foreach (var definition in definitions)
+            await EnsureStandardReportAsync(definition, reports, sources);
+        await _context.SaveChangesAsync();
     }
 
     /// <summary>Досадка нового отчёта в существующие базы, независимо от версии общего сида.</summary>
@@ -259,7 +278,11 @@ public partial class MetadataService
         }
 
         report.SourceFormat = definition.SourceFormat;
-        if (definition.SeedClosedXmlLayout && string.IsNullOrWhiteSpace(report.ClosedXmlLayout))
+        var refreshGeneratedCashBookLayout = definition.ReportType == "CashBook" &&
+            report.TemplateVersion < 2 &&
+            !IsCashBookLayout(report.ClosedXmlLayout);
+        if (definition.SeedClosedXmlLayout &&
+            (string.IsNullOrWhiteSpace(report.ClosedXmlLayout) || refreshGeneratedCashBookLayout))
         {
             // Макет записывается в Reports."ClosedXmlLayout" один раз и дальше живёт в базе:
             // правки, сделанные в генераторе отчётов, код не перетирает.
@@ -268,6 +291,8 @@ public partial class MetadataService
             var seedLayout = definition.ReportType switch
             {
                 "AccountPairTurnover" => AccountPairTurnoverLayout.Create(definition.Name),
+                "CashBook" => ClosedXmlLayoutTemplates.CreateCashBook(definition.Name),
+                "CashReceiptExpenseRegister" => ClosedXmlLayoutTemplates.CreateCashReceiptExpenseRegister(definition.Name),
                 "TrialBalance" => ClosedXmlLayoutTemplates.CreateTrialBalance(definition.Name),
                 "TurnoverByAccount" => ClosedXmlLayoutTemplates.CreateTurnoverByAccount(definition.Name),
                 "InvoiceJournal" => ClosedXmlLayoutTemplates.CreateInvoiceJournal(definition.Name),
@@ -279,7 +304,9 @@ public partial class MetadataService
             report.ClosedXmlLayout = ClosedXmlReportRenderer.SerializeLayout(seedLayout);
         }
 
-        report.TemplateVersion = isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
+        report.TemplateVersion = definition.ReportType == "CashBook"
+            ? Math.Max(report.TemplateVersion, 2)
+            : isNewReport ? 1 : Math.Max(report.TemplateVersion, 1);
         if (isNewReport)
             report.Order = definition.Order;
         report.UpdatedAt = DateTime.UtcNow;
@@ -324,6 +351,22 @@ public partial class MetadataService
             await AddStandardReportFieldsAsync(report.Id, source, definition.Fields);
         await _context.SaveChangesAsync();
         await AssignStandardReportToModuleAsync(report.Id, definition.ModuleCode, definition.Order);
+    }
+
+    private static bool IsCashBookLayout(string? layoutJson)
+    {
+        if (string.IsNullOrWhiteSpace(layoutJson))
+            return false;
+
+        var layout = ClosedXmlReportRenderer.ParseLayout(layoutJson, out _);
+        var fields = layout?.Sheets
+            .SelectMany(sheet => sheet.Blocks)
+            .Where(block => block.Type == "TabularSection")
+            .SelectMany(block => block.Table?.Columns ?? new List<ClosedXmlColumn>())
+            .Select(column => column.Field)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return fields?.Contains("book_date") == true;
     }
 
     private static Report? FindExistingStandardReport(StandardReportDefinition definition, List<Report> existingReports)
@@ -679,6 +722,36 @@ public partial class MetadataService
                 "payment_kind", "delivery_kind", "supply_kind", "amount_without_tax",
                 "vat_total", "sales_tax_total", "amount", "is_posted"
             }),
+        new StandardReportDefinition(
+            Code: "standard.frx.finance.cash.cash-book",
+            Name: "Кассовая книга",
+            Description: "Кассовая книга по приходным и расходным ордерам с остатками и оборотами за выбранный период.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Расходный/Приходный КО",
+            SourceObjectType: "Document",
+            ReportType: "CashBook",
+            Icon: "📒",
+            Order: 175,
+            PageOrientation: "Landscape",
+            Fields: new[] { "book_date", "book_document", "book_description", "book_correspondent", "book_income", "book_expense", "period_title", "cash_desk_title", "receipt_count", "payment_count" },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true,
+            ShowInAccountingReports: false),
+        new StandardReportDefinition(
+            Code: "standard.frx.finance.cash.receipts-expenses-register",
+            Name: "Реестр приходов / расходов",
+            Description: "Реестр приходных и расходных кассовых ордеров за выбранный период.",
+            ModuleCode: ModuleMetadataService.FinanceCode,
+            SourceName: "Расходный/Приходный КО",
+            SourceObjectType: "Document",
+            ReportType: "CashReceiptExpenseRegister",
+            Icon: "📋",
+            Order: 176,
+            PageOrientation: "Landscape",
+            Fields: new[] { "d_xls", "d_nuch", "dovf", "tex", "deb", "sum", "order_type", "period_start", "period_end", "cash_desk" },
+            SourceFormat: "ClosedXml",
+            SeedClosedXmlLayout: true,
+            ShowInAccountingReports: false),
         new StandardReportDefinition(
             Code: "standard.finance.cash-receipts",
             Name: "Журнал приходных кассовых ордеров",
