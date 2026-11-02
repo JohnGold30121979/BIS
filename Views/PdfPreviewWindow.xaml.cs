@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
@@ -23,11 +24,14 @@ namespace BIS.ERP.Views
         private readonly string _documentName;
         private string _tempFilePath = string.Empty;
         private bool _viewerReady;
+        private readonly Func<Task>? _openExcelAsync;
 
-        public PdfPreviewWindow(byte[] pdfData, string? documentName = null)
+        public PdfPreviewWindow(byte[] pdfData, string? documentName = null, Func<Task>? openExcelAsync = null)
         {
             InitializeComponent();
             _pdfData = pdfData ?? Array.Empty<byte>();
+            _openExcelAsync = openExcelAsync;
+            OpenExcelButton.Visibility = openExcelAsync == null ? Visibility.Collapsed : Visibility.Visible;
             _documentName = string.IsNullOrWhiteSpace(documentName)
                 ? "Документ"
                 : documentName!.Trim();
@@ -110,6 +114,30 @@ namespace BIS.ERP.Views
         private void OnOpenClick(object sender, RoutedEventArgs e)
         {
             OpenPdfExternally(showError: true);
+        }
+
+        private async void OnOpenExcelClick(object sender, RoutedEventArgs e)
+        {
+            if (_openExcelAsync == null)
+                return;
+
+            OpenExcelButton.IsEnabled = false;
+            try
+            {
+                StatusText.Text = "Формирование Excel…";
+                await _openExcelAsync();
+                StatusText.Text = "Файл Excel открыт.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "Ошибка формирования Excel.";
+                MessageBox.Show($"Не удалось открыть отчет в Excel: {ex.Message}", "Экспорт в Excel",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                OpenExcelButton.IsEnabled = true;
+            }
         }
 
         private void OpenPdfExternally(bool showError)

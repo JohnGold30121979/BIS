@@ -13,6 +13,7 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Заголовок -->
@@ -22,28 +23,176 @@
         </StackPanel>
 
         <!-- Панель фильтров и действий -->
-        <StackPanel Grid.Row="1" Margin="0,0,0,10">
-            <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F8FBFE" CornerRadius="5">
+        <StackPanel Grid.Row="1" Margin="0,0,0,8">
+            <GroupBox Header="Период и касса" Margin="0,0,0,6" Padding="8,5">
                 <WrapPanel>
-                    <TextBlock Text="Поиск и отбор:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
                     <TextBlock Text="Период с:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <DatePicker x:Name="PeriodStartDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
                     <TextBlock Text="по:" VerticalAlignment="Center" Margin="10,0,6,0"/>
                     <DatePicker x:Name="PeriodEndDatePicker" Width="120" SelectedDateChanged="OnFilterChanged"/>
-                    <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="32" Margin="10,0,0,0"
-                            Background="#95A5A6" Foreground="White" Click="OnRefreshClick"/>
+                    <Button x:Name="RefreshButton" Content="Обновить" Width="100" Height="30" Margin="10,0,0,0" Background="#27AE60" Foreground="White" Click="OnRefreshClick"/>
                     <TextBlock Text="Касса:" VerticalAlignment="Center" Margin="16,0,8,0" FontWeight="Bold"/>
-                    <ComboBox x:Name="CashDeskFilterCombo"
-                              Width="260"
-                              Height="30"
-                              DisplayMemberPath="DisplayNameWithAccount"
-                              SelectionChanged="OnFilterChanged"/>
-                    <Button x:Name="CashPostingsButton" Content="Проводки по кассе" Width="145" Height="32" Margin="10,0,0,0"
-                            Background="#16A085" Foreground="White" Click="OnCashPostingsClick"/>
-                   
+                    <ComboBox x:Name="CashDeskFilterCombo" Width="260" Height="30" DisplayMemberPath="DisplayNameWithAccount" SelectionChanged="OnFilterChanged"/>
+                    <Button x:Name="CashPostingsButton" Content="Проводки по кассе" Width="155" Height="30" Margin="10,0,0,0" Background="#16A085" Foreground="White" Click="OnCashPostingsClick"/>
                 </WrapPanel>
-            </Border>
-            <Border Margin="0,0,0,8" Padding="6" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
+            </GroupBox>
+            <GroupBox Header="Документы" Margin="0,0,0,6" Padding="8,5">
+                <WrapPanel>
+                    <Button x:Name="AddPaymentButton" Content="➖ Расходный КО" Width="130" Height="32" Margin="0,0,8,0" Background="#E67E22" Foreground="White" Click="OnAddPaymentClick"/>
+                    <Button x:Name="AddReceiptButton" Content="➕ Приходный КО" Width="130" Height="32" Margin="0,0,8,0" Background="#27AE60" Foreground="White" Click="OnAddReceiptClick"/>
+                    <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="32" Margin="0,0,8,0" Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
+                    <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="32" Margin="0,0,8,0" Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
+                    <TextBlock Text="Отчеты:" VerticalAlignment="Center" Margin="0,0,6,0" FontWeight="Bold" Foreground="#2C3E50"/>
+                    <ComboBox x:Name="CashReportCombo" Width="250" Height="30" DisplayMemberPath="Name"
+                              SelectionChanged="OnCashReportSelectionChanged"
+                              ToolTip="Выберите отчет или печатную форму документа"/>
+                    <CheckBox x:Name="PrintFormsCheckBox" Content="Печатные формы" VerticalAlignment="Center" Margin="10,0,0,0"
+                              ToolTip="При выборе отчета позволяет выбрать его вариант печати и формат Excel или PDF"/>
+                </WrapPanel>
+            </GroupBox>
+            <GroupBox Header="Работа с кассовым днем" Margin="0,0,0,6" Padding="8,5">
+                <WrapPanel>
+                    <TextBlock Text="Дата:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <DatePicker x:Name="CashDayDatePicker" Width="120" ToolTip="Дата кассового дня для закрытия, открытия и оборотов за день"/>
+                    <Button x:Name="CloseCashDayButton" Content="Закрыть день" Width="115" Height="30" Margin="10,0,8,0" Background="#D35400" Foreground="White" Click="OnCloseCashDayClick"/>
+                    <Button x:Name="OpenCashDayButton" Content="Открыть день" Width="115" Height="30" Margin="0,0,8,0" Background="#27AE60" Foreground="White" Click="OnOpenCashDayClick"/>
+                    <Button x:Name="DayTurnoversButton" Content="Обороты за день" Width="135" Height="30" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnDayTurnoversClick"/>
+                    <Button x:Name="ClosedDaysTurnoversButton" Content="Обороты по закрытым дням" Width="180" Height="30" Background="#2C3E50" Foreground="White" Click="OnClosedDaysTurnoversClick"/>
+                </WrapPanel>
+            </GroupBox>
+        </StackPanel>
+
+        <!-- Таблица -->
+        <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 
+          IsReadOnly="False" SelectionChanged="OnSelectionChanged"
+          AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1"
+          PreviewMouseRightButtonDown="DataGrid_PreviewMouseRightButtonDown"
+          MouseDoubleClick="DataGrid_MouseDoubleClick"
+          LoadingRow="DataGrid_LoadingRow">
+            <DataGrid.ContextMenu>
+                <ContextMenu Opened="OnCashOrderContextMenuOpened">
+                    <MenuItem Header="Изменить" Tag="Edit" Click="OnEditClick"/>
+                    <MenuItem Header="Печатная форма" Tag="Print" Click="OnPrintClick"/>
+                    <Separator/>
+                    <MenuItem Header="Провести" Tag="PostingState" Click="OnPostClick"/>
+                    <Separator/>
+                    <MenuItem Header="Удалить" Tag="Delete" Click="OnDeleteClick"/>
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="Background" Value="White"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsPostedDisplay}" Value="Да">
+                            <Setter Property="Background" Value="LightGreen"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Resources>
+                <Style x:Key="ColumnFilterTextBoxStyle" TargetType="TextBox">
+                    <Setter Property="MinWidth" Value="68"/>
+                    <Setter Property="Height" Value="22"/>
+                    <Setter Property="Margin" Value="0,4,0,0"/>
+                    <Setter Property="Padding" Value="3,1"/>
+                    <Setter Property="FontSize" Value="11"/>
+                </Style>
+            </DataGrid.Resources>
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Width="85" IsReadOnly="False" CanUserSort="False">
+                    <DataGridTemplateColumn.Header>
+                        <CheckBox x:Name="SelectAllBatchPostCheckBox" Content="Выбор" VerticalAlignment="Center"
+                                  Click="OnSelectAllBatchPostClick"
+                                  ToolTip="Отметить все непроведенные документы, доступные для проведения">
+                            <CheckBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Провести все доступные" Click="OnPostAllFromSelectionHeaderClick"/>
+                                    <MenuItem Header="Провести выбранные" Click="OnPostSelectedFromSelectionHeaderClick"/>
+                                    <MenuItem Header="Снять проведение выбранных" Click="OnUnpostSelectedFromSelectionHeaderClick"/>
+                                </ContextMenu>
+                            </CheckBox.ContextMenu>
+                        </CheckBox>
+                    </DataGridTemplateColumn.Header>
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsSelectedForBatchPost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEnabled="{Binding CanChangePosting}"
+                                      Click="OnBatchPostRowCheckBoxClick"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      ToolTip="{Binding PostingStateChangeHint}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="День" Binding="{Binding CashDayStatusDisplay}" Width="85" IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter Property="Foreground" Value="#27AE60"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CashDayStatusDisplay}" Value="Не открыт">
+                                    <Setter Property="Foreground" Value="#7F8C8D"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsCashDayClosed}" Value="True">
+                                    <Setter Property="Foreground" Value="#C0392B"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding DocDate, StringFormat=dd/MM/yyyy}" Width="100" IsReadOnly="True">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Дата"/>
+                            <TextBox x:Name="DateFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Binding="{Binding DocNumber}" Width="120" IsReadOnly="True">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Документ"/>
+                            <TextBox x:Name="NumberFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="180" IsReadOnly="True"/>
+                <DataGridTextColumn Binding="{Binding DebitAccount}" Width="120" IsReadOnly="True">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Дебет"/>
+                            <TextBox x:Name="DebitFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Binding="{Binding CreditAccount}" Width="120" IsReadOnly="True">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Кредит"/>
+                            <TextBox x:Name="CreditFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Тип проводки" Binding="{Binding PostingTypeDisplay}" Width="250" Visibility="Collapsed" IsReadOnly="True"/>
+                <DataGridTextColumn Binding="{Binding Amount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120" IsReadOnly="True">
+                    <DataGridTextColumn.Header>
+                        <StackPanel>
+                            <TextBlock Text="Сумма в сом"/>
+                            <TextBox x:Name="AmountFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
+                        </StackPanel>
+                    </DataGridTextColumn.Header>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="В валюте" Binding="{Binding AmountInCurrency, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="180" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150" IsReadOnly="True"/>
+            </DataGrid.Columns>
+            
+        </DataGrid>
+        <GroupBox Grid.Row="4" Header="Обороты" Margin="0,8,0,0" Padding="4">
+            <Border Padding="6" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F6FAFD" CornerRadius="4">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -148,168 +297,7 @@
                     </Border>
                 </Grid>
             </Border>
-            <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFFFFF" CornerRadius="5">
-                <WrapPanel>
-                    <TextBlock Text="Документы:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
-                    <Button x:Name="AddPaymentButton" Content="➖ Расходный КО" Width="130" Height="35" Margin="0,0,10,0"
-                            Background="#E67E22" Foreground="White" Click="OnAddPaymentClick"/>
-                    <Button x:Name="AddReceiptButton" Content="➕ Приходный КО" Width="130" Height="35" Margin="0,0,10,0"
-                            Background="#27AE60" Foreground="White" Click="OnAddReceiptClick"/>
-                    <Button x:Name="EditButton" Content="✏️ Редактировать" Width="120" Height="35" Margin="0,0,10,0"
-                            Background="#3498DB" Foreground="White" IsEnabled="False" Click="OnEditClick"/>
-                    <Button x:Name="DeleteButton" Content="🗑️ Удалить" Width="100" Height="35" Margin="0,0,10,0"
-                            Background="#E74C3C" Foreground="White" IsEnabled="False" Click="OnDeleteClick"/>
-                    <Button x:Name="PostButton" Content="✅ Провести" Width="100" Height="35" Margin="0,0,10,0"
-                            Background="#9B59B6" Foreground="White" IsEnabled="False" Click="OnPostClick"/>
-                    <CheckBox x:Name="SelectAllBatchPostCheckBox" Content="Выбрать все" VerticalAlignment="Center" Margin="0,0,10,0"
-                              Click="OnSelectAllBatchPostClick"
-                              ToolTip="Отметить все непроведенные документы, доступные для проведения"/>
-                    <Button x:Name="BatchPostButton" Content="✅ Провести выбранные" Width="165" Height="35" Margin="0,0,10,0"
-                            Background="#8E44AD" Foreground="White" Click="OnBatchPostClick"
-                            ToolTip="Провести все отмеченные непроведенные документы"/>
-                </WrapPanel>
-            </Border>
-            <Border Margin="0,0,0,8" Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#FFF8EC" CornerRadius="5">
-                <WrapPanel>
-                    <TextBlock Text="Работа с кассовым днем:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
-                    <TextBlock Text="Дата:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <DatePicker x:Name="CashDayDatePicker" Width="120" ToolTip="Дата кассового дня для закрытия, открытия и оборотов за день"/>
-                    <Button x:Name="CloseCashDayButton" Content="Закрыть день" Width="115" Height="32" Margin="10,0,8,0" Background="#D35400" Foreground="White" Click="OnCloseCashDayClick"/>
-                    <Button x:Name="OpenCashDayButton" Content="Открыть день" Width="115" Height="32" Margin="0,0,8,0" Background="#27AE60" Foreground="White" Click="OnOpenCashDayClick"/>
-                    <Button x:Name="DayTurnoversButton" Content="Обороты за день" Width="135" Height="32" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnDayTurnoversClick"/>
-                    <Button x:Name="ClosedDaysTurnoversButton" Content="Обороты по закрытым дням" Width="180" Height="32" Margin="0,0,8,0" Background="#2C3E50" Foreground="White" Click="OnClosedDaysTurnoversClick"/>
-                </WrapPanel>
-            </Border>
-            <Border Padding="10,8" BorderBrush="#D5DEE8" BorderThickness="1" Background="#F8FBFE" CornerRadius="5">
-                <WrapPanel>
-                    <TextBlock Text="Отчеты по кассе:" VerticalAlignment="Center" Margin="0,0,12,0" FontWeight="Bold" Foreground="#2C3E50"/>
-                    <Button x:Name="CashBookButton" Content="Кассовая книга Excel" Width="150" Height="32" Margin="0,0,8,0" Background="#16A085" Foreground="White" Click="OnCashBookClick"/>
-                    <Button x:Name="CashBookPdfButton" Content="Кассовая книга PDF предпросмотр" Width="230" Height="32" Margin="0,0,8,0" Background="#2980B9" Foreground="White" Click="OnCashBookPdfClick"/>
-                    <Button x:Name="ReceiptExpenseRegisterButton" Content="Реестр приходов/расходов" Width="185" Height="32" Margin="0,0,8,0" Background="#34495E" Foreground="White" Click="OnReceiptExpenseRegisterClick"/>
-                    <Button x:Name="PrintExcelButton" Content="📊 Excel" Width="110" Height="32" Margin="0,0,8,0"
-                            Background="#27AE60" Foreground="White" IsEnabled="False" Click="OnPrintFormExcelClick"
-                            ToolTip="Печать в Excel выбранной формы (или основной, если флажок «Выбрать форму» снят)"/>
-                    <Button x:Name="PrintPdfButton" Content="📄 Предпросмотр ПДФ" Width="180" Height="32" Margin="0,0,8,0"
-                            Background="#2980B9" Foreground="White" IsEnabled="False" Click="OnPrintFormPdfClick"
-                            ToolTip="Предпросмотр PDF в окне программы"/>
-                    <CheckBox x:Name="ChoosePrintFormCheckBox" Content="Выбрать форму" VerticalAlignment="Center" Margin="0,0,10,0"
-                              Checked="OnChoosePrintFormChecked" Unchecked="OnChoosePrintFormUnchecked"
-                              ToolTip="Включите — откроется список печатных форм, и выбранная будет печататься кнопками «Эксель» и «Предпросмотр ПДФ». Выключено — печатается форма по умолчанию."/>
-                </WrapPanel>
-            </Border>
-        </StackPanel>
-
-        <!-- Таблица -->
-        <DataGrid x:Name="DataGrid" Grid.Row="2" AutoGenerateColumns="False" 
-          IsReadOnly="False" SelectionChanged="OnSelectionChanged"
-          AlternatingRowBackground="#F5F5F5" BorderBrush="#BDC3C7" BorderThickness="1"
-          PreviewMouseRightButtonDown="DataGrid_PreviewMouseRightButtonDown"
-          MouseDoubleClick="DataGrid_MouseDoubleClick"
-          LoadingRow="DataGrid_LoadingRow">
-            <DataGrid.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="Печатная форма выбранного документа" Click="OnPrintClick"/>
-                </ContextMenu>
-            </DataGrid.ContextMenu>
-            <DataGrid.RowStyle>
-                <Style TargetType="DataGridRow">
-                    <Setter Property="Background" Value="White"/>
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsPostedDisplay}" Value="Да">
-                            <Setter Property="Background" Value="LightGreen"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </DataGrid.RowStyle>
-            <DataGrid.Resources>
-                <Style x:Key="ColumnFilterTextBoxStyle" TargetType="TextBox">
-                    <Setter Property="MinWidth" Value="68"/>
-                    <Setter Property="Height" Value="22"/>
-                    <Setter Property="Margin" Value="0,4,0,0"/>
-                    <Setter Property="Padding" Value="3,1"/>
-                    <Setter Property="FontSize" Value="11"/>
-                </Style>
-            </DataGrid.Resources>
-            <DataGrid.Columns>
-                <DataGridTemplateColumn Header="Выбор" Width="70" IsReadOnly="False" CanUserSort="False">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <CheckBox IsChecked="{Binding IsSelectedForBatchPost, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      IsEnabled="{Binding CanBatchPost}"
-                                      Click="OnBatchPostRowCheckBoxClick"
-                                      HorizontalAlignment="Center"
-                                      VerticalAlignment="Center"
-                                      ToolTip="{Binding BatchPostAvailabilityHint}"/>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTextColumn Header="День" Binding="{Binding CashDayStatusDisplay}" Width="85" IsReadOnly="True">
-                    <DataGridTextColumn.ElementStyle>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="FontWeight" Value="SemiBold"/>
-                            <Setter Property="Foreground" Value="#27AE60"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding CashDayStatusDisplay}" Value="Не открыт">
-                                    <Setter Property="Foreground" Value="#7F8C8D"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding IsCashDayClosed}" Value="True">
-                                    <Setter Property="Foreground" Value="#C0392B"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </DataGridTextColumn.ElementStyle>
-                </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding DocDate, StringFormat=dd/MM/yyyy}" Width="100" IsReadOnly="True">
-                    <DataGridTextColumn.Header>
-                        <StackPanel>
-                            <TextBlock Text="Дата"/>
-                            <TextBox x:Name="DateFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
-                        </StackPanel>
-                    </DataGridTextColumn.Header>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Тип КО" Binding="{Binding OrderTypeDisplay}" Width="120" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding DocNumber}" Width="120" IsReadOnly="True">
-                    <DataGridTextColumn.Header>
-                        <StackPanel>
-                            <TextBlock Text="Документ"/>
-                            <TextBox x:Name="NumberFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
-                        </StackPanel>
-                    </DataGridTextColumn.Header>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Касса" Binding="{Binding CashDeskName}" Width="180" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding DebitAccount}" Width="120" IsReadOnly="True">
-                    <DataGridTextColumn.Header>
-                        <StackPanel>
-                            <TextBlock Text="Дебет"/>
-                            <TextBox x:Name="DebitFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
-                        </StackPanel>
-                    </DataGridTextColumn.Header>
-                </DataGridTextColumn>
-                <DataGridTextColumn Binding="{Binding CreditAccount}" Width="120" IsReadOnly="True">
-                    <DataGridTextColumn.Header>
-                        <StackPanel>
-                            <TextBlock Text="Кредит"/>
-                            <TextBox x:Name="CreditFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
-                        </StackPanel>
-                    </DataGridTextColumn.Header>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="Тип проводки" Binding="{Binding PostingTypeDisplay}" Width="250" Visibility="Collapsed" IsReadOnly="True"/>
-                <DataGridTextColumn Binding="{Binding Amount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120" IsReadOnly="True">
-                    <DataGridTextColumn.Header>
-                        <StackPanel>
-                            <TextBlock Text="Сумма в сом"/>
-                            <TextBox x:Name="AmountFilterBox" Style="{StaticResource ColumnFilterTextBoxStyle}" TextChanged="OnColumnFilterChanged"/>
-                        </StackPanel>
-                    </DataGridTextColumn.Header>
-                </DataGridTextColumn>
-                <DataGridTextColumn Header="В валюте" Binding="{Binding AmountInCurrency, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="120" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Основание" Binding="{Binding Basis}" Width="180" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Проведён" Binding="{Binding IsPostedDisplay}" Width="80" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Дата создания" Binding="{Binding CreatedAt}" Width="150" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Дата изменения" Binding="{Binding UpdatedAt}" Width="150" IsReadOnly="True"/>
-            </DataGrid.Columns>
-            
-        </DataGrid>
+        </GroupBox>
         <!-- Детали выбранной проводки -->
         <GroupBox Grid.Row="3" Header="Дополнительная информация о проводке" Margin="0,8,0,0" Padding="6">
             <DataGrid x:Name="PostingDetailsGrid"
@@ -348,7 +336,7 @@
             </DataGrid>
         </GroupBox>
         <!-- Статус бар -->
-        <StatusBar Grid.Row="4" Margin="0,10,0,0">
+        <StatusBar Grid.Row="5" Margin="0,10,0,0">
             <StatusBarItem>
                 <TextBlock x:Name="StatusText" Text="Готово" Foreground="Gray"/>
             </StatusBarItem>

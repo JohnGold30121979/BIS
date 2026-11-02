@@ -746,15 +746,17 @@ namespace BIS.ERP
         }
 
         /// <summary>
-        /// Проверяет, что отчёт доступен для показа в дереве.
-        ///
-        /// Отчёты по координатным макетам FoxPro скрываются: значения в их макеты
-        /// подставлял слой разбора FoxPro-полей, который удалён вместе с подсистемой
-        /// FRX. Строки таких отчётов ещё есть в базе — их удаляет этап 2 плана;
-        /// после очистки данных проверку можно убрать целиком.
+        /// Отчёты по координатным макетам FoxPro скрываются, потому что поддержка FRX удалена.
+        /// Кассовые отчёты остаются доступны из окна ПКО/РКО и не дублируются в дереве.
         /// </summary>
         private static bool IsReportAvailableForNavigation(Report report) =>
-            report != null && !IsFrxLayoutReport(report);
+            report != null &&
+            !IsFrxLayoutReport(report) &&
+            !IsCashOrderReport(report);
+
+        private static bool IsCashOrderReport(Report report) =>
+            string.Equals(report.ReportType, "CashBook", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(report.ReportType, "CashReceiptExpenseRegister", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Признак отчёта по координатному макету FoxPro.</summary>
         private static bool IsFrxLayoutReport(Report report) =>
@@ -982,9 +984,13 @@ namespace BIS.ERP
             return new NavigationItem
             {
                 Id = document.Id.ToString(),
-                // Для кассовых ордеров раздел называется так же, как документ:
-                // «Расходный/Приходный КО» (переименование в «Банковские операции» отменено).
-                Name = type == "CashOrder" ? CashOrderWorkView.SectionTitle : document.Name,
+                // В дереве используем заголовок рабочего раздела, сохраняя имя документа в метаданных.
+                Name = type switch
+                {
+                    "CashOrder" => CashOrderWorkView.SectionTitle,
+                    "PaymentOrder" => PaymentOrderWorkView.SectionTitle,
+                    _ => document.Name
+                },
                 Icon = document.Icon,
                 Type = type, Tag = document, Order = document.Order
             };
@@ -2630,5 +2636,4 @@ namespace BIS.ERP
         }
     }
 }
-
 

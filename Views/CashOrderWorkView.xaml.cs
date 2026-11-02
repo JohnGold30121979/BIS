@@ -88,31 +88,64 @@ namespace BIS.ERP.Views
             DescriptionText.Text = string.IsNullOrWhiteSpace(description)
                 ? "Список приходных и расходных кассовых ордеров"
                 : description;
-            Loaded += async (_, _) => await LoadData();
+            Loaded += async (_, _) =>
+            {
+                await LoadData();
+                await LoadCashReportChoicesAsync();
+            };
+        }
+
+        private async Task LoadCashReportChoicesAsync()
+        {
+            if (CashReportCombo.ItemsSource != null)
+                return;
+
+            try
+            {
+                using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                await new MetadataService(context).EnsureCashOrderReportsAsync();
+                var choices = await context.Reports
+                    .AsNoTracking()
+                    .Where(report => report.IsActive && !report.IsPrintForm &&
+                        (report.ReportType == "CashBook" || report.ReportType == "CashReceiptExpenseRegister"))
+                    .OrderBy(report => report.Order)
+                    .ThenBy(report => report.Name)
+                    .Select(report => new CashReportChoice
+                    {
+                        Name = report.Name,
+                        Code = report.Code,
+                        ReportType = report.ReportType
+                    })
+                    .ToListAsync();
+                choices.Add(new CashReportChoice
+                {
+                    Name = "Печатная форма выбранного документа",
+                    IsDocumentPrint = true
+                });
+                CashReportCombo.ItemsSource = choices;
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Ошибка загрузки списка кассовых отчетов.", "CashOrderWorkView.LoadCashReportChoices", ex);
+                StatusText.Text = "Не удалось загрузить список отчетов";
+            }
         }
 
         private void UpdateButtonsState()
         {
             var selected = DataGrid.SelectedItem as CashOrderRow;
             var hasSelection = selected != null;
-            EditButton.IsEnabled = hasSelection && selected?.IsPosted != true;
-            DeleteButton.IsEnabled = hasSelection && selected?.IsPosted != true;
-            PostButton.IsEnabled = hasSelection;
-            PrintExcelButton.IsEnabled = hasSelection;
-            PrintPdfButton.IsEnabled = hasSelection;
-            PostButton.Content = selected?.IsPosted == true ? "↩ Отменить проведение" : "✅ Провести";
-            PostButton.Width = selected?.IsPosted == true ? 175 : 100;
+            EditButton.IsEnabled = hasSelection && selected?.CanChangePosting == true;
+            DeleteButton.IsEnabled = hasSelection && selected?.CanChangePosting == true;
 
-            var batchRows = GetCurrentFilteredRows()
-                .Where(row => row.CanBatchPost)
+            var changeableRows = GetCurrentFilteredRows()
+                .Where(row => row.CanChangePosting)
                 .ToList();
-            var hasSelectedRows = batchRows.Any(row => row.IsSelectedForBatchPost);
-            BatchPostButton.IsEnabled = hasSelectedRows;
 
             if (SelectAllBatchPostCheckBox != null)
             {
-                SelectAllBatchPostCheckBox.IsEnabled = batchRows.Count > 0;
-                SelectAllBatchPostCheckBox.IsChecked = batchRows.Count > 0 && batchRows.All(row => row.IsSelectedForBatchPost);
+                SelectAllBatchPostCheckBox.IsEnabled = changeableRows.Count > 0;
+                SelectAllBatchPostCheckBox.IsChecked = changeableRows.Count > 0 && changeableRows.All(row => row.IsSelectedForBatchPost);
             }
         }
 
@@ -294,7 +327,7 @@ namespace BIS.ERP.Views
             CashDeskFilterCombo.ItemsSource = _cashDeskFilterItems;
             CashDeskFilterCombo.SelectedItem = _cashDeskFilterItems.FirstOrDefault(item => item.Id == selectedId)
                                               ?? _cashDeskFilterItems.First();
-            CashPostingsButton.IsEnabled = _cashDeskFilterItems.Count > 1;
+            CashPostingsButton.IsEnabled = _cashDeskFilterItems.Count > 0;
         }
 
         private static CashDeskItem CreateCashDeskFilterItem(
@@ -420,7 +453,7 @@ namespace BIS.ERP.Views
                 row.CashDayStatusDisplay = status;
                 row.IsCashDayClosed = isClosed;
                 row.IsCashDayOpen = false;
-                if (!row.CanBatchPost)
+                if (!row.CanChangePosting)
                     row.IsSelectedForBatchPost = false;
             }
         }
@@ -475,15 +508,14 @@ namespace BIS.ERP.Views
                 return;
 
             var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(cashDeskId);
-            var currentOpenDay = await cashDayService.GetCurrentOpenDayAsync(cashDeskId);
             foreach (var row in rowList)
             {
                 row.IsCashDayClosed = lastClosedDate.HasValue && row.DocDate.Date <= lastClosedDate.Value.Date;
-                row.IsCashDayOpen = !row.IsCashDayClosed && currentOpenDay != null;
+                row.IsCashDayOpen = !row.IsCashDayClosed;
                 row.CashDayStatusDisplay = row.IsCashDayClosed
                     ? "Закрыт"
                     : row.IsCashDayOpen ? "Открыт" : "Не открыт";
-                if (!row.CanBatchPost)
+                if (!row.CanChangePosting)
                     row.IsSelectedForBatchPost = false;
             }
         }
@@ -536,21 +568,20 @@ namespace BIS.ERP.Views
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var cashDayService = new CashDayClosureService(context);
-                var openDay = await cashDayService.GetCurrentOpenDayAsync(selectedCashDesk.Id);
-
-                if (openDay == null)
+                var closeDate = GetSelectedCashDayDate();
+                var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(selectedCashDesk.Id);
+                if (lastClosedDate.HasValue && closeDate <= lastClosedDate.Value.Date)
                 {
-                    var empty = CashTurnoverSummary.ForPeriod(DateTime.Today, DateTime.Today, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
-                    DisplayOpenCashDaySummary(empty, $"Текущий открытый период по кассе {selectedCashDesk.DisplayNameWithAccount}: не открыт", "-");
+                    var closed = CashTurnoverSummary.ForPeriod(closeDate, closeDate, selectedCashDesk.DisplayNameWithAccount, ExtractAccountCode(selectedCashDesk.AccountCode));
+                    DisplayOpenCashDaySummary(closed, $"Дата по кассе {selectedCashDesk.DisplayNameWithAccount} уже закрыта", closeDate.ToString("dd/MM/yyyy"));
                     return;
                 }
 
-                var closeDate = GetSelectedCashDayDate();
                 var openDaySummary = await CalculateCurrentOpenCashDaySummaryAsync(selectedCashDesk, cashDayService, closeDate);
                 var dateText = openDaySummary.StartDate.Date == openDaySummary.EndDate.Date
                     ? openDaySummary.EndDate.ToString("dd/MM/yyyy")
                     : $"{openDaySummary.StartDate:dd/MM/yyyy}-{openDaySummary.EndDate:dd/MM/yyyy}";
-                DisplayOpenCashDaySummary(openDaySummary, $"Текущий открытый период по кассе {selectedCashDesk.DisplayNameWithAccount}", dateText);
+                DisplayOpenCashDaySummary(openDaySummary, $"Открытый период по кассе {selectedCashDesk.DisplayNameWithAccount}", dateText);
             }
             catch (Exception ex)
             {
@@ -1183,11 +1214,24 @@ namespace BIS.ERP.Views
 
             if (!await EnsureCashDayAllowsDocumentAsync(
                     selectedRow,
-                    selectedRow.IsPosted ? "Отмена проведения кассового ордера" : "Проведение кассового ордера",
-                    offerOpenDay: !selectedRow.IsPosted))
+                    selectedRow.IsPosted ? "Отмена проведения кассового ордера" : "Проведение кассового ордера"))
                 return;
 
-            var actionText = selectedRow.IsPosted ? "Отменить проведение выбранного документа?" : "Провести выбранный документ?";
+            var actionText = selectedRow.IsPosted
+                ? $"Отменить проведение этого документа?{Environment.NewLine}{Environment.NewLine}" +
+                  $"Тип: {selectedRow.OrderTypeDisplay}{Environment.NewLine}" +
+                  $"Дата: {selectedRow.DocDate:dd.MM.yyyy}{Environment.NewLine}" +
+                  $"Номер: {selectedRow.DocNumber}{Environment.NewLine}" +
+                  $"Дебет: {selectedRow.DebitAccount}{Environment.NewLine}" +
+                  $"Кредит: {selectedRow.CreditAccount}{Environment.NewLine}" +
+                  $"Сумма: {selectedRow.Amount:N2} {selectedRow.CurrencyName}"
+                : $"Провести выбранный документ?{Environment.NewLine}{Environment.NewLine}" +
+                  $"Тип: {selectedRow.OrderTypeDisplay}{Environment.NewLine}" +
+                  $"Дата: {selectedRow.DocDate:dd.MM.yyyy}{Environment.NewLine}" +
+                  $"Номер: {selectedRow.DocNumber}{Environment.NewLine}" +
+                  $"Дебет: {selectedRow.DebitAccount}{Environment.NewLine}" +
+                  $"Кредит: {selectedRow.CreditAccount}{Environment.NewLine}" +
+                  $"Сумма: {selectedRow.Amount:N2} {selectedRow.CurrencyName}";
             var result = MessageBox.Show(actionText, "Подтверждение",
                 MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (result != MessageBoxResult.Yes)
@@ -1212,9 +1256,66 @@ namespace BIS.ERP.Views
             }
         }
 
+        private async void OnCashOrderContextMenuOpened(object sender, RoutedEventArgs e)
+        {
+            if (sender is not ContextMenu menu)
+                return;
+
+            var row = DataGrid.SelectedItem as CashOrderRow;
+            var canChangeForOpenDay = row != null && await IsCashDayOpenForDocumentAsync(row);
+            if (row != null)
+            {
+                row.IsCashDayOpen = canChangeForOpenDay;
+                row.IsCashDayClosed = !canChangeForOpenDay;
+                row.CashDayStatusDisplay = canChangeForOpenDay ? "Открыт" : "Закрыт / не открыт";
+                DataGrid.Items.Refresh();
+                UpdateButtonsState();
+            }
+
+            foreach (var item in menu.Items.OfType<MenuItem>())
+            {
+                switch (item.Tag as string)
+                {
+                    case "Edit":
+                        item.IsEnabled = canChangeForOpenDay;
+                        break;
+                    case "Print":
+                        item.IsEnabled = row != null;
+                        break;
+                    case "PostingState":
+                        item.Header = row?.IsPosted == true ? "Отменить проведение" : "Провести";
+                        item.IsEnabled = canChangeForOpenDay;
+                        break;
+                    case "Delete":
+                        item.IsEnabled = canChangeForOpenDay;
+                        break;
+                }
+            }
+        }
+
+        private async Task<bool> IsCashDayOpenForDocumentAsync(CashOrderRow row)
+        {
+            if (!Guid.TryParse(row.CashDeskId, out var cashDeskId) || cashDeskId == Guid.Empty)
+                return false;
+
+            try
+            {
+                using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
+                var cashDayService = new CashDayClosureService(context);
+            var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(cashDeskId);
+            return !lastClosedDate.HasValue || row.DocDate.Date > lastClosedDate.Value.Date;
+            }
+            catch (Exception ex)
+            {
+                SystemLogService.Error("Не удалось проверить открытый кассовый день для контекстного меню.",
+                    "CashOrderWorkView.IsCashDayOpenForDocument", ex);
+                return false;
+            }
+        }
+
         private void OnBatchPostRowCheckBoxClick(object sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement { DataContext: CashOrderRow row } && !row.CanBatchPost)
+            if (sender is FrameworkElement { DataContext: CashOrderRow row } && !row.CanChangePosting)
                 row.IsSelectedForBatchPost = false;
 
             UpdateButtonsState();
@@ -1224,36 +1325,54 @@ namespace BIS.ERP.Views
         {
             var shouldSelect = SelectAllBatchPostCheckBox.IsChecked == true;
             foreach (var row in GetCurrentFilteredRows())
-                row.IsSelectedForBatchPost = shouldSelect && row.CanBatchPost;
+                row.IsSelectedForBatchPost = shouldSelect && row.CanChangePosting;
 
             DataGrid.Items.Refresh();
             UpdateButtonsState();
         }
 
-        private async void OnBatchPostClick(object sender, RoutedEventArgs e)
+        private async void OnPostAllFromSelectionHeaderClick(object sender, RoutedEventArgs e)
         {
-            const string caption = "Массовое проведение кассовых ордеров";
+            foreach (var row in GetCurrentFilteredRows())
+                row.IsSelectedForBatchPost = !row.IsPosted && row.CanChangePosting;
+
+            DataGrid.Items.Refresh();
+            UpdateButtonsState();
+            await ChangeSelectedPostingStateAsync(posted: false);
+        }
+
+        private async void OnPostSelectedFromSelectionHeaderClick(object sender, RoutedEventArgs e)
+        {
+            await ChangeSelectedPostingStateAsync(posted: false);
+        }
+
+        private async void OnUnpostSelectedFromSelectionHeaderClick(object sender, RoutedEventArgs e)
+        {
+            await ChangeSelectedPostingStateAsync(posted: true);
+        }
+
+        private async Task ChangeSelectedPostingStateAsync(bool posted)
+        {
+            var caption = posted ? "Отмена проведения кассовых ордеров" : "Проведение кассовых ордеров";
             var currentRows = GetCurrentFilteredRows();
-            foreach (var row in currentRows.Where(row => row.IsSelectedForBatchPost && !row.CanBatchPost))
+            foreach (var row in currentRows.Where(row => row.IsSelectedForBatchPost && !row.CanChangePosting))
                 row.IsSelectedForBatchPost = false;
 
             var selectedRows = currentRows
-                .Where(row => row.IsSelectedForBatchPost && row.CanBatchPost)
+                .Where(row => row.IsSelectedForBatchPost && row.CanChangePosting && row.IsPosted == posted)
                 .ToList();
 
             if (selectedRows.Count == 0)
             {
                 DataGrid.Items.Refresh();
                 UpdateButtonsState();
-                var hasOpenUnpostedRows = currentRows.Any(row => row.CanBatchPost);
-                var message = hasOpenUnpostedRows
-                    ? "Отметьте непроведенные документы открытого периода для проведения."
-                    : "Нет непроведенных документов открытого периода для массового проведения.";
+                var action = posted ? "снятия проведения" : "проведения";
+                var message = $"Выберите документы для {action} в открытом кассовом дне.";
                 MessageBox.Show(message, caption, MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            var rowsWithoutCorrespondent = selectedRows
+            var rowsWithoutCorrespondent = (posted ? Enumerable.Empty<CashOrderRow>() : selectedRows)
                 .Where(row => !row.HasCorrespondentAccount)
                 .Take(8)
                 .Select(row => $"№ {row.DocNumber}")
@@ -1270,11 +1389,12 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var confirm = MessageBox.Show($"Провести выбранные документы: {selectedRows.Count}?", caption, MessageBoxButton.YesNo, MessageBoxImage.Question);
+            var actionText = posted ? "Снять проведение" : "Провести";
+            var confirm = MessageBox.Show($"{actionText} у выбранных документов: {selectedRows.Count}?", caption, MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (confirm != MessageBoxResult.Yes)
                 return;
 
-            var postedCount = 0;
+            var changedCount = 0;
             var errors = new List<string>();
             foreach (var row in selectedRows)
             {
@@ -1283,14 +1403,17 @@ namespace BIS.ERP.Views
 
                 try
                 {
-                    StatusText.Text = $"Проведение документа № {row.DocNumber}...";
-                    await _metadataService.PostDocumentAsync(_documentMetadata.Id, row.Id);
-                    postedCount++;
+                    StatusText.Text = $"{(posted ? "Отмена проведения" : "Проведение")} документа № {row.DocNumber}...";
+                    if (posted)
+                        await _metadataService.UnpostDocumentAsync(_documentMetadata.Id, row.Id);
+                    else
+                        await _metadataService.PostDocumentAsync(_documentMetadata.Id, row.Id);
+                    changedCount++;
                 }
                 catch (Exception ex)
                 {
                     errors.Add($"№ {row.DocNumber}: {ex.Message}");
-                    SystemLogService.Error($"Ошибка массового проведения кассового документа № {row.DocNumber}.", "CashOrderWorkView.OnBatchPostClick", ex);
+                    SystemLogService.Error($"Ошибка изменения проведения кассового документа № {row.DocNumber}.", "CashOrderWorkView.ChangeSelectedPostingState", ex);
                 }
             }
 
@@ -1301,13 +1424,13 @@ namespace BIS.ERP.Views
                 var details = string.Join(Environment.NewLine, errors.Take(5));
                 if (errors.Count > 5)
                     details += Environment.NewLine + $"... и еще ошибок: {errors.Count - 5}";
-                StatusText.Text = $"⚠️ Проведено документов: {postedCount}. Ошибок: {errors.Count}";
-                MessageBox.Show($"Проведено документов: {postedCount}. Ошибок: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
+                StatusText.Text = $"⚠️ Обработано документов: {changedCount}. Ошибок: {errors.Count}";
+                MessageBox.Show($"Обработано документов: {changedCount}. Ошибок: {errors.Count}.{Environment.NewLine}{details}", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
             // Итог массового проведения показываем в строке состояния, без модального окна.
-            StatusText.Text = $"✅ Проведено документов: {postedCount}";
+            StatusText.Text = $"✅ Обработано документов: {changedCount}";
         }
         private async void OnRefreshClick(object sender, RoutedEventArgs e)
         {
@@ -1375,7 +1498,7 @@ namespace BIS.ERP.Views
             return true;
         }
 
-        private async Task<bool> EnsureCashDayAllowsDocumentAsync(CashOrderRow row, string caption, bool offerOpenDay = true)
+        private async Task<bool> EnsureCashDayAllowsDocumentAsync(CashOrderRow row, string caption)
         {
             if (!Guid.TryParse(row.CashDeskId, out var cashDeskId) || cashDeskId == Guid.Empty)
             {
@@ -1391,36 +1514,13 @@ namespace BIS.ERP.Views
 
                 if (lastClosedDate.HasValue && row.DocDate.Date <= lastClosedDate.Value.Date)
                 {
-                    var closedMessage = offerOpenDay
-                        ? $"Кассовый день {row.DocDate:dd/MM/yyyy} по кассе \"{row.CashDeskName}\" уже закрыт. Создание, изменение и проведение документов в закрытом периоде запрещено."
-                        : $"Кассовый день {row.DocDate:dd/MM/yyyy} по кассе \"{row.CashDeskName}\" уже закрыт. Для отмены проведения сначала откройте день штатной кнопкой \"Открыть день\".";
+                    var closedMessage = $"Кассовый период по кассе \"{row.CashDeskName}\" закрыт по {lastClosedDate.Value:dd/MM/yyyy}. Документ от {row.DocDate:dd/MM/yyyy} нельзя изменять в закрытом периоде.";
                     MessageBox.Show(closedMessage, caption, MessageBoxButton.OK, MessageBoxImage.Warning);
                     return false;
                 }
 
-                var currentOpenDay = await cashDayService.GetCurrentOpenDayAsync(cashDeskId);
-                if (currentOpenDay != null)
-                    return true;
-
-                if (!offerOpenDay)
-                {
-                    MessageBox.Show($"По кассе \"{row.CashDeskName}\" нет открытого кассового дня. Откройте день штатной кнопкой \"Открыть день\", затем повторите операцию.",
-                        caption,
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                    return false;
-                }
-
-                var openDate = CashDayDatePicker.SelectedDate?.Date ?? DateTime.Today;
-                var answer = MessageBox.Show($"По кассе \"{row.CashDeskName}\" нет открытого кассового дня. Открыть текущий кассовый день {openDate:dd/MM/yyyy} для работы?",
-                    caption,
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-                if (answer != MessageBoxResult.Yes)
-                    return false;
-
-                await cashDayService.OpenDayAsync(cashDeskId, openDate, CurrentUserName());
-                CashDayDatePicker.SelectedDate = openDate;
+                // Между закрытиями период открыт целиком; отдельная запись OpenDay
+                // используется для аудита закрытия, а не как граница разрешенных дат.
                 return true;
             }
             catch (InvalidOperationException ex)
@@ -1609,11 +1709,6 @@ namespace BIS.ERP.Views
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var cashDayService = new CashDayClosureService(context);
                 var openDay = await cashDayService.GetCurrentOpenDayAsync(cashDesk.Id);
-                if (openDay == null)
-                {
-                    MessageBox.Show("По выбранной кассе нет открытого текущего кассового дня. Перед закрытием откройте день.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
 
                 var closeDate = GetSelectedCashDayDate();
                 var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(cashDesk.Id);
@@ -1644,17 +1739,34 @@ namespace BIS.ERP.Views
                     return;
 
                 var turnoverSummary = await CalculateCurrentOpenCashDaySummaryAsync(cashDesk, cashDayService, closeDate);
-                await cashDayService.CloseOpenDayAsync(
-                    openDay,
-                    cashDesk.DisplayNameWithAccount,
-                    closeDate,
-                    CurrentUserName(),
-                    turnoverSummary.OpeningDebit,
-                    turnoverSummary.OpeningCredit,
-                    turnoverSummary.DebitTurnover,
-                    turnoverSummary.CreditTurnover,
-                    turnoverSummary.ClosingDebit,
-                    turnoverSummary.ClosingCredit);
+                if (openDay != null)
+                {
+                    await cashDayService.CloseOpenDayAsync(
+                        openDay,
+                        cashDesk.DisplayNameWithAccount,
+                        closeDate,
+                        CurrentUserName(),
+                        turnoverSummary.OpeningDebit,
+                        turnoverSummary.OpeningCredit,
+                        turnoverSummary.DebitTurnover,
+                        turnoverSummary.CreditTurnover,
+                        turnoverSummary.ClosingDebit,
+                        turnoverSummary.ClosingCredit);
+                }
+                else
+                {
+                    await cashDayService.CloseDayAsync(
+                        cashDesk.Id,
+                        cashDesk.DisplayNameWithAccount,
+                        closeDate,
+                        CurrentUserName(),
+                        turnoverSummary.OpeningDebit,
+                        turnoverSummary.OpeningCredit,
+                        turnoverSummary.DebitTurnover,
+                        turnoverSummary.CreditTurnover,
+                        turnoverSummary.ClosingDebit,
+                        turnoverSummary.ClosingCredit);
+                }
 
                 await LoadData();
                 // Итог виден в строке состояния и в самом списке, модальное подтверждение не нужно.
@@ -1775,13 +1887,6 @@ namespace BIS.ERP.Views
             {
                 var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
                 var cashDayService = new CashDayClosureService(context);
-                var openDay = await cashDayService.GetCurrentOpenDayAsync(cashDesk.Id);
-                if (openDay == null)
-                {
-                    MessageBox.Show("По выбранной кассе нет открытого текущего кассового дня. Откройте день, чтобы посмотреть обороты.", caption, MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
                 var closeDate = GetSelectedCashDayDate();
                 var lastClosedDate = await cashDayService.GetLastClosedDayDateAsync(cashDesk.Id);
                 if (lastClosedDate.HasValue && closeDate <= lastClosedDate.Value.Date)
@@ -1797,23 +1902,20 @@ namespace BIS.ERP.Views
                 var dialog = new CashDayTurnoverDialog(
                     caption,
                     $"{cashDesk.DisplayNameWithAccount} | открытый кассовый период {periodText}",
-                    new[]
+                    new CashDayTurnoverRow
                     {
-                        new CashDayTurnoverRow
-                        {
-                            Date = turnoverSummary.EndDate,
-                            OpeningDebit = turnoverSummary.OpeningDebit,
-                            OpeningCredit = turnoverSummary.OpeningCredit,
-                            DebitTurnover = turnoverSummary.DebitTurnover,
-                            CreditTurnover = turnoverSummary.CreditTurnover,
-                            ClosingDebit = turnoverSummary.ClosingDebit,
-                            ClosingCredit = turnoverSummary.ClosingCredit
-                        }
+                        Date = turnoverSummary.EndDate,
+                        OpeningDebit = turnoverSummary.OpeningDebit,
+                        OpeningCredit = turnoverSummary.OpeningCredit,
+                        DebitTurnover = turnoverSummary.DebitTurnover,
+                        CreditTurnover = turnoverSummary.CreditTurnover,
+                        ClosingDebit = turnoverSummary.ClosingDebit,
+                        ClosingCredit = turnoverSummary.ClosingCredit
                     })
                 {
                     Owner = Window.GetWindow(this)
                 };
-                MdiDialogService.ShowInWorkspaceOrDialog(Window.GetWindow(this), dialog, caption);
+                dialog.ShowDialog();
                 StatusText.Text = $"Обороты открытого периода {periodText}";
             }
             catch (Exception ex)
@@ -1821,22 +1923,29 @@ namespace BIS.ERP.Views
                 MessageBox.Show($"Ошибка расчета оборотов за день: {ex.Message}", caption, MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-        private async void OnCashBookClick(object sender, RoutedEventArgs e)
+        private async void OnCashReportSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            await OpenCashBookExcelAsync(PrintFormOutputFormat.Excel);
+            if (CashReportCombo.SelectedItem is not CashReportChoice choice)
+                return;
+
+            CashReportCombo.SelectedIndex = -1;
+            var choosePrintForm = PrintFormsCheckBox.IsChecked == true;
+            if (choice.IsDocumentPrint)
+            {
+                await PrintCashOrderFormAsync(
+                    toExcel: false,
+                    preview: true,
+                    chooseForm: choosePrintForm);
+                return;
+            }
+
+            if (choice.ReportType == "CashBook")
+                await OpenCashBookReportAsync(choice.Code, choosePrintForm);
+            else if (choice.ReportType == "CashReceiptExpenseRegister")
+                await OpenReceiptExpenseRegisterReportAsync(choice.Code, choosePrintForm);
         }
 
-        private async void OnCashBookPdfClick(object sender, RoutedEventArgs e)
-        {
-            await OpenCashBookExcelAsync(PrintFormOutputFormat.Pdf);
-        }
-
-        private async void OnReceiptExpenseRegisterClick(object sender, RoutedEventArgs e)
-        {
-            await OpenReceiptExpenseRegisterExcelAsync();
-        }
-
-        private async Task OpenCashBookExcelAsync(PrintFormOutputFormat outputFormat)
+        private async Task OpenCashBookReportAsync(string reportCode, bool choosePrintForm)
         {
             const string caption = "Кассовая книга";
             try
@@ -1860,16 +1969,15 @@ namespace BIS.ERP.Views
 
                 var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
 
-                CashBookButton.IsEnabled = false;
-                CashBookPdfButton.IsEnabled = false;
+                CashReportCombo.IsEnabled = false;
                 Cursor = Cursors.Wait;
-                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы кассовой книги..." : "Формирование Excel кассовой книги по.market конфигуратору...";
+                StatusText.Text = choosePrintForm ? "Выбор варианта кассовой книги..." : "Формирование кассовой книги...";
                 SystemLogService.Info(
-                    $"Старт формирования кассовой книги ({PrintFormOutputFileService.GetDisplayName(outputFormat)}). Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
+                    $"Старт формирования кассовой книги. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
                     "CashOrderWorkView.CashBook");
 
                 await OpenConfiguredCashReportAsync(
-                    CashBookReportCode,
+                    reportCode,
                     caption,
                     BuildCashBookReportDataTable(rows, startDate, endDate, cashDeskName, turnoverSummary),
                     startDate,
@@ -1877,7 +1985,7 @@ namespace BIS.ERP.Views
                     cashDeskName,
                     "cash_book",
                     "CashOrderWorkView.CashBook",
-                    outputFormat);
+                    choosePrintForm);
             }
             catch (Exception ex)
             {
@@ -1887,8 +1995,7 @@ namespace BIS.ERP.Views
             }
             finally
             {
-                CashBookButton.IsEnabled = true;
-                CashBookPdfButton.IsEnabled = true;
+                CashReportCombo.IsEnabled = true;
                 Cursor = null;
             }
         }
@@ -1904,7 +2011,7 @@ namespace BIS.ERP.Views
                 : $"{party}    {text}";
         }
 
-        private async Task OpenReceiptExpenseRegisterExcelAsync()
+        private async Task OpenReceiptExpenseRegisterReportAsync(string reportCode, bool choosePrintForm)
         {
             const string caption = "Реестр приходов / расходов";
             try
@@ -1928,22 +2035,23 @@ namespace BIS.ERP.Views
 
                 var turnoverSummary = await BuildCashTurnoverSummaryForReportAsync(startDate, endDate);
 
-                ReceiptExpenseRegisterButton.IsEnabled = false;
+                CashReportCombo.IsEnabled = false;
                 Cursor = Cursors.Wait;
-                StatusText.Text = ChoosePrintFormCheckBox.IsChecked == true ? "Выбор формы реестра приходов/расходов..." : "Формирование Excel-реестра приходов/расходов по market конфигуратору...";
+                StatusText.Text = choosePrintForm ? "Выбор варианта реестра..." : "Формирование реестра...";
                 SystemLogService.Info(
                     $"Старт формирования реестра приходов/расходов. Строк: {rows.Count}, касса: {cashDeskName}, период: {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}.",
                     "CashOrderWorkView.ReceiptExpenseRegister");
 
                 await OpenConfiguredCashReportAsync(
-                    ReceiptExpenseRegisterReportCode,
+                    reportCode,
                     caption,
                     BuildReceiptExpenseRegisterReportDataTable(rows, startDate, endDate, cashDeskName, turnoverSummary),
                     startDate,
                     endDate,
                     cashDeskName,
                     "reestr_pko_rko",
-                    "CashOrderWorkView.ReceiptExpenseRegister");
+                    "CashOrderWorkView.ReceiptExpenseRegister",
+                    choosePrintForm);
             }
             catch (Exception ex)
             {
@@ -1953,7 +2061,7 @@ namespace BIS.ERP.Views
             }
             finally
             {
-                ReceiptExpenseRegisterButton.IsEnabled = true;
+                CashReportCombo.IsEnabled = true;
                 Cursor = null;
             }
         }
@@ -1985,7 +2093,7 @@ namespace BIS.ERP.Views
             string cashDeskName,
             string outputBaseName,
             string logSource,
-            PrintFormOutputFormat preferredFormat = PrintFormOutputFormat.Excel)
+            bool choosePrintForm)
         {
             using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
             await new MetadataService(context).EnsureCashOrderReportsAsync();
@@ -2000,15 +2108,24 @@ namespace BIS.ERP.Views
             if (!report.IsActive)
                 throw new InvalidOperationException($"Отчет \"{caption}\" отключен в конфигураторе.");
 
-            var selectedReport = report;
-            var selectedFormat = preferredFormat;
-            if (ChoosePrintFormCheckBox.IsChecked == true)
+            var reportVariants = await context.Reports
+                .AsNoTracking()
+                .Include(item => item.ElementMappings)
+                .Where(item => item.IsActive && item.ReportType == report.ReportType)
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Name)
+                .ToListAsync();
+            if (reportVariants.All(item => item.Id != report.Id))
+                reportVariants.Insert(0, report);
+
+            Report selectedReport = report;
+            var selectedFormat = PrintFormOutputFormat.Pdf;
+            if (choosePrintForm)
             {
-                var selectionDialog = new PrintFormSelectionDialog(new[] { report })
+                var selectionDialog = new PrintFormSelectionDialog(reportVariants)
                 {
                     Owner = Window.GetWindow(this)
                 };
-
                 if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
                 {
                     StatusText.Text = "Формирование отчета отменено";
@@ -2029,7 +2146,11 @@ namespace BIS.ERP.Views
             var formatName = PrintFormOutputFileService.GetDisplayName(selectedFormat);
             if (selectedFormat == PrintFormOutputFormat.Pdf)
             {
-                var previewWindow = new PdfPreviewWindow(output, selectedReport.Name)
+                var previewWindow = new PdfPreviewWindow(output, selectedReport.Name, async () =>
+                {
+                    var excel = await Task.Run(() => printFormService.ExportReportTemplateExcel(dataSnapshot.Copy(), selectedReport));
+                    await PrintFormOutputFileService.SaveAndOpenAsync(excel, selectedReport.Name, PrintFormOutputFormat.Excel);
+                })
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -2387,8 +2508,14 @@ namespace BIS.ERP.Views
                 }
 
                 var printFormService = new PrintFormService(context);
-                var pdf = printFormService.ExportReportTemplatePreview(BuildCashOrdersDataTable(rows), report);
-                var previewWindow = new PdfPreviewWindow(pdf, report.Name)
+                var reportData = BuildCashOrdersDataTable(rows);
+                var excelData = reportData.Copy();
+                var pdf = printFormService.ExportReportTemplatePreview(reportData, report);
+                var previewWindow = new PdfPreviewWindow(pdf, report.Name, async () =>
+                {
+                    var excel = await Task.Run(() => printFormService.ExportReportTemplateExcel(excelData.Copy(), report));
+                    await PrintFormOutputFileService.SaveAndOpenAsync(excel, report.Name, PrintFormOutputFormat.Excel);
+                })
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -2519,64 +2646,6 @@ namespace BIS.ERP.Views
             row[columnName] = value ?? DBNull.Value;
         }
 
-        /// <summary>Печатная форма, выбранная флажком «Выбрать форму» (иначе берётся форма по умолчанию).</summary>
-        private Report? _chosenPrintForm;
-
-        /// <summary>
-        /// Флажок «Выбрать форму»: диалог со списком печатных форм открывается только здесь.
-        /// Кнопки «Эксель» и «Предпросмотр ПДФ» выводят выбранную форму уже без диалога.
-        /// </summary>
-        private async void OnChoosePrintFormChecked(object sender, RoutedEventArgs e)
-        {
-            if (DataGrid.SelectedItem is not CashOrderRow row)
-            {
-                ChoosePrintFormCheckBox.IsChecked = false;
-                return;
-            }
-
-            try
-            {
-                var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-                var printFormService = new PrintFormService(context);
-                await printFormService.SeedCashOrderFormsAsync();
-                var forms = await printFormService.GetCashOrderPrintFormsAsync(
-                    _documentMetadata.Id,
-                    row.IsReceipt,
-                    includeInactive: false);
-
-                if (forms.Count == 0)
-                {
-                    MessageBox.Show("Для выбранного документа не найдены активные печатные формы.", "Печать",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
-                    ChoosePrintFormCheckBox.IsChecked = false;
-                    return;
-                }
-
-                var selectionDialog = new PrintFormSelectionDialog(forms) { Owner = Window.GetWindow(this) };
-                if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
-                {
-                    ChoosePrintFormCheckBox.IsChecked = false;
-                    return;
-                }
-
-                _chosenPrintForm = selectionDialog.SelectedReport;
-                StatusText.Text = $"Печатная форма: {_chosenPrintForm.Name}";
-            }
-            catch (Exception ex)
-            {
-                ChoosePrintFormCheckBox.IsChecked = false;
-                MessageBox.Show($"Ошибка выбора печатной формы: {ex.Message}", "Печать",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        /// <summary>Снятый флажок возвращает печать формы по умолчанию.</summary>
-        private void OnChoosePrintFormUnchecked(object sender, RoutedEventArgs e)
-        {
-            _chosenPrintForm = null;
-            StatusText.Text = "Печатная форма: по умолчанию";
-        }
-
         /// <summary>Кнопка «Эксель» — печать выбранной формы в Excel.</summary>
         private async void OnPrintFormExcelClick(object sender, RoutedEventArgs e) =>
             await PrintCashOrderFormAsync(toExcel: true, preview: false);
@@ -2585,18 +2654,17 @@ namespace BIS.ERP.Views
         private async void OnPrintFormPdfClick(object sender, RoutedEventArgs e) =>
             await PrintCashOrderFormAsync(toExcel: false, preview: true);
 
-        /// <summary>Пункт контекстного меню «Печатная форма выбранного документа» — PDF файлом.</summary>
+        /// <summary>Пункт контекстного меню «Печатная форма» — PDF во встроенном окне предпросмотра.</summary>
         private async void OnPrintClick(object sender, RoutedEventArgs e) =>
-            await PrintCashOrderFormAsync(toExcel: false, preview: false);
+            await PrintCashOrderFormAsync(toExcel: false, preview: true);
 
         /// <summary>
         /// Готовит и выводит печатную форму выбранного кассового ордера.
         ///
         /// toExcel — вывод в Excel, иначе PDF; preview — показать PDF в окне вместо сохранения файла.
-        /// Форма берётся из выбора флажка «Выбрать форму», без него — форма по умолчанию:
-        /// диалог выбора здесь не открывается.
+        /// chooseForm открывает список доступных печатных форм и позволяет выбрать формат.
         /// </summary>
-        private async Task PrintCashOrderFormAsync(bool toExcel, bool preview)
+        private async Task PrintCashOrderFormAsync(bool toExcel, bool preview, bool chooseForm = false)
         {
             if (DataGrid.SelectedItem is not CashOrderRow selectedRow)
             {
@@ -2622,11 +2690,24 @@ namespace BIS.ERP.Views
                 }
 
                 // Выбранная форма может относиться к другому типу ордера — тогда берётся форма по умолчанию.
-                var report = forms.FirstOrDefault(form => form.Id == _chosenPrintForm?.Id)
-                             ?? forms.FirstOrDefault(form => form.IsDefault)
+                var report = forms.FirstOrDefault(form => form.IsDefault)
                              ?? forms.FirstOrDefault();
                 if (report == null)
                     return;
+
+                if (chooseForm)
+                {
+                    var selectionDialog = new PrintFormSelectionDialog(forms)
+                    {
+                        Owner = Window.GetWindow(this)
+                    };
+                    if (selectionDialog.ShowDialog() != true || selectionDialog.SelectedReport == null)
+                        return;
+
+                    report = selectionDialog.SelectedReport;
+                    toExcel = selectionDialog.SelectedFormat == PrintFormOutputFormat.Excel;
+                    preview = selectionDialog.SelectedFormat == PrintFormOutputFormat.Pdf;
+                }
 
                 if (toExcel)
                 {
@@ -2643,7 +2724,11 @@ namespace BIS.ERP.Views
 
                 if (preview)
                 {
-                    var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name) { Owner = Window.GetWindow(this) };
+                    var previewWindow = new PdfPreviewWindow(pdfBytes, report.Name, async () =>
+                    {
+                        var excel = await printFormService.ExportDocumentExcelAsync(report, selectedRow.Id);
+                        await PrintFormOutputFileService.SaveAndOpenAsync(excel, report.Name, PrintFormOutputFormat.Excel);
+                    }) { Owner = Window.GetWindow(this) };
                     previewWindow.ShowDialog();
                     StatusText.Text = "Предпросмотр PDF открыт";
                     return;
@@ -2755,6 +2840,14 @@ namespace BIS.ERP.Views
         }
     }
 
+    public sealed class CashReportChoice
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+        public string ReportType { get; set; } = string.Empty;
+        public bool IsDocumentPrint { get; set; }
+    }
+
     public class CashOrderRow
     {
         public Guid Id { get; set; }
@@ -2786,20 +2879,20 @@ namespace BIS.ERP.Views
         public bool IsSelectedForBatchPost { get; set; }
         public string EffectiveCorrespondentAccount => IsReceipt ? CreditAccount : DebitAccount;
         public bool HasCorrespondentAccount => !string.IsNullOrWhiteSpace(CorrespondentAccountName);
-        public bool CanBatchPost => !IsPosted && IsCashDayOpen;
-        public string BatchPostAvailabilityHint
+        public bool CanChangePosting => IsCashDayOpen;
+        public string PostingStateChangeHint
         {
             get
             {
-                if (IsPosted)
-                    return "Документ уже проведен.";
                 if (IsCashDayClosed)
-                    return "Кассовый день закрыт.";
+                    return "Кассовый день закрыт. Изменение проведения недоступно.";
                 if (!IsCashDayOpen)
-                    return "Откройте кассовый период для выбранной кассы.";
+                    return "Откройте кассовый день для изменения состояния проведения.";
+                if (IsPosted)
+                    return "Документ проведен. Выберите «Снять проведение» в контекстном меню заголовка колонки.";
                 if (!HasCorrespondentAccount)
-                    return "Можно отметить, но перед проведением нужно указать корреспондирующий счет.";
-                return "Отметить документ для массового проведения.";
+                    return "Перед проведением укажите корреспондирующий счет.";
+                return "Документ не проведен. Выберите его и используйте команду проведения.";
             }
         }
         public string IsPostedDisplay => LocalizationService.DisplayValue(IsPosted);
@@ -2838,3 +2931,4 @@ namespace BIS.ERP.Views
         }
     }
 }
+

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="Предпросмотр печатной формы"
-        Height="760" Width="980"
+        Height="800" Width="1120" MinWidth="1080" MinHeight="760"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource AppWindowBackgroundBrush}">
 
@@ -62,13 +62,21 @@
 
         <!-- Панель кнопок -->
         <Border Grid.Row="2" Background="{DynamicResource AppHeaderBackgroundBrush}" Padding="10">
-            <DockPanel>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusText"
-                           DockPanel.Dock="Left"
+                           Grid.Column="0"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource AppPrimaryTextBrush}"
-                           TextTrimming="CharacterEllipsis"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                           TextTrimming="CharacterEllipsis"
+                           Margin="0,0,10,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="OpenExcelButton" Content="📊 Открыть в Excel" Width="155" Height="35" Margin="5"
+                            Background="#16A085" Foreground="White" Click="OnOpenExcelClick"
+                            Cursor="Hand" Visibility="Collapsed"/>
                     <Button Content="🖨 Печать" Width="110" Height="35" Margin="5"
                             Background="#3498DB" Foreground="White" Click="OnPrintClick"
                             Cursor="Hand" ToolTip="Открыть диалог печати"/>
@@ -82,7 +90,7 @@
                             Background="#E74C3C" Foreground="White" Click="OnCloseClick"
                             Cursor="Hand"/>
                 </StackPanel>
-            </DockPanel>
+            </Grid>
         </Border>
     </Grid>
 </Window>
