@@ -7,8 +7,9 @@ namespace BIS.ERP.Models
     /// doc_advance_payment_lines — классическая нормализованная модель,
     /// как у счет-фактур (doc_sales_invoice_lines / doc_purchase_invoice_lines).
     /// </summary>
-    public class AdvancePaymentLine
+    public class AdvancePaymentLine : ILineAnalyticsRow
     {
+        public LineAnalytics Analytics { get; set; } = new();
         public Guid Id { get; set; }
         public int LineNumber { get; set; }
         public DateTime? LineDate { get; set; }

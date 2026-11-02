@@ -173,7 +173,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <DataGrid x:Name="AdvanceExpenseGrid" Grid.Row="0" AutoGenerateColumns="False" CanUserAddRows="False"
+                    <DataGrid x:Name="AdvanceExpenseGrid" Grid.Row="0" AutoGenerateColumns="False" CanUserAddRows="False" CanUserSortColumns="False"
                               HeadersVisibility="Column" Height="230" Margin="0,0,0,8"
                               Language="ru-RU"
                               RowHeight="26"

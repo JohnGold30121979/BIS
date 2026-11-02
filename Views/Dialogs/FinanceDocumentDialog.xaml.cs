@@ -32,6 +32,7 @@ namespace BIS.ERP.Views
         private readonly FinanceDocumentKind _documentKind;
 
         private AccountAnalyticsRegistry _accountAnalytics = new();
+        private BIS.ERP.Views.Controls.LineAnalyticsColumns? _lineAnalyticsColumns;
         private List<ReferenceItem> _organizations = new();
         private List<ReferenceItem> _employees = new();
         private List<ReferenceItem> _currencies = new();
@@ -178,6 +179,12 @@ namespace BIS.ERP.Views
         {
             var catalogs = await _metadataService.GetCatalogsAsync();
             _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+            if (_documentKind == FinanceDocumentKind.AdvanceReport)
+                _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(AdvanceExpenseGrid,
+                    _metadataService, _accountAnalytics, catalogs.ToList(), _advanceExpenseLines,
+                    row => ((AdvanceExpenseLineRow)row).ExpenseAccountValue,
+                    nameof(AdvanceExpenseLineRow.ExpenseAccountValue), nativeLinks: new[] { "currencies" },
+                    afterColumn: AdvanceExpenseAccountColumn);
             _organizations = await LoadReferenceItemsAsync(catalogs, "Организации", "Код", "Наименование");
             _employees = await LoadReferenceItemsAsync(catalogs, "Сотрудники (Списочный состав)", "Табельный номер", "ФИО");
             _currencies = await LoadReferenceItemsAsync(catalogs, "Справочник валют", "Код", "Наименование");
@@ -608,6 +615,12 @@ namespace BIS.ERP.Views
             {
                 Cursor = Cursors.Wait;
                 _pendingAdvanceLines = new List<AdvancePaymentLine>();
+                if (_lineAnalyticsColumns != null)
+                {
+                    if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(AdvanceExpenseGrid))
+                        return;
+                    await _lineAnalyticsColumns.ValidateAsync();
+                }
                 var data = BuildRecordData();
 
                 Guid savedId;
@@ -654,6 +667,7 @@ namespace BIS.ERP.Views
         }
         private static AdvancePaymentLine ToAdvancePaymentLine(AdvanceExpenseLineRecord source) => new()
         {
+            Analytics = source.Analytics,
             LineDate = source.LineDate,
             PairId = source.PairId,
             PairCode = source.PairCode,
@@ -789,6 +803,7 @@ namespace BIS.ERP.Views
                     LineDate = line.LineDate ?? DatePicker.SelectedDate,
                     PairId = line.PairId,
                     ExpenseAccountValue = line.ExpenseAccount,
+                    Analytics = line.Analytics,
                     ExpenseAccountDisplay = ResolveAccountDisplay(line.ExpenseAccount, line.ExpenseAccountName),
                     Amount = line.Amount,
                     CurrencyId = line.CurrencyId,
@@ -807,8 +822,7 @@ namespace BIS.ERP.Views
             RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
 
-            // Загруженные строки могли принести счёт затрат со связью с
-            // организациями: панель организации зависит и от него.
+            // После загрузки обновляем реквизиты шапки по выбранной паре счетов.
             UpdateAdvanceOrganizationVisibility();
         }
 
@@ -911,6 +925,7 @@ namespace BIS.ERP.Views
                     DebitAccount = GetString(pair, "debit_account", "Дебет"),
                     CreditAccount = creditAccount,
                     ExpenseAccount = GetAccountValueForSave(row.ExpenseAccountValue).ToString() ?? string.Empty,
+                    Analytics = row.Analytics,
                     ExpenseAccountName = string.IsNullOrWhiteSpace(row.ExpenseAccountTitle)
                         ? row.ExpenseAccountDisplay
                         : row.ExpenseAccountTitle,
@@ -1228,7 +1243,7 @@ namespace BIS.ERP.Views
         /// <summary>
         /// Клавиши в таблице «Строки затрат» — как в счёт-фактуре:
         /// Enter переводит на следующую редактируемую ячейку (с последней — на первую
-        /// ячейку следующей строки), «+» (в т.ч. правый плюс клавиатуры) добавляет строку.
+        /// ячейку существующей следующей строки), правый «+» добавляет строку в конец.
         /// PreviewKeyDown срабатывает и когда фокус в редакторе активной ячейки,
         /// поэтому ввод работает одинаково в любой колонке.
         /// </summary>
@@ -1237,9 +1252,11 @@ namespace BIS.ERP.Views
             if (Keyboard.Modifiers != ModifierKeys.None)
                 return;
 
-            if (e.Key is Key.Add or Key.OemPlus)
+            if (e.Key == Key.Add)
             {
                 e.Handled = true;
+                if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(AdvanceExpenseGrid))
+                    return;
                 AddAdvanceExpenseLine();
                 return;
             }
@@ -1253,7 +1270,9 @@ namespace BIS.ERP.Views
                 return;
 
             e.Handled = true;
-            TryCommitAdvanceExpenseGridEdit();
+            if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(AdvanceExpenseGrid))
+                return;
+            RecalculateAdvanceExpenseTotal();
             MoveToNextAdvanceExpenseCell();
         }
 
@@ -1306,7 +1325,8 @@ namespace BIS.ERP.Views
             var column = AdvanceExpenseGrid.Columns
                 .FirstOrDefault(current => current.DisplayIndex == displayColumnIndex);
 
-            return column is { IsReadOnly: false, Visibility: Visibility.Visible };
+            return column is { IsReadOnly: false, Visibility: Visibility.Visible } &&
+                   _lineAnalyticsColumns?.IsAvailable(AdvanceExpenseGrid.CurrentItem, column) != false;
         }
 
         /// <summary>
@@ -1560,8 +1580,7 @@ namespace BIS.ERP.Views
         {
             try
             {
-                AdvanceExpenseGrid.CommitEdit(DataGridEditingUnit.Cell, true);
-                AdvanceExpenseGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                BIS.ERP.Behaviors.DocumentGridEditing.Commit(AdvanceExpenseGrid);
             }
             catch (InvalidOperationException)
             {
@@ -1717,24 +1736,20 @@ namespace BIS.ERP.Views
 
         /// <summary>
         /// Настройки аналитики всех счетов, влияющих на шапку авансового отчёта:
-        /// счета затрат из строк и дебет/кредит выбранной пары счетов.
+        /// дебет/кредит выбранной пары счетов. Аналитика счёта затрат вводится в строке.
         /// </summary>
         private List<AccountAnalyticsSettings?> GetAdvanceAccountSettings(
             IReadOnlyList<Dictionary<string, object>> pairRows)
         {
-            return _advanceExpenseLines
-                .Select(row => _accountAnalytics.GetSettingsFromValue(row.ExpenseAccountValue))
-                .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "debit_account", "Дебет"))))
+            return pairRows
+                .Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "debit_account", "Дебет")))
                 .Concat(pairRows.Select(row => _accountAnalytics.GetSettingsFromValue(GetFirstValue(row, "credit_account", "Кредит"))))
                 .ToList();
         }
 
         /// <summary>
-        /// Организация в авансовом отчёте нужна и тогда, когда её включает пара
-        /// счетов («Организации» в справочнике пар), и тогда, когда выбранный
-        /// счёт затрат ведётся в разрезе организаций («Связь с организациями»
-        /// в плане счетов). Второе раньше не учитывалось: поле организации
-        /// оставалось скрытым при счёте затрат со связью с организациями.
+        /// Организация шапки определяется парой счетов; организация счёта затрат
+        /// задаётся отдельно в соответствующей строке таблицы.
         /// </summary>
         private bool ResolveAdvanceOrganizationVisibility(
             IReadOnlyList<Dictionary<string, object>> pairRows)
@@ -2047,9 +2062,8 @@ namespace BIS.ERP.Views
                     break;
                 case nameof(AdvanceExpenseLineRow.ExpenseAccountValue):
                 case nameof(AdvanceExpenseLineRow.PairId):
-                    // Счёт затрат и пара строки решают, нужна ли организация
-                    // (аналитика счёта). Обновляем только панель шапки,
-                    // не трогая колонки DataGrid.
+                    // Шапка зависит от пары счетов. Колонки аналитики счёта
+                    // затрат обновляются отдельно через LineAnalyticsColumns.
                     UpdateAdvanceOrganizationVisibility();
                     break;
             }
@@ -2545,8 +2559,9 @@ namespace BIS.ERP.Views
             return Guid.TryParse(value?.ToString(), out id);
         }
     }
-    public sealed class AdvanceExpenseLineRow : INotifyPropertyChanged
+    public sealed class AdvanceExpenseLineRow : INotifyPropertyChanged, ILineAnalyticsRow
     {
+        public LineAnalytics Analytics { get; set; } = new();
         private int _rowNumber;
         private DateTime? _lineDate;
         private Guid _pairId;
@@ -2763,6 +2778,7 @@ namespace BIS.ERP.Views
 
     public sealed class AdvanceExpenseLineRecord
     {
+        public LineAnalytics Analytics { get; set; } = new();
         public DateTime? LineDate { get; set; }
         public Guid PairId { get; set; }
         public string PairCode { get; set; } = string.Empty;

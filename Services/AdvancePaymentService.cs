@@ -78,6 +78,9 @@ namespace BIS.ERP.Services
                     ""UpdatedAt"" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );");
 
+            await _context.Database.ExecuteSqlRawAsync(
+                $@"ALTER TABLE {lines} ADD COLUMN IF NOT EXISTS ""line_analytics"" text NOT NULL DEFAULT {LineAnalytics.EmptySqlDefault};");
+
             // Внешний ключ на шапку добавляем только когда шапка уже существует.
             await _context.Database.ExecuteSqlRawAsync($@"
                 DO $$
@@ -106,7 +109,7 @@ namespace BIS.ERP.Services
                 SELECT ""Id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
                        ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
                        ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"",
-                       ""amount"", ""description""
+                       ""amount"", ""description"", ""line_analytics""
                 FROM {QuoteIdentifier(LinesTableName)}
                 WHERE ""advance_id"" = @advanceId
                 ORDER BY ""line_number"";";
@@ -144,7 +147,7 @@ namespace BIS.ERP.Services
                 SELECT ""advance_id"", ""Id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
                        ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
                        ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"",
-                       ""amount"", ""description""
+                       ""amount"", ""description"", ""line_analytics""
                 FROM {QuoteIdentifier(LinesTableName)}
                 WHERE ""advance_id"" = ANY(@advanceIds)
                 ORDER BY ""advance_id"", ""line_number"";";
@@ -195,7 +198,8 @@ namespace BIS.ERP.Services
                 AmountCurrency = reader.IsDBNull(offset + 12) ? 0m : reader.GetDecimal(offset + 12),
                 ExchangeRate = reader.IsDBNull(offset + 13) ? 0m : reader.GetDecimal(offset + 13),
                 Amount = reader.IsDBNull(offset + 14) ? 0m : reader.GetDecimal(offset + 14),
-                Description = reader.IsDBNull(offset + 15) ? string.Empty : reader.GetString(offset + 15)
+                Description = reader.IsDBNull(offset + 15) ? string.Empty : reader.GetString(offset + 15),
+                Analytics = LineAnalytics.FromJson(reader.IsDBNull(offset + 16) ? null : reader.GetString(offset + 16))
             };
         }
 /// <summary>
@@ -224,11 +228,11 @@ namespace BIS.ERP.Services
                         (""Id"", ""advance_id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
                          ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
                          ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"", ""amount"",
-                         ""description"", ""CreatedAt"", ""UpdatedAt"")
+                         ""description"", ""line_analytics"", ""CreatedAt"", ""UpdatedAt"")
                         VALUES (@id, @advanceId, @lineNumber, @lineDate, @pairId, @pairCode, @pairName,
                                 @debitAccount, @creditAccount, @expenseAccount, @expenseAccountName,
                                 @currencyId, @currencyName, @amountCurrency, @exchangeRate, @amount,
-                                @description, NOW(), NOW())",
+                                @description, @lineAnalytics, NOW(), NOW())",
                         new NpgsqlParameter("@id", line.Id == Guid.Empty ? Guid.NewGuid() : line.Id),
                         new NpgsqlParameter("@advanceId", documentId),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
@@ -245,7 +249,8 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@amountCurrency", line.AmountCurrency),
                         new NpgsqlParameter("@exchangeRate", line.ExchangeRate),
                         new NpgsqlParameter("@amount", line.Amount),
-                        new NpgsqlParameter("@description", Nullable(line.Description)));
+                        new NpgsqlParameter("@description", Nullable(line.Description)),
+                        new NpgsqlParameter("@lineAnalytics", line.Analytics.ToJson()));
                 }
 
                 await transaction.CommitAsync();

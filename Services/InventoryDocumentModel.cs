@@ -245,7 +245,8 @@ namespace BIS.ERP.Services
             ("sales_tax_amount", "numeric(18,2) NOT NULL DEFAULT 0"),
             ("line_total", "numeric(18,2) NOT NULL DEFAULT 0"),
             ("amount_currency", "numeric(18,2) NOT NULL DEFAULT 0"),
-            ("description", "varchar(500) NULL")
+            ("description", "varchar(500) NULL"),
+            ("line_analytics", "text NOT NULL DEFAULT " + BIS.ERP.Models.LineAnalytics.EmptySqlDefault)
         };
 
         /// <summary>Поля справочника «Вид операции ТМЗ».</summary>

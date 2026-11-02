@@ -151,6 +151,8 @@ namespace BIS.ERP.Services
                 CREATE INDEX IF NOT EXISTS ""IX_doc_sales_invoice_lines_invoice"" ON ""{salesLinesTable}"" (""invoice_id"");
                 CREATE INDEX IF NOT EXISTS ""IX_doc_purchase_invoice_lines_invoice"" ON ""{purchaseLinesTable}"" (""invoice_id"");
                 ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
+                ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""line_analytics"" text NOT NULL DEFAULT {LineAnalytics.EmptySqlDefault};
+                ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""line_analytics"" text NOT NULL DEFAULT {LineAnalytics.EmptySqlDefault};
                 ALTER TABLE ""{salesLinesTable}"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
                 ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""vat_tax_code"" varchar(50);
                 ALTER TABLE ""{purchaseLinesTable}"" ADD COLUMN IF NOT EXISTS ""sales_tax_code"" varchar(50);
@@ -289,7 +291,7 @@ namespace BIS.ERP.Services
             var sql = $@"
                 SELECT ""Id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"",
                        ""vat_tax_code"", ""amount_without_tax"", ""vat_rate"", ""vat_amount"",
-                       ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total""
+                       ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total"", ""line_analytics""
                 FROM ""{LinesTableName}""
                 WHERE ""invoice_id"" = @invoiceId
                 ORDER BY ""line_number""";
@@ -319,7 +321,8 @@ namespace BIS.ERP.Services
                     SalesTaxCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
                     SalesTaxRate = reader.GetDecimal(11),
                     SalesTaxAmount = reader.GetDecimal(12),
-                    LineTotal = reader.GetDecimal(13)
+                    LineTotal = reader.GetDecimal(13),
+                    Analytics = LineAnalytics.FromJson(reader.IsDBNull(14) ? null : reader.GetString(14))
                 });
             }
             await _context.Database.CloseConnectionAsync();
@@ -773,10 +776,10 @@ namespace BIS.ERP.Services
                         INSERT INTO ""{LinesTableName}""
                         (""Id"", ""invoice_id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"", ""vat_tax_code"",
                          ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"",
-                         ""line_total"", ""CreatedAt"", ""UpdatedAt"")
+                         ""line_total"", ""line_analytics"", ""CreatedAt"", ""UpdatedAt"")
                         VALUES (@lineId, @invoiceId, @lineNumber, @name, @unitName, @quantity, @account, @vatTaxCode,
                                 @amountWithoutTax, @vatRate, @vatAmount, @salesTaxCode, @salesTaxRate, @salesTaxAmount,
-                                @lineTotal, NOW(), NOW())",
+                                @lineTotal, @lineAnalytics, NOW(), NOW())",
                         new NpgsqlParameter("@lineId", line.Id),
                         new NpgsqlParameter("@invoiceId", id),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
@@ -791,7 +794,8 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@salesTaxCode", (object?)line.SalesTaxCode ?? DBNull.Value),
                         new NpgsqlParameter("@salesTaxRate", line.SalesTaxRate),
                         new NpgsqlParameter("@salesTaxAmount", line.SalesTaxAmount),
-                        new NpgsqlParameter("@lineTotal", line.LineTotal));
+                        new NpgsqlParameter("@lineTotal", line.LineTotal),
+                        new NpgsqlParameter("@lineAnalytics", line.Analytics.ToJson()));
                 }
 
                 await PostInvoiceWithinCurrentTransactionAsync(invoice, id, existing?.DocNumber);

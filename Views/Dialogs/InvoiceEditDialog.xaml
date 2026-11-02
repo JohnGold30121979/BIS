@@ -197,7 +197,7 @@
             </Grid>
         </Grid>
 
-        <DataGrid x:Name="LinesGrid" RowHeight="28" Grid.Row="2" MinHeight="150" AutoGenerateColumns="False"
+        <DataGrid x:Name="LinesGrid" RowHeight="28" Grid.Row="2" MinHeight="150" AutoGenerateColumns="False" CanUserSortColumns="False"
                   CanUserAddRows="False"
                   ScrollViewer.CanContentScroll="True"
                   ScrollViewer.HorizontalScrollBarVisibility="Auto"

@@ -52,6 +52,7 @@ namespace BIS.ERP.Views.Dialogs
         // обработчик TextChanged не должен сбрасывать сделанный выбор.
         private bool _isApplyingOrganization;
         private AccountAnalyticsRegistry _accountAnalytics = new();
+        private Controls.LineAnalyticsColumns? _lineAnalyticsColumns;
         private TaxService? _taxService;
         private bool _isInitialized;
         private bool _isRecalculating;
@@ -225,6 +226,9 @@ namespace BIS.ERP.Views.Dialogs
                 await _invoiceService.EnsureSchemaAsync();
                 var catalogs = await _metadataService.GetCatalogsAsync();
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _lineAnalyticsColumns = new Controls.LineAnalyticsColumns(LinesGrid, _metadataService,
+                    _accountAnalytics, catalogs.ToList(), _lines, row => ((InvoiceLineRow)row).AccountCode,
+                    nameof(InvoiceLineRow.AccountCode), _isReadOnlyMode, afterColumn: LineAccountColumn);
                 var assignedModuleName = await ResolveAssignedModuleNameAsync();
                 var organizationsCatalog = catalogs.FirstOrDefault(item => item.Name == "Организации");
                 if (organizationsCatalog != null)
@@ -288,6 +292,7 @@ namespace BIS.ERP.Views.Dialogs
                         AddLine(new EditableInvoiceLine
                         {
                             Id = line.Id,
+                            Analytics = line.Analytics,
                             LineNumber = line.LineNumber,
                             Name = line.Name,
                             UnitName = line.UnitName,
@@ -1291,7 +1296,7 @@ namespace BIS.ERP.Views.Dialogs
         /// <summary>
         /// Клавиши в гриде строк счёт-фактуры:
         /// Enter — переход к следующей ячейке (колонке) строки,
-        /// «+» (в т.ч. правый плюс клавиатуры) — новая строка.
+        /// Правый «+» цифровой клавиатуры — новая строка в конце таблицы.
         /// PreviewKeyDown срабатывает и когда фокус в TextBox активной ячейки,
         /// поэтому ввод работает одинаково в любой колонке.
         /// </summary>
@@ -1300,10 +1305,11 @@ namespace BIS.ERP.Views.Dialogs
             if (_isReadOnlyMode || !LinesGrid.IsEnabled)
                 return;
 
-            if (e.Key is Key.Add or Key.OemPlus)
+            if (e.Key == Key.Add && Keyboard.Modifiers == ModifierKeys.None)
             {
                 e.Handled = true;
-                LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
+                    return;
                 AddNewInvoiceLine();
                 return;
             }
@@ -1312,7 +1318,8 @@ namespace BIS.ERP.Views.Dialogs
                 return;
 
             e.Handled = true;
-            LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+            if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
+                return;
             MoveToNextLineCell();
         }
 
@@ -1337,7 +1344,8 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
-            for (var nextRow = rowIndex + 1; nextRow < LinesGrid.Items.Count; nextRow++)
+            var nextRow = rowIndex + 1;
+            if (nextRow < LinesGrid.Items.Count)
             {
                 var firstEditable = Enumerable.Range(0, LinesGrid.Columns.Count)
                     .FirstOrDefault(IsEditableColumn, -1);
@@ -1348,10 +1356,8 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
-            // Последняя редактируемая ячейка последней строки: Enter добавляет
-            // новую строку и ставит курсор в поле суммы (как в табличных редакторах).
-            if (!_isReadOnlyMode)
-                AddNewInvoiceLine();
+            // В конце таблицы Enter оставляет курсор на текущей строке.
+            // Новая строка добавляется правым «+» или кнопкой добавления.
         }
 
         /// <summary>
@@ -1363,7 +1369,8 @@ namespace BIS.ERP.Views.Dialogs
             var column = LinesGrid.Columns
                 .FirstOrDefault(current => current.DisplayIndex == displayColumnIndex);
 
-            return column is { IsReadOnly: false, Visibility: Visibility.Visible };
+            return column is { IsReadOnly: false, Visibility: Visibility.Visible } &&
+                   _lineAnalyticsColumns?.IsAvailable(LinesGrid.CurrentItem, column) != false;
         }
 
         /// <summary>
@@ -1831,7 +1838,10 @@ namespace BIS.ERP.Views.Dialogs
                     return;
                 }
 
-                LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+                if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
+                    return;
+                if (_lineAnalyticsColumns != null)
+                    await _lineAnalyticsColumns.ValidateAsync();
                 if (!TryFocusFirstEmptyAmount(out var emptyAmountLine))
                 {
                     MessageBox.Show(
@@ -1940,6 +1950,7 @@ namespace BIS.ERP.Views.Dialogs
                     UnitName = line.UnitName,
                     Quantity = line.Quantity <= 0 ? 1m : line.Quantity,
                     AccountCode = ResolveLineAccountCode(line.AccountCode),
+                    Analytics = line.Analytics,
                     VatTaxCode = line.VatTaxCode,
                     AmountWithoutTax = line.AmountWithoutTax,
                     VatRate = line.VatRate,
@@ -2471,9 +2482,12 @@ namespace BIS.ERP.Views.Dialogs
                 if (sender is not TextBox box)
                     return;
 
-                e.Handled = !CanAcceptAmountInput(
-                    box.Text ?? string.Empty,
-                    e.Text);
+                // Проверяем текст ПОСЛЕ замены выделения, а не дописывание
+                // в конец старой суммы, уже содержащей две дробные цифры.
+                var candidate = box.Text.Remove(box.SelectionStart, box.SelectionLength)
+                    .Insert(box.SelectionStart, e.Text);
+                e.Handled = !CanAcceptAmountInput(string.Empty, candidate.Replace(" ", string.Empty)
+                    .Replace("\u00A0", string.Empty));
         }
 
         private void OnAmountGotFocus(object sender, RoutedEventArgs e)

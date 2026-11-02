@@ -42,8 +42,9 @@ namespace BIS.ERP.Models
         }
     }
 
-    public class InvoiceLineRow
+    public class InvoiceLineRow : ILineAnalyticsRow
     {
+        public LineAnalytics Analytics { get; set; } = new();
         public Guid Id { get; set; }
         public int LineNumber { get; set; }
         public string Name { get; set; } = string.Empty;

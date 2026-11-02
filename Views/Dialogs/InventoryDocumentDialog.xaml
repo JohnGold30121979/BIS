@@ -84,7 +84,7 @@
         </StackPanel>
         </ScrollViewer>
 
-        <DataGrid x:Name="LinesGrid" Grid.Row="1" Margin="0,10,0,0" MinHeight="120"
+        <DataGrid x:Name="LinesGrid" Grid.Row="1" Margin="0,10,0,0" MinHeight="120" CanUserSortColumns="False"
                   AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
                   HeadersVisibility="Column" RowHeight="26" GridLinesVisibility="Horizontal"
                   CellEditEnding="OnCellEditEnding" CanUserReorderColumns="True"
@@ -182,6 +182,15 @@
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
+                                <Grid.Style>
+                                    <Style TargetType="Grid">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Analytics[sites].IsApplicable}" Value="False">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Grid.Style>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -202,9 +211,9 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
-                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
-                <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=PropertyChanged}" Width="100"/>
+                <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}" Width="60"/>
+                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="90"/>
+                <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                 <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="100" IsReadOnly="True"/>
             </DataGrid.Columns>

@@ -9,8 +9,9 @@ using Npgsql;
 namespace BIS.ERP.Services
 {
     /// <summary>Строка документа ТМЗ (таблица &lt;шапка&gt;_lines).</summary>
-    public sealed class InventoryLineRow : INotifyPropertyChanged
+    public sealed class InventoryLineRow : INotifyPropertyChanged, BIS.ERP.Models.ILineAnalyticsRow
     {
+        public BIS.ERP.Models.LineAnalytics Analytics { get; set; } = new();
         private Guid _id = Guid.NewGuid();
         private int _lineNumber;
         private Guid? _materialId;
@@ -106,7 +107,7 @@ namespace BIS.ERP.Services
                 SELECT ""Id"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"", ""account_code"",
                        ""site_id"", ""responsible_person_id"", ""quantity"", ""price"", ""amount_without_tax"",
                        ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total"",
-                       ""amount_currency"", ""description""
+                       ""amount_currency"", ""description"", ""line_analytics""
                 FROM ""{linesTable}""
                 WHERE ""{parentColumn}"" = @header
                 ORDER BY ""line_number""";
@@ -134,7 +135,8 @@ namespace BIS.ERP.Services
                     SalesTaxAmount = reader.GetDecimal(14),
                     LineTotal = reader.GetDecimal(15),
                     AmountCurrency = reader.GetDecimal(16),
-                    Description = reader.IsDBNull(17) ? string.Empty : reader.GetString(17)
+                    Description = reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
+                    Analytics = BIS.ERP.Models.LineAnalytics.FromJson(reader.IsDBNull(18) ? null : reader.GetString(18))
                 });
             }
 
@@ -168,12 +170,12 @@ namespace BIS.ERP.Services
                         (""Id"", ""{parentColumn}"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"",
                          ""account_code"", ""site_id"", ""responsible_person_id"", ""quantity"", ""price"",
                          ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"",
-                         ""line_total"", ""amount_currency"", ""description"", ""CreatedAt"", ""UpdatedAt"")
+                         ""line_total"", ""amount_currency"", ""description"", ""line_analytics"", ""CreatedAt"", ""UpdatedAt"")
                     VALUES
                         (@id, @header, @line_number, @material_id, @material_name, @unit_name,
                          @account_code, @site_id, @responsible_person_id, @quantity, @price,
                          @amount_without_tax, @vat_rate, @vat_amount, @sales_tax_rate, @sales_tax_amount,
-                         @line_total, @amount_currency, @description, NOW(), NOW())";
+                         @line_total, @amount_currency, @description, @lineAnalytics, NOW(), NOW())";
 
                 line.Recalculate();
                 line.LineNumber = number++;
@@ -197,6 +199,7 @@ namespace BIS.ERP.Services
                 insert.Parameters.Add(new NpgsqlParameter("line_total", line.LineTotal));
                 insert.Parameters.Add(new NpgsqlParameter("amount_currency", line.AmountCurrency));
                 insert.Parameters.Add(new NpgsqlParameter("description", line.Description ?? string.Empty));
+                insert.Parameters.Add(new NpgsqlParameter("lineAnalytics", line.Analytics.ToJson()));
 
                 await insert.ExecuteNonQueryAsync();
             }

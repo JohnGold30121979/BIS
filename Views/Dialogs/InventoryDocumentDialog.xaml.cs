@@ -39,6 +39,7 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<string, object?> _existing;
 
         private readonly ObservableCollection<InventoryLineRow> _lines = new();
+        private BIS.ERP.Views.Controls.LineAnalyticsColumns? _lineAnalyticsColumns;
         private readonly Dictionary<string, Control> _editors = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Guid?> _references = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, TextBox> _referenceBoxes = new(StringComparer.OrdinalIgnoreCase);
@@ -122,6 +123,12 @@ namespace BIS.ERP.Views.Dialogs
             try
             {
                 var catalogs = await _metadataService.GetCatalogsAsync();
+                var lineAccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
+                    _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
+                    row => ((InventoryLineRow)row).AccountCode, nameof(InventoryLineRow.AccountCode),
+                    nativeLinks: new[] { "materials", "sites" }, afterColumn: AccountColumn,
+                    nativeColumns: new Dictionary<string, DataGridColumn> { ["sites"] = SiteColumn });
 
                 var accounts = await LoadRowsAsync(catalogs, "План счетов");
                 var organizations = await LoadRowsAsync(catalogs, "Организации");
@@ -1181,8 +1188,8 @@ namespace BIS.ERP.Views.Dialogs
         }
 
         /// <summary>
-        /// Количество, цена и ставки пересчитывают строку и итоги сразу при вводе:
-        /// не надо ждать окончания редактирования ячейки.
+        /// После фиксации количества, цены или ставки (Enter / выход из ячейки)
+        /// пересчитываем строку и итоги.
         /// </summary>
         private void OnLinePropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
@@ -1666,17 +1673,31 @@ namespace BIS.ERP.Views.Dialogs
 
         /// <summary>
         /// Enter в таблице: переход к следующей колонке, после последней — на следующую
-        /// строку, а в конце последней строки — создание новой.
+        /// существующую строку. Правый «+» добавляет строку в конец таблицы.
         /// </summary>
         private void OnLinesGridPreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key != Key.Enter || Keyboard.Modifiers != ModifierKeys.None)
+            if (Keyboard.Modifiers != ModifierKeys.None)
+                return;
+
+            if (e.Key == Key.Add)
+            {
+                e.Handled = true;
+                if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
+                    return;
+
+                AddLine();
+                FocusFirstEntryCell(_lines[^1]);
+                return;
+            }
+
+            if (e.Key != Key.Enter)
                 return;
 
             e.Handled = true;
 
-            LinesGrid.CommitEdit(DataGridEditingUnit.Cell, true);
-            LinesGrid.CommitEdit(DataGridEditingUnit.Row, true);
+            if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
+                return;
 
             MoveToNextEntryCell();
         }
@@ -1687,18 +1708,18 @@ namespace BIS.ERP.Views.Dialogs
             if (column == null || LinesGrid.CurrentCell.Item is not InventoryLineRow row)
                 return;
 
-            var index = LinesGrid.Columns.IndexOf(column);
-            for (var next = index + 1; next < LinesGrid.Columns.Count; next++)
+            foreach (var candidate in LinesGrid.Columns.Where(candidate => candidate.DisplayIndex > column.DisplayIndex)
+                         .OrderBy(candidate => candidate.DisplayIndex))
             {
-                var candidate = LinesGrid.Columns[next];
-                if (candidate.IsReadOnly || candidate.Visibility != Visibility.Visible)
+                if (candidate.IsReadOnly || candidate.Visibility != Visibility.Visible ||
+                    _lineAnalyticsColumns?.IsAvailable(row, candidate) == false)
                     continue;
 
                 FocusCell(row, candidate);
                 return;
             }
 
-            // Колонки закончились: идём на следующую строку, а в конце — создаём новую.
+            // Колонки закончились: переходим только на существующую следующую строку.
             var rowIndex = _lines.IndexOf(row);
             if (rowIndex >= 0 && rowIndex + 1 < _lines.Count)
             {
@@ -1706,8 +1727,7 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
-            AddLine();
-            FocusFirstEntryCell(_lines[^1]);
+            // В последней строке Enter не создаёт новую строку.
         }
 
         /// <summary>Ставит курсор в первую вводимую колонку строки.</summary>
@@ -1830,7 +1850,12 @@ namespace BIS.ERP.Views.Dialogs
         {
             try
             {
-                // Пустые строки (их создаёт Enter в конце таблицы) не сохраняем.
+                if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
+                    return;
+                if (_lineAnalyticsColumns != null)
+                    await _lineAnalyticsColumns.ValidateAsync();
+
+                // Пустые строки не сохраняем.
                 foreach (var empty in _lines
                              .Where(line => !line.MaterialId.HasValue && line.Quantity == 0 && line.Price == 0)
                              .ToList())
