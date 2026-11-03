@@ -127,7 +127,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                    <TextBlock x:Name="CurrencySelectorLabel" Grid.Row="0" Grid.Column="0" Text="Валюта:" VerticalAlignment="Center" Margin="0,0,8,8"/>
                     <ComboBox x:Name="CurrencyCombo" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Height="30"
                               DisplayMemberPath="DisplayName" SelectedValuePath="Id"
                               SelectionChanged="OnRateInputChanged" Margin="0,0,0,8"/>

@@ -111,8 +111,17 @@ namespace BIS.ERP.Views
 
                 await EnsureSiteNamesAsync();
 
+                if (!ReferenceEquals(DataGrid.SelectedItem, row))
+                    return;
+
+                var currency = row.DataView.Table.Columns.Contains("Валюта") ? row["Валюта"].ToString() : null;
+                var rate = row.DataView.Table.Columns.Contains("Курс валюты") &&
+                    decimal.TryParse(row["Курс валюты"].ToString(), out var exchangeRate) && exchangeRate > 0
+                    ? exchangeRate : (decimal?)null;
                 foreach (var line in lines)
                 {
+                    line.CurrencyName = currency ?? string.Empty;
+                    line.ExchangeRate = rate;
                     if (line.SiteId.HasValue && _siteNames.TryGetValue(line.SiteId.Value, out var siteName))
                         line.SiteText = siteName;
 

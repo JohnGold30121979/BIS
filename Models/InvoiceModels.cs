@@ -44,6 +44,9 @@ namespace BIS.ERP.Models
 
     public class InvoiceLineRow : ILineAnalyticsRow
     {
+        public string CurrencyName { get; set; } = string.Empty;
+        public decimal? ExchangeRate { get; set; }
+        public decimal? AmountCurrency { get; set; }
         public LineAnalytics Analytics { get; set; } = new();
         public Guid Id { get; set; }
         public int LineNumber { get; set; }

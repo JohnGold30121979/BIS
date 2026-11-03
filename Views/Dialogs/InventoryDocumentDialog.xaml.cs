@@ -127,7 +127,7 @@ namespace BIS.ERP.Views.Dialogs
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
                     _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
                     row => ((InventoryLineRow)row).AccountCode, nameof(InventoryLineRow.AccountCode),
-                    nativeLinks: new[] { "materials", "sites" }, afterColumn: AccountColumn,
+                    nativeLinks: new[] { "materials", "sites", "currencies" }, afterColumn: AccountColumn,
                     nativeColumns: new Dictionary<string, DataGridColumn> { ["sites"] = SiteColumn });
 
                 var accounts = await LoadRowsAsync(catalogs, "План счетов");
@@ -175,7 +175,6 @@ namespace BIS.ERP.Views.Dialogs
                     ApplyDefaultSelections();
 
                 ApplyTaxRates();
-                UpdateAccountDependencies();
 
                 if (!_recordId.HasValue &&
                     _editors.TryGetValue("doc_number", out var numberEditor) &&
@@ -186,6 +185,7 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 await LoadLinesAsync();
+                UpdateAccountDependencies();
                 UpdateTotals();
                 FocusFirstEntryCell(_lines.FirstOrDefault());
             }
@@ -788,15 +788,19 @@ namespace BIS.ERP.Views.Dialogs
             var account = FindAccountRow();
             var linkOrganizations = account != null && IsTrue(account, "Связь с организациями");
             var linkEmployees = account != null && IsTrue(account, "Связь со списочным составом");
-            var linkCurrency = account != null && IsTrue(account, "Связь с валютами");
+            var currencyAccount = _lines.Select(line => _accountRows.FirstOrDefault(row =>
+                    string.Equals(Read(row, "Код", "code"), line.AccountCode, StringComparison.OrdinalIgnoreCase)))
+                .FirstOrDefault(row => row != null && ResolveAccountCurrencyId(row).HasValue) ?? account;
+            var linkCurrency = currencyAccount != null &&
+                (ResolveAccountCurrencyId(currencyAccount).HasValue || IsTrue(currencyAccount, "Связь с валютами"));
 
             SetPanelVisibility("organization_id", linkOrganizations);
             SetPanelVisibility("employee_id", linkEmployees);
             CurrencyCard.Visibility = linkCurrency ? Visibility.Visible : Visibility.Collapsed;
 
             // Валюта привязана к счёту: берём её из «Валюты счёта» плана счетов.
-            if (linkCurrency && account != null)
-                _ = ApplyAccountCurrencyAsync(account);
+            if (linkCurrency && currencyAccount != null)
+                _ = ApplyAccountCurrencyAsync(currencyAccount);
             else
                 ResetAccountCurrency();
         }
@@ -806,6 +810,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             _accountCurrencyId = null;
             _currencySynced = true;
+            CurrencySelector.Visibility = Visibility.Visible;
             CurrencyCombo.IsEnabled = true;
             CurrencyCombo.ToolTip = null;
         }
@@ -840,7 +845,7 @@ namespace BIS.ERP.Views.Dialogs
         /// <summary>
         /// Подставляет валюту, закреплённую за счётом, и блокирует выбор: в документе
         /// она уже известна и не должна расходиться со счётом. Курс подтягивается
-        /// из справочника курсов валют на дату документа.
+        /// из последней записи справочника курсов валют.
         /// </summary>
         private async Task ApplyAccountCurrencyAsync(Dictionary<string, object> account)
         {
@@ -850,6 +855,7 @@ namespace BIS.ERP.Views.Dialogs
                 // У валютного счёта валюта не заполнена — оставляем ручной выбор.
                 _accountCurrencyId = null;
                 _currencySynced = true;
+                CurrencySelector.Visibility = Visibility.Visible;
                 CurrencyCombo.IsEnabled = true;
                 CurrencyCombo.ToolTip = "У счёта не заполнена «Валюта счета» — выберите валюту вручную";
                 return;
@@ -870,18 +876,22 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             // При первой загрузке курс уже пришёл из документа — не перетираем его.
-            var keepDocumentRate = !_currencySynced && !string.IsNullOrWhiteSpace(ExchangeRateBox.Text);
+            var keepDocumentRate = !_currencySynced && Equals(CurrencyCombo.SelectedValue, currencyId.Value) &&
+                ReadDecimalEditor("exchange_rate") > 0;
 
+            CurrencySelector.Visibility = Visibility.Collapsed;
             CurrencyCombo.SelectedValue = currencyId.Value;
             CurrencyCombo.IsEnabled = false;
             CurrencyCombo.ToolTip = "Валюта задаётся в плане счетов («Валюта счета»)";
             _accountCurrencyId = currencyId.Value;
             _currencySynced = true;
 
+            if (!keepDocumentRate)
+                ExchangeRateBox.Clear();
             await ApplyRateFromCatalogAsync(currencyId.Value, overwrite: !keepDocumentRate);
         }
 
-        /// <summary>Курс на дату документа из справочника курсов валют; базовая валюта — 1.</summary>
+        /// <summary>Последний курс из справочника; базовая валюта — 1.</summary>
         private async Task ApplyRateFromCatalogAsync(Guid currencyId, bool overwrite)
         {
             if (!overwrite && !string.IsNullOrWhiteSpace(ExchangeRateBox.Text))
@@ -889,11 +899,12 @@ namespace BIS.ERP.Views.Dialogs
 
             try
             {
+                var originalRate = ExchangeRateBox.Text;
                 var rate = IsBaseCurrency(currencyId)
                     ? 1m
-                    : (await _metadataService.GetCurrencyRateForDateAsync(currencyId, GetDocumentDate()))?.Rate;
+                    : (await _metadataService.GetLatestCurrencyRateAsync(currencyId))?.Rate;
 
-                if (rate is > 0)
+                if (rate is > 0 && _accountCurrencyId == currencyId && ExchangeRateBox.Text == originalRate)
                 {
                     ExchangeRateBox.Text = rate.Value.ToString("0.####", CultureInfo.CurrentCulture);
                     UpdateTotals();
@@ -935,7 +946,8 @@ namespace BIS.ERP.Views.Dialogs
 
             var rateDate = GetDocumentDate();
             var currencyName = (CurrencyCombo.SelectedItem as RefItem)?.Display ?? string.Empty;
-            var dialog = new CurrencyRatesDialog(_metadataService, currencyId, currencyName, rateDate);
+            var dialog = new CurrencyRatesDialog(_metadataService, currencyId, currencyName, rateDate,
+                includeLatest: _accountCurrencyId.HasValue);
 
             var owner = Window.GetWindow(this);
             if (owner != null && !ReferenceEquals(owner, this) && owner.IsVisible)
@@ -1132,6 +1144,7 @@ namespace BIS.ERP.Views.Dialogs
             if (LinesGrid.SelectedItem is InventoryLineRow row)
             {
                 _lines.Remove(row);
+                UpdateAccountDependencies();
                 RenumberLines();
                 UpdateTotals();
             }
@@ -1195,6 +1208,9 @@ namespace BIS.ERP.Views.Dialogs
         {
             if (sender is not InventoryLineRow row)
                 return;
+
+            if (e.PropertyName == nameof(InventoryLineRow.AccountCode))
+                UpdateAccountDependencies();
 
             if (e.PropertyName is not (nameof(InventoryLineRow.Quantity) or nameof(InventoryLineRow.Price)
                 or nameof(InventoryLineRow.VatRate) or nameof(InventoryLineRow.SalesTaxRate)))

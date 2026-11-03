@@ -129,6 +129,9 @@
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="90"/>
                 <DataGridTextColumn x:Name="LineSalesTaxColumn" Header="Налог с прод" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                 <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                <DataGridTextColumn Header="Валюта" Binding="{Binding CurrencyName}" Width="120"/>
+                <DataGridTextColumn Header="Курс" Binding="{Binding ExchangeRate, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="90"/>
+                <DataGridTextColumn Header="Сумма в валюте" Binding="{Binding AmountCurrency, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="125"/>
             </DataGrid.Columns>
         </DataGrid>
 

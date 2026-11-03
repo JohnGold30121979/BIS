@@ -165,6 +165,7 @@ namespace BIS.ERP.Views
             return new FinanceDocumentRow
             {
                 Id = ReadGuid(row, "Id"),
+                ExpenseLines = expenseLines,
                 DocumentNumber = ReadString(row, "Номер", "doc_number"),
                 DocumentDate = documentDate,
                 // Даты проводок берутся из строк затрат: дата проводки может отличаться
@@ -381,6 +382,7 @@ namespace BIS.ERP.Views
                 return;
 
             _postingDetails.Clear();
+            ExpenseLinesGrid.ItemsSource = (DataGrid?.SelectedItem as FinanceDocumentRow)?.ExpenseLines;
             if (DataGrid?.SelectedItem is not FinanceDocumentRow selected)
             {
                 SetDetailColumnsVisibility(false, false, false);
@@ -789,6 +791,7 @@ namespace BIS.ERP.Views
         public decimal Amount { get; set; }
 
         /// <summary>Итог документа по строкам затрат в валюте.</summary>
+        public IReadOnlyList<AdvancePaymentLine> ExpenseLines { get; set; } = Array.Empty<AdvancePaymentLine>();
         public decimal AmountCurrency { get; set; }
 
         /// <summary>Валюта, в которой выражен итог документа.</summary>

@@ -11,6 +11,11 @@ namespace BIS.ERP.Services
     /// <summary>Строка документа ТМЗ (таблица &lt;шапка&gt;_lines).</summary>
     public sealed class InventoryLineRow : INotifyPropertyChanged, BIS.ERP.Models.ILineAnalyticsRow
     {
+        public string CurrencyName { get; set; } = string.Empty;
+        public decimal? ExchangeRate { get; set; }
+        public decimal? DisplayAmountCurrency => AmountCurrency != 0
+            ? AmountCurrency
+            : ExchangeRate is > 0 ? Math.Round(LineTotal / ExchangeRate.Value, 2, MidpointRounding.AwayFromZero) : null;
         public BIS.ERP.Models.LineAnalytics Analytics { get; set; } = new();
         private Guid _id = Guid.NewGuid();
         private int _lineNumber;

@@ -32,6 +32,8 @@ namespace BIS.ERP.Views
         private readonly FinanceDocumentKind _documentKind;
 
         private AccountAnalyticsRegistry _accountAnalytics = new();
+        private List<Dictionary<string, object>> _currencyAccountRows = new();
+        private Guid _advanceRateCurrencyId;
         private BIS.ERP.Views.Controls.LineAnalyticsColumns? _lineAnalyticsColumns;
         private List<ReferenceItem> _organizations = new();
         private List<ReferenceItem> _employees = new();
@@ -158,6 +160,9 @@ namespace BIS.ERP.Views
                     NumberBox.Text = await GetNextNumberAsync();
                 }
 
+                if (_documentKind == FinanceDocumentKind.AdvanceReport && !_isUpdatingAdvanceVisibility)
+                    await UpdateAdvanceAccountDependentVisibilityCoreAsync();
+
                 _isInitialized = true;
             }
             catch (Exception ex)
@@ -179,6 +184,10 @@ namespace BIS.ERP.Views
         {
             var catalogs = await _metadataService.GetCatalogsAsync();
             _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+            if (_documentKind == FinanceDocumentKind.AdvanceReport &&
+                catalogs.FirstOrDefault(c => c.Name == "План счетов") is { } chart)
+                _currencyAccountRows = await _metadataService.GetCatalogDataAsync(chart.Id);
+
             if (_documentKind == FinanceDocumentKind.AdvanceReport)
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(AdvanceExpenseGrid,
                     _metadataService, _accountAnalytics, catalogs.ToList(), _advanceExpenseLines,
@@ -991,6 +1000,7 @@ namespace BIS.ERP.Views
         {
             if (AdvanceExpenseGrid.SelectedItem is AdvanceExpenseLineRow row)
                 _advanceExpenseLines.Remove(row);
+            UpdateAdvanceAccountDependentVisibilityAsync();
             RefreshAdvanceExpenseLineNumbers();
             RecalculateAdvanceExpenseTotal();
         }
@@ -1709,10 +1719,11 @@ namespace BIS.ERP.Views
             FinanceEmployeePanel.Visibility = showEmployee ? Visibility.Visible : Visibility.Collapsed;
             OrganizationPanel.Visibility = showOrganization ? Visibility.Visible : Visibility.Collapsed;
 
-            // Валюта документа берётся из выбранной пары счетов: у пары с
-            // включённым «Валютным учетом» в справочнике «Пары счетов» задана
-            // ссылка на валюту (поле «Валюта» пары).
-            var pairCurrencyId = ResolveAdvancePairCurrencyId(pairRows);
+            // Привязка счёта затрат имеет приоритет перед валютой пары счетов.
+            var pairCurrencyId = _advanceExpenseLines.Select(row => ResolveExpenseCurrencyId(row.ExpenseAccountValue))
+                .FirstOrDefault(id => id != Guid.Empty);
+            if (pairCurrencyId == Guid.Empty)
+                pairCurrencyId = ResolveAdvancePairCurrencyId(pairRows);
             var showCurrency = pairCurrencyId != Guid.Empty;
 
             if (showCurrency)
@@ -1721,6 +1732,7 @@ namespace BIS.ERP.Views
             }
             else
             {
+                _advanceRateCurrencyId = Guid.Empty;
                 CurrencyPanel.Visibility = Visibility.Collapsed;
                 CurrencyCombo.SelectedItem = null;
                 AmountCurrencyBox.Text = "0";
@@ -1817,9 +1829,30 @@ namespace BIS.ERP.Views
         /// документа. Курс можно ввести вручную в поле «Курс» или запросить
         /// кнопкой «?» — так же, как в счёт-фактуре.
         /// </summary>
+        private Guid ResolveExpenseCurrencyId(object? accountValue)
+        {
+            var account = _accountAnalytics.FindAccount(accountValue);
+            var row = account == null ? null : _currencyAccountRows.FirstOrDefault(item =>
+                TryGetGuid(item.GetValueOrDefault("Id"), out var id) && id == account.Id);
+            if (row == null)
+                return Guid.Empty;
+
+            var value = GetFirstValue(row, "account_currency_id", "Валюта счета");
+            if (TryGetGuid(value, out var currencyId))
+                return currencyId;
+
+            var code = value?.ToString()?.Split(" - ")[0].Trim();
+            return _currencies.FirstOrDefault(item => !string.IsNullOrWhiteSpace(code) &&
+                item.LookupKeys.Contains(code))?.Id ?? Guid.Empty;
+        }
+
         private async Task ApplyHeaderCurrencyAsync(Guid currencyId)
         {
             CurrencyPanel.Visibility = Visibility.Visible;
+            CurrencySelectorLabel.Visibility = Visibility.Collapsed;
+            CurrencyCombo.Visibility = Visibility.Collapsed;
+            var preserveRate = GetSelectedReferenceId(CurrencyCombo) == currencyId &&
+                (_advanceRateCurrencyId == currencyId || _isLoading && ReadDecimal(ExchangeRateBox.Text) > 0);
 
             var currency = _currencies.FirstOrDefault(item => item.Id == currencyId);
             if (currency == null)
@@ -1838,12 +1871,18 @@ namespace BIS.ERP.Views
                 }
             }
 
-            await ApplyHeaderExchangeRateAsync();
+            _advanceRateCurrencyId = currencyId;
+            if (!preserveRate)
+            {
+                SetHeaderExchangeRate("0");
+                await ApplyHeaderExchangeRateAsync();
+            }
+            else
+                ApplyHeaderCurrencyToLines(currencyId);
         }
 
         /// <summary>
-        /// Курс валюты шапки на дату документа: для базовой валюты — единица,
-        /// иначе из справочника курсов валют.
+        /// Последний курс валюты шапки из справочника; для базовой валюты — единица.
         /// </summary>
         private async Task ApplyHeaderExchangeRateAsync(bool interactive = false)
         {
@@ -1862,7 +1901,10 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var rate = await _metadataService.GetCurrencyRateForDateAsync(currency.Id, rateDate);
+            var originalRate = ExchangeRateBox.Text;
+            var rate = await _metadataService.GetLatestCurrencyRateAsync(currency.Id);
+            if (GetSelectedReferenceId(CurrencyCombo) != currency.Id || ExchangeRateBox.Text != originalRate)
+                return;
             if (rate == null && interactive)
                 rate = await RequestNewLineExchangeRateAsync(currency.Id, rateDate);
 
@@ -1922,7 +1964,7 @@ namespace BIS.ERP.Views
                 _metadataService,
                 currency.Id,
                 currency.DisplayName ?? string.Empty,
-                documentDate);
+                documentDate, includeLatest: true);
 
             // Owner — только видимому чужому окну: иначе WPF падает на
             // «объект Window, который не был показан ранее».
@@ -2061,6 +2103,9 @@ namespace BIS.ERP.Views
                     RecalculateAdvanceExpenseTotal();
                     break;
                 case nameof(AdvanceExpenseLineRow.ExpenseAccountValue):
+                    if (_isInitialized)
+                        UpdateAdvanceAccountDependentVisibilityAsync();
+                    break;
                 case nameof(AdvanceExpenseLineRow.PairId):
                     // Шапка зависит от пары счетов. Колонки аналитики счёта
                     // затрат обновляются отдельно через LineAnalyticsColumns.

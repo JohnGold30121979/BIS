@@ -20,6 +20,7 @@ namespace BIS.ERP.Views.Dialogs
         private readonly MetadataService _metadataService;
         private readonly Guid _currencyId;
         private readonly DateTime _documentDate;
+        private readonly bool _includeLatest;
         private List<RateRow> _rows = new();
 
         public decimal? SelectedRate { get; private set; }
@@ -29,13 +30,15 @@ namespace BIS.ERP.Views.Dialogs
             MetadataService metadataService,
             Guid currencyId,
             string currencyName,
-            DateTime documentDate)
+            DateTime documentDate,
+            bool includeLatest = false)
         {
             InitializeComponent();
 
             _metadataService = metadataService;
             _currencyId = currencyId;
             _documentDate = documentDate.Date;
+            _includeLatest = includeLatest;
 
             HeaderText.Text = $"Курсы валюты: {currencyName} (документ на {_documentDate:dd.MM.yyyy})";
             Loaded += async (_, _) => await ReloadAsync();
@@ -48,10 +51,12 @@ namespace BIS.ERP.Views.Dialogs
                 Mouse.OverrideCursor = Cursors.Wait;
                 StatusText.Text = "Загрузка курсов...";
 
+                var latest = _includeLatest ? await _metadataService.GetLatestCurrencyRateAsync(_currencyId) : null;
+                var endDate = latest != null && latest.RateDate > _documentDate ? latest.RateDate : _documentDate;
                 var rates = await _metadataService.GetCurrencyRatesAsync(
                     _currencyId,
-                    _documentDate.AddMonths(-6),
-                    _documentDate,
+                    endDate.AddMonths(-6),
+                    endDate,
                     limit: 500);
 
                 _rows = rates

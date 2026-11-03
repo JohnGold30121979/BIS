@@ -253,7 +253,21 @@ namespace BIS.ERP.Views
                 await _invoiceGate.WaitAsync();
                 try
                 {
-                    LinesGrid.ItemsSource = await _invoiceService.GetLinesAsync(selected.Id);
+                    var lines = await _invoiceService.GetLinesAsync(selected.Id);
+                    if (selected.CurrencyId.HasValue)
+                    {
+                        foreach (var line in lines)
+                        {
+                            line.CurrencyName = selected.CurrencyName;
+                            if (selected.ExchangeRate <= 0)
+                                continue;
+                            line.ExchangeRate = selected.ExchangeRate;
+                            line.AmountCurrency = Math.Round(line.LineTotal / selected.ExchangeRate, 2, MidpointRounding.AwayFromZero);
+                        }
+                    }
+
+                    if (InvoicesGrid.SelectedItem is InvoiceListRow current && current.Id == selected.Id)
+                        LinesGrid.ItemsSource = lines;
                 }
                 finally
                 {

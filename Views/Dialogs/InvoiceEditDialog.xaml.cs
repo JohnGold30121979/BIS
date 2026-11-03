@@ -228,7 +228,7 @@ namespace BIS.ERP.Views.Dialogs
                 _accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
                 _lineAnalyticsColumns = new Controls.LineAnalyticsColumns(LinesGrid, _metadataService,
                     _accountAnalytics, catalogs.ToList(), _lines, row => ((InvoiceLineRow)row).AccountCode,
-                    nameof(InvoiceLineRow.AccountCode), _isReadOnlyMode, afterColumn: LineAccountColumn);
+                    nameof(InvoiceLineRow.AccountCode), _isReadOnlyMode, nativeLinks: new[] { "currencies" }, afterColumn: LineAccountColumn);
                 var assignedModuleName = await ResolveAssignedModuleNameAsync();
                 var organizationsCatalog = catalogs.FirstOrDefault(item => item.Name == "Организации");
                 if (organizationsCatalog != null)
@@ -1768,7 +1768,7 @@ namespace BIS.ERP.Views.Dialogs
             RecalculateTotals();
         }
 
-        private async Task ApplyExchangeRateFromCatalogAsync()
+        private async Task ApplyExchangeRateFromCatalogAsync(bool latest = false)
         {
             if (CurrencyPanel.Visibility != Visibility.Visible ||
                 CurrencyCombo.SelectedItem is not ReferenceOption currency ||
@@ -1777,10 +1777,12 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
+            var originalRate = ExchangeRateBox.Text;
             var rate = currency.Code.Equals("KGS", StringComparison.OrdinalIgnoreCase)
                 ? new CurrencyRateLookupResult(1m, DatePicker.SelectedDate ?? DateTime.Today, "Базовая валюта")
-                : await _metadataService.GetCurrencyRateForDateAsync(currencyId, DatePicker.SelectedDate ?? DateTime.Today);
-            if (rate == null)
+                : latest ? await _metadataService.GetLatestCurrencyRateAsync(currencyId)
+                         : await _metadataService.GetCurrencyRateForDateAsync(currencyId, DatePicker.SelectedDate ?? DateTime.Today);
+            if (rate == null || !ReferenceEquals(CurrencyCombo.SelectedItem, currency) || ExchangeRateBox.Text != originalRate)
                 return;
 
             try
@@ -2689,9 +2691,7 @@ namespace BIS.ERP.Views.Dialogs
 
         private void UpdateCurrencyPanelVisibility()
         {
-            // Валюта показывается только для валютного счёта: раньше сюда добавлялось
-            // «ResolveDocumentCurrencyId() != null», и панель висела даже на сомовом счёте.
-            var shouldShow = IsCurrencyAccount(_selectedHeaderAccountCode) ||
+            var shouldShow = ResolveDocumentCurrencyId().HasValue || IsCurrencyAccount(_selectedHeaderAccountCode) ||
                              _lines.Any(line => IsCurrencyAccount(line.AccountCode));
 
             CurrencyPanel.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
@@ -2719,7 +2719,6 @@ namespace BIS.ERP.Views.Dialogs
             // Валюта привязана к счёту: подставляем её в список выбора и
             // подтягиваем курс из справочника курсов валют.
             _ = ApplyAccountCurrencyAsync();
-            _ = ApplyExchangeRateFromCatalogAsync();
             RecalculateTotals();
         }
 
@@ -2818,6 +2817,7 @@ namespace BIS.ERP.Views.Dialogs
         private async Task ApplyAccountCurrencyAsync()
         {
             var currencyId = ResolveDocumentCurrencyId();
+            CurrencySelector.Visibility = currencyId.HasValue ? Visibility.Collapsed : Visibility.Visible;
             if (currencyId == null)
                 return;
 
@@ -2838,7 +2838,8 @@ namespace BIS.ERP.Views.Dialogs
             if (CurrencyCombo.SelectedItem == null)
                 return;
 
-            await ApplyExchangeRateFromCatalogAsync();
+            ExchangeRateBox.Clear();
+            await ApplyExchangeRateFromCatalogAsync(latest: true);
         }
 
 
@@ -2862,7 +2863,8 @@ namespace BIS.ERP.Views.Dialogs
             var currencyName = (CurrencyCombo.SelectedItem as ReferenceOption)?.DisplayName ?? string.Empty;
 
             // То же окно курсов, что в ПКО/РКО: история, выбор курса, запрос новых курсов НБКР.
-            var dialog = new CurrencyRatesDialog(_metadataService, currencyId, currencyName, rateDate);
+            var dialog = new CurrencyRatesDialog(_metadataService, currencyId, currencyName, rateDate,
+                includeLatest: ResolveDocumentCurrencyId().HasValue);
 
             var owner = Window.GetWindow(this);
             if (owner != null && !ReferenceEquals(owner, this) && owner.IsVisible)

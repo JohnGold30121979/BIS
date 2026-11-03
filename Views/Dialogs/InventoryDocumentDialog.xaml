@@ -47,7 +47,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                <StackPanel x:Name="CurrencySelector" Grid.Column="0" Margin="0,0,10,0">
                     <TextBlock Text="Валюта"/>
                     <ComboBox x:Name="CurrencyCombo" Height="28"
                               DisplayMemberPath="Display" SelectedValuePath="Id"/>
