@@ -149,8 +149,59 @@ namespace BIS.ERP.Services
                 new("2026.10.30.07",
                     "Акт ClosedXML: Сумма Дт, Сумма Кт и одна Сумма вал.",
                     false,
-                    EnsureReconciliationCurrencyColumnAsync)
+                    EnsureReconciliationCurrencyColumnAsync),
+
+                new("2026.11.05.01",
+                    "Аналитика строк документов ТМЗ: колонка line_analytics",
+                    true,
+                    EnsureInventoryLineAnalyticsAsync),
+
+                new("2026.11.06.01",
+                    "Виды материалов: замена начальных данных эталонным списком",
+                    false,
+                    ReplaceMaterialTypesAsync)
             };
+        }
+
+        private static async Task ReplaceMaterialTypesAsync(AppDbContext context)
+        {
+            if (!await context.Database.SqlQueryRaw<bool>(
+                    "SELECT (to_regclass('public.catalog_material_types') IS NOT NULL) AS \"Value\"")
+                .SingleAsync())
+                return;
+
+            await using var transaction = await context.Database.BeginTransactionAsync();
+            await context.Database.ExecuteSqlRawAsync(
+                "LOCK TABLE public.catalog_material_types IN SHARE ROW EXCLUSIVE MODE");
+
+            foreach (var type in InitialDataProvider.GetMaterialTypes())
+            {
+                await context.Database.ExecuteSqlInterpolatedAsync($"""
+                    WITH updated AS (
+                        UPDATE public.catalog_material_types
+                        SET name = {type.Name}, description = {type.Description},
+                            is_active = {type.IsActive}, "UpdatedAt" = NOW()
+                        WHERE code = {type.Code}
+                        RETURNING "Id"
+                    )
+                    INSERT INTO public.catalog_material_types
+                        ("Id", code, name, description, is_active, "CreatedAt", "UpdatedAt")
+                    SELECT {Guid.NewGuid()}, {type.Code}, {type.Name}, {type.Description},
+                           {type.IsActive}, NOW(), NOW()
+                    WHERE NOT EXISTS (SELECT 1 FROM updated)
+                    """);
+            }
+
+            // У старых кодов нет подтверждённого соответствия эталонным видам.
+            // Сохраняем их Id для карточек материалов, в которых они уже используются.
+            await context.Database.ExecuteSqlRawAsync("""
+                UPDATE public.catalog_material_types
+                SET is_active = FALSE, "UpdatedAt" = NOW()
+                WHERE code IN ('10', '11', '12', '13', '14', '15', '16', '17', '18')
+                  AND is_active IS DISTINCT FROM FALSE
+                """);
+
+            await transaction.CommitAsync();
         }
 
         private static async Task EnsureReconciliationCurrencyColumnAsync(AppDbContext ctx)
@@ -583,6 +634,16 @@ namespace BIS.ERP.Services
 
             foreach (var warning in report.Warnings)
                 SystemLogService.Warning($"ТМЗ: {warning}", "Migration");
+        }
+
+        private static async Task EnsureInventoryLineAnalyticsAsync(AppDbContext context)
+        {
+            var (column, definition) = InventoryDocumentModel.LineColumns
+                .Single(item => item.Column == "line_analytics");
+            var statements = InventoryDocumentModel.Documents.Select(document =>
+                $"ALTER TABLE IF EXISTS public.\"{document.LinesTable}\" ADD COLUMN IF NOT EXISTS \"{column}\" {definition};");
+
+            await context.Database.ExecuteSqlRawAsync(string.Join("\n", statements));
         }
 
         /// <summary>

@@ -18,13 +18,12 @@ public sealed class Worker(ILogger<Worker> logger, IConfiguration configuration)
         {
             using var socket = new ClientWebSocket();
             using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            using var sendLock = new SemaphoreSlim(1, 1);
             Task? receiver = null;
             try
             {
                 await socket.ConnectAsync(new UriBuilder(relay) { Query = $"node={node}" }.Uri, stoppingToken);
                 logger.LogInformation("Node {Node} connected", node);
-
+                using var sendLock = new SemaphoreSlim(1, 1);
                 async Task SendAsync(PeerMessage message)
                 {
                     await sendLock.WaitAsync(session.Token);

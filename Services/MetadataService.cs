@@ -1569,7 +1569,8 @@ namespace BIS.ERP.Services
         }
 
 
-        public async Task<Guid> CreateDynamicRecordAsync(Guid metadataId, Dictionary<string, object> data)
+        public async Task<Guid> CreateDynamicRecordAsync(Guid metadataId, Dictionary<string, object> data,
+            IReadOnlyList<InventoryLineRow>? inventoryLines = null)
         {
             // Лог 10:45: создание документа шло по цепочке
             // CreateDynamicRecord -> EnsureDocumentDateCanBeModified ->
@@ -1584,6 +1585,14 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            if (metadata.ObjectType == "Document" &&
+                (IsInventoryDocumentName(metadata.Name) || InventoryDocumentModel.Documents.Any(item =>
+                    string.Equals(item.Table, metadata.TableName, StringComparison.OrdinalIgnoreCase))) &&
+                (inventoryLines == null || inventoryLines.Count == 0))
+            {
+                throw new InvalidOperationException("Добавьте хотя бы одну строку с материалом и количеством.");
+            }
+
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
             ValidateChartOfAccountsCode(metadata, data);
@@ -1595,6 +1604,10 @@ namespace BIS.ERP.Services
             NormalizeDocumentNumberData(metadata, data);
             await EnsureDocumentNumberIsUniqueAsync(metadata, data);
             await ApplyCreateRecordDefaultsAsync(metadata, data);
+
+            await using var transaction = inventoryLines == null
+                ? null
+                : await _context.Database.BeginTransactionAsync();
 
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
@@ -1642,6 +1655,9 @@ namespace BIS.ERP.Services
 
             var recordId = Guid.Parse(newId.ToString());
 
+            if (inventoryLines != null)
+                await SaveInventoryLinesAsync(metadata, recordId, inventoryLines);
+
             if (ShouldIncrementDocumentNumberAfterCreate(metadata, data))
                 await IncrementDocumentNumberAfterCreateAsync(metadata, data);
 
@@ -1654,6 +1670,9 @@ namespace BIS.ERP.Services
                     previousRecord: null,
                     currentRecord: await GetRecordDataAsync(metadata.TableName, recordId));
             }
+
+            if (transaction != null)
+                await transaction.CommitAsync();
 
             await new EventLogService(_context).LogAsync(
                 "Create",
@@ -1670,7 +1689,8 @@ namespace BIS.ERP.Services
             }
         }
 
-        public async Task UpdateDynamicRecordAsync(Guid metadataId, Guid recordId, Dictionary<string, object> data)
+        public async Task UpdateDynamicRecordAsync(Guid metadataId, Guid recordId, Dictionary<string, object> data,
+            IReadOnlyList<InventoryLineRow>? inventoryLines = null)
         {
             // Та же причина, что и в CreateDynamicRecordAsync: лог 09:43 —
             // UPDATE catalog_taxes падал с "A command is already in progress".
@@ -1700,6 +1720,10 @@ namespace BIS.ERP.Services
             var previousRecord = IsPostingsDocument(metadata) || IsCashDeskCatalog(metadata)
                 ? await GetRecordDataAsync(metadata.TableName, recordId)
                 : null;
+
+            await using var transaction = inventoryLines == null
+                ? null
+                : await _context.Database.BeginTransactionAsync();
 
             var setClauses = new List<string>();
             var missingRequired = new List<string>();
@@ -1736,8 +1760,17 @@ namespace BIS.ERP.Services
             command.CommandText = sql;
 
             await _context.Database.OpenConnectionAsync();
-            await command.ExecuteNonQueryAsync();
-            await _context.Database.CloseConnectionAsync();
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+
+            if (inventoryLines != null)
+                await SaveInventoryLinesAsync(metadata, recordId, inventoryLines);
 
             await EnsureSingleCatalogDefaultsAsync(metadata, data, recordId);
 
@@ -1757,6 +1790,9 @@ namespace BIS.ERP.Services
                 await SyncCashDeskAccountReferencesAsync(recordId, accountCode);
             }
 
+            if (transaction != null)
+                await transaction.CommitAsync();
+
             await new EventLogService(_context).LogAsync(
                 "Update",
                 metadata.ObjectType,
@@ -1768,6 +1804,16 @@ namespace BIS.ERP.Services
             {
                 _contextAccess.Release();
             }
+        }
+
+        private Task SaveInventoryLinesAsync(
+            MetadataObject metadata, Guid recordId, IReadOnlyList<InventoryLineRow> lines)
+        {
+            var definition = InventoryDocumentModel.Documents.First(item =>
+                string.Equals(item.Table, metadata.TableName, StringComparison.OrdinalIgnoreCase));
+
+            return new InventoryDocumentLineService(_context).ReplaceLinesAsync(
+                definition.LinesTable, definition.ParentColumn, recordId, lines);
         }
 
         private void ValidateChartOfAccountsCode(

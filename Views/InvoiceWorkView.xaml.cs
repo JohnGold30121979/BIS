@@ -130,7 +130,6 @@ namespace BIS.ERP.Views
             LineUnitColumn.Visibility = Visibility.Visible;
             LineQuantityColumn.Visibility = Visibility.Visible;
             LineAccountColumn.Visibility = Visibility.Collapsed;
-            LineSalesTaxColumn.Visibility = Visibility.Collapsed;
         }
 
         private async Task LoadDataAsync()

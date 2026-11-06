@@ -178,19 +178,10 @@
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <!-- Участок — тоже поле с ручным вводом и кнопкой «?». -->
-                <DataGridTemplateColumn x:Name="SiteColumn" Header="Участок" Width="170">
+                <DataGridTemplateColumn Header="Участок" Width="170">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
-                                <Grid.Style>
-                                    <Style TargetType="Grid">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Analytics[sites].IsApplicable}" Value="False">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Grid.Style>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -216,6 +207,7 @@
                 <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                 <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="100" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Сумма НСП" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100" IsReadOnly="True"/>
             </DataGrid.Columns>
         </DataGrid>
 

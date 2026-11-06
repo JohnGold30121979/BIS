@@ -127,7 +127,7 @@
                 <DataGridTextColumn x:Name="LineAccountColumn" Header="Счет" Binding="{Binding AccountName}" Width="220"/>
                 <DataGridTextColumn Header="Сумма б/нал" Binding="{Binding AmountWithoutTax, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="110"/>
                 <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="90"/>
-                <DataGridTextColumn x:Name="LineSalesTaxColumn" Header="Налог с прод" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                <DataGridTextColumn Header="Сумма НСП" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                 <DataGridTextColumn Header="Итого" Binding="{Binding LineTotal, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                 <DataGridTextColumn Header="Валюта" Binding="{Binding CurrencyName}" Width="120"/>
                 <DataGridTextColumn Header="Курс" Binding="{Binding ExchangeRate, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="90"/>

@@ -127,8 +127,7 @@ namespace BIS.ERP.Views.Dialogs
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
                     _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
                     row => ((InventoryLineRow)row).AccountCode, nameof(InventoryLineRow.AccountCode),
-                    nativeLinks: new[] { "materials", "sites", "currencies" }, afterColumn: AccountColumn,
-                    nativeColumns: new Dictionary<string, DataGridColumn> { ["sites"] = SiteColumn });
+                    nativeLinks: new[] { "materials", "sites", "currencies" }, afterColumn: AccountColumn);
 
                 var accounts = await LoadRowsAsync(catalogs, "План счетов");
                 var organizations = await LoadRowsAsync(catalogs, "Организации");
@@ -1864,6 +1863,10 @@ namespace BIS.ERP.Views.Dialogs
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            if (!SaveButton.IsEnabled)
+                return;
+
+            SaveButton.IsEnabled = false;
             try
             {
                 if (!BIS.ERP.Behaviors.DocumentGridEditing.Commit(LinesGrid))
@@ -1913,25 +1916,27 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 var data = BuildItemData();
+                var lines = _lines.ToList();
 
                 if (_recordId.HasValue)
                 {
-                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, _recordId.Value, data);
+                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, _recordId.Value, data, lines);
                     SavedRecordId = _recordId.Value;
                 }
                 else
                 {
-                    SavedRecordId = await _metadataService.CreateDynamicRecordAsync(_document.Id, data);
+                    SavedRecordId = await _metadataService.CreateDynamicRecordAsync(_document.Id, data, lines);
                 }
-
-                await _lineService.ReplaceLinesAsync(
-                    _definition.LinesTable, _definition.ParentColumn, SavedRecordId, _lines.ToList());
 
                 MdiDialogService.CloseWithResult(this, true);
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message, "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                SaveButton.IsEnabled = true;
             }
         }
 

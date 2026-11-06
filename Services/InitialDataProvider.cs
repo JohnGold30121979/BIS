@@ -716,20 +716,15 @@ namespace BIS.ERP.Services
 
         public static IReadOnlyList<SeedMaterialType> GetMaterialTypes() => new[]
         {
-            new SeedMaterialType("1", "ОС", "Основные средства", true),
-            new SeedMaterialType("2", "Малоценка", "Малоценные предметы", true),
-            new SeedMaterialType("3", "Прочие материалы", "Прочие материалы", true),
-            new SeedMaterialType("8", "Спец.одежда", "Специальная одежда", true),
-            new SeedMaterialType("9", "Бензин, л", "Бензин в литрах", true),
-            new SeedMaterialType("10", "Див. топливо, л", "Дизельное топливо в литрах", true),
-            new SeedMaterialType("11", "Авто Масла и про", "Автомасла и прочие жидкости", true),
-            new SeedMaterialType("12", "Сера, кг", "Сера в килограммах", true),
-            new SeedMaterialType("13", "Тринатрий фосфат, кг", "Тринатрий фосфат в кг", true),
-            new SeedMaterialType("14", "Известь хлорная, кг", "Известь хлорная в кг", true),
-            new SeedMaterialType("15", "Жир технический, кг", "Жир технический в кг", true),
-            new SeedMaterialType("16", "Мешки 50 кг, шт", "Мешки 50 кг в штуках", true),
-            new SeedMaterialType("17", "Мешки 25 кг, шт", "Мешки 25 кг в штуках", true),
-            new SeedMaterialType("18", "Бирки для мешков 25 кг, л", "Бирки для мешков 25 кг", true),
+            new SeedMaterialType("1", "топливо", "", true),
+            new SeedMaterialType("2", "Строй материалы", "", true),
+            new SeedMaterialType("3", "прочие", "", true),
+            new SeedMaterialType("4", "МБП в эксплуатации", "", true),
+            new SeedMaterialType("5", "материалы и запчасти", "", true),
+            new SeedMaterialType("6", "ГСМ", "", true),
+            new SeedMaterialType("7", "Электроэнергия", "", true),
+            new SeedMaterialType("8", "мал. инвентарь", "", true),
+            new SeedMaterialType("9", "Запчасти", "", true),
         };
 
         // Типы услуг системного справочника «Справочник типов услуг» (модуль «Абонентский отдел»).

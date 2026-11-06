@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using BIS.ERP.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace BIS.ERP.Services
@@ -148,14 +149,18 @@ namespace BIS.ERP.Services
             return result;
         }
 
-        public async Task ReplaceLinesAsync(
+        internal async Task ReplaceLinesAsync(
             string linesTable,
             string parentColumn,
             Guid headerId,
             IReadOnlyList<InventoryLineRow> lines)
         {
-            await using var connection = await OpenConnectionAsync();
-            await using var transaction = await connection.BeginTransactionAsync();
+            if (lines.Count == 0)
+                throw new InvalidOperationException("Добавьте хотя бы одну строку с материалом и количеством.");
+
+            var transaction = (NpgsqlTransaction)(_context.Database.CurrentTransaction?.GetDbTransaction()
+                ?? throw new InvalidOperationException("Строки ТМЗ сохраняются в транзакции документа."));
+            var connection = (NpgsqlConnection)_context.Database.GetDbConnection();
 
             await using (var delete = connection.CreateCommand())
             {
@@ -208,8 +213,6 @@ namespace BIS.ERP.Services
 
                 await insert.ExecuteNonQueryAsync();
             }
-
-            await transaction.CommitAsync();
         }
 
         public static void RecalculateTotals(
