@@ -4,6 +4,7 @@ using Npgsql;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -202,6 +203,57 @@ namespace BIS.ERP.Services
                 """);
 
             await transaction.CommitAsync();
+        }
+
+        internal static async Task ImportInitialMaterialsAsync(AppDbContext context)
+        {
+            const string version = "2026.11.06.02";
+            if (await SeedStateService.IsAppliedAsync(context, version))
+                return;
+
+            using var resource = typeof(SchemaMigrationService).Assembly
+                .GetManifestResourceStream("BIS.ERP.InitialMaterials.json")
+                ?? throw new InvalidOperationException("Не найден ресурс начальных данных материалов.");
+            using var reader = new StreamReader(resource);
+            var materials = await reader.ReadToEndAsync();
+
+            await using var transaction = await context.Database.BeginTransactionAsync();
+            await context.Database.ExecuteSqlRawAsync(
+                "LOCK TABLE public.catalog_materials IN SHARE ROW EXCLUSIVE MODE");
+            await context.Database.ExecuteSqlRawAsync(
+                "LOCK TABLE public.catalog_material_types IN SHARE MODE");
+
+            var typeCount = await context.Database.SqlQueryRaw<int>("""
+                SELECT COUNT(*)::int AS "Value"
+                FROM (
+                    SELECT code
+                    FROM public.catalog_material_types
+                    WHERE code IN ('1', '2', '3', '4', '5', '6', '7', '8', '9')
+                    GROUP BY code
+                    HAVING COUNT(*) = 1 AND bool_and(is_active)
+                ) AS types
+                """).SingleAsync();
+            if (typeCount != 9)
+                throw new InvalidOperationException("Для загрузки материалов нужны активные виды с кодами 1–9 без дублей.");
+
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO public.catalog_materials
+                    ("Id", code, name, unit, article, material_type_id, capacity, storage_account,
+                     income_account, cost_account, tnved_code, is_active, "CreatedAt", "UpdatedAt")
+                SELECT gen_random_uuid(), material.code, material.name, material.unit, material.article,
+                       kind."Id", material.capacity, material.storage_account, material.income_account,
+                       material.cost_account, material.tnved_code, TRUE, NOW(), NOW()
+                FROM jsonb_to_recordset(CAST({materials} AS jsonb)) AS material(
+                    code text, name text, unit text, article text, type_code text, capacity numeric,
+                    storage_account text, income_account text, cost_account text, tnved_code text)
+                JOIN public.catalog_material_types AS kind ON kind.code = material.type_code
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM public.catalog_materials AS existing WHERE existing.code = material.code
+                )
+                """);
+
+            await transaction.CommitAsync();
+            await SeedStateService.MarkAsync(context, version, "Справочник материалов: начальные данные из DESGOD6");
         }
 
         private static async Task EnsureReconciliationCurrencyColumnAsync(AppDbContext ctx)

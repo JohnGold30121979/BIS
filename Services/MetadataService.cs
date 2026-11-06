@@ -1447,6 +1447,14 @@ namespace BIS.ERP.Services
                 if (!existingCatalogs.Contains("Справочник материалов"))
                     await CreateMaterialCatalog(config);
                 await EnsureMaterialCatalogStructureAsync();
+                try
+                {
+                    await SchemaMigrationService.ImportInitialMaterialsAsync(_context);
+                }
+                catch (Exception ex)
+                {
+                    SystemLogService.Warning($"Миграция начальных данных материалов не выполнена: {ex.Message}", "Migration");
+                }
 
                 if (!existingCatalogs.Contains("Справочник валют"))
                     await CreateCurrencyCatalog(config);
