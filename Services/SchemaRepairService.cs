@@ -27,6 +27,7 @@ namespace BIS.ERP.Services
         public async Task<int> RepairAsync()
         {
             var added = 0;
+            var failures = new List<Exception>();
             var connection = _context.Database.GetDbConnection();
             var openedHere = connection.State != System.Data.ConnectionState.Open;
             if (openedHere)
@@ -74,8 +75,8 @@ namespace BIS.ERP.Services
                         }
                         catch (Exception ex)
                         {
-                            SystemLogService.Warning(
-                                $"Схема: не удалось добавить {tableName}.{columnName}: {ex.Message}", "Schema");
+                            failures.Add(new InvalidOperationException(
+                                $"Не удалось добавить {tableName}.{columnName}: {ex.Message}", ex));
                         }
                     }
                 }
@@ -85,6 +86,9 @@ namespace BIS.ERP.Services
                 if (openedHere)
                     await connection.CloseAsync();
             }
+
+            if (failures.Count > 0)
+                throw new AggregateException("Не удалось достроить колонки EF-модели.", failures);
 
             return added;
         }

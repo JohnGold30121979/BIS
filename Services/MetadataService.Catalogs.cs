@@ -506,7 +506,7 @@ namespace BIS.ERP.Services
         /// Колонки остаются текстовыми — в них хранится код счёта, поэтому
         /// накопленные значения читаются без миграции.
         /// </summary>
-        private async Task EnsureMaterialCatalogStructureAsync()
+        internal async Task EnsureMaterialCatalogStructureAsync()
         {
             var catalog = await _context.MetadataObjects
                 .Include(metadata => metadata.Fields)
@@ -516,7 +516,12 @@ namespace BIS.ERP.Services
                      metadata.TableName == "catalog_materials"));
 
             if (catalog == null)
-                return;
+                throw new InvalidOperationException("Отсутствуют метаданные справочника материалов.");
+
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            var schema = await DatabaseSchemaCache.LoadAsync(_context.Database.GetConnectionString()!);
+            if (!schema.TryGetColumns(catalog.TableName, out var physicalColumns))
+                throw new InvalidOperationException("Отсутствует таблица справочника материалов.");
 
             var existingByColumn = catalog.Fields
                 .Where(field => !string.IsNullOrWhiteSpace(field.DbColumnName))
@@ -525,12 +530,28 @@ namespace BIS.ERP.Services
 
             foreach (var desired in GetMaterialFields(catalog.Id))
             {
+                if (!physicalColumns.ContainsKey(desired.DbColumnName))
+                {
+                    var fieldType = GetSqlTypeForField(desired);
+                    var required = desired.IsRequired && desired.FieldType != "Reference";
+                    var constraint = required
+                        ? desired.FieldType switch
+                        {
+                            "String" => " NOT NULL DEFAULT ''",
+                            "Bool" => " NOT NULL DEFAULT false",
+                            _ => throw new InvalidOperationException($"Укажите значение по умолчанию для поля «{desired.Name}».")
+                        }
+                        : string.Empty;
+                    await _context.Database.ExecuteSqlRawAsync(
+                        $"ALTER TABLE public.{QuoteIdentifier(catalog.TableName)} " +
+                        $"ADD COLUMN IF NOT EXISTS {QuoteIdentifier(desired.DbColumnName)} {fieldType}{constraint}");
+                }
+
                 if (!existingByColumn.TryGetValue(desired.DbColumnName, out var existing))
                 {
                     desired.Id = Guid.NewGuid();
                     desired.MetadataObjectId = catalog.Id;
                     await _context.MetadataFields.AddAsync(desired);
-                    await AddColumnToTableAsync(catalog.TableName, desired);
                     catalog.Fields.Add(desired);
                     continue;
                 }
@@ -551,6 +572,7 @@ namespace BIS.ERP.Services
             }
 
             await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
 
         private async Task CreateMaterialCategoriesCatalog(MetadataConfiguration config)

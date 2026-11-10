@@ -27,7 +27,8 @@ namespace BIS.ERP.Services
             string Version,
             string Description,
             bool Repeatable,
-            Func<AppDbContext, Task> Apply);
+            Func<AppDbContext, Task> Apply,
+            bool AfterCatalogs = false);
 
         private readonly AppDbContext _context;
         private readonly List<Step> _steps;
@@ -98,7 +99,7 @@ namespace BIS.ERP.Services
                     EnsureInventoryEntryOperationKindsAsync),
 
                 new("2026.10.22.02",
-                    "doc_postings: colonnes document_table/document_id (восстановление схемы при отсутствии)",
+                    "doc_postings: колонки document_table/document_id (восстановление схемы при отсутствии)",
                     true,
                     EnsurePostingDocumentTableColumnsAsync),
 
@@ -160,7 +161,7 @@ namespace BIS.ERP.Services
                 new("2026.11.06.01",
                     "Виды материалов: замена начальных данных эталонным списком",
                     false,
-                    ReplaceMaterialTypesAsync),
+                    ReplaceMaterialTypesAsync, AfterCatalogs: true),
 
                 new("2026.11.09.01",
                     "Проводки: счёт-ссылка (uuid) в дебете/кредите заменяется кодом счёта",
@@ -175,12 +176,17 @@ namespace BIS.ERP.Services
                 new("2026.11.10.02",
                     "Движения и остатки материалов по проведённым документам",
                     false,
-                    EnsureInventoryValuationSchemaAsync),
+                    EnsureInventoryValuationSchemaAsync, AfterCatalogs: true),
 
                 new("2026.11.10.03",
                     "Себестоимость в строках выбытия и перемещения материалов",
                     false,
-                    EnsureInventoryValuationSchemaAsync)
+                    EnsureInventoryValuationSchemaAsync, AfterCatalogs: true),
+
+                new("2026.11.10.04",
+                    "Полное наименование и коды классификаторов справочника материалов",
+                    false,
+                    ctx => new MetadataService(ctx).EnsureMaterialCatalogStructureAsync(), AfterCatalogs: true)
             };
         }
 
@@ -223,7 +229,7 @@ namespace BIS.ERP.Services
             if (!await context.Database.SqlQueryRaw<bool>(
                     "SELECT (to_regclass('public.catalog_material_types') IS NOT NULL) AS \"Value\"")
                 .SingleAsync())
-                return;
+                throw new InvalidOperationException("Отсутствует таблица справочника видов материалов.");
 
             await using var transaction = await context.Database.BeginTransactionAsync();
             await context.Database.ExecuteSqlRawAsync(
@@ -581,8 +587,17 @@ namespace BIS.ERP.Services
                 END $$;");
         }
 
-        public async Task<SchemaMigrationReport> EnsureAsync()
+        public async Task<SchemaMigrationReport> EnsureAsync(bool afterCatalogs = false)
         {
+            var connectionString = _context.Database.GetConnectionString()
+                ?? throw new InvalidOperationException("Не задана строка подключения для миграций.");
+            await using var lockConnection = new NpgsqlConnection(connectionString);
+            await lockConnection.OpenAsync();
+            await using var migrationLock = await lockConnection.BeginTransactionAsync();
+            await using var lockCommand = new NpgsqlCommand(
+                "SELECT pg_advisory_xact_lock(3606, 2);", lockConnection, migrationLock);
+            await lockCommand.ExecuteNonQueryAsync();
+
             await EnsureJournalAsync();
 
             var alreadyApplied = await LoadAppliedAsync();
@@ -590,7 +605,7 @@ namespace BIS.ERP.Services
             var skipped = 0;
             var failures = new List<string>();
 
-            foreach (var step in _steps)
+            foreach (var step in _steps.Where(step => step.AfterCatalogs == afterCatalogs))
             {
                 if (!step.Repeatable && alreadyApplied.Contains(step.Version))
                 {
@@ -742,11 +757,9 @@ namespace BIS.ERP.Services
                 SystemLogService.Warning($"ТМЗ: {warning}", "Migration");
         }
 
-        private static async Task EnsureInventoryValuationSchemaAsync(AppDbContext context)
-        {
-            await context.Database.ExecuteSqlRawAsync(InventoryBalanceService.EnsureCostColumnsSql);
-            await context.Database.ExecuteSqlRawAsync(InventoryBalanceService.CreateViewsSql);
-        }
+        private static Task EnsureInventoryValuationSchemaAsync(AppDbContext context) =>
+            context.Database.ExecuteSqlRawAsync(
+                InventoryBalanceService.EnsureCostColumnsSql + "\n" + InventoryBalanceService.CreateViewsSql);
 
         private static Task EnsureReceiptCreditAccountColumnAsync(AppDbContext context) =>
             context.Database.ExecuteSqlRawAsync(

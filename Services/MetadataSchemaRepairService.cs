@@ -33,6 +33,7 @@ namespace BIS.ERP.Services
         {
             var tablesChecked = 0;
             var columnsAdded = 0;
+            var failures = new List<Exception>();
 
             var objects = await _context.Set<MetadataObject>()
                 .Include(item => item.Fields)
@@ -79,11 +80,14 @@ namespace BIS.ERP.Services
                     }
                     catch (Exception ex)
                     {
-                        SystemLogService.Warning(
-                            $"Схема: не удалось добавить {tableName}.{columnName}: {ex.Message}", "Schema");
+                        failures.Add(new InvalidOperationException(
+                            $"Не удалось добавить {tableName}.{columnName}: {ex.Message}", ex));
                     }
                 }
             }
+
+            if (failures.Count > 0)
+                throw new AggregateException("Не удалось достроить колонки по метаданным.", failures);
 
             return (tablesChecked, columnsAdded);
         }

@@ -1515,7 +1515,12 @@ namespace BIS.ERP.Services
 
                 if (!existingCatalogs.Contains("Справочник материалов"))
                     await CreateMaterialCatalog(config);
-                await EnsureMaterialCatalogStructureAsync();
+                await using (var migrationContext = CreateIndependentContext())
+                {
+                    await StartupProfiler.MeasureAsync("Миграции после создания справочников",
+                        () => new SchemaMigrationService(migrationContext).EnsureAsync(afterCatalogs: true));
+                }
+
                 try
                 {
                     await SchemaMigrationService.ImportInitialMaterialsAsync(_context);

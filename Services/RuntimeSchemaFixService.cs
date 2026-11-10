@@ -96,11 +96,14 @@ namespace BIS.ERP.Services
             // (колонки EF, колонки метаданных, схемы касс/наборов, разовые чистки).
             try
             {
-                await new SchemaMigrationService(_context).EnsureAsync();
+                var report = await new SchemaMigrationService(_context).EnsureAsync();
+                if (report.Failures.Count > 0)
+                    return;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[migration] миграции не выполнены: {ex.Message}");
+                SystemLogService.Warning($"Миграции схемы не завершены: {ex.Message}", "Migration");
+                return;
             }
 
 
