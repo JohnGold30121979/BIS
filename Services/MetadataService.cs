@@ -2703,10 +2703,15 @@ namespace BIS.ERP.Services
             if (documents.Count == 0)
                 return;
 
-            var metadataByTable = await _context.MetadataObjects
-                .Where(item => item.TableName == InventoryDocumentModel.OutgoingTable ||
-                               item.TableName == InventoryDocumentModel.MovementTable)
-                .ToDictionaryAsync(item => item.TableName);
+            var documentMetadata = await _context.MetadataObjects
+                .Where(item => item.ObjectType == "Document" &&
+                    ((item.TableName == InventoryDocumentModel.OutgoingTable && item.Name == InventoryDocumentModel.OutgoingName) ||
+                     (item.TableName == InventoryDocumentModel.MovementTable && item.Name == InventoryDocumentModel.MovementName)))
+                .OrderByDescending(item => item.UsePostings)
+                .ThenBy(item => item.Id)
+                .ToListAsync();
+            var metadataByTable = documentMetadata.GroupBy(item => item.TableName)
+                .ToDictionary(group => group.Key, group => group.First());
             var lineService = new InventoryDocumentLineService(_context);
             foreach (var order in documents)
             {

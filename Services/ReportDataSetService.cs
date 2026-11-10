@@ -101,6 +101,12 @@ public sealed class ReportDataSetService
                 ON ""ReportDataSetFields"" (""ReportDataSetId"", ""DbColumnName"");
         ";
 
+        if (_context.Database.CurrentTransaction != null)
+        {
+            await _context.Database.ExecuteSqlRawAsync(sql);
+            return;
+        }
+
         await using var connection = await OpenStandaloneConnectionAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
@@ -888,9 +894,16 @@ ORDER BY doc_date DESC, doc_number DESC";
     /// отчёты, не написав ни одной строки кода. Колонки берутся из справочника
     /// расчётов, запрос писать не нужно.
     /// </summary>
-    private async Task EnsureSystemCalculatorDataSetsAsync()
+    internal async Task EnsureInventoryTurnoverDataSetsAsync()
     {
-        foreach (var calculator in SystemReportCalculators.All)
+        await EnsureSchemaAsync();
+        await EnsureSystemCalculatorDataSetsAsync(SystemReportCalculators.All.Where(calculator =>
+            calculator.Code is InventoryTurnoverReport.MaterialDataSetCode or InventoryTurnoverReport.ResponsiblePersonDataSetCode));
+    }
+
+    private async Task EnsureSystemCalculatorDataSetsAsync(IEnumerable<SystemReportCalculator>? calculators = null)
+    {
+        foreach (var calculator in calculators ?? SystemReportCalculators.All)
         {
             var existing = await _context.ReportDataSets
                 .Include(item => item.Fields)

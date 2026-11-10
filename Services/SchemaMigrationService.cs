@@ -186,7 +186,12 @@ namespace BIS.ERP.Services
                 new("2026.11.10.04",
                     "Полное наименование и коды классификаторов справочника материалов",
                     false,
-                    ctx => new MetadataService(ctx).EnsureMaterialCatalogStructureAsync(), AfterCatalogs: true)
+                    ctx => new MetadataService(ctx).EnsureMaterialCatalogStructureAsync(), AfterCatalogs: true),
+
+                new("2026.11.10.05",
+                    "Оборотные ведомости материалов и материально ответственных лиц (ClosedXML)",
+                    false,
+                    ctx => new MetadataService(ctx).EnsureInventoryTurnoverReportsAsync(), AfterCatalogs: true)
             };
         }
 

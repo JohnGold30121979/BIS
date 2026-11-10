@@ -78,7 +78,13 @@
                                Foreground="{DynamicResource AppSecondaryTextBrush}"
                                Text="Макет: ClosedXML (визуальный Excel). Формат вывода переключён на «ClosedXML Excel». Макет хранится в отчёте с кодом standard.finance.trial-balance-closedxml и правится в конструкторе отчётов."/>
                 </WrapPanel>
-                <WrapPanel Margin="0,10,0,0">
+                <WrapPanel x:Name="InventoryTurnoverPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                    <TextBlock Text="Обороты по текущей информационной базе" VerticalAlignment="Center"/>
+                    <CheckBox x:Name="ExcludeInternalTransfersCheckBox"
+                              Content="Исключить перемещения внутри счёта хранения"
+                              VerticalAlignment="Center" Margin="16,0,0,0"/>
+                </WrapPanel>
+                <WrapPanel x:Name="OrganizationFilterPanel" Margin="0,10,0,0">
                     <TextBlock Text="Организация:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <TextBox x:Name="OrganizationNumberTextBox" Width="240" Height="32" Padding="8,4"
                              KeyDown="OnOrganizationNumberKeyDown"

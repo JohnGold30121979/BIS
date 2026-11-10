@@ -576,7 +576,9 @@ namespace BIS.ERP.Views
             return (start, end);
         }
 
-        private async void OnGenerateClick(object sender, RoutedEventArgs e)
+        private async void OnGenerateClick(object sender, RoutedEventArgs e) => await GenerateReportAsync();
+
+        private async Task<bool> GenerateReportAsync()
         {
             try
             {
@@ -599,6 +601,7 @@ namespace BIS.ERP.Views
                 ReportGrid.ItemsSource = _currentData.DefaultView;
                 SearchBox.Clear();
                 StatusText.Text = $"Сформировано строк: {_currentData.Rows.Count}";
+                return true;
             }
             catch (ReportNeedsAccountException ex)
             {
@@ -606,12 +609,14 @@ namespace BIS.ERP.Views
                 MessageBox.Show(ex.Message, "Выбор счёта",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 StatusText.Text = "Нужно выбрать счёт";
+                return false;
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"Ошибка формирования отчета: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 StatusText.Text = "Ошибка формирования";
+                return false;
             }
             finally
             {
@@ -668,6 +673,9 @@ namespace BIS.ERP.Views
             DateTime start,
             DateTime end)
         {
+            if (selected.ReportType == InventoryTurnoverReport.ReportType)
+                return await BuildInventoryTurnoverAsync(selected.Code, start, end);
+
             if (selected.ReportType == AccountPairTurnoverBuilder.ReportType)
                 return await BuildAccountPairTurnoverAsync(start, end);
 
@@ -678,6 +686,30 @@ namespace BIS.ERP.Views
                 return await BuildTurnoverStatementAsync(start, end);
 
             return await BuildClosedXmlReportByCodeAsync(selected.Code, start, end);
+        }
+
+        private async Task<(DataTable, Report)> BuildInventoryTurnoverAsync(string code, DateTime start, DateTime end)
+        {
+            await using var context = _createContext();
+            var stored = await context.Reports.AsNoTracking()
+                .Include(report => report.Fields)
+                .Include(report => report.Parameters)
+                .SingleAsync(report => report.Code == code);
+            if (!stored.DataSourceId.HasValue)
+                throw new InvalidOperationException($"Выберите источник данных для отчёта «{stored.Name}» в конструкторе.");
+
+            var reportService = new ReportService(context);
+            var resolved = await reportService.ResolveParametersForPreviewAsync(stored);
+            var parameters = new Dictionary<string, object>(resolved, StringComparer.OrdinalIgnoreCase)
+            {
+                ["PeriodStart"] = start,
+                ["PeriodEnd"] = end
+            };
+            if (code == InventoryTurnoverReport.MaterialCode)
+                parameters["ExcludeInternalTransfers"] = ExcludeInternalTransfersCheckBox.IsChecked == true;
+
+            var data = await reportService.GetReportDataAsync(stored, parameters);
+            return (data, stored);
         }
 
         /// <summary>
@@ -1361,6 +1393,15 @@ namespace BIS.ERP.Views
                 return;
 
             var selected = SelectedAccountingReport;
+            var isInventoryTurnover = selected?.ReportType == InventoryTurnoverReport.ReportType;
+            if (InventoryTurnoverPanel != null)
+                InventoryTurnoverPanel.Visibility = isInventoryTurnover ? Visibility.Visible : Visibility.Collapsed;
+            if (OrganizationFilterPanel != null)
+                OrganizationFilterPanel.Visibility = isInventoryTurnover ? Visibility.Collapsed : Visibility.Visible;
+            if (ExcludeInternalTransfersCheckBox != null)
+                ExcludeInternalTransfersCheckBox.Visibility = selected?.Code == InventoryTurnoverReport.MaterialCode
+                    ? Visibility.Visible : Visibility.Collapsed;
+
             var isReconciliation = selected != null && IsReconciliationType(selected.ReportType);
             var isTurnover = selected != null && IsTurnoverType(selected.ReportType);
             if (TurnoverPairPanel != null)
@@ -2257,7 +2298,8 @@ namespace BIS.ERP.Views
                 ? "ClosedXmlExcel"
                 : "ProgramExcel";
 
-            await EnsureReportBuiltAsync();
+            if (!await EnsureReportBuiltAsync())
+                return;
             OnExportExcelClick(sender, e);
         }
 
@@ -2270,7 +2312,8 @@ namespace BIS.ERP.Views
                 ? "ClosedXmlPdf"
                 : "ProgramPdf";
 
-            await EnsureReportBuiltAsync();
+            if (!await EnsureReportBuiltAsync())
+                return;
 
             if (string.Equals(_requestedOutputFormat, "ClosedXmlPdf", StringComparison.OrdinalIgnoreCase))
                 OnExportClosedXmlPdfClick(sender, e);
@@ -2290,13 +2333,14 @@ namespace BIS.ERP.Views
         /// Формирует отчёт, если он ещё не построен или построен за другой период.
         /// Кнопки вывода работают без отдельного нажатия «Сформировать».
         /// </summary>
-        private async Task EnsureReportBuiltAsync()
+        private async Task<bool> EnsureReportBuiltAsync()
         {
-            if (_currentData == null || _currentReport == null)
-            {
-                OnGenerateClick(this, new RoutedEventArgs());
-                return;
-            }
+            if (_currentData == null || _currentReport == null ||
+                SelectedAccountingReport?.ReportType == InventoryTurnoverReport.ReportType ||
+                _currentReport.ReportType == InventoryTurnoverReport.ReportType)
+                return await GenerateReportAsync();
+
+            return true;
         }
 
         private void OnOpenReportClick(object sender, RoutedEventArgs e)

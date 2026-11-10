@@ -100,6 +100,7 @@
                                 </Grid.ColumnDefinitions>
                                 <ComboBox x:Name="ReportTypeCombo" Grid.Column="0" Height="35" SelectedIndex="0">
                                     <ComboBoxItem Content="Таблица" Tag="Table"/>
+                                    <ComboBoxItem Content="Оборотная ведомость материалов" Tag="InventoryTurnover"/>
                                     <ComboBoxItem Content="Список" Tag="List"/>
                                     <ComboBoxItem Content="Карточка" Tag="Card"/>
                                     <ComboBoxItem Content="Счет-фактура на материалы (КР)" Tag="InvoiceMaterialsKg"/>

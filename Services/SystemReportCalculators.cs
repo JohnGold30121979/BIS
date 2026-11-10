@@ -72,8 +72,30 @@ namespace BIS.ERP.Services
         };
 
         /// <summary>Все доступные расчёты, в порядке показа.</summary>
+        private static SystemReportCalculator CreateInventoryTurnoverCalculator(bool byPerson)
+        {
+            IReadOnlyList<SystemCalculatorParameter> parameters = byPerson
+                ? PeriodParameters
+                : PeriodParameters.Append(new SystemCalculatorParameter(
+                    "ExcludeInternalTransfers", "Исключить перемещения внутри счёта хранения", "Bool", "false", false)).ToArray();
+            return new SystemReportCalculator(
+                byPerson ? InventoryTurnoverReport.ResponsiblePersonDataSetCode : InventoryTurnoverReport.MaterialDataSetCode,
+                byPerson ? InventoryTurnoverReport.ResponsiblePersonName : InventoryTurnoverReport.MaterialName,
+                "Остатки и обороты по проведённым документам материалов.",
+                parameters, InventoryTurnoverReport.GetDataSetFields(byPerson),
+                (context, values, _) =>
+                {
+                    var (start, end) = ReadPeriod(values);
+                    var excludeTransfers = values != null && values.TryGetValue("ExcludeInternalTransfers", out var rawValue) &&
+                        bool.TryParse(rawValue?.ToString(), out var exclude) && exclude;
+                    return InventoryTurnoverReport.LoadAsync(context, start, end, byPerson, excludeTransfers);
+                });
+        }
+
         public static IReadOnlyList<SystemReportCalculator> All { get; } = new List<SystemReportCalculator>
         {
+            CreateInventoryTurnoverCalculator(byPerson: false),
+            CreateInventoryTurnoverCalculator(byPerson: true),
             new(
                 MovementsCode,
                 "Движения по проводкам",

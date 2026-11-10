@@ -200,10 +200,6 @@ public class InfoBaseManager
             await dbContext.Database.MigrateAsync();
             LogInfoBaseCreation(dbName, "Базовая схема EF создана");
 
-            LogInfoBaseCreation(dbName, "Применение runtime-исправлений схемы");
-            await new RuntimeSchemaFixService(dbContext).EnsureAsync();
-            LogInfoBaseCreation(dbName, "Runtime-исправления схемы применены");
-
             var infoBase = new InfoBase
             {
                 Id = Guid.NewGuid(),
@@ -229,6 +225,10 @@ public class InfoBaseManager
             LogInfoBaseCreation(dbName, "Инициализация базовых метаданных");
             await metadataService.InitializeDefaultMetadataAsync(Guid.Empty);
             LogInfoBaseCreation(dbName, "Базовые метаданные инициализированы");
+
+            LogInfoBaseCreation(dbName, "Применение runtime-исправлений схемы");
+            await new RuntimeSchemaFixService(dbContext).EnsureAsync();
+            LogInfoBaseCreation(dbName, "Runtime-исправления схемы применены");
 
             LogInfoBaseCreation(dbName, "Создание предустановленных справочников");
             await metadataService.InitializePredefinedCatalogsAsync(infoBase.Id); // ← только здесь

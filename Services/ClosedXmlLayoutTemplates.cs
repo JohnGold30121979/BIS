@@ -94,6 +94,10 @@ namespace BIS.ERP.Services
             if (report?.ReportType == AccountPairTurnoverBuilder.ReportType)
                 return AccountPairTurnoverLayout.Create(report.Name);
 
+            if (report?.ReportType == InventoryTurnoverReport.ReportType)
+                return InventoryTurnoverReport.CreateLayout(report.Name,
+                    report.Code == InventoryTurnoverReport.ResponsiblePersonCode);
+
             if (IsReconciliationAct(report))
                 return CreateReconciliationAct(report!.Name);
 

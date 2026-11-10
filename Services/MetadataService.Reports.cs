@@ -71,7 +71,27 @@ public partial class MetadataService
         await _context.SaveChangesAsync();
     }
 
-    /// <summary>Досадка нового отчёта в существующие базы, независимо от версии общего сида.</summary>
+    /// <summary>Добавляет оборотные ведомости материалов в существующую инфобазу.</summary>
+    internal async Task EnsureInventoryTurnoverReportsAsync()
+    {
+        await new ReportDataSetService(_context).EnsureInventoryTurnoverDataSetsAsync();
+        var deleted = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
+        var reports = await _context.Reports
+            .Where(item => item.Code == InventoryTurnoverReport.MaterialCode ||
+                           item.Code == InventoryTurnoverReport.ResponsiblePersonCode)
+            .ToListAsync();
+        var sourceIds = await _context.ReportDataSets
+            .Where(item => item.Code == InventoryTurnoverReport.MaterialDataSetCode ||
+                           item.Code == InventoryTurnoverReport.ResponsiblePersonDataSetCode)
+            .Select(item => item.MetadataObjectId).ToListAsync();
+        var sources = await _context.MetadataObjects.AsNoTracking().Include(item => item.Fields)
+            .Where(item => sourceIds.Contains(item.Id))
+            .ToListAsync();
+        foreach (var definition in BuildStandardReportDefinitions()
+                     .Where(item => item.ReportType == InventoryTurnoverReport.ReportType && !deleted.Contains(item.Code)))
+            await EnsureStandardReportAsync(definition, reports, sources);
+    }
+
     public async Task EnsureAccountPairTurnoverReportAsync()
     {
         var deleted = await new StandardReportDeletionService(_context).GetDeletedCodesAsync();
@@ -259,8 +279,11 @@ public partial class MetadataService
             report.Name = definition.Name;
         if (isNewReport || string.IsNullOrWhiteSpace(report.Description))
             report.Description = definition.Description;
-        report.DataSourceType = definition.SourceObjectType;
-        report.DataSourceId = source?.Id;
+        if (definition.ReportType != InventoryTurnoverReport.ReportType || !report.DataSourceId.HasValue)
+        {
+            report.DataSourceType = definition.SourceObjectType;
+            report.DataSourceId = source?.Id;
+        }
         report.ReportType = definition.ReportType;
         if (isNewReport)
         {
@@ -301,6 +324,8 @@ public partial class MetadataService
             var seedLayout = definition.ReportType switch
             {
                 "AccountPairTurnover" => AccountPairTurnoverLayout.Create(definition.Name),
+                InventoryTurnoverReport.ReportType => InventoryTurnoverReport.CreateLayout(
+                    definition.Name, definition.Code == InventoryTurnoverReport.ResponsiblePersonCode),
                 "CashBook" => ClosedXmlLayoutTemplates.CreateCashBook(definition.Name),
                 "CashReceiptExpenseRegister" => ClosedXmlLayoutTemplates.CreateCashReceiptExpenseRegister(definition.Name),
                 "TrialBalance" => ClosedXmlLayoutTemplates.CreateTrialBalance(definition.Name),
@@ -585,6 +610,26 @@ public partial class MetadataService
                 "posting_date", "doc_number", "document_type", "debit_account",
                 "credit_account", "amount_kgs", "organization_id", "employee_id", "description"
             }),
+        new StandardReportDefinition(
+            Code: InventoryTurnoverReport.MaterialCode,
+            Name: InventoryTurnoverReport.MaterialName,
+            Description: "Остатки и обороты материалов по счетам хранения за период.",
+            ModuleCode: ModuleMetadataService.InventoryCode,
+            SourceName: InventoryTurnoverReport.MaterialName, SourceObjectType: "ReportSource",
+            ReportType: InventoryTurnoverReport.ReportType, Icon: "📦", Order: 153,
+            PageOrientation: "Landscape",
+            Fields: InventoryTurnoverReport.GetDataSetFields(byPerson: false).Select(field => field.DbColumnName).ToArray(),
+            SourceFormat: "ClosedXml", SeedClosedXmlLayout: true, ShowInAccountingReports: true),
+        new StandardReportDefinition(
+            Code: InventoryTurnoverReport.ResponsiblePersonCode,
+            Name: InventoryTurnoverReport.ResponsiblePersonName,
+            Description: "Остатки и обороты по материально ответственным лицам, участкам и счетам хранения.",
+            ModuleCode: ModuleMetadataService.InventoryCode,
+            SourceName: InventoryTurnoverReport.ResponsiblePersonName, SourceObjectType: "ReportSource",
+            ReportType: InventoryTurnoverReport.ReportType, Icon: "📦", Order: 154,
+            PageOrientation: "Landscape",
+            Fields: InventoryTurnoverReport.GetDataSetFields(byPerson: true).Select(field => field.DbColumnName).ToArray(),
+            SourceFormat: "ClosedXml", SeedClosedXmlLayout: true, ShowInAccountingReports: true),
         new StandardReportDefinition(
             Code: AccountPairTurnoverBuilder.ReportCode,
             Name: AccountPairTurnoverBuilder.ReportName,
