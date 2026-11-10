@@ -38,10 +38,8 @@ namespace BIS.ERP.Views
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
 
-            // Документы ТМЗ проводятся сразу при записи («Запись»/«Добавить» в карточке),
-            // поэтому отдельная кнопка «Провести» для них не нужна.
             if (IsInventoryDocument)
-                PostButton.Visibility = Visibility.Collapsed;
+                MaterialBalancesButton.Visibility = Visibility.Visible;
             else
                 ViewButton.Visibility = Visibility.Collapsed;
         }
@@ -69,6 +67,8 @@ namespace BIS.ERP.Views
             EditButton.IsEnabled = canChange;
             DeleteButton.IsEnabled = canChange;
             PostButton.IsEnabled = hasSelection && !isPosted;
+            if (IsInventoryDocument)
+                PostButton.Visibility = hasSelection && !isPosted ? Visibility.Visible : Visibility.Collapsed;
 
             // Просмотр доступен для любого выбранного документа ТМЗ — даже проведённого.
             ViewButton.IsEnabled = hasSelection && IsInventoryDocument;
@@ -1053,10 +1053,11 @@ namespace BIS.ERP.Views
             {
                 try
                 {
-                    StatusText.Text = "🔄 Проведение...";
+                    PostButton.IsEnabled = false;
+                    StatusText.Text = "Проведение...";
                     await metadata.PostDocumentAsync(_documentMetadata.Id, id);
                     await LoadData();
-                    StatusText.Text = "✅ Документ проведён";
+                    StatusText.Text = "Документ проведён";
                 }
                 catch (Exception ex)
                 {
@@ -1068,6 +1069,31 @@ namespace BIS.ERP.Views
                 {
                     UpdateButtonsState();
                 }
+            }
+        }
+
+        private async void OnMaterialBalancesClick(object sender, RoutedEventArgs e)
+        {
+            MaterialBalancesButton.IsEnabled = false;
+            try
+            {
+                await using var context = _metadataService.CreateIndependentContext();
+                var balances = await new InventoryBalanceService(context).ReadAsync();
+                var dialog = new ReferenceSelectionDialog(balances, "Код", "Материал")
+                {
+                    Title = "Остатки по проведённым документам"
+                };
+                if (dialog.FindName("SelectButton") is Button selectButton)
+                    selectButton.Visibility = Visibility.Collapsed;
+                await MdiDialogService.ShowInWorkspaceForResultAsync(Window.GetWindow(this), dialog, dialog.Title);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Остатки материалов", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                MaterialBalancesButton.IsEnabled = true;
             }
         }
 

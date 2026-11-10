@@ -219,6 +219,14 @@ namespace BIS.ERP.Views.Dialogs
                     if (!_readOnly && _entryEditor != null)
                         _entryEditor.SelectionChanged += (_, _) => UpdateReceiptOperation(recalculate: true);
                 }
+                if (!IsIncomingReceipt)
+                {
+                    InventoryCostColumn.Visibility = Visibility.Visible;
+                    UpdateValuationPriceColumn();
+                    if (!_readOnly && _entryEditor != null)
+                        _entryEditor.SelectionChanged += (_, _) => UpdateValuationPriceColumn();
+                }
+
                 UpdateAccountDependencies();
                 UpdateTotals();
 
@@ -370,6 +378,13 @@ namespace BIS.ERP.Views.Dialogs
         {
             var text = Read(row, "Порядок", "sort_order");
             return int.TryParse(text, out var order) ? order : int.MaxValue;
+        }
+
+        private void UpdateValuationPriceColumn()
+        {
+            var isSale = string.Equals(SelectedOperation, InventoryDocumentModel.SaleOperation, StringComparison.OrdinalIgnoreCase);
+            PriceColumn.IsReadOnly = !isSale;
+            PriceColumn.Header = isSale ? "Цена продажи" : "Учётная цена";
         }
 
         private bool IsIncomingReceipt => _definition.Table == InventoryDocumentModel.IncomingTable;
@@ -2156,10 +2171,39 @@ namespace BIS.ERP.Views.Dialogs
         private async Task OpenMaterialPickerAsync(InventoryLineRow row)
         {
             var pickRows = BuildMaterialPickRows();
-            var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
+            var siteId = IsInternalMovement ? ResolveMovementReference(SourceSiteColumn) : row.SiteId;
+            var responsiblePersonId = IsInternalMovement ? ResolveMovementReference(SourcePersonColumn) : row.ResponsiblePersonId;
+            var selectFromBalances = !IsIncomingReceipt && siteId.HasValue && responsiblePersonId.HasValue;
+            if (selectFromBalances)
+            {
+                try
+                {
+                    await using var context = _metadataService.CreateIndependentContext();
+                    var available = await new InventoryBalanceService(context).ReadAvailableAsync(
+                        siteId!.Value, responsiblePersonId!.Value, GetDocumentDate(), _recordId);
+                    var availableMaterials = available.Where(item => item.Value > 0)
+                        .GroupBy(item => item.Key.MaterialId).ToDictionary(group => group.Key,
+                            group => string.Join(", ", group.Select(item => $"{item.Key.AccountCode}: {item.Value}")));
+                    pickRows = pickRows.Where(item => ReadGuid(item) is Guid materialId && availableMaterials.ContainsKey(materialId)).ToList();
+                    foreach (var item in pickRows)
+                        item["Доступно по счетам"] = availableMaterials[ReadGuid(item)!.Value];
 
-            // Справочник может быть пустым — в окне выбора доступны «Добавить» и «Изменить».
-            if (_materialsCatalog != null)
+                    if (pickRows.Count == 0)
+                    {
+                        MessageBox.Show("На выбранном участке у указанного материально ответственного лица нет доступных материалов.",
+                            "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Остатки материалов", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+            }
+
+            var dialog = new ReferenceSelectionDialog(pickRows, "Код", "Наименование");
+            if (!selectFromBalances && _materialsCatalog != null)
                 dialog.ConfigureCatalogEditing(_materialsCatalog, _metadataService);
 
             dialog.SetSearchText(MaterialSearchText(row.MaterialText));
@@ -2553,23 +2597,15 @@ namespace BIS.ERP.Views.Dialogs
                 var data = BuildItemData();
                 var lines = _lines.ToList();
 
-                // Повторная запись после неудачного проведения обновляет уже созданный
-                // документ, а не создаёт второй.
-                var targetId = _recordId ?? (SavedRecordId != Guid.Empty ? SavedRecordId : (Guid?)null);
-
-                if (targetId.HasValue)
+                if (_recordId.HasValue)
                 {
-                    await metadata.UpdateDynamicRecordAsync(_document.Id, targetId.Value, data, lines);
-                    SavedRecordId = targetId.Value;
+                    await metadata.UpdateDynamicRecordAsync(_document.Id, _recordId.Value, data, lines);
+                    SavedRecordId = _recordId.Value;
                 }
                 else
                 {
                     SavedRecordId = await metadata.CreateDynamicRecordAsync(_document.Id, data, lines);
                 }
-
-                // Документы ТМЗ проводятся сразу при записи — отдельной кнопки «Провести» нет.
-                if (!await PostSavedDocumentAsync())
-                    return;
 
                 MdiDialogService.CloseWithResult(this, true);
             }
@@ -2652,29 +2688,6 @@ namespace BIS.ERP.Views.Dialogs
 
             LinesGrid.Columns.RemoveAt(index);
             LinesGrid.Columns.Insert(index, text);
-        }
-
-        /// <summary>
-        /// Проводит только что записанный документ ТМЗ. Если провести нельзя (нет счёта
-        /// в шапке, нет дебета в строках, дата в закрытом периоде), документ остаётся
-        /// сохранённым, но не проведённым: показываем причину и не закрываем окно —
-        /// можно исправить и нажать «Запись» ещё раз, проводки пересоздадутся.
-        /// </summary>
-        private async Task<bool> PostSavedDocumentAsync()
-        {
-            var metadata = _metadataService.CreateIndependent(out var operationContext);
-            await using var contextScope = operationContext;
-            try
-            {
-                await metadata.PostInventoryDocumentAsync(_document.Id, SavedRecordId);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Документ сохранён, но не проведён: {ex.Message}",
-                    "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return false;
-            }
         }
 
         private void OnCancelClick(object sender, RoutedEventArgs e) => MdiDialogService.CloseWithResult(this, false);

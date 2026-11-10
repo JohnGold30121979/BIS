@@ -56,6 +56,8 @@ namespace BIS.ERP.Services
         /// </summary>
         public string MaterialText { get => _materialText; set => Set(ref _materialText, value); }
         public string UnitName { get => _unitName; set => Set(ref _unitName, value); }
+        private decimal? _inventoryCost;
+        public decimal? InventoryCost { get => _inventoryCost; set => Set(ref _inventoryCost, value); }
         public string CreditAccountCode { get; set; } = string.Empty;
         public string AccountCode { get => _accountCode; set => Set(ref _accountCode, value); }
 
@@ -160,20 +162,26 @@ namespace BIS.ERP.Services
         public async Task<List<InventoryLineRow>> GetLinesAsync(string linesTable, string parentColumn, Guid headerId)
         {
             var result = new List<InventoryLineRow>();
-            await using var connection = await OpenConnectionAsync();
-            var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, linesTable, "line_analytics");
+            var transaction = (NpgsqlTransaction?)_context.Database.CurrentTransaction?.GetDbTransaction();
+            await using var independentConnection = transaction == null ? await OpenConnectionAsync() : null;
+            var connection = independentConnection ?? (NpgsqlConnection)_context.Database.GetDbConnection();
+            var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, linesTable, "line_analytics", transaction);
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             // Колонка аналитики появилась позже самих таблиц строк: если её нет,
             // читаем без неё — открытие документа не падает с 42703.
             var hasCreditAccount = linesTable == InventoryDocumentModel.IncomingLinesTable &&
-                await TableColumnProbe.HasColumnAsync(connection, linesTable, InventoryDocumentModel.CreditAccountCodeColumn);
+                await TableColumnProbe.HasColumnAsync(connection, linesTable, InventoryDocumentModel.CreditAccountCodeColumn, transaction);
             var creditAccountProjection = hasCreditAccount ? InventoryDocumentModel.CreditAccountCodeColumn : "NULL::text";
+            var hasInventoryCost = linesTable != InventoryDocumentModel.IncomingLinesTable &&
+                await TableColumnProbe.HasColumnAsync(connection, linesTable, "inventory_cost", transaction);
+            var costProjection = hasInventoryCost ? "inventory_cost" : "NULL::numeric";
             var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
             command.CommandText = $@"
                 SELECT ""Id"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"", ""account_code"",
                        ""site_id"", ""responsible_person_id"", ""quantity"", ""price"", ""amount_without_tax"",
                        ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total"",
-                       ""amount_currency"", ""description"", {creditAccountProjection}{analyticsColumn}
+                       ""amount_currency"", ""description"", {creditAccountProjection}, {costProjection}{analyticsColumn}
                 FROM ""{linesTable}""
                 WHERE ""{parentColumn}"" = @header
                 ORDER BY ""line_number""";
@@ -203,8 +211,9 @@ namespace BIS.ERP.Services
                     AmountCurrency = reader.GetDecimal(16),
                     Description = reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
                     CreditAccountCode = reader.IsDBNull(18) ? string.Empty : reader.GetString(18),
-                    Analytics = hasAnalytics && !reader.IsDBNull(19)
-                        ? BIS.ERP.Models.LineAnalytics.FromJson(reader.GetString(19))
+                    InventoryCost = reader.IsDBNull(19) ? null : reader.GetDecimal(19),
+                    Analytics = hasAnalytics && !reader.IsDBNull(20)
+                        ? BIS.ERP.Models.LineAnalytics.FromJson(reader.GetString(20))
                         : new BIS.ERP.Models.LineAnalytics()
                 });
             }

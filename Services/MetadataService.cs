@@ -4,6 +4,7 @@ using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Internal;
 using Npgsql;
+using Microsoft.EntityFrameworkCore.Storage;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -1685,6 +1686,9 @@ namespace BIS.ERP.Services
                 ? null
                 : await _context.Database.BeginTransactionAsync();
 
+            if (inventoryLines != null)
+                await LockInventoryValuationAsync();
+
             var columns = new List<string> { "\"Id\"", "\"CreatedAt\"" };
             var values = new List<string> { $"'{Guid.NewGuid()}'", "NOW()" };
 
@@ -1747,6 +1751,9 @@ namespace BIS.ERP.Services
                     currentRecord: await GetRecordDataAsync(metadata.TableName, recordId));
             }
 
+            if (inventoryLines != null)
+                await RecalculateInventoryPostingsAsync(metadata, recordId, inventoryLines);
+
             if (transaction != null)
                 await transaction.CommitAsync();
 
@@ -1779,6 +1786,9 @@ namespace BIS.ERP.Services
 
             if (metadata == null) throw new Exception($"Объект метаданных {metadataId} не найден");
 
+            if (IsInventoryDocumentName(metadata.Name) && (inventoryLines == null || inventoryLines.Count == 0))
+                throw new InvalidOperationException("Документ ТМЗ можно изменить только вместе со строками и проводками.");
+
             await EnsureLargeDynamicTextColumnsAsync(metadata);
             await EnsureDocumentDateCanBeModifiedAsync(metadata, data);
             ValidateChartOfAccountsCode(metadata, data);
@@ -1800,6 +1810,17 @@ namespace BIS.ERP.Services
             await using var transaction = inventoryLines == null
                 ? null
                 : await _context.Database.BeginTransactionAsync();
+
+            DateTime? previousInventoryDate = null;
+            if (inventoryLines != null)
+            {
+                await LockInventoryValuationAsync();
+                var storedRecord = await GetRecordDataAsync(metadata.TableName, recordId, lockForUpdate: true);
+                if (storedRecord.Count == 0)
+                    throw new InvalidOperationException("Документ ТМЗ уже удалён.");
+                await EnsureDocumentDateCanBeModifiedAsync(metadata, storedRecord);
+                previousInventoryDate = GetDateValue(storedRecord, "doc_date");
+            }
 
             var setClauses = new List<string>();
             var missingRequired = new List<string>();
@@ -1865,6 +1886,9 @@ namespace BIS.ERP.Services
                 var accountCode = await ResolveAccountCodeValueAsync(GetStringValue(currentRecord, "code", "Счет"));
                 await SyncCashDeskAccountReferencesAsync(recordId, accountCode);
             }
+
+            if (inventoryLines != null)
+                await RecalculateInventoryPostingsAsync(metadata, recordId, inventoryLines, previousInventoryDate);
 
             if (transaction != null)
                 await transaction.CommitAsync();
@@ -2496,14 +2520,20 @@ namespace BIS.ERP.Services
             if (metadata.ObjectType == "Catalog")
                 await EnsureCatalogReferenceNotUsedAsync(metadata, recordId);
 
+            var isInventory = IsInventoryDocumentName(metadata.Name);
+            await using var transaction = isInventory ? await _context.Database.BeginTransactionAsync() : null;
+            if (isInventory)
+                await LockInventoryValuationAsync();
+
             Dictionary<string, object>? documentRecord = null;
             if (metadata.ObjectType == "Document")
             {
-                documentRecord = await GetRecordDataAsync(metadata.TableName, recordId);
+                documentRecord = await GetRecordDataAsync(metadata.TableName, recordId, lockForUpdate: isInventory);
                 await EnsureDocumentDateCanBeModifiedAsync(metadata, documentRecord);
-                // Сначала проводки (doc_postings), только потом сам первичный документ.
-                await DeleteInventoryPostingsAsync(metadata, recordId);
-                await DeleteDocumentPostingsAsync(metadata, documentRecord);
+                if (isInventory)
+                    await DeleteInventoryPostingsAsync(metadata, recordId);
+                else
+                    await DeleteDocumentPostingsAsync(metadata, documentRecord);
             }
 
             Dictionary<string, object>? previousRecord = null;
@@ -2528,6 +2558,13 @@ namespace BIS.ERP.Services
             {
                 if (openedHere)
                     await _context.Database.CloseConnectionAsync();
+            }
+
+            if (transaction != null)
+            {
+                if (documentRecord != null && GetDateValue(documentRecord, "doc_date") is DateTime removedDate)
+                    await RecalculateInventoryPostingsAsync(null, null, null, removedDate);
+                await transaction.CommitAsync();
             }
 
             await SyncManualPostingCashBalanceAsync(metadata, previousRecord, currentRecord: null);
@@ -2575,23 +2612,152 @@ namespace BIS.ERP.Services
             InventoryDocumentModel.Documents.Any(item =>
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
 
-        /// <summary>
-        /// Проводки документа ТМЗ — по одной на строку документа:
-        /// поступление — Дт счёт строки («Дебет») и Кт счёт шапки («Счет»);
-        /// выбытие и перемещение — наоборот. Строки без счёта или с одинаковыми
-        /// счетами пропускаются; если не создано ни одной проводки — исключение.
-        /// </summary>
+        private Task LockInventoryValuationAsync() =>
+            _context.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(3606, 1);");
+
+        private async Task<bool> ApplyInventoryCostAsync(
+            InventoryBalanceService balances, InventoryBalanceService.DocumentOrder order,
+            InventoryDocumentModel.DocumentDefinition definition, IReadOnlyList<InventoryLineRow> lines,
+            bool preserveSalePrice, decimal exchangeRate, bool forceWrite)
+        {
+            var materialIds = lines.Where(line => line.MaterialId.HasValue)
+                .Select(line => line.MaterialId!.Value).Distinct().ToArray();
+            var remaining = await balances.ReadBeforeAsync(order, materialIds);
+            var changes = new List<InventoryLineRow>();
+            foreach (var line in lines)
+            {
+                if (line.MaterialId is not Guid materialId || line.SiteId is not Guid siteId ||
+                    line.ResponsiblePersonId is not Guid personId || line.Quantity <= 0)
+                    throw new InvalidOperationException(
+                        $"Строка {line.LineNumber}: укажите материал, участок, материально ответственное лицо и положительное количество.");
+
+                var key = (materialId, siteId.ToString(), personId.ToString(), line.AccountCode?.Trim() ?? string.Empty);
+                var stock = remaining.GetValueOrDefault(key);
+                if (line.Quantity > stock.Quantity)
+                    throw new InvalidOperationException(
+                        $"Документ от {order.Date:d}, строка {line.LineNumber}: недостаточно материала «{line.MaterialName}» " +
+                        $"на счёте {key.Item4}. Доступно {stock.Quantity}, требуется {line.Quantity}.");
+
+                var cost = line.Quantity == stock.Quantity
+                    ? stock.Value
+                    : decimal.Round(stock.Value * line.Quantity / stock.Quantity, 2, MidpointRounding.AwayFromZero);
+                if (cost < 0)
+                    throw new InvalidOperationException($"Строка {line.LineNumber}: учётная себестоимость не может быть отрицательной.");
+
+                remaining[key] = (stock.Quantity - line.Quantity, stock.Value - cost);
+                if (forceWrite || line.InventoryCost != cost || (!preserveSalePrice && line.AmountWithoutTax != cost))
+                {
+                    line.InventoryCost = cost;
+                    changes.Add(line);
+                }
+            }
+
+            foreach (var line in changes)
+            {
+                var valuationColumns = preserveSalePrice
+                    ? string.Empty
+                    : ", price = @price, amount_without_tax = @cost, line_total = @cost, " +
+                      "vat_rate = 0, vat_amount = 0, sales_tax_rate = 0, sales_tax_amount = 0, " +
+                      "amount_currency = CASE WHEN @rate > 0 THEN round(@cost / @rate, 2) ELSE 0 END";
+                await _context.Database.ExecuteSqlRawAsync(
+                    $@"UPDATE {QuoteIdentifier(definition.LinesTable)}
+                       SET inventory_cost = @cost, ""UpdatedAt"" = NOW(){valuationColumns}
+                       WHERE {QuoteIdentifier(definition.ParentColumn)} = @document AND line_number = @number;",
+                    new NpgsqlParameter("cost", line.InventoryCost!.Value),
+                    new NpgsqlParameter("document", order.Id),
+                    new NpgsqlParameter("number", line.LineNumber),
+                    new NpgsqlParameter("price",
+                        decimal.Round(line.InventoryCost.Value / line.Quantity, 6, MidpointRounding.AwayFromZero)),
+                    new NpgsqlParameter("rate", exchangeRate));
+            }
+
+            return changes.Count > 0;
+        }
+
+        private async Task RecalculateInventoryPostingsAsync(
+            MetadataObject? currentDocument, Guid? currentId, IReadOnlyList<InventoryLineRow>? currentLines,
+            DateTime? previousDate = null)
+        {
+            var currentRecord = currentDocument != null && currentId.HasValue
+                ? await GetRecordDataAsync(currentDocument.TableName, currentId.Value)
+                : null;
+            var currentDate = currentRecord != null ? GetDateValue(currentRecord, "doc_date") : null;
+            var fromDate = currentDate ?? previousDate
+                ?? throw new InvalidOperationException("Не определена дата расчёта себестоимости.");
+            if (previousDate.HasValue && previousDate.Value < fromDate)
+                fromDate = previousDate.Value;
+
+            if (currentDocument?.TableName == InventoryDocumentModel.IncomingTable && currentRecord != null && currentId.HasValue)
+            {
+                await DeleteInventoryPostingsAsync(currentDocument, currentId.Value);
+                await ProcessInventoryDocumentAsync(currentDocument, currentRecord, currentId.Value, ResolveDocumentAmount(currentRecord), currentLines);
+            }
+
+            var balances = new InventoryBalanceService(_context);
+            var documents = await balances.ReadCostingDocumentsAsync(fromDate, currentId);
+            if (documents.Count == 0)
+                return;
+
+            var metadataByTable = await _context.MetadataObjects
+                .Where(item => item.TableName == InventoryDocumentModel.OutgoingTable ||
+                               item.TableName == InventoryDocumentModel.MovementTable)
+                .ToDictionaryAsync(item => item.TableName);
+            var lineService = new InventoryDocumentLineService(_context);
+            foreach (var order in documents)
+            {
+                var document = metadataByTable[order.Table];
+                var definition = InventoryDocumentModel.Documents.Single(item => item.Table == order.Table);
+                var isCurrent = order.Id == currentId && currentDocument?.TableName == order.Table;
+                var lines = isCurrent && currentLines != null
+                    ? currentLines
+                    : await lineService.GetLinesAsync(definition.LinesTable, definition.ParentColumn, order.Id);
+
+                if (lines.Count == 0)
+                    throw new InvalidOperationException($"Документ от {order.Date:d} не содержит строк для пересчёта себестоимости.");
+
+                var record = await GetRecordDataAsync(document.TableName, order.Id);
+                var isSale = IsInventorySale(document, record);
+                var exchangeRate = GetDecimalValue(record, "exchange_rate");
+                var costChanged = await ApplyInventoryCostAsync(balances, order, definition, lines, isSale, exchangeRate, forceWrite: isCurrent);
+                if (!isCurrent && !costChanged)
+                    continue;
+
+                await EnsureDocumentDateCanBeModifiedAsync(document, record);
+                if (!isSale)
+                {
+                    var total = lines.Sum(line => line.InventoryCost!.Value);
+                    await _context.Database.ExecuteSqlRawAsync(
+                        $@"UPDATE {QuoteIdentifier(document.TableName)}
+                           SET amount_without_tax = @total, amount = @total, vat_total = 0, sales_tax_total = 0,
+                               vat_rate = 0, sales_tax_rate = 0, amount_currency = @currencyAmount
+                           WHERE ""Id"" = @document;",
+                        new NpgsqlParameter("total", total),
+                        new NpgsqlParameter("currencyAmount",
+                            exchangeRate > 0 ? decimal.Round(total / exchangeRate, 2, MidpointRounding.AwayFromZero) : total),
+                        new NpgsqlParameter("document", order.Id));
+                }
+                await DeleteInventoryPostingsAsync(document, order.Id);
+                await ProcessInventoryDocumentAsync(document, record, order.Id, ResolveDocumentAmount(record), lines);
+            }
+        }
+
+        private static bool IsInventorySale(MetadataObject document, Dictionary<string, object> record) =>
+            document.TableName == InventoryDocumentModel.OutgoingTable &&
+            string.Equals(GetStringValue(record, "operation_kind"), InventoryDocumentModel.SaleOperation,
+                StringComparison.OrdinalIgnoreCase);
+
         private async Task ProcessInventoryDocumentAsync(
             MetadataObject document,
             Dictionary<string, object> record,
             Guid recordId,
-            decimal amount)
+            decimal amount,
+            IReadOnlyList<InventoryLineRow>? savedLines = null)
         {
             var definition = InventoryDocumentModel.Documents.FirstOrDefault(item =>
                 string.Equals(item.Name, document.Name, StringComparison.OrdinalIgnoreCase))
                 ?? throw new InvalidOperationException($"Не найдено описание документа ТМЗ «{document.Name}».");
 
-            var lines = await new InventoryDocumentLineService(_context)
+            var lines = savedLines ?? await new InventoryDocumentLineService(_context)
                 .GetLinesAsync(definition.LinesTable, definition.ParentColumn, recordId);
 
             if (lines.Count == 0)
@@ -2606,8 +2772,7 @@ namespace BIS.ERP.Services
             if (Guid.TryParse(headerAccount, out var headerAccountId))
             {
                 var headerAccountCode = await GetAccountCodeById(headerAccountId);
-                if (!string.IsNullOrWhiteSpace(headerAccountCode))
-                    headerAccount = headerAccountCode;
+                headerAccount = headerAccountCode ?? string.Empty;
             }
             var rate = GetDecimalValue(record, "exchange_rate", "Курс валюты", "Курс");
             var currencyId = ReadRecordGuid(record, "currency_id", "Валюта");
@@ -2620,34 +2785,48 @@ namespace BIS.ERP.Services
             var destinationSite = ReadRecordGuid(record, "destination_site_id", "Участок-получатель");
             var destinationPerson = ReadRecordGuid(record, "destination_person_id", "МОЛ-получатель");
 
-            var created = 0;
-            var skipped = 0;
+            if (isMovement && (!destinationSite.HasValue || !destinationPerson.HasValue))
+                throw new InvalidOperationException("Укажите участок и материально ответственное лицо получателя.");
 
+            var isSale = IsInventorySale(document, record);
             foreach (var line in lines)
             {
+                if (!line.MaterialId.HasValue || line.Quantity <= 0)
+                    throw new InvalidOperationException($"Строка {line.LineNumber}: укажите материал и положительное количество.");
+                if (isProductionReceipt && (!line.SiteId.HasValue || !line.ResponsiblePersonId.HasValue))
+                    throw new InvalidOperationException($"Строка {line.LineNumber}: укажите участок и материально ответственное лицо получателя.");
+
                 var rowAmount = line.LineTotal != 0m ? line.LineTotal : line.AmountWithoutTax;
-                if (rowAmount <= 0m)
+                var lineAccount = (line.AccountCode ?? string.Empty).Trim();
+                if (isSale)
                 {
-                    skipped++;
+                    var material = await GetRecordDataAsync("catalog_materials", line.MaterialId.Value);
+                    var revenueAccount = await ResolveAccountCodeValueAsync(GetStringValue(material, "income_account"));
+                    var costAccount = await ResolveAccountCodeValueAsync(GetStringValue(material, "cost_account"));
+                    await InsertPostingAsync(line, headerAccount, revenueAccount, rowAmount);
+                    await InsertPostingAsync(line, costAccount, lineAccount, line.InventoryCost!.Value, allowZero: true);
                     continue;
                 }
 
-                var lineAccount = (line.AccountCode ?? string.Empty).Trim();
                 var debit = isIncoming || (isMovement && headerAccount.Length == 0) ? lineAccount : headerAccount;
                 var credit = isIncoming ? headerAccount : lineAccount;
                 if (isProductionReceipt && !string.IsNullOrWhiteSpace(line.CreditAccountCode))
                     credit = line.CreditAccountCode.Trim();
 
-                // Внутреннее перемещение может идти по одному счёту при смене участка или МОЛ.
                 var changesCustody = isMovement &&
-                    (destinationSite.HasValue && destinationSite != line.SiteId ||
-                     destinationPerson.HasValue && destinationPerson != line.ResponsiblePersonId);
-                if (debit.Length == 0 || credit.Length == 0 ||
-                    (string.Equals(debit, credit, StringComparison.OrdinalIgnoreCase) && !changesCustody))
-                {
-                    skipped++;
-                    continue;
-                }
+                    (destinationSite != line.SiteId || destinationPerson != line.ResponsiblePersonId);
+                await InsertPostingAsync(line, debit, credit, isIncoming ? rowAmount : line.InventoryCost!.Value,
+                    changesCustody, allowZero: !isIncoming);
+            }
+
+            async Task InsertPostingAsync(InventoryLineRow line, string debit, string credit, decimal rowAmount,
+                bool allowSameAccount = false, bool allowZero = false)
+            {
+                if (rowAmount < 0 || (!allowZero && rowAmount == 0))
+                    throw new InvalidOperationException($"Строка {line.LineNumber}: недопустимая сумма проводки.");
+                if (string.IsNullOrWhiteSpace(debit) || string.IsNullOrWhiteSpace(credit) ||
+                    (!allowSameAccount && string.Equals(debit, credit, StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException($"Строка {line.LineNumber}: проверьте счета дебета и кредита для выбранной операции.");
 
                 var amountCurrency = rate > 0
                     ? Math.Round(rowAmount / rate, 2, MidpointRounding.AwayFromZero)
@@ -2682,22 +2861,6 @@ namespace BIS.ERP.Services
                     new NpgsqlParameter("@documentTable", document.TableName),
                     new NpgsqlParameter("@documentId", recordId));
 
-                created++;
-            }
-
-            if (created == 0)
-            {
-                if (isProductionReceipt)
-                    throw new InvalidOperationException("Проверьте счета дебета и кредита и сумму в строках прихода из производства.");
-
-                if (isMovement)
-                {
-                    throw new InvalidOperationException(
-                        "Не удалось сформировать проводки перемещения: проверьте счёт и сумму в строках, участок и МОЛ обеих сторон.");
-                }
-
-                throw new InvalidOperationException(
-                    $"Не удалось сформировать проводки «{document.Name}»: заполните «Счет» в шапке и счёт дебета в строках (пропущено строк: {skipped}).");
             }
 
             await _context.Database.ExecuteSqlRawAsync(
@@ -2705,31 +2868,14 @@ namespace BIS.ERP.Services
                 new NpgsqlParameter("@id", recordId));
 
             System.Diagnostics.Debug.WriteLine(
-                $"Документ ТМЗ {document.Name} {documentNumber}: проводок {created}, пропущено строк {skipped}, сумма {amount}.");
+                $"Документ ТМЗ {document.Name} {documentNumber}: строк {lines.Count}, сумма документа {amount}.");
         }
 
-        /// <summary>
-        /// Удаляет проводки документа ТМЗ по прямой ссылке (document_table + document_id).
-        /// Вызывается до удаления самого документа — в doc_postings уже ничего не остаётся.
-        /// </summary>
-        private async Task DeleteInventoryPostingsAsync(MetadataObject document, Guid recordId)
-        {
-            if (!IsInventoryDocumentName(document.Name))
-                return;
-
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync(
-                    "DELETE FROM doc_postings WHERE document_table = @table AND document_id = @id;",
-                    new NpgsqlParameter("@table", document.TableName),
-                    new NpgsqlParameter("@id", recordId));
-            }
-            catch (Exception ex)
-            {
-                // Колонок может не быть в старой базе — тогда сработает удаление по номеру.
-                System.Diagnostics.Debug.WriteLine($"Проводки ТМЗ: удаление по ссылке не выполнено: {ex.Message}");
-            }
-        }
+        private Task DeleteInventoryPostingsAsync(MetadataObject document, Guid recordId) =>
+            _context.Database.ExecuteSqlRawAsync(
+                "DELETE FROM doc_postings WHERE document_table = @table AND document_id = @id;",
+                new NpgsqlParameter("@table", document.TableName),
+                new NpgsqlParameter("@id", recordId));
 
         private static Guid? ReadRecordGuid(Dictionary<string, object> record, params string[] keys)
         {
@@ -3008,11 +3154,14 @@ namespace BIS.ERP.Services
         }
 
         // Получение данных записи
-        private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId)
+        private async Task<Dictionary<string, object>> GetRecordDataAsync(string tableName, Guid recordId, bool lockForUpdate = false)
         {
             var result = new Dictionary<string, object>();
             var safeTableName = QuoteIdentifier(tableName);
             var sql = $"SELECT * FROM {safeTableName} WHERE \"Id\" = @recordId";
+
+            if (lockForUpdate)
+                sql += " FOR UPDATE";
 
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
@@ -3481,7 +3630,10 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"Document: {document.Name}");
 
                 // 2. Получаем данные записи
-                var recordData = await GetRecordDataAsync(document.TableName, recordId);
+                var isInventory = IsInventoryDocumentName(document.Name);
+                if (isInventory)
+                    await LockInventoryValuationAsync();
+                var recordData = await GetRecordDataAsync(document.TableName, recordId, lockForUpdate: isInventory);
                 await EnsureDocumentDateCanBeModifiedAsync(document, recordData);
 
                 System.Diagnostics.Debug.WriteLine("=== recordData keys ===");
@@ -3597,9 +3749,9 @@ namespace BIS.ERP.Services
                 {
                     await ProcessFixedAssetDisposalDocumentAsync(document, recordData, recordId, amount, true);
                 }
-                else if (IsInventoryDocumentName(document.Name))
+                else if (isInventory)
                 {
-                    await ProcessInventoryDocumentAsync(document, recordData, recordId, amount);
+                    await RecalculateInventoryPostingsAsync(document, recordId, null);
                 }
                 else if (document.PostingRules.Any())
                 {
@@ -3629,36 +3781,6 @@ namespace BIS.ERP.Services
             }
         }
 
-        /// <summary>
-        /// Проведение документа ТМЗ при записи: отдельной кнопки «Провести» больше нет.
-        /// Повторная запись уже проведённого документа сначала снимает старые проводки
-        /// и признак «Проведен» — иначе <see cref="PostDocumentAsync"/> ответил бы
-        /// «Документ уже проведён!».
-        /// </summary>
-        public async Task PostInventoryDocumentAsync(Guid documentId, Guid recordId)
-        {
-            var document = await _context.MetadataObjects
-                .Include(item => item.Fields)
-                .FirstOrDefaultAsync(item => item.Id == documentId)
-                ?? throw new InvalidOperationException("Документ не найден.");
-
-            if (!IsInventoryDocumentName(document.Name))
-            {
-                await PostDocumentAsync(documentId, recordId);
-                return;
-            }
-
-            // Проводки пересоздаются целиком: старые могли остаться от прошлой записи.
-            await DeleteInventoryPostingsAsync(document, recordId);
-            await _context.Database.ExecuteSqlRawAsync(
-                $@"UPDATE {QuoteIdentifier(document.TableName)}
-                   SET ""is_posted"" = false, ""UpdatedAt"" = NOW()
-                   WHERE ""Id"" = @id;",
-                new NpgsqlParameter("@id", recordId));
-
-            await PostDocumentAsync(documentId, recordId);
-        }
-
         public async Task UnpostDocumentAsync(Guid documentId, Guid recordId)
         {
             await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -3670,6 +3792,9 @@ namespace BIS.ERP.Services
                 var isCashOrder = IsCashOrderDocumentName(document.Name);
                 var isFixedAssetDocument = ModuleMetadataService.FixedAssetDocumentNames.Contains(document.Name);
                 var isPaymentOrder = document.Name.Equals("Платежное поручение", StringComparison.OrdinalIgnoreCase);
+                if (IsInventoryDocumentName(document.Name))
+                    throw new InvalidOperationException("Документ ТМЗ должен оставаться проведённым. Исправьте его через редактирование.");
+
                 if (!isCashOrder && !isFixedAssetDocument && !isPaymentOrder)
                     throw new InvalidOperationException("Отмена проведения поддерживается для кассовых документов, платежных поручений и документов основных средств.");
 

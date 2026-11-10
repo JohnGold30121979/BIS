@@ -25,6 +25,8 @@
                 <Button x:Name="ViewButton" Content="👁️ Просмотр" Click="OnViewClick" 
                         Background="#607D8B" Foreground="White" Padding="15,8" Margin="0,0,10,0"
                         Cursor="Hand" ToolTip="Открыть документ только для чтения"/>
+                <Button x:Name="MaterialBalancesButton" Content="Остатки материалов"
+                        Click="OnMaterialBalancesClick" Visibility="Collapsed" Padding="15,8" Margin="0,0,10,0"/>
                 <Button x:Name="DeleteButton" Content="🗑️ Удалить" Click="OnDeleteClick" 
                         Background="#F44336" Foreground="White" Padding="15,8" Margin="0,0,10,0"
                         Cursor="Hand"/>

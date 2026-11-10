@@ -36,6 +36,7 @@ namespace BIS.ERP.Services
         public const string OutgoingLinesTable = "doc_inventory_outgoing_lines";
         public const string MovementLinesTable = "doc_inventory_movement_lines";
 
+        public const string SaleOperation = "OUTGOING_SALE";
         public const string PurchaseOperation = "INCOMING_PURCHASE";
         public const string ProductionReceiptOperation = "INCOMING_PRODUCTION";
         public const string ReceiptByActOperation = "INCOMING_ACT";
@@ -140,7 +141,7 @@ namespace BIS.ERP.Services
                 "Возврат/поступление ТМЗ из производства"),
             new KindDefinition(ReceiptByActOperation, "Приход по акту", IncomingName, "Incoming", 3,
                 "Оприходование по акту (излишки, инвентаризация)"),
-            new KindDefinition("OUTGOING_SALE", "Реализация ТМЗ", OutgoingName, "Outgoing", 4,
+            new KindDefinition(SaleOperation, "Реализация ТМЗ", OutgoingName, "Outgoing", 4,
                 "Продажа ТМЗ на сторону"),
             new KindDefinition("OUTGOING_PRODUCTION", "Расход в производство", OutgoingName, "Outgoing", 5,
                 "Списание ТМЗ в производство"),

@@ -236,7 +236,9 @@
                 </DataGridTemplateColumn>
                 <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}" Width="46"/>
                 <DataGridTextColumn Header="К-во" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="60"/>
-                <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                <DataGridTextColumn x:Name="PriceColumn" Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
+                <DataGridTextColumn x:Name="InventoryCostColumn" Header="Себестоимость" Visibility="Collapsed"
+                                    Binding="{Binding InventoryCost, StringFormat=N2}" Width="120" IsReadOnly="True"/>
                 <DataGridTextColumn x:Name="ReceiptCreditAccountColumn" Header="Кредит" Width="110"
                                     Visibility="Collapsed"
                                     Binding="{Binding CreditAccountCode, UpdateSourceTrigger=PropertyChanged}"/>

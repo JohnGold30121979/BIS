@@ -170,7 +170,17 @@ namespace BIS.ERP.Services
                 new("2026.11.10.01",
                     "Счёт кредита в строках поступления материалов",
                     true,
-                    EnsureReceiptCreditAccountColumnAsync)
+                    EnsureReceiptCreditAccountColumnAsync),
+
+                new("2026.11.10.02",
+                    "Движения и остатки материалов по проведённым документам",
+                    false,
+                    EnsureInventoryValuationSchemaAsync),
+
+                new("2026.11.10.03",
+                    "Себестоимость в строках выбытия и перемещения материалов",
+                    false,
+                    EnsureInventoryValuationSchemaAsync)
             };
         }
 
@@ -730,6 +740,12 @@ namespace BIS.ERP.Services
 
             foreach (var warning in report.Warnings)
                 SystemLogService.Warning($"ТМЗ: {warning}", "Migration");
+        }
+
+        private static async Task EnsureInventoryValuationSchemaAsync(AppDbContext context)
+        {
+            await context.Database.ExecuteSqlRawAsync(InventoryBalanceService.EnsureCostColumnsSql);
+            await context.Database.ExecuteSqlRawAsync(InventoryBalanceService.CreateViewsSql);
         }
 
         private static Task EnsureReceiptCreditAccountColumnAsync(AppDbContext context) =>
