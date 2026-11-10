@@ -127,7 +127,7 @@ namespace BIS.ERP.Views.Dialogs
         private async void OnFirstLoaded(object sender, RoutedEventArgs e)
         {
             Loaded -= OnFirstLoaded;
-            await InitializeAsync();
+            await StartupProfiler.MeasureAsync($"ТМЗ: инициализация карточки {_document.Name}", InitializeAsync);
         }
 
         private async Task InitializeAsync()
@@ -136,7 +136,8 @@ namespace BIS.ERP.Views.Dialogs
             await using var contextScope = operationContext;
             try
             {
-                var catalogs = await metadata.GetCatalogsAsync();
+                var catalogs = await StartupProfiler.MeasureAsync("ТМЗ: метаданные справочников",
+                    metadata.ReadCatalogMetadataAsync);
                 var lineAccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadata);
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
                     _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
@@ -200,7 +201,7 @@ namespace BIS.ERP.Views.Dialogs
                     numberBox.Text = await metadata.GetNextDocumentNumberAsync(_document);
                 }
 
-                await LoadLinesAsync();
+                await StartupProfiler.MeasureAsync("ТМЗ: строки документа", LoadLinesAsync);
                 UpdateAccountDependencies();
                 UpdateTotals();
 
@@ -2610,14 +2611,13 @@ namespace BIS.ERP.Views.Dialogs
             List<MetadataObject> catalogs,
             params string[] catalogNames)
         {
-            var metadata = _metadataService.CreateIndependent(out var operationContext);
-            await using var contextScope = operationContext;
             var catalog = catalogs.FirstOrDefault(item => catalogNames.Any(name =>
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)));
 
             return catalog == null
                 ? new List<Dictionary<string, object>>()
-                : await metadata.GetCatalogDataAsync(catalog.Id);
+                : await StartupProfiler.MeasureAsync($"ТМЗ: справочник {catalog.Name}",
+                    () => _metadataService.ReadCatalogDataAsync(catalog));
         }
 
         private static List<RefItem> ToItems(

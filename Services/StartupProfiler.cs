@@ -14,6 +14,21 @@ namespace BIS.ERP.Services
     {
         private static readonly Stopwatch Total = Stopwatch.StartNew();
 
+        public static void Mark(string stage) => Log(stage, 0);
+
+        public static T Measure<T>(string stage, Func<T> action)
+        {
+            var watch = Stopwatch.StartNew();
+            try
+            {
+                return action();
+            }
+            finally
+            {
+                Log(stage, watch.ElapsedMilliseconds);
+            }
+        }
+
         public static async Task MeasureAsync(string stage, Func<Task> action)
         {
             var watch = Stopwatch.StartNew();

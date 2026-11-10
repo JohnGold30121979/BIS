@@ -13,7 +13,8 @@ public partial class MetadataService
         if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.StandardReportsKey))
         {
             SystemLogService.Info("Стандартные отчёты уже посажены — пропуск.", "Seed");
-            await EnsureCashOrderReportsAsync();
+            await StartupProfiler.MeasureAsync("Стандартные отчёты: проверка кассовых отчётов",
+                EnsureCashOrderReportsAsync);
             return;
         }
 

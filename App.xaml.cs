@@ -23,6 +23,7 @@ namespace BIS.ERP
         {
             base.OnStartup(e);
             ConfigureSystemLogging();
+            StartupProfiler.Mark("Вход в запуск приложения");
             // Инициализация контейнера сервисов и фабрики DbContext
             var services = new ServiceCollection();
             services.AddDbContextFactory<AppDbContext>(options =>
@@ -54,7 +55,7 @@ namespace BIS.ERP
                 ThemeService.Apply(settings?.Theme ?? ThemeService.DefaultTheme);
 
                 // Проверяем подключение
-                bool needSetup = !settings.TestConnection();
+                bool needSetup = !StartupProfiler.Measure("Проверка подключения к PostgreSQL", settings.TestConnection);
 
                 if (needSetup)
                 {
@@ -70,7 +71,7 @@ namespace BIS.ERP
                     // Перезагружаем настройки после сохранения
                     settings = AppSettings.Instance;
 
-                    if (!settings.TestConnection())
+                    if (!StartupProfiler.Measure("Проверка подключения к PostgreSQL", settings.TestConnection))
                     {
                         MessageBox.Show(
                             "Не удалось подключиться к PostgreSQL. Проверьте параметры подключения.",
@@ -90,6 +91,7 @@ namespace BIS.ERP
 
                 // Показываем главное окно
                 _infoBaseWindow.Show();
+                StartupProfiler.Mark("Показано окно выбора инфобазы");
             }
             catch (Exception ex)
             {
@@ -233,6 +235,7 @@ namespace BIS.ERP
             if (_infoBaseWindow != null)
             {
                 _infoBaseWindow.Show();
+                StartupProfiler.Mark("Показано окно выбора инфобазы");
                 _infoBaseWindow.WindowState = WindowState.Normal;
                 _infoBaseWindow.Activate();
             }

@@ -321,13 +321,50 @@ namespace BIS.ERP.Services
             if (string.IsNullOrEmpty(selectSql))
                 return new List<Dictionary<string, object>>();
 
-            // Чтение строк — на НЕЗАВИСИМОМ контексте/соединении, чтобы конкурентные
-            // окна не делили один NpgsqlConnection (лог 09:43/09:59: "A command is
-            // already in progress"). part1 (метаданные) уже под _contextAccess.
+            return await ReadCatalogRowsAsync(catalogId, catalogEntity?.TableName, catalogEntity?.Name,
+                catalogObjectType, catalogFieldsSnapshot, selectSql);
+        }
+
+        public async Task<List<MetadataObject>> ReadCatalogMetadataAsync()
+        {
+            await using var context = CreateIndependentContext();
+            var catalogs = await context.MetadataObjects.AsNoTracking()
+                .Where(item => item.ObjectType == "Catalog" && item.Name != "Контрагенты")
+                .Include(item => item.Fields)
+                .OrderBy(item => item.Order)
+                .ToListAsync();
+            return CollapseDuplicateCatalogsForNavigation(catalogs);
+        }
+
+        public async Task<List<Dictionary<string, object>>> ReadCatalogDataAsync(MetadataObject catalog)
+        {
+            var sql = await BuildCatalogDataSelectSqlAsync(catalog);
+            return await ReadCatalogRowsAsync(catalog.Id, catalog.TableName, catalog.Name,
+                catalog.ObjectType, catalog.Fields, sql);
+        }
+
+        public async Task<Dictionary<string, object>?> GetDocumentRecordAsync(Guid documentId, Guid recordId)
+        {
+            await using var context = CreateIndependentContext();
+            var document = await context.MetadataObjects.AsNoTracking().Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Id == documentId && item.ObjectType == "Document");
+            if (document == null)
+                return null;
+
+            var sql = $"SELECT * FROM {QuoteIdentifier(document.TableName)} WHERE \"Id\" = @recordId";
+            var rows = await ReadCatalogRowsAsync(documentId, document.TableName, document.Name,
+                document.ObjectType, document.Fields, sql, recordId);
+            return rows.FirstOrDefault();
+        }
+
+        private async Task<List<Dictionary<string, object>>> ReadCatalogRowsAsync(
+            Guid catalogId, string? tableName, string? catalogName, string catalogObjectType,
+            IEnumerable<MetadataField> catalogFieldsSnapshot, string selectSql, Guid? recordId = null)
+        {
             await using var context = CreateIndependentContext();
             var result = new List<Dictionary<string, object>>();
-            var tableNameForLog = catalogEntity?.TableName ?? catalogId.ToString();
-            var catalogDisplayName = catalogEntity?.Name ?? tableNameForLog;
+            var tableNameForLog = tableName ?? catalogId.ToString();
+            var catalogDisplayName = catalogName ?? tableNameForLog;
 
             try
             {
@@ -335,6 +372,13 @@ namespace BIS.ERP.Services
                 await connection.OpenAsync();
                 await using var command = connection.CreateCommand();
                 command.CommandText = selectSql;
+                if (recordId.HasValue)
+                {
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = "@recordId";
+                    parameter.Value = recordId.Value;
+                    command.Parameters.Add(parameter);
+                }
                 await using var reader = await command.ExecuteReaderAsync();
 
                 // Безопасное создание fieldMapping (обрабатывает дубликаты)
@@ -376,7 +420,7 @@ namespace BIS.ERP.Services
                     result.Add(row);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!recordId.HasValue)
             {
                 System.Diagnostics.Debug.WriteLine($"GetCatalogDataAsync ({tableNameForLog}): {ex.Message}");
                 throw;

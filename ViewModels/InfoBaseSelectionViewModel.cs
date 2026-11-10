@@ -181,7 +181,8 @@ namespace BIS.ERP.ViewModels
 
             try
             {
-                await _infoBaseManager.SetCurrentInfoBaseAsync(SelectedInfoBase.Id);
+                await StartupProfiler.MeasureAsync("Выбор инфобазы",
+                    () => _infoBaseManager.SetCurrentInfoBaseAsync(SelectedInfoBase.Id));
             }
             catch (Exception ex)
             {
@@ -189,7 +190,8 @@ namespace BIS.ERP.ViewModels
                 return;
             }
 
-            if (!await _dialogService.ShowLoginAsync(configMode))
+            if (!await StartupProfiler.MeasureAsync("Окно входа (включая ввод пользователя)",
+                    () => _dialogService.ShowLoginAsync(configMode)))
                 return;
 
             var currentUser = _authService.CurrentUser;

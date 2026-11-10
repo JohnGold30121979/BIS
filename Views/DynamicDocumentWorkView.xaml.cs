@@ -96,7 +96,7 @@ namespace BIS.ERP.Views
         /// Внешний замок не берём: методы сервиса запирают контекст сами, а внешний замок
         /// дал бы взаимную блокировку. Повторные вызовы (Loaded) безопасны.
         /// </summary>
-        private Task LoadData() => LoadDataCore();
+        private Task LoadData() => StartupProfiler.MeasureAsync($"Журнал документов: {_documentMetadata.Name}", LoadDataCore);
 
         /// <summary>Загружает строки выбранного документа в нижнюю таблицу «Строки проводки».</summary>
         private bool _loadingPostingLines;
@@ -336,8 +336,10 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Загрузка данных...";
-                var data = await metadata.GetCatalogDataAsync(_documentMetadata.Id);
-                var allCatalogs = await metadata.GetCatalogsAsync();
+                var data = await StartupProfiler.MeasureAsync("Журнал документов: данные",
+                    () => metadata.GetCatalogDataAsync(_documentMetadata.Id));
+                var allCatalogs = await StartupProfiler.MeasureAsync("Журнал документов: метаданные справочников",
+                    metadata.ReadCatalogMetadataAsync);
                 var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadata);
 
                 // Строим таблицу в локальной переменной и привязываем разом:
@@ -363,7 +365,7 @@ namespace BIS.ERP.Views
                     var catalog = allCatalogs.FirstOrDefault(c => c.Name == field.ReferenceCatalog);
                     if (catalog != null)
                     {
-                        var catalogData = await metadata.GetCatalogDataAsync(catalog.Id);
+                        var catalogData = await metadata.ReadCatalogDataAsync(catalog);
                         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var item in catalogData)
                         {
@@ -877,9 +879,13 @@ namespace BIS.ERP.Views
             }
             else if (IsInventoryDocument)
             {
-                var rows = await metadata.GetCatalogDataAsync(_documentMetadata.Id);
-                var existing = rows.FirstOrDefault(row =>
-                    row.TryGetValue("Id", out var value) && value is Guid guid && guid == id);
+                var existing = await StartupProfiler.MeasureAsync("ТМЗ: чтение карточки по Id",
+                    () => metadata.GetDocumentRecordAsync(_documentMetadata.Id, id));
+                if (existing == null)
+                {
+                    StatusText.Text = "Документ не найден. Обновите список.";
+                    return;
+                }
 
                 var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService, id, existing);
                 dialog.Owner = Window.GetWindow(this);
@@ -936,9 +942,13 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "👁️ Просмотр документа";
 
-                var rows = await metadata.GetCatalogDataAsync(_documentMetadata.Id);
-                var existing = rows.FirstOrDefault(row =>
-                    row.TryGetValue("Id", out var value) && value is Guid guid && guid == id);
+                var existing = await StartupProfiler.MeasureAsync("ТМЗ: чтение карточки по Id",
+                    () => metadata.GetDocumentRecordAsync(_documentMetadata.Id, id));
+                if (existing == null)
+                {
+                    StatusText.Text = "Документ не найден. Обновите список.";
+                    return;
+                }
 
                 var dialog = new InventoryDocumentDialog(
                     _documentMetadata, _metadataService, id, existing, readOnly: true)

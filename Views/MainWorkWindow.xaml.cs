@@ -608,7 +608,8 @@ namespace BIS.ERP
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             Loaded -= OnLoaded;
-            await DbContextScope.StartupGate.WaitAsync();
+            await StartupProfiler.MeasureAsync("Рабочее окно: ожидание инициализации",
+                () => DbContextScope.StartupGate.WaitAsync());
             // Контекст и имя текущего шага нужны в catch для диагностики
             // DbUpdateConcurrencyException, поэтому объявлены вне блока try.
             AppDbContext? diagnosticContext = null;
@@ -686,9 +687,10 @@ namespace BIS.ERP
 
                     context.ChangeTracker.Clear();
                     initStage = "BuildNavigationTree (дерево навигации)";
-                    await BuildNavigationTree();
+                    await StartupProfiler.MeasureAsync("Рабочее окно: построение дерева целиком", BuildNavigationTree);
                     // Дерево строится позже первых вкладок — подсвечиваем узел активной.
                     SyncNavigationWithActiveDocument();
+                    StartupProfiler.Mark("Рабочее окно инициализировано");
                 }
             }
             catch (Exception ex)

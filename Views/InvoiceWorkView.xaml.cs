@@ -142,8 +142,10 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Загрузка...";
-                var postedCount = await _invoiceService.EnsureSavedInvoicesPostedAsync();
-                var invoices = await _invoiceService.GetInvoicesAsync();
+                var postedCount = await StartupProfiler.MeasureAsync("Счета-фактуры: проверка проведения",
+                    () => _invoiceService.EnsureSavedInvoicesPostedAsync());
+                var invoices = await StartupProfiler.MeasureAsync("Счета-фактуры: чтение журнала",
+                    () => _invoiceService.GetInvoicesAsync());
                 var defaultModuleName = await ResolveAssignedModuleNameAsync();
                 foreach (var invoice in invoices)
                 {

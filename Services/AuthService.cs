@@ -15,8 +15,10 @@ namespace BIS.ERP.Services
         {
             var normalizedLogin = NormalizeLogin(login);
             await using var context = await ServiceLocator.InfoBaseManager.GetCurrentDbContextAsync();
-            await new UserAccessService(context).EnsureSchemaAsync();
-            var user = await context.Users.FirstOrDefaultAsync(item => item.Login.ToLower() == normalizedLogin);
+            await StartupProfiler.MeasureAsync("Вход: схема прав доступа",
+                () => new UserAccessService(context).EnsureSchemaAsync());
+            var user = await StartupProfiler.MeasureAsync("Вход: поиск пользователя",
+                () => context.Users.FirstOrDefaultAsync(item => item.Login.ToLower() == normalizedLogin));
 
             if (user == null)
             {
@@ -39,7 +41,8 @@ namespace BIS.ERP.Services
             bool passwordValid = false;
             try
             {
-                passwordValid = VerifyPassword(password, user.PasswordHash);
+                passwordValid = StartupProfiler.Measure("Вход: проверка пароля",
+                    () => VerifyPassword(password, user.PasswordHash));
             }
             catch (Exception ex)
             {
@@ -63,7 +66,7 @@ namespace BIS.ERP.Services
             if (!IsBcryptHash(user.PasswordHash))
                 user.PasswordHash = HashPassword(password);
             user.LastLoginDate = DateTime.UtcNow;
-            await context.SaveChangesAsync();
+            await StartupProfiler.MeasureAsync("Вход: сохранение отметки", () => context.SaveChangesAsync());
 
             _currentUser = user;
             return new AuthResult { Success = true, User = user };
