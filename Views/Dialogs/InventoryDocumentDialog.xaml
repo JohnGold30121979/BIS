@@ -28,7 +28,7 @@
             <Grid Margin="0,10,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="1*"/>
-                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition x:Name="SecondPartyColumn" Width="2*"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- Поставщик — узкая колонка: каждый контрол в отдельной строке и растянут
@@ -37,7 +37,7 @@
                     <StackPanel x:Name="SupplierPanel"/>
                 </GroupBox>
 
-                <GroupBox Grid.Column="1" Header="Налоги и оплата" Padding="8">
+                <GroupBox x:Name="SecondPartyCard" Grid.Column="1" Header="Налоги и оплата" Padding="8">
                     <StackPanel x:Name="TaxPanel"/>
                 </GroupBox>
             </Grid>

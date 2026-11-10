@@ -340,7 +340,8 @@ namespace BIS.ERP.Views
                     () => metadata.GetCatalogDataAsync(_documentMetadata.Id));
                 var allCatalogs = await StartupProfiler.MeasureAsync("Журнал документов: метаданные справочников",
                     metadata.ReadCatalogMetadataAsync);
-                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadata);
+                var accountAnalytics = await StartupProfiler.MeasureAsync("Журнал документов: аналитика счетов",
+                    () => AccountAnalyticsRegistry.LoadAsync(metadata));
 
                 // Строим таблицу в локальной переменной и привязываем разом:
                 // частичная мутация привязанного DefaultView без Reset рассинхронизирует
@@ -360,12 +361,23 @@ namespace BIS.ERP.Views
 
                 // Загружаем справочники для подстановки имен
                 var referenceCatalogs = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+                var catalogRows = new Dictionary<Guid, List<Dictionary<string, object>>>();
                 foreach (var field in _documentMetadata.Fields.Where(f => !string.IsNullOrEmpty(f.ReferenceCatalog)))
                 {
+                    if (!data.Any(row => row.TryGetValue(field.Name, out var value) &&
+                        value is not null and not DBNull && !string.IsNullOrWhiteSpace(value.ToString())))
+                        continue;
+
                     var catalog = allCatalogs.FirstOrDefault(c => c.Name == field.ReferenceCatalog);
                     if (catalog != null)
                     {
-                        var catalogData = await metadata.ReadCatalogDataAsync(catalog);
+                        if (!catalogRows.TryGetValue(catalog.Id, out var catalogData))
+                        {
+                            catalogData = await StartupProfiler.MeasureAsync($"Журнал документов: справочник {catalog.Name}",
+                                () => metadata.ReadCatalogDataAsync(catalog));
+                            catalogRows.Add(catalog.Id, catalogData);
+                        }
+
                         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var item in catalogData)
                         {

@@ -55,8 +55,17 @@ public partial class MetadataService
         if (definitions.Length == 0)
             return;
 
-        var reports = await _context.Reports.ToListAsync();
-        var sources = await _context.MetadataObjects.AsNoTracking().Include(item => item.Fields).ToListAsync();
+        var codes = definitions.Select(item => item.Code).ToArray();
+        var names = definitions.Select(item => item.Name).ToArray();
+        var sourceNames = definitions.Select(item => item.SourceName).ToArray();
+        var sourceTypes = definitions.Select(item => item.SourceObjectType).ToArray();
+        var reports = await _context.Reports
+            .Where(item => codes.Contains(item.Code) || names.Contains(item.Name))
+            .ToListAsync();
+        var sources = await _context.MetadataObjects.AsNoTracking()
+            .Where(item => sourceNames.Contains(item.Name) && sourceTypes.Contains(item.ObjectType))
+            .Include(item => item.Fields)
+            .ToListAsync();
         foreach (var definition in definitions)
             await EnsureStandardReportAsync(definition, reports, sources);
         await _context.SaveChangesAsync();

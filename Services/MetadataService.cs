@@ -2612,9 +2612,10 @@ namespace BIS.ERP.Services
             var rate = GetDecimalValue(record, "exchange_rate", "Курс валюты", "Курс");
             var currencyId = ReadRecordGuid(record, "currency_id", "Валюта");
             var organizationId = ReadRecordGuid(record, "organization_id", "Организация");
-            var isIncoming = string.Equals(
-                InventoryDocumentModel.MovementKindForDocument(document.Name), "Incoming",
-                StringComparison.OrdinalIgnoreCase);
+            var isIncoming = definition.Table == InventoryDocumentModel.IncomingTable;
+            var isMovement = definition.Table == InventoryDocumentModel.MovementTable;
+            var destinationSite = ReadRecordGuid(record, "destination_site_id", "Участок-получатель");
+            var destinationPerson = ReadRecordGuid(record, "destination_person_id", "МОЛ-получатель");
 
             var created = 0;
             var skipped = 0;
@@ -2629,11 +2630,15 @@ namespace BIS.ERP.Services
                 }
 
                 var lineAccount = (line.AccountCode ?? string.Empty).Trim();
-                var debit = isIncoming ? lineAccount : headerAccount;
+                var debit = isIncoming || (isMovement && headerAccount.Length == 0) ? lineAccount : headerAccount;
                 var credit = isIncoming ? headerAccount : lineAccount;
 
+                // Внутреннее перемещение может идти по одному счёту при смене участка или МОЛ.
+                var changesCustody = isMovement &&
+                    (destinationSite.HasValue && destinationSite != line.SiteId ||
+                     destinationPerson.HasValue && destinationPerson != line.ResponsiblePersonId);
                 if (debit.Length == 0 || credit.Length == 0 ||
-                    string.Equals(debit, credit, StringComparison.OrdinalIgnoreCase))
+                    (string.Equals(debit, credit, StringComparison.OrdinalIgnoreCase) && !changesCustody))
                 {
                     skipped++;
                     continue;
@@ -2677,6 +2682,12 @@ namespace BIS.ERP.Services
 
             if (created == 0)
             {
+                if (isMovement)
+                {
+                    throw new InvalidOperationException(
+                        "Не удалось сформировать проводки перемещения: проверьте счёт и сумму в строках, участок и МОЛ обеих сторон.");
+                }
+
                 throw new InvalidOperationException(
                     $"Не удалось сформировать проводки «{document.Name}»: заполните «Счет» в шапке и счёт дебета в строках (пропущено строк: {skipped}).");
             }

@@ -23,7 +23,7 @@ namespace BIS.ERP
         {
             base.OnStartup(e);
             ConfigureSystemLogging();
-            StartupProfiler.Mark("Вход в запуск приложения");
+            StartupProfiler.BeginRun();
             // Инициализация контейнера сервисов и фабрики DbContext
             var services = new ServiceCollection();
             services.AddDbContextFactory<AppDbContext>(options =>

@@ -138,7 +138,8 @@ namespace BIS.ERP.Views.Dialogs
             {
                 var catalogs = await StartupProfiler.MeasureAsync("ТМЗ: метаданные справочников",
                     metadata.ReadCatalogMetadataAsync);
-                var lineAccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadata);
+                var lineAccountAnalytics = await StartupProfiler.MeasureAsync("ТМЗ: аналитика счетов",
+                    () => AccountAnalyticsRegistry.LoadAsync(metadata));
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
                     _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
                     row => ((InventoryLineRow)row).AccountCode, nameof(InventoryLineRow.AccountCode),
@@ -146,12 +147,7 @@ namespace BIS.ERP.Views.Dialogs
                     nativeLinks: new[] { "materials", "sites", "currencies" }, afterColumn: AccountColumn);
 
                 var accounts = await LoadRowsAsync(catalogs, "План счетов");
-                var organizations = await LoadRowsAsync(catalogs, "Организации");
                 var employees = await LoadRowsAsync(catalogs, "Сотрудники (Списочный состав)");
-                var supplyKinds = await LoadRowsAsync(catalogs, "Типы поставки");
-                var taxRows = await LoadRowsAsync(catalogs, "Налоги");
-                _taxRows = taxRows;
-                var paymentKinds = await LoadRowsAsync(catalogs, "Виды оплаты");
                 var currencies = await LoadRowsAsync(catalogs, "Справочник валют");
                 var sites = await LoadRowsAsync(catalogs, "Участки", "Участки (новые)");
                 var responsible = await LoadRowsAsync(catalogs, "МОЛ");
@@ -161,15 +157,27 @@ namespace BIS.ERP.Views.Dialogs
                     string.Equals(item.Name, "Материалы", StringComparison.OrdinalIgnoreCase));
                 var entries = await LoadRowsAsync(catalogs, InventoryDocumentModel.EntryCatalogName);
 
+                _sites = sites;
+                _responsiblePersons = BuildResponsibleOptions(responsible, employees);
                 BuildTopRow(FilterEntriesForDocument(entries));
-                BuildSupplierCard(accounts, organizations, employees, supplyKinds, sites, responsible);
+                if (IsInternalMovement)
+                {
+                    BuildMovementCards(sites);
+                }
+                else
+                {
+                    var organizations = await LoadRowsAsync(catalogs, "Организации");
+                    var supplyKinds = await LoadRowsAsync(catalogs, "Типы поставки");
+                    var taxRows = await LoadRowsAsync(catalogs, "Налоги");
+                    var paymentKinds = await LoadRowsAsync(catalogs, "Виды оплаты");
+                    _taxRows = taxRows;
+                    BuildSupplierCard(accounts, organizations, employees, supplyKinds);
+                    var documentDate = GetDocumentDate();
+                    var vatItems = await BuildTaxItemsAsync(TaxKind.Vat, taxRows, documentDate);
+                    var salesItems = await BuildTaxItemsAsync(TaxKind.Sales, taxRows, documentDate);
+                    BuildTaxCard(vatItems, salesItems, BuildPaymentItems(paymentKinds));
+                }
 
-                var documentDate = GetDocumentDate();
-                var vatItems = await BuildTaxItemsAsync(TaxKind.Vat, taxRows, documentDate);
-                var salesItems = await BuildTaxItemsAsync(TaxKind.Sales, taxRows, documentDate);
-                var paymentItems = BuildPaymentItems(paymentKinds);
-
-                BuildTaxCard(vatItems, salesItems, paymentItems);
                 BuildCurrencyCard(currencies);
 
                 _materials = materials;
@@ -182,8 +190,6 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 _accountRows = accounts;
-                _sites = sites;
-                _responsiblePersons = BuildResponsibleOptions(responsible, employees);
 
                 ApplyExistingValues();
 
@@ -202,6 +208,8 @@ namespace BIS.ERP.Views.Dialogs
                 }
 
                 await StartupProfiler.MeasureAsync("ТМЗ: строки документа", LoadLinesAsync);
+                if (IsInternalMovement)
+                    LoadMovementSource();
                 UpdateAccountDependencies();
                 UpdateTotals();
 
@@ -350,13 +358,126 @@ namespace BIS.ERP.Views.Dialogs
             return int.TryParse(text, out var order) ? order : int.MaxValue;
         }
 
+        private bool IsInternalMovement => _definition.Table == InventoryDocumentModel.MovementTable;
+
+        private const string SourceSiteColumn = "site_id";
+        private const string SourcePersonColumn = "responsible_person_id";
+        private const string DestinationSiteColumn = "destination_site_id";
+        private const string DestinationPersonColumn = "destination_person_id";
+
+        private void BuildMovementCards(List<Dictionary<string, object>> sites)
+        {
+            SecondPartyCard.Header = "Потребитель";
+            SecondPartyColumn.Width = new GridLength(1, GridUnitType.Star);
+            BuildMovementParty(SupplierPanel, sites, SourceSiteColumn, SourcePersonColumn);
+            BuildMovementParty(TaxPanel, sites, DestinationSiteColumn, DestinationPersonColumn);
+
+            SiteColumn.IsReadOnly = true;
+            PersonColumn.IsReadOnly = true;
+            AccountColumn.Header = "Счёт ТМЗ";
+        }
+
+        private void BuildMovementParty(
+            StackPanel panel, List<Dictionary<string, object>> sites, string siteColumn, string personColumn)
+        {
+            var persons = _responsiblePersons.Select(person => new Dictionary<string, object>
+            {
+                ["Id"] = person.Id,
+                ["Код"] = person.Number,
+                ["Наименование"] = person.Name
+            }).ToList();
+
+            AddReference(panel, "Участок", siteColumn, sites);
+            AddReference(panel, "МОЛ", personColumn, persons);
+            _referenceBoxes[siteColumn].LostKeyboardFocus += (_, _) => UpdateMovementPartyPerson(siteColumn, personColumn);
+        }
+
+        private void UpdateMovementPartyPerson(string siteColumn, string personColumn)
+        {
+            var siteId = ResolveMovementReference(siteColumn);
+            var currentPersonId = ResolveMovementReference(personColumn);
+            var sitePersons = _responsiblePersons.Where(person => siteId.HasValue && person.SiteId == siteId).ToList();
+            var person = sitePersons.Count == 1
+                ? sitePersons[0]
+                : sitePersons.FirstOrDefault(option => option.Id == currentPersonId);
+            _referenceBoxes[personColumn].Text = person?.Display ?? string.Empty;
+            _references[personColumn] = person?.Id;
+        }
+
+        private Guid? ResolveMovementReference(string column)
+        {
+            var text = _referenceBoxes[column].Text.Trim();
+            if (text.Length == 0)
+                return null;
+
+            if (_references.GetValueOrDefault(column) is Guid selectedId)
+                return selectedId;
+
+            if (column is SourcePersonColumn or DestinationPersonColumn)
+            {
+                var siteColumn = column == SourcePersonColumn ? SourceSiteColumn : DestinationSiteColumn;
+                var siteId = ResolveMovementReference(siteColumn);
+                var matches = _responsiblePersons.Where(person => siteId.HasValue && person.SiteId == siteId &&
+                    (string.Equals(person.Number, text, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(person.Name, text, StringComparison.CurrentCultureIgnoreCase) ||
+                     string.Equals(person.Display, text, StringComparison.CurrentCultureIgnoreCase)))
+                    .Take(2).ToList();
+                return matches.Count == 1 ? matches[0].Id : null;
+            }
+
+            return ResolveReference(column, text) as Guid?;
+        }
+
+        private (Guid SiteId, Guid PersonId) ReadMovementParty(string label, string siteColumn, string personColumn)
+        {
+            if (ResolveMovementReference(siteColumn) is not Guid siteId)
+                throw new InvalidOperationException($"«{label}»: выберите участок из справочника.");
+
+            if (ResolveMovementReference(personColumn) is not Guid personId ||
+                !_responsiblePersons.Any(person => person.Id == personId && person.SiteId == siteId))
+                throw new InvalidOperationException($"«{label}»: выберите МОЛ указанного участка.");
+
+            return (siteId, personId);
+        }
+
+        private void LoadMovementSource()
+        {
+            LoadMovementSourceReference("site_id", _lines.Select(line => line.SiteId));
+            LoadMovementSourceReference("responsible_person_id", _lines.Select(line => line.ResponsiblePersonId));
+        }
+
+        private void LoadMovementSourceReference(string column, IEnumerable<Guid?> values)
+        {
+            var ids = values.Distinct().ToList();
+            if (ids.Count != 1 || ids[0] is not Guid id)
+                return;
+
+            var row = _rowsByColumn[column].FirstOrDefault(item => ReadGuid(item) == id);
+            _referenceBoxes[column].Text = row == null ? id.ToString() : FormatReferenceText(row);
+            _references[column] = id;
+        }
+
+        private void ApplyMovementParties()
+        {
+            var source = ReadMovementParty("Поставщик", SourceSiteColumn, SourcePersonColumn);
+            var destination = ReadMovementParty("Потребитель", DestinationSiteColumn, DestinationPersonColumn);
+            _references[DestinationSiteColumn] = destination.SiteId;
+            _references[DestinationPersonColumn] = destination.PersonId;
+
+            foreach (var line in _lines)
+            {
+                line.SiteId = source.SiteId;
+                line.SiteText = FormatLoadedSiteText(source.SiteId);
+                line.ResponsiblePersonId = source.PersonId;
+                line.ResponsiblePersonText = FormatLoadedResponsibleText(source.PersonId);
+            }
+        }
+
         private void BuildSupplierCard(
             List<Dictionary<string, object>> accounts,
             List<Dictionary<string, object>> organizations,
             List<Dictionary<string, object>> employees,
-            List<Dictionary<string, object>> supplyKinds,
-            List<Dictionary<string, object>> sites,
-            List<Dictionary<string, object>> responsible)
+            List<Dictionary<string, object>> supplyKinds)
         {
             AddReference(SupplierPanel, "Счет", "counterparty_account", accounts);
             AddReference(SupplierPanel, "Организация", "organization_id", organizations);
@@ -367,13 +488,6 @@ namespace BIS.ERP.Views.Dialogs
             SetPanelVisibility("organization_id", false);
             SetPanelVisibility("employee_id", false);
             SetPanelVisibility("supply_kind", true);
-
-            // Для внутреннего перемещения нужны получатель и его МОЛ.
-            if (string.Equals(_definition.Name, InventoryDocumentModel.MovementName, StringComparison.OrdinalIgnoreCase))
-            {
-                AddReference(SupplierPanel, "Участок-получатель", "destination_site_id", sites);
-                AddReference(SupplierPanel, "МОЛ-получатель", "destination_person_id", responsible);
-            }
         }
 
         private void BuildTaxCard(
@@ -805,6 +919,23 @@ namespace BIS.ERP.Views.Dialogs
             TextBox box,
             List<Dictionary<string, object>> rows)
         {
+            if (IsInternalMovement && (column is SourcePersonColumn or DestinationPersonColumn))
+            {
+                var siteColumn = column == SourcePersonColumn ? SourceSiteColumn : DestinationSiteColumn;
+                var siteId = ResolveMovementReference(siteColumn);
+                var personIds = _responsiblePersons
+                    .Where(person => siteId.HasValue && person.SiteId == siteId)
+                    .Select(person => person.Id)
+                    .ToHashSet();
+                rows = rows.Where(row => ReadGuid(row) is Guid id && personIds.Contains(id)).ToList();
+                if (rows.Count == 0)
+                {
+                    MessageBox.Show("Выберите участок, к которому привязан МОЛ.", "Документ ТМЗ",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+            }
+
             if (rows.Count == 0)
                 return;
 
@@ -821,7 +952,7 @@ namespace BIS.ERP.Views.Dialogs
                 };
 
                 // Участок в окне выбора показывает и своего МОЛ.
-                if (string.Equals(column, "destination_site_id", StringComparison.OrdinalIgnoreCase))
+                if (column is "site_id" or "destination_site_id")
                     pick["МОЛ"] = SiteResponsibleText(row);
 
                 // У плана счетов в окне выбора нужны ещё «Тип счета» и «Активен».
@@ -847,6 +978,9 @@ namespace BIS.ERP.Views.Dialogs
             var code = Read(selected, "Код");
             box.Text = string.IsNullOrWhiteSpace(code) ? text : $"{code} - {text}".Trim(' ', '-');
             _references[column] = ReadGuid(selected);
+
+            if (IsInternalMovement && (column is SourceSiteColumn or DestinationSiteColumn))
+                UpdateMovementPartyPerson(column, column == SourceSiteColumn ? SourcePersonColumn : DestinationPersonColumn);
 
             if (string.Equals(column, "counterparty_account", StringComparison.OrdinalIgnoreCase))
             {
@@ -2288,6 +2422,9 @@ namespace BIS.ERP.Views.Dialogs
                     }
                 }
 
+                if (IsInternalMovement)
+                    ApplyMovementParties();
+
                 var data = BuildItemData();
                 var lines = _lines.ToList();
 
@@ -2427,7 +2564,11 @@ namespace BIS.ERP.Views.Dialogs
                 {
                     var text = referenceBox.Text?.Trim() ?? string.Empty;
                     if (text.Length == 0)
+                    {
+                        if (IsInternalMovement && (field.DbColumnName is "destination_site_id" or "destination_person_id"))
+                            data[field.Name] = DBNull.Value;
                         continue;
+                    }
 
                     if (_references.TryGetValue(field.DbColumnName, out var known) && known.HasValue)
                     {
@@ -2536,7 +2677,8 @@ namespace BIS.ERP.Views.Dialogs
                 // «Не найдено значение для поля «Вид покупки»: eb608619-…».
                 string.Equals(Read(item, "Id"), text, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Read(item, "Id"), code, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Read(item, "Код", "code"), code, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Read(item, "Код", "code", "Код участка", "site_code"), code, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(FormatReferenceText(item), text, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(Read(item, "Наименование", "ФИО", "Полное наименование", "Наименование материала"),
                     text, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(AccountDisplay(item), text, StringComparison.OrdinalIgnoreCase));

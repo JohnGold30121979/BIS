@@ -14,6 +14,12 @@ namespace BIS.ERP.Services
     {
         private static readonly Stopwatch Total = Stopwatch.StartNew();
 
+        public static void BeginRun()
+        {
+            Total.Restart();
+            SystemLogService.WriteStartupEntry("⏱ Вход в запуск приложения: 0 мс (с запуска 0 мс)");
+        }
+
         public static void Mark(string stage) => Log(stage, 0);
 
         public static T Measure<T>(string stage, Func<T> action)

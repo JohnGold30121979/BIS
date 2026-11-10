@@ -35,7 +35,11 @@ namespace BIS.ERP.Services
             Write(SystemLogLevel.Error, message, source, exception);
         }
 
-        private static void Write(SystemLogLevel level, string message, string? source, Exception? exception)
+        internal static void WriteStartupEntry(string message) =>
+            Write(SystemLogLevel.Info, message, "Startup", null, separateRun: true);
+
+        private static void Write(
+            SystemLogLevel level, string message, string? source, Exception? exception, bool separateRun = false)
         {
             if (string.IsNullOrWhiteSpace(message) && exception == null)
             {
@@ -63,7 +67,11 @@ namespace BIS.ERP.Services
 
                 lock (SyncRoot)
                 {
-                    File.AppendAllText(MainLogFilePath, line, Encoding.UTF8);
+                    var path = MainLogFilePath;
+                    if (separateRun && File.Exists(path) && new FileInfo(path).Length > 0)
+                        line = Environment.NewLine + line;
+
+                    File.AppendAllText(path, line, Encoding.UTF8);
                 }
             }
             catch (Exception ex)
