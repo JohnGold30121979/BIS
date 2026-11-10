@@ -787,7 +787,7 @@ namespace BIS.ERP.Views
                 ProgressText.Text = "⏳ Загрузка...";
 
                 var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
-                if (IsAdvancePaymentsCatalog)
+                if (IsAdvancePaymentsCatalog || IsChartOfAccountsCatalog)
                     data = SortRowsByNumericCode(data).ToList();
                 if (IsCurrencyRatesCatalog)
                     data = data

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 
 namespace BIS.ERP.Services
@@ -288,44 +289,59 @@ namespace BIS.ERP.Services
         public async Task<List<InvoiceLineRow>> GetLinesAsync(Guid invoiceId)
         {
             var accountMap = await LoadAccountMapAsync();
-            var sql = $@"
+
+            var connection = (NpgsqlConnection)_context.Database.GetDbConnection();
+            var result = new List<InvoiceLineRow>();
+            await _context.Database.OpenConnectionAsync();
+            try
+            {
+                // Колонки line_analytics может не быть в старой базе — тогда читаем без неё.
+                // Схема базы не меняется: спрашиваем только information_schema.
+                var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, LinesTableName, "line_analytics");
+                var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = $@"
                 SELECT ""Id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"",
                        ""vat_tax_code"", ""amount_without_tax"", ""vat_rate"", ""vat_amount"",
-                       ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total"", ""line_analytics""
+                       ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total""{analyticsColumn}
                 FROM ""{LinesTableName}""
                 WHERE ""invoice_id"" = @invoiceId
                 ORDER BY ""line_number""";
+                command.Parameters.Add(new NpgsqlParameter("@invoiceId", invoiceId));
 
-            var result = new List<InvoiceLineRow>();
-            await using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-            command.Parameters.Add(new NpgsqlParameter("@invoiceId", invoiceId));
-            await _context.Database.OpenConnectionAsync();
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                var accountCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5);
-                result.Add(new InvoiceLineRow
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
                 {
-                    Id = reader.GetGuid(0),
-                    LineNumber = reader.GetInt32(1),
-                    Name = reader.GetString(2),
-                    UnitName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                    Quantity = reader.IsDBNull(4) ? 1m : reader.GetDecimal(4),
-                    AccountCode = accountCode,
-                    AccountName = ResolveAccount(accountCode, accountMap),
-                    VatTaxCode = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                    AmountWithoutTax = reader.GetDecimal(7),
-                    VatRate = reader.GetDecimal(8),
-                    VatAmount = reader.GetDecimal(9),
-                    SalesTaxCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
-                    SalesTaxRate = reader.GetDecimal(11),
-                    SalesTaxAmount = reader.GetDecimal(12),
-                    LineTotal = reader.GetDecimal(13),
-                    Analytics = LineAnalytics.FromJson(reader.IsDBNull(14) ? null : reader.GetString(14))
-                });
+                    var accountCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5);
+                    result.Add(new InvoiceLineRow
+                    {
+                        Id = reader.GetGuid(0),
+                        LineNumber = reader.GetInt32(1),
+                        Name = reader.GetString(2),
+                        UnitName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                        Quantity = reader.IsDBNull(4) ? 1m : reader.GetDecimal(4),
+                        AccountCode = accountCode,
+                        AccountName = ResolveAccount(accountCode, accountMap),
+                        VatTaxCode = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                        AmountWithoutTax = reader.GetDecimal(7),
+                        VatRate = reader.GetDecimal(8),
+                        VatAmount = reader.GetDecimal(9),
+                        SalesTaxCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                        SalesTaxRate = reader.GetDecimal(11),
+                        SalesTaxAmount = reader.GetDecimal(12),
+                        LineTotal = reader.GetDecimal(13),
+                        Analytics = hasAnalytics && !reader.IsDBNull(14)
+                            ? LineAnalytics.FromJson(reader.GetString(14))
+                            : new LineAnalytics()
+                    });
+                }
             }
-            await _context.Database.CloseConnectionAsync();
+            finally
+            {
+                await _context.Database.CloseConnectionAsync();
+            }
+
             return result;
         }
 
@@ -766,20 +782,24 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@id", id));
                 }
 
+                // Колонки аналитики может не быть в старой базе — тогда вставляем без неё.
+                var hasAnalytics = await TableColumnProbe.HasColumnAsync(
+                    (NpgsqlConnection)_context.Database.GetDbConnection(),
+                    LinesTableName,
+                    "line_analytics",
+                    (NpgsqlTransaction)transaction.GetDbTransaction());
+                var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
+                var analyticsValue = hasAnalytics ? ", @lineAnalytics" : string.Empty;
+
                 var lineNumber = 1;
                 foreach (var line in invoice.Lines)
                 {
                     RecalculateLine(line);
                     line.Id = line.Id == Guid.Empty ? Guid.NewGuid() : line.Id;
                     line.LineNumber = lineNumber;
-                    await _context.Database.ExecuteSqlRawAsync($@"
-                        INSERT INTO ""{LinesTableName}""
-                        (""Id"", ""invoice_id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"", ""vat_tax_code"",
-                         ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"",
-                         ""line_total"", ""line_analytics"", ""CreatedAt"", ""UpdatedAt"")
-                        VALUES (@lineId, @invoiceId, @lineNumber, @name, @unitName, @quantity, @account, @vatTaxCode,
-                                @amountWithoutTax, @vatRate, @vatAmount, @salesTaxCode, @salesTaxRate, @salesTaxAmount,
-                                @lineTotal, @lineAnalytics, NOW(), NOW())",
+
+                    var parameters = new List<object>
+                    {
                         new NpgsqlParameter("@lineId", line.Id),
                         new NpgsqlParameter("@invoiceId", id),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
@@ -794,8 +814,20 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@salesTaxCode", (object?)line.SalesTaxCode ?? DBNull.Value),
                         new NpgsqlParameter("@salesTaxRate", line.SalesTaxRate),
                         new NpgsqlParameter("@salesTaxAmount", line.SalesTaxAmount),
-                        new NpgsqlParameter("@lineTotal", line.LineTotal),
-                        new NpgsqlParameter("@lineAnalytics", line.Analytics.ToJson()));
+                        new NpgsqlParameter("@lineTotal", line.LineTotal)
+                    };
+                    if (hasAnalytics)
+                        parameters.Add(new NpgsqlParameter("@lineAnalytics", line.Analytics.ToJson()));
+
+                    await _context.Database.ExecuteSqlRawAsync($@"
+                        INSERT INTO ""{LinesTableName}""
+                        (""Id"", ""invoice_id"", ""line_number"", ""name"", ""unit_name"", ""quantity"", ""account_code"", ""vat_tax_code"",
+                         ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_code"", ""sales_tax_rate"", ""sales_tax_amount"",
+                         ""line_total""{analyticsColumn}, ""CreatedAt"", ""UpdatedAt"")
+                        VALUES (@lineId, @invoiceId, @lineNumber, @name, @unitName, @quantity, @account, @vatTaxCode,
+                                @amountWithoutTax, @vatRate, @vatAmount, @salesTaxCode, @salesTaxRate, @salesTaxAmount,
+                                @lineTotal{analyticsValue}, NOW(), NOW())",
+                        parameters.ToArray());
                 }
 
                 await PostInvoiceWithinCurrentTransactionAsync(invoice, id, existing?.DocNumber);

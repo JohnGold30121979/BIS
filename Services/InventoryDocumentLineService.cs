@@ -30,6 +30,9 @@ namespace BIS.ERP.Services
         private Guid? _siteId;
         private string _siteText = string.Empty;
         private Guid? _responsiblePersonId;
+        private string _responsiblePersonText = string.Empty;
+        private string _debitAccountText = string.Empty;
+        private string _creditAccountText = string.Empty;
         private decimal _quantity;
         private decimal _price;
         private decimal _amountWithoutTax;
@@ -62,6 +65,27 @@ namespace BIS.ERP.Services
         /// <summary>Текст ячейки «Участок»: наименование участка (вводится или выбирается).</summary>
         public string SiteText { get => _siteText; set => Set(ref _siteText, value); }
         public Guid? ResponsiblePersonId { get => _responsiblePersonId; set => Set(ref _responsiblePersonId, value); }
+
+        /// <summary>Текст ячейки «МОЛ»: «Табельный номер - ФИО» выбранного МОЛ.</summary>
+        public string ResponsiblePersonText
+        {
+            get => _responsiblePersonText;
+            set => Set(ref _responsiblePersonText, value);
+        }
+
+        /// <summary>Счёт дебета проводки строки — заполняется в окне списка документов.</summary>
+        public string DebitAccountText
+        {
+            get => _debitAccountText;
+            set => Set(ref _debitAccountText, value);
+        }
+
+        /// <summary>Счёт кредита проводки строки — заполняется в окне списка документов.</summary>
+        public string CreditAccountText
+        {
+            get => _creditAccountText;
+            set => Set(ref _creditAccountText, value);
+        }
         public decimal Quantity { get => _quantity; set => Set(ref _quantity, value); }
         public decimal Price { get => _price; set => Set(ref _price, value); }
         public decimal AmountWithoutTax { get => _amountWithoutTax; set => Set(ref _amountWithoutTax, value); }
@@ -94,6 +118,34 @@ namespace BIS.ERP.Services
         }
     }
 
+    /// <summary>
+    /// Вариант выбора МОЛ в строке документа ТМЗ: ФИО, табельный номер и участок,
+    /// за которым МОЛ закреплён (по нему МОЛ подставляется при выборе участка).
+    /// </summary>
+    public sealed class InventoryResponsiblePerson
+    {
+        public Guid Id { get; init; }
+        public Guid? SiteId { get; init; }
+
+        /// <summary>ФИО из справочника «МОЛ».</summary>
+        public string Name { get; init; } = string.Empty;
+
+        /// <summary>Табельный номер сотрудника; может быть пустым.</summary>
+        public string Number { get; init; } = string.Empty;
+
+        /// <summary>Строка списка и ячейки: «Табельный номер - ФИО».</summary>
+        public string Display
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(Number))
+                    return Name;
+
+                return string.IsNullOrWhiteSpace(Name) ? Number : $"{Number} - {Name}";
+            }
+        }
+    }
+
     /// <summary>Чтение и запись строк документов ТМЗ.</summary>
     public sealed class InventoryDocumentLineService
     {
@@ -108,12 +160,16 @@ namespace BIS.ERP.Services
         {
             var result = new List<InventoryLineRow>();
             await using var connection = await OpenConnectionAsync();
+            var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, linesTable, "line_analytics");
             await using var command = connection.CreateCommand();
+            // Колонка аналитики появилась позже самих таблиц строк: если её нет,
+            // читаем без неё — открытие документа не падает с 42703.
+            var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
             command.CommandText = $@"
                 SELECT ""Id"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"", ""account_code"",
                        ""site_id"", ""responsible_person_id"", ""quantity"", ""price"", ""amount_without_tax"",
                        ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total"",
-                       ""amount_currency"", ""description"", ""line_analytics""
+                       ""amount_currency"", ""description""{analyticsColumn}
                 FROM ""{linesTable}""
                 WHERE ""{parentColumn}"" = @header
                 ORDER BY ""line_number""";
@@ -142,7 +198,9 @@ namespace BIS.ERP.Services
                     LineTotal = reader.GetDecimal(15),
                     AmountCurrency = reader.GetDecimal(16),
                     Description = reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
-                    Analytics = BIS.ERP.Models.LineAnalytics.FromJson(reader.IsDBNull(18) ? null : reader.GetString(18))
+                    Analytics = hasAnalytics && !reader.IsDBNull(18)
+                        ? BIS.ERP.Models.LineAnalytics.FromJson(reader.GetString(18))
+                        : new BIS.ERP.Models.LineAnalytics()
                 });
             }
 
@@ -162,6 +220,13 @@ namespace BIS.ERP.Services
                 ?? throw new InvalidOperationException("Строки ТМЗ сохраняются в транзакции документа."));
             var connection = (NpgsqlConnection)_context.Database.GetDbConnection();
 
+            // В старой базе колонки аналитики может не быть: тогда пишем без неё —
+            // документ сохраняется, аналитика строк просто не попадёт в эту таблицу.
+            // Схема базы не меняется.
+            var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, linesTable, "line_analytics", transaction);
+            var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
+            var analyticsValue = hasAnalytics ? ", @lineAnalytics" : string.Empty;
+
             await using (var delete = connection.CreateCommand())
             {
                 delete.Transaction = transaction;
@@ -180,12 +245,12 @@ namespace BIS.ERP.Services
                         (""Id"", ""{parentColumn}"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"",
                          ""account_code"", ""site_id"", ""responsible_person_id"", ""quantity"", ""price"",
                          ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"",
-                         ""line_total"", ""amount_currency"", ""description"", ""line_analytics"", ""CreatedAt"", ""UpdatedAt"")
+                         ""line_total"", ""amount_currency"", ""description""{analyticsColumn}, ""CreatedAt"", ""UpdatedAt"")
                     VALUES
                         (@id, @header, @line_number, @material_id, @material_name, @unit_name,
                          @account_code, @site_id, @responsible_person_id, @quantity, @price,
                          @amount_without_tax, @vat_rate, @vat_amount, @sales_tax_rate, @sales_tax_amount,
-                         @line_total, @amount_currency, @description, @lineAnalytics, NOW(), NOW())";
+                         @line_total, @amount_currency, @description{analyticsValue}, NOW(), NOW())";
 
                 line.Recalculate();
                 line.LineNumber = number++;
@@ -209,7 +274,8 @@ namespace BIS.ERP.Services
                 insert.Parameters.Add(new NpgsqlParameter("line_total", line.LineTotal));
                 insert.Parameters.Add(new NpgsqlParameter("amount_currency", line.AmountCurrency));
                 insert.Parameters.Add(new NpgsqlParameter("description", line.Description ?? string.Empty));
-                insert.Parameters.Add(new NpgsqlParameter("lineAnalytics", line.Analytics.ToJson()));
+                if (hasAnalytics)
+                    insert.Parameters.Add(new NpgsqlParameter("lineAnalytics", line.Analytics.ToJson()));
 
                 await insert.ExecuteNonQueryAsync();
             }

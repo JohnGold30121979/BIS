@@ -5,7 +5,12 @@
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource AppSurfaceBrush}">
 
-    <Grid Margin="14">
+    <!-- Фон и цвет текста — на самом содержимом: в MDI-вкладке окно не рисуется,
+         и без этого диалог был прозрачным — на белой подложке вкладки тёмные поля
+         выглядели «чужой гаммой» при тёмной теме. Фон — цвет поверхности: в светлой
+         теме белый (без серого оттенка), в тёмной — цвет темы. -->
+    <Grid Margin="14" Background="{DynamicResource AppSurfaceBrush}"
+          TextElement.Foreground="{DynamicResource AppBodyTextBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -61,7 +66,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBox x:Name="ExchangeRateBox" Height="28" Padding="6,3,6,3"/>
-                        <Button Grid.Column="1" Content="?" Width="28" Height="28" Margin="4,0,0,0"
+                        <Button x:Name="RequestExchangeRateButton" Grid.Column="1" Content="?" Width="28" Height="28" Margin="4,0,0,0"
                                 Padding="0"
                                 HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                                 Click="OnRequestExchangeRateClick"
@@ -76,7 +81,7 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="3" VerticalAlignment="Bottom">
-                    <Button Content="Текущий курс" Width="110" Height="28" Padding="0"
+                    <Button x:Name="CurrentRateButton" Content="Текущий курс" Width="110" Height="28" Padding="0"
                             Click="OnCurrentRateClick"
                             ToolTip="Подставить последний известный курс валюты"/>
                 </StackPanel>
@@ -150,7 +155,7 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="60" IsReadOnly="True"/>
+                <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="46" IsReadOnly="True"/>
                 <!-- Дебет — как счёт в шапке: поле ввода с кнопкой «?» (план счетов). -->
                 <DataGridTemplateColumn x:Name="AccountColumn" Header="Дебет" Width="180">
                     <DataGridTemplateColumn.CellTemplate>
@@ -178,7 +183,7 @@
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <!-- Участок — тоже поле с ручным вводом и кнопкой «?». -->
-                <DataGridTemplateColumn Header="Участок" Width="170">
+                <DataGridTemplateColumn x:Name="SiteColumn" Header="Участок" Width="170">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Grid>
@@ -202,12 +207,39 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}" Width="60"/>
-                <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="90"/>
+                <!-- МОЛ — как «Участок»: поле ввода + «?» (окно выбора МОЛ).
+                     При выборе участка МОЛ участка подставляется автоматически. -->
+                <DataGridTemplateColumn x:Name="PersonColumn" Header="МОЛ" Width="190"
+                                        SortMemberPath="ResponsiblePersonText">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Height="22" Padding="2,0,2,0"
+                                         VerticalContentAlignment="Center"
+                                         BorderThickness="0" Background="Transparent"
+                                         Text="{Binding ResponsiblePersonText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Введите табельный номер или ФИО; «?» — выбор из справочника МОЛ"
+                                         LostFocus="OnResponsibleTextLostFocus"/>
+                                <Button Grid.Column="1" Content="?" Width="24" Height="22" Padding="0"
+                                        Margin="2,0,0,0"
+                                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                                        ToolTip="Выбрать МОЛ из справочника"
+                                        Tag="responsible"
+                                        Click="OnPickResponsibleClick"/>
+                            </Grid>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}" Width="46"/>
+                <DataGridTextColumn Header="К-во" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="60"/>
                 <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
                 <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
-                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="100" IsReadOnly="True"/>
-                <DataGridTextColumn Header="Сумма НСП" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100" IsReadOnly="True"/>
+                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="70" IsReadOnly="True"/>
+                <DataGridTextColumn Header="НСП" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="70" IsReadOnly="True"/>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -218,16 +250,20 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Orientation="Horizontal">
-                <Button Content="Добавить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
-                <Button Content="Удалить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnDeleteLineClick"/>
-                <Button Content="Пересчет" Width="110" Height="32" Margin="0,0,8,0" Click="OnRecalculateClick"/>
+                <Button x:Name="AddLineButton" Content="Добавить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnAddLineClick"/>
+                <Button x:Name="DeleteLineButton" Content="Удалить строку" Width="130" Height="32" Margin="0,0,8,0" Click="OnDeleteLineClick"/>
+                <Button x:Name="RecalculateButton" Content="Пересчет" Width="110" Height="32" Margin="0,0,8,0" Click="OnRecalculateClick"/>
+                <TextBlock x:Name="ModeHintText"
+                           Text="Режим просмотра: изменения недоступны. Для правки закройте окно и нажмите «Редактировать»."
+                           Foreground="{DynamicResource AppSecondaryTextBrush}" FontStyle="Italic" VerticalAlignment="Center"
+                           Visibility="Collapsed"/>
             </StackPanel>
 
             <!-- Завершающие кнопки — как в счёте-фактуре, справа под таблицей. -->
             <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <Button x:Name="SaveButton" Content="Запись" Width="110" Height="32" Margin="0,0,8,0"
                         Click="OnSaveClick" Background="{DynamicResource AppAccentBrush}" Foreground="White"/>
-                <Button Content="Отмена" Width="110" Height="32" Click="OnCancelClick"/>
+                <Button x:Name="CancelButton" Content="Отмена" Width="110" Height="32" Click="OnCancelClick"/>
             </StackPanel>
         </Grid>
 

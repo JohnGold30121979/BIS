@@ -25,7 +25,7 @@
 
             <TextBlock Grid.Column="0" Text="Поиск:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox x:Name="SearchBox" Grid.Column="1" Height="30" MinWidth="160" Padding="8,4"
-                     TextChanged="SearchBox_TextChanged" ToolTip="Введите текст для поиска"/>
+                     TextChanged="SearchBox_TextChanged" ToolTip="Поиск с начала записи: код или начало наименования"/>
         </Grid>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,10">

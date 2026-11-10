@@ -1,6 +1,7 @@
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using System;
 using System.Collections.Generic;
@@ -105,21 +106,25 @@ namespace BIS.ERP.Services
             if (documentId == Guid.Empty)
                 return result;
 
-            var sql = $@"
-                SELECT ""Id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
-                       ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
-                       ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"",
-                       ""amount"", ""description"", ""line_analytics""
-                FROM {QuoteIdentifier(LinesTableName)}
-                WHERE ""advance_id"" = @advanceId
-                ORDER BY ""line_number"";";
-
-            await using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-            command.Parameters.Add(new NpgsqlParameter("@advanceId", documentId));
+            var connection = (NpgsqlConnection)_context.Database.GetDbConnection();
             await _context.Database.OpenConnectionAsync();
             try
             {
+                // Колонки line_analytics может не быть в старой базе — тогда читаем без неё.
+                var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, LinesTableName, "line_analytics");
+                var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = $@"
+                SELECT ""Id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
+                       ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
+                       ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"",
+                       ""amount"", ""description""{analyticsColumn}
+                FROM {QuoteIdentifier(LinesTableName)}
+                WHERE ""advance_id"" = @advanceId
+                ORDER BY ""line_number"";";
+                command.Parameters.Add(new NpgsqlParameter("@advanceId", documentId));
+
                 await using var reader = await command.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                     result.Add(ReadLine(reader));
@@ -143,21 +148,25 @@ namespace BIS.ERP.Services
             if (ids.Length == 0)
                 return result;
 
-            var sql = $@"
-                SELECT ""advance_id"", ""Id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
-                       ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
-                       ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"",
-                       ""amount"", ""description"", ""line_analytics""
-                FROM {QuoteIdentifier(LinesTableName)}
-                WHERE ""advance_id"" = ANY(@advanceIds)
-                ORDER BY ""advance_id"", ""line_number"";";
-
-            await using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-            command.Parameters.Add(new NpgsqlParameter("@advanceIds", ids));
+            var connection = (NpgsqlConnection)_context.Database.GetDbConnection();
             await _context.Database.OpenConnectionAsync();
             try
             {
+                // Колонки line_analytics может не быть в старой базе — тогда читаем без неё.
+                var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, LinesTableName, "line_analytics");
+                var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = $@"
+                SELECT ""advance_id"", ""Id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
+                       ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
+                       ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"",
+                       ""amount"", ""description""{analyticsColumn}
+                FROM {QuoteIdentifier(LinesTableName)}
+                WHERE ""advance_id"" = ANY(@advanceIds)
+                ORDER BY ""advance_id"", ""line_number"";";
+                command.Parameters.Add(new NpgsqlParameter("@advanceIds", ids));
+
                 await using var reader = await command.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
@@ -199,7 +208,10 @@ namespace BIS.ERP.Services
                 ExchangeRate = reader.IsDBNull(offset + 13) ? 0m : reader.GetDecimal(offset + 13),
                 Amount = reader.IsDBNull(offset + 14) ? 0m : reader.GetDecimal(offset + 14),
                 Description = reader.IsDBNull(offset + 15) ? string.Empty : reader.GetString(offset + 15),
-                Analytics = LineAnalytics.FromJson(reader.IsDBNull(offset + 16) ? null : reader.GetString(offset + 16))
+                // Колонки может не быть (старая база) — тогда аналитика пустая.
+                Analytics = reader.FieldCount > offset + 16 && !reader.IsDBNull(offset + 16)
+                    ? LineAnalytics.FromJson(reader.GetString(offset + 16))
+                    : new LineAnalytics()
             };
         }
 /// <summary>
@@ -220,19 +232,20 @@ namespace BIS.ERP.Services
                     $@"DELETE FROM {linesTable} WHERE ""advance_id"" = @advanceId;",
                     new NpgsqlParameter("@advanceId", documentId));
 
+                // Колонки аналитики может не быть в старой базе — тогда вставляем без неё.
+                var hasAnalytics = await TableColumnProbe.HasColumnAsync(
+                    (NpgsqlConnection)_context.Database.GetDbConnection(),
+                    LinesTableName,
+                    "line_analytics",
+                    (NpgsqlTransaction)transaction.GetDbTransaction());
+                var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
+                var analyticsValue = hasAnalytics ? ", @lineAnalytics" : string.Empty;
+
                 var lineNumber = 1;
                 foreach (var line in lines ?? Array.Empty<AdvancePaymentLine>())
                 {
-                    await _context.Database.ExecuteSqlRawAsync($@"
-                        INSERT INTO {linesTable}
-                        (""Id"", ""advance_id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
-                         ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
-                         ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"", ""amount"",
-                         ""description"", ""line_analytics"", ""CreatedAt"", ""UpdatedAt"")
-                        VALUES (@id, @advanceId, @lineNumber, @lineDate, @pairId, @pairCode, @pairName,
-                                @debitAccount, @creditAccount, @expenseAccount, @expenseAccountName,
-                                @currencyId, @currencyName, @amountCurrency, @exchangeRate, @amount,
-                                @description, @lineAnalytics, NOW(), NOW())",
+                    var parameters = new List<object>
+                    {
                         new NpgsqlParameter("@id", line.Id == Guid.Empty ? Guid.NewGuid() : line.Id),
                         new NpgsqlParameter("@advanceId", documentId),
                         new NpgsqlParameter("@lineNumber", lineNumber++),
@@ -249,8 +262,22 @@ namespace BIS.ERP.Services
                         new NpgsqlParameter("@amountCurrency", line.AmountCurrency),
                         new NpgsqlParameter("@exchangeRate", line.ExchangeRate),
                         new NpgsqlParameter("@amount", line.Amount),
-                        new NpgsqlParameter("@description", Nullable(line.Description)),
-                        new NpgsqlParameter("@lineAnalytics", line.Analytics.ToJson()));
+                        new NpgsqlParameter("@description", Nullable(line.Description))
+                    };
+                    if (hasAnalytics)
+                        parameters.Add(new NpgsqlParameter("@lineAnalytics", line.Analytics.ToJson()));
+
+                    await _context.Database.ExecuteSqlRawAsync($@"
+                        INSERT INTO {linesTable}
+                        (""Id"", ""advance_id"", ""line_number"", ""line_date"", ""pair_id"", ""pair_code"", ""pair_name"",
+                         ""debit_account"", ""credit_account"", ""expense_account"", ""expense_account_name"",
+                         ""currency_id"", ""currency_name"", ""amount_currency"", ""exchange_rate"", ""amount"",
+                         ""description""{analyticsColumn}, ""CreatedAt"", ""UpdatedAt"")
+                        VALUES (@id, @advanceId, @lineNumber, @lineDate, @pairId, @pairCode, @pairName,
+                                @debitAccount, @creditAccount, @expenseAccount, @expenseAccountName,
+                                @currencyId, @currencyName, @amountCurrency, @exchangeRate, @amount,
+                                @description{analyticsValue}, NOW(), NOW())",
+                        parameters.ToArray());
                 }
 
                 await transaction.CommitAsync();

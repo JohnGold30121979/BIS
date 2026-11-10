@@ -13,9 +13,13 @@
         <GroupBox Header="Период" Grid.Row="0" Margin="0,0,0,5">
             <StackPanel Orientation="Horizontal" Margin="5">
                 <TextBlock Text="Начало:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                <DatePicker x:Name="dpStartDate" SelectedDate="{Binding StartDate}" Width="120" Margin="0,0,10,0"/>
+                <!-- Даты периода выставляются кодом (конструктор и btnRefresh_Click).
+                     Привязки SelectedDate="{Binding StartDate}" / "EndDate" давали
+                     ошибку привязки: DataContext вкладки — не модель окна,
+                     а MdiDocumentItem рабочей области. -->
+                <DatePicker x:Name="dpStartDate" Width="120" Margin="0,0,10,0"/>
                 <TextBlock Text="Конец:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                <DatePicker x:Name="dpEndDate" SelectedDate="{Binding EndDate}" Width="120" Margin="0,0,10,0"/>
+                <DatePicker x:Name="dpEndDate" Width="120" Margin="0,0,10,0"/>
                 <Button x:Name="btnRefresh" Content="Обновить" Click="btnRefresh_Click" Width="100" Margin="5,0"/>
             </StackPanel>
         </GroupBox>

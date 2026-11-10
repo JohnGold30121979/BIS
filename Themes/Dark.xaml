@@ -59,6 +59,16 @@
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#2A3A4A"/>
     <Color x:Key="AppHighlightColor">#2A3A4A</Color>
 
+    <!-- Выделение узла в дереве навигации (см. Themes/Default.xaml — те же ключи).
+         Фон #2C79B8 контрастен и к панели #1E1E2A, и к наведению #2A3A4A. -->
+    <SolidColorBrush x:Key="AppNavigationSelectionBrush" Color="#2C79B8"/>
+    <Color x:Key="AppNavigationSelectionColor">#2C79B8</Color>
+    <SolidColorBrush x:Key="AppNavigationSelectionTextBrush" Color="#FFFFFF"/>
+    <Color x:Key="AppNavigationSelectionTextColor">#FFFFFF</Color>
+    <SolidColorBrush x:Key="AppNavigationSelectionAccentBrush" Color="#64B5F6"/>
+    <!-- Наведение: светлее панели (#1E1E2A), темнее выделения (#2C79B8). -->
+    <SolidColorBrush x:Key="AppNavigationHoverBrush" Color="#303748"/>
+
     <SolidColorBrush x:Key="ConfiguratorSidebarBackgroundBrush" Color="#151923"/>
     <SolidColorBrush x:Key="ConfiguratorHeaderBackgroundBrush" Color="#0A0D14"/>
     <SolidColorBrush x:Key="ConfiguratorSidebarCardBrush" Color="#232A3D"/>

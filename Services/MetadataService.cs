@@ -406,6 +406,14 @@ namespace BIS.ERP.Services
                     orderParts.Add("\"code\"");
             }
 
+            // План счетов — по коду: иначе список шёл в порядке вставки (CreatedAt)
+            // и счета стояли вперемешку.
+            if (catalog.Name.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase) &&
+                columns.Contains("code"))
+            {
+                orderParts.Add("\"code\"");
+            }
+
             if (columns.Contains("CreatedAt"))
                 orderParts.Add("\"CreatedAt\"");
             else if (columns.Contains("Id"))
@@ -2513,6 +2521,15 @@ namespace BIS.ERP.Services
             var documentNumber = GetDocumentNumberFromData(record) ?? string.Empty;
             var postingDate = GetDateValue(record, "doc_date", "Дата") ?? DateTime.Today;
             var headerAccount = GetStringValue(record, "counterparty_account", "Счет").Trim();
+
+            // «Счет» шапки — ссылка (uuid). В проводку пишем код счёта: иначе в журнале
+            // и в деталях проводки вместо кредитового счёта стоит идентификатор.
+            if (Guid.TryParse(headerAccount, out var headerAccountId))
+            {
+                var headerAccountCode = await GetAccountCodeById(headerAccountId);
+                if (!string.IsNullOrWhiteSpace(headerAccountCode))
+                    headerAccount = headerAccountCode;
+            }
             var rate = GetDecimalValue(record, "exchange_rate", "Курс валюты", "Курс");
             var currencyId = ReadRecordGuid(record, "currency_id", "Валюта");
             var organizationId = ReadRecordGuid(record, "organization_id", "Организация");
@@ -3503,6 +3520,36 @@ namespace BIS.ERP.Services
                 System.Diagnostics.Debug.WriteLine($"StackTrace: {ex.StackTrace}");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Проведение документа ТМЗ при записи: отдельной кнопки «Провести» больше нет.
+        /// Повторная запись уже проведённого документа сначала снимает старые проводки
+        /// и признак «Проведен» — иначе <see cref="PostDocumentAsync"/> ответил бы
+        /// «Документ уже проведён!».
+        /// </summary>
+        public async Task PostInventoryDocumentAsync(Guid documentId, Guid recordId)
+        {
+            var document = await _context.MetadataObjects
+                .Include(item => item.Fields)
+                .FirstOrDefaultAsync(item => item.Id == documentId)
+                ?? throw new InvalidOperationException("Документ не найден.");
+
+            if (!IsInventoryDocumentName(document.Name))
+            {
+                await PostDocumentAsync(documentId, recordId);
+                return;
+            }
+
+            // Проводки пересоздаются целиком: старые могли остаться от прошлой записи.
+            await DeleteInventoryPostingsAsync(document, recordId);
+            await _context.Database.ExecuteSqlRawAsync(
+                $@"UPDATE {QuoteIdentifier(document.TableName)}
+                   SET ""is_posted"" = false, ""UpdatedAt"" = NOW()
+                   WHERE ""Id"" = @id;",
+                new NpgsqlParameter("@id", recordId));
+
+            await PostDocumentAsync(documentId, recordId);
         }
 
         public async Task UnpostDocumentAsync(Guid documentId, Guid recordId)

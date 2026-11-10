@@ -10,6 +10,14 @@ namespace BIS.ERP.Services;
 
 public static class MdiDialogService
 {
+    /// <summary>
+    /// Метка окна (<see cref="FrameworkElement.Tag"/>): окно само управляет прокруткой.
+    /// MDI-хост не оборачивает его содержимое во внешний ScrollViewer — иначе тот
+    /// измеряет содержимое неограниченной высотой, таблица растягивается на все строки
+    /// и вместе с ней прокручиваются поиск и кнопки сверху.
+    /// </summary>
+    public const string ManageOwnScrollTag = "Mdi:ManageOwnScroll";
+
     private static readonly Dictionary<object, HostedDialogSession> HostedDialogs = new();
 
     private static readonly Dictionary<object, HostedControlSession> HostedControlSessions = new();

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BIS.ERP.Services;
 
 namespace BIS.ERP.Views.Controls;
 
@@ -58,7 +59,7 @@ public sealed class MdiDialogHostControl : UserControl
         // вкладки: в MDI-режиме свойства WindowState/WindowStartupLocation сами
         // по себе не действуют, поэтому учитываем их здесь явно.
         if (fillWorkspace || sourceWindow.WindowState == WindowState.Maximized)
-            return BuildFullWorkspaceContent(body);
+            return BuildFullWorkspaceContent(sourceWindow, body, ManagesOwnScroll(sourceWindow));
 
         var targetWidth = NormalizeDimension(sourceWindow.Width, 760, 1500);
         var targetHeight = NormalizeDimension(sourceWindow.Height, 420, 920);
@@ -82,15 +83,10 @@ public sealed class MdiDialogHostControl : UserControl
                 Opacity = 0.16,
                 Color = Color.FromRgb(35, 56, 77)
             },
-            Child = new ScrollViewer
-            {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Stretch,
-                Content = body
-            }
+            Child = Scrollable(body, ManagesOwnScroll(sourceWindow))
         };
+
+        ApplyDialogBackground(card, sourceWindow);
 
         var root = new Grid
         {
@@ -110,7 +106,8 @@ public sealed class MdiDialogHostControl : UserControl
             element.DataContext = sourceWindow.DataContext;
     }
 
-    private static UIElement BuildFullWorkspaceContent(UIElement body)
+    private static UIElement BuildFullWorkspaceContent(
+        Window sourceWindow, UIElement body, bool managesOwnScroll)
     {
         if (body is FrameworkElement element)
         {
@@ -135,18 +132,57 @@ public sealed class MdiDialogHostControl : UserControl
             Padding = new Thickness(8),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
-            Child = new ScrollViewer
-            {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Stretch,
-                Content = body
-            }
+            Child = Scrollable(body, managesOwnScroll)
         };
+
+        ApplyDialogBackground(panel, sourceWindow);
 
         root.Children.Add(panel);
         return root;
+    }
+
+    /// <summary>
+    /// Подложка под содержимым окна: если диалог сам задал фон окна (например, документы ТМЗ
+    /// с тёмной темой), красим рамку вкладки тем же фоном — иначе вокруг диалога
+    /// остаётся белая кайма и гамма выглядит развалившейся.
+    /// </summary>
+    private static void ApplyDialogBackground(Border panel, Window sourceWindow)
+    {
+        if (Equals(sourceWindow.ReadLocalValue(Window.BackgroundProperty), DependencyProperty.UnsetValue))
+            return;
+
+        panel.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding(nameof(Window.Background))
+        {
+            Source = sourceWindow,
+            Mode = System.Windows.Data.BindingMode.OneWay
+        });
+    }
+
+    /// <summary>
+    /// Оборачивает содержимое окна в ScrollViewer — кроме окон, которые сами управляют
+    /// прокруткой (таблица с закреплёнными поиском и кнопками). Внешний ScrollViewer
+    /// в этом случае только мешает: он даёт содержимому бесконечную высоту, таблица
+    /// растёт на все строки и прокручивается вместе с поиском.
+    /// </summary>
+    private static UIElement Scrollable(UIElement body, bool managesOwnScroll)
+    {
+        if (managesOwnScroll)
+            return body;
+
+        return new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Content = body
+        };
+    }
+
+    private static bool ManagesOwnScroll(Window sourceWindow)
+    {
+        return sourceWindow.Tag is string tag &&
+               string.Equals(tag, MdiDialogService.ManageOwnScrollTag, StringComparison.OrdinalIgnoreCase);
     }
 
     private static double NormalizeDimension(double value, double fallback, double max)

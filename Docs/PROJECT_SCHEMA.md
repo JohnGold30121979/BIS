@@ -601,7 +601,7 @@ flowchart TD
 | `PostingDetailsDialog` | Просмотр деталей проводки. |
 | `PostingSearchDialog` | Поиск проводки. |
 | `PrintFormSelectionDialog` | Выбор печатной формы. |
-| `ReferenceSelectionDialog` | Универсальный выбор элемента справочника. |
+| `ReferenceSelectionDialog` | Универсальный выбор элемента справочника; поиск — по первым символам кода/наименования (`StartsWith`), составная подпись «1010 - Касса» находится и по коду, и по наименованию. |
 | `TerminationDialog` | Увольнение/завершение. |
 | `TurnoversDialog` | Обороты по счету. |
 | `UserProfileDialog` | Профиль текущего пользователя, отображение роли/инфобазы и смена пароля в текущей инфобазе. |

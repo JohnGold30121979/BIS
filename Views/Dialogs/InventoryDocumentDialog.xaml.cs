@@ -37,12 +37,15 @@ namespace BIS.ERP.Views.Dialogs
         private readonly InventoryDocumentModel.DocumentDefinition _definition;
         private readonly Guid? _recordId;
         private readonly Dictionary<string, object?> _existing;
+        // Просмотр — как в счёте-фактуре: все контролы только для чтения.
+        private readonly bool _readOnly;
 
         private readonly ObservableCollection<InventoryLineRow> _lines = new();
         private BIS.ERP.Views.Controls.LineAnalyticsColumns? _lineAnalyticsColumns;
         private readonly Dictionary<string, Control> _editors = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Guid?> _references = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, TextBox> _referenceBoxes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Button> _referenceButtons = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, StackPanel> _referencePanels = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<Dictionary<string, object>>> _rowsByColumn = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Guid, Dictionary<string, object>> _materialRows = new();
@@ -50,6 +53,7 @@ namespace BIS.ERP.Views.Dialogs
         private List<Dictionary<string, object>> _currencyRows = new();
         private List<Dictionary<string, object>> _accountRows = new();
         private List<Dictionary<string, object>> _sites = new();
+        private List<InventoryResponsiblePerson> _responsiblePersons = new();
         private MetadataObject? _materialsCatalog;
         // Защита от двойного открытия окна выбора (мышь + Click).
         private bool _pickerOpening;
@@ -75,6 +79,9 @@ namespace BIS.ERP.Views.Dialogs
         private DatePicker? _dateBox;
         private Guid? _defaultEntryId;
         private List<Dictionary<string, object>> _taxRows = new();
+        // Ставки шапки, уже применённые к строкам: пока их не меняют, строки не трогаем.
+        private decimal? _lastVatRate;
+        private decimal? _lastSalesTaxRate;
 
         public Guid SavedRecordId { get; private set; }
 
@@ -83,7 +90,8 @@ namespace BIS.ERP.Views.Dialogs
             MetadataService metadataService,
             AppDbContext context,
             Guid? recordId = null,
-            Dictionary<string, object>? existingData = null)
+            Dictionary<string, object>? existingData = null,
+            bool readOnly = false)
         {
             InitializeComponent();
 
@@ -92,6 +100,7 @@ namespace BIS.ERP.Views.Dialogs
             _lineService = new InventoryDocumentLineService(context);
             _taxService = new TaxService(metadataService);
             _recordId = recordId;
+            _readOnly = readOnly;
             _existing = existingData == null
                 ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                 : existingData.ToDictionary(kvp => kvp.Key, kvp => (object?)kvp.Value, StringComparer.OrdinalIgnoreCase);
@@ -100,11 +109,13 @@ namespace BIS.ERP.Views.Dialogs
                               string.Equals(item.Name, document.Name, StringComparison.OrdinalIgnoreCase))
                           ?? InventoryDocumentModel.Documents[0];
 
-            Title = recordId.HasValue
-                ? $"Документ ТМЗ: {document.Name}"
-                : $"Новый документ ТМЗ: {document.Name}";
+            Title = readOnly
+                ? $"Просмотр: {document.Name}"
+                : recordId.HasValue
+                    ? $"Документ ТМЗ: {document.Name}"
+                    : $"Новый документ ТМЗ: {document.Name}";
 
-            SaveButton.Content = recordId.HasValue ? "Запись" : "Добавить";
+            SaveButton.Content = readOnly ? "Закрыть" : recordId.HasValue ? "Запись" : "Добавить";
 
             LinesGrid.ItemsSource = _lines;
 
@@ -127,6 +138,7 @@ namespace BIS.ERP.Views.Dialogs
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
                     _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
                     row => ((InventoryLineRow)row).AccountCode, nameof(InventoryLineRow.AccountCode),
+                    readOnly: _readOnly,
                     nativeLinks: new[] { "materials", "sites", "currencies" }, afterColumn: AccountColumn);
 
                 var accounts = await LoadRowsAsync(catalogs, "План счетов");
@@ -167,6 +179,7 @@ namespace BIS.ERP.Views.Dialogs
 
                 _accountRows = accounts;
                 _sites = sites;
+                _responsiblePersons = BuildResponsibleOptions(responsible, employees);
 
                 ApplyExistingValues();
 
@@ -174,6 +187,7 @@ namespace BIS.ERP.Views.Dialogs
                     ApplyDefaultSelections();
 
                 ApplyTaxRates();
+                RememberHeaderRates();
 
                 if (!_recordId.HasValue &&
                     _editors.TryGetValue("doc_number", out var numberEditor) &&
@@ -186,7 +200,11 @@ namespace BIS.ERP.Views.Dialogs
                 await LoadLinesAsync();
                 UpdateAccountDependencies();
                 UpdateTotals();
-                FocusFirstEntryCell(_lines.FirstOrDefault());
+
+                if (_readOnly)
+                    ApplyReadOnlyMode();
+                else
+                    FocusFirstEntryCell(_lines.FirstOrDefault());
             }
             catch (Exception ex)
             {
@@ -375,6 +393,12 @@ namespace BIS.ERP.Views.Dialogs
                 _vatCombo.SelectionChanged += (_, _) => ApplyTaxRate(_vatCombo, _vatRateBox);
             if (_salesTaxCombo != null)
                 _salesTaxCombo.SelectionChanged += (_, _) => ApplyTaxRate(_salesTaxCombo, _salesTaxRateBox);
+
+            // Ставка, введённая в шапке руками, тоже становится ставкой всех строк.
+            if (_vatRateBox != null)
+                _vatRateBox.LostFocus += (_, _) => ApplyHeaderRateToLines(isVat: true);
+            if (_salesTaxRateBox != null)
+                _salesTaxRateBox.LostFocus += (_, _) => ApplyHeaderRateToLines(isVat: false);
         }
 
         /// <summary>
@@ -523,8 +547,67 @@ namespace BIS.ERP.Views.Dialogs
             if (combo?.SelectedValue is not Guid id || rateBox == null)
                 return;
 
-            if (_taxRates.TryGetValue(id, out var rate))
-                rateBox.Text = rate.ToString("0.##", CultureInfo.CurrentCulture);
+            if (!_taxRates.TryGetValue(id, out var rate))
+                return;
+
+            rateBox.Text = rate.ToString("0.##", CultureInfo.CurrentCulture);
+            ApplyHeaderRateToLines(ReferenceEquals(rateBox, _vatRateBox));
+        }
+
+        /// <summary>
+        /// Ставка налога из шапки переносится во все строки — как в счёте-фактуре.
+        /// Иначе строки, созданные до выбора налога (первая строка создаётся при открытии),
+        /// остаются со старой ставкой, и НСП в документе считается по нулю.
+        /// </summary>
+        private void ApplyHeaderRateToLines(bool isVat)
+        {
+            var rate = ReadDecimalEditor(isVat ? "vat_rate" : "sales_tax_rate");
+            var previous = isVat ? _lastVatRate : _lastSalesTaxRate;
+
+            // Ставку шапки не меняли — строки не трогаем: в сохранённом документе
+            // у строк могут быть свои ставки, и «просто зашли в поле» их не перепишет.
+            // Первое значение только запоминаем.
+            if (previous.HasValue && previous.Value == rate)
+                return;
+
+            if (isVat)
+                _lastVatRate = rate;
+            else
+                _lastSalesTaxRate = rate;
+
+            if (!previous.HasValue || _lines.Count == 0)
+                return;
+
+            var changed = false;
+            foreach (var line in _lines)
+            {
+                if (isVat)
+                {
+                    if (line.VatRate == rate)
+                        continue;
+
+                    line.VatRate = rate;
+                }
+                else
+                {
+                    if (line.SalesTaxRate == rate)
+                        continue;
+
+                    line.SalesTaxRate = rate;
+                }
+
+                changed = true;
+            }
+
+            if (changed)
+                UpdateTotals();
+        }
+
+        /// <summary>Текущие ставки шапки — точка отсчёта для применения к строкам.</summary>
+        private void RememberHeaderRates()
+        {
+            _lastVatRate = ReadDecimalEditor("vat_rate");
+            _lastSalesTaxRate = ReadDecimalEditor("sales_tax_rate");
         }
 
         private DateTime GetDocumentDate() => _dateBox?.SelectedDate?.Date ?? DateTime.Today;
@@ -647,6 +730,7 @@ namespace BIS.ERP.Views.Dialogs
             panel.Children.Add(container);
 
             _referenceBoxes[column] = box;
+            _referenceButtons[column] = pick;
             _referencePanels[column] = container;
         }
 
@@ -730,6 +814,10 @@ namespace BIS.ERP.Views.Dialogs
                     ["Код"] = Read(row, "Код", "code", "Код участка", "site_code"),
                     ["Наименование"] = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала", "Наименование участка", "site_name")
                 };
+
+                // Участок в окне выбора показывает и своего МОЛ.
+                if (string.Equals(column, "destination_site_id", StringComparison.OrdinalIgnoreCase))
+                    pick["МОЛ"] = SiteResponsibleText(row);
 
                 // У плана счетов в окне выбора нужны ещё «Тип счета» и «Активен».
                 if (isAccount)
@@ -1036,7 +1124,16 @@ namespace BIS.ERP.Views.Dialogs
 
                 if (_referenceBoxes.TryGetValue(field.DbColumnName, out var referenceBox))
                 {
-                    referenceBox.Text = Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+                    // В базе ссылка хранится как uuid — в поле показываем «Код - Наименование»,
+                    // иначе при открытии документа был виден GUID вместо названия.
+                    var row = FindReferenceRow(field.DbColumnName, value);
+                    referenceBox.Text = row == null
+                        ? Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty
+                        : FormatReferenceText(row);
+
+                    if (row != null && ReadGuid(row) is { } rowId)
+                        _references[field.DbColumnName] = rowId;
+
                     continue;
                 }
 
@@ -1099,6 +1196,7 @@ namespace BIS.ERP.Views.Dialogs
                 row.MaterialText = FormatMaterialText(row.MaterialCode, row.MaterialName);
                 row.AccountText = FormatLoadedAccountText(row.AccountCode);
                 row.SiteText = FormatLoadedSiteText(row.SiteId);
+                row.ResponsiblePersonText = FormatLoadedResponsibleText(row.ResponsiblePersonId);
                 row.PropertyChanged += OnLinePropertyChanged;
                 _lines.Add(row);
             }
@@ -1239,7 +1337,7 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             var kind = button.Tag as string;
-            if (kind is not ("material" or "account" or "site"))
+            if (kind is not ("material" or "account" or "site" or "responsible"))
                 return;
 
             _pendingPick = (row, kind);
@@ -1262,6 +1360,7 @@ namespace BIS.ERP.Views.Dialogs
             "material" => OpenMaterialPickerAsync(row),
             "account" => OpenAccountPickerAsync(row),
             "site" => OpenSitePickerAsync(row),
+            "responsible" => OpenResponsiblePickerAsync(row),
             _ => Task.CompletedTask
         };
 
@@ -1383,6 +1482,9 @@ namespace BIS.ERP.Views.Dialogs
                 if (hasCode)
                     item["Код"] = SiteCode(site);
 
+                // МОЛ участка — видно прямо в окне выбора, кого подставит документ.
+                item["МОЛ"] = SiteResponsibleText(site);
+
                 result.Add(item);
             }
 
@@ -1401,6 +1503,7 @@ namespace BIS.ERP.Views.Dialogs
         {
             row.SiteId = ReadGuid(picked);
             row.SiteText = Read(picked, "Наименование", "Наименование участка", "site_name");
+            FillResponsibleFromSite(row);
         }
 
         private void OnSiteTextLostFocus(object sender, RoutedEventArgs e)
@@ -1443,6 +1546,156 @@ namespace BIS.ERP.Views.Dialogs
             ApplySite(row, site);
         }
 
+        /// <summary>При выборе участка в строку подставляется МОЛ этого участка.</summary>
+        private void FillResponsibleFromSite(InventoryLineRow row)
+        {
+            var siteId = row.SiteId;
+            if (!siteId.HasValue)
+                return;
+
+            var person = _responsiblePersons.FirstOrDefault(option =>
+                option.SiteId.HasValue && option.SiteId.Value == siteId.Value);
+            if (person == null)
+                return;
+
+            row.ResponsiblePersonId = person.Id;
+            row.ResponsiblePersonText = person.Display;
+        }
+
+        /// <summary>Подпись сохранённого МОЛ в загруженной строке.</summary>
+        private string FormatLoadedResponsibleText(Guid? personId)
+        {
+            if (!personId.HasValue)
+                return string.Empty;
+
+            var person = _responsiblePersons.FirstOrDefault(option => option.Id == personId.Value);
+            return person == null ? string.Empty : person.Display;
+        }
+
+        private void OnResponsibleTextLostFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is TextBox box && box.DataContext is InventoryLineRow row)
+                ApplyResponsibleText(row, box.Text);
+        }
+
+        private async void OnPickResponsibleClick(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is InventoryLineRow row)
+                await OpenResponsiblePickerAsync(row);
+        }
+
+        /// <summary>
+        /// Окно выбора МОЛ — как выбор участка: справочник «МОЛ» с поиском по табельному
+        /// номеру и ФИО; МОЛ участка строки идёт первым.
+        /// </summary>
+        private async Task OpenResponsiblePickerAsync(InventoryLineRow row)
+        {
+            var pickRows = BuildResponsiblePickRows(row);
+            if (pickRows.Count == 0)
+            {
+                MessageBox.Show("Справочник МОЛ пуст или не найден.", "Документ ТМЗ",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var hasNumber = pickRows.Any(item => !string.IsNullOrWhiteSpace(Read(item, "Код")));
+            var dialog = new ReferenceSelectionDialog(pickRows,
+                hasNumber ? "Код" : "Наименование",
+                hasNumber ? "Наименование" : null);
+
+            if (await ShowPickerAsync(dialog, "Выбор МОЛ"))
+                ApplyResponsible(row, dialog.SelectedItem);
+        }
+
+        /// <summary>Строки окна выбора МОЛ: табельный номер, ФИО и участок.</summary>
+        private List<Dictionary<string, object>> BuildResponsiblePickRows(InventoryLineRow row)
+        {
+            var siteId = row.SiteId;
+            var hasSite = _responsiblePersons.Any(option => option.SiteId.HasValue);
+            var result = new List<Dictionary<string, object>>();
+
+            foreach (var person in _responsiblePersons
+                         .OrderByDescending(option => siteId.HasValue && option.SiteId == siteId))
+            {
+                var item = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Id"] = person.Id,
+                    ["Код"] = person.Number,
+                    ["Наименование"] = person.Name
+                };
+
+                if (hasSite)
+                    item["Участок"] = FormatLoadedSiteText(person.SiteId);
+
+                result.Add(item);
+            }
+
+            return result;
+        }
+
+        private void ApplyResponsible(InventoryLineRow row, Dictionary<string, object> picked)
+        {
+            var personId = ReadGuid(picked);
+            if (!personId.HasValue)
+                return;
+
+            var person = _responsiblePersons.FirstOrDefault(option => option.Id == personId.Value);
+            row.ResponsiblePersonId = personId.Value;
+            row.ResponsiblePersonText = person?.Display ?? Read(picked, "Наименование");
+        }
+
+        /// <summary>
+        /// Ручной ввод в ячейке «МОЛ»: табельный номер или ФИО сопоставляются со
+        /// справочником, после чего в ячейке остаётся подпись выбранного МОЛ.
+        /// </summary>
+        private void ApplyResponsibleText(InventoryLineRow row, string? text)
+        {
+            var value = text?.Trim() ?? string.Empty;
+            if (value.Length == 0)
+            {
+                row.ResponsiblePersonId = null;
+                row.ResponsiblePersonText = string.Empty;
+                return;
+            }
+
+            var person = ResolveResponsible(value);
+            if (person == null)
+            {
+                // Не нашли МОЛ — возвращаем последнее корректное значение.
+                row.ResponsiblePersonText = FormatLoadedResponsibleText(row.ResponsiblePersonId);
+                return;
+            }
+
+            row.ResponsiblePersonId = person.Id;
+            row.ResponsiblePersonText = person.Display;
+        }
+
+        /// <summary>Поиск МОЛ по подписи, табельному номеру или ФИО.</summary>
+        private InventoryResponsiblePerson? ResolveResponsible(string text)
+        {
+            var exact = _responsiblePersons.FirstOrDefault(option =>
+                string.Equals(option.Display, text, StringComparison.CurrentCultureIgnoreCase) ||
+                string.Equals(option.Name, text, StringComparison.CurrentCultureIgnoreCase) ||
+                string.Equals(option.Number, text, StringComparison.OrdinalIgnoreCase));
+            if (exact != null)
+                return exact;
+
+            var prefix = _responsiblePersons
+                .Where(option =>
+                    option.Number.StartsWith(text, StringComparison.OrdinalIgnoreCase) ||
+                    option.Display.StartsWith(text, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+            if (prefix.Count == 1)
+                return prefix[0];
+            if (prefix.Count > 1)
+                return null;
+
+            var contains = _responsiblePersons
+                .Where(option => option.Name.Contains(text, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+            return contains.Count == 1 ? contains[0] : null;
+        }
+
         private string FormatLoadedSiteText(Guid? siteId)
         {
             if (!siteId.HasValue)
@@ -1450,6 +1703,97 @@ namespace BIS.ERP.Views.Dialogs
 
             var site = _sites.FirstOrDefault(item => ReadGuid(item) == siteId.Value);
             return site == null ? string.Empty : SiteName(site);
+        }
+
+        /// <summary>
+        /// МОЛ участка для окна выбора: в справочнике «МОЛ» участок — это ссылка,
+        /// поэтому МОЛ участка ищется по идентификатору участка.
+        /// </summary>
+        private string SiteResponsibleText(Dictionary<string, object> site)
+        {
+            var siteId = ReadGuid(site);
+            if (!siteId.HasValue)
+                return string.Empty;
+
+            return string.Join(", ", _responsiblePersons
+                .Where(option => option.SiteId.HasValue && option.SiteId.Value == siteId.Value)
+                .Select(option => option.Display));
+        }
+
+        /// <summary>
+        /// Варианты списка «МОЛ». «Табельный номер» в справочнике «МОЛ» — ссылка на
+        /// сотрудника, поэтому номер берётся из «Сотрудники (Списочный состав)».
+        /// </summary>
+        private List<InventoryResponsiblePerson> BuildResponsibleOptions(
+            List<Dictionary<string, object>> responsible,
+            List<Dictionary<string, object>> employees)
+        {
+            var employeesById = new Dictionary<Guid, (string Number, string Name)>();
+            foreach (var employee in employees)
+            {
+                var employeeId = ReadGuid(employee);
+                if (!employeeId.HasValue)
+                    continue;
+
+                employeesById[employeeId.Value] = (
+                    Read(employee, "Табельный номер", "personnel_number"),
+                    Read(employee, "ФИО", "full_name", "Наименование", "name"));
+            }
+
+            var result = new List<InventoryResponsiblePerson>();
+            foreach (var person in responsible)
+            {
+                var personId = ReadGuid(person);
+                if (!personId.HasValue)
+                    continue;
+
+                var name = Read(person, "ФИО", "full_name", "Наименование", "name");
+                var number = Read(person, "Табельный номер", "personnel_number");
+
+                // Поле-ссылка хранит идентификатор сотрудника, а не сам номер.
+                if (Guid.TryParse(number, out var employeeKey) &&
+                    employeesById.TryGetValue(employeeKey, out var employee))
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                        name = employee.Name;
+
+                    number = employee.Number;
+                }
+
+                if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(number))
+                    continue;
+
+                result.Add(new InventoryResponsiblePerson
+                {
+                    Id = personId.Value,
+                    SiteId = ResolveSiteId(Read(person, "Участок", "site_id")),
+                    Name = name,
+                    Number = number
+                });
+            }
+
+            return result
+                .OrderBy(option => option.Display, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Участок МОЛ: в новых базах это ссылка (uuid), в старых — наименование участка.
+        /// Понимаем оба варианта, иначе МОЛ не находился бы по участку.
+        /// </summary>
+        private Guid? ResolveSiteId(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            if (Guid.TryParse(value, out var siteId))
+                return siteId;
+
+            var site = _sites.FirstOrDefault(item =>
+                string.Equals(SiteName(item), value, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(SiteCode(item), value, StringComparison.OrdinalIgnoreCase));
+
+            return site == null ? null : ReadGuid(site);
         }
 
         /// <summary>Строки окна выбора счёта: код, наименование и тип — как в шапке документа.</summary>
@@ -1467,7 +1811,15 @@ namespace BIS.ERP.Views.Dialogs
                 });
             }
 
-            return result;
+            // План счетов — по коду: в самом справочнике порядок вставки, а счёт
+            // в окне выбора ищут по номеру.
+            return result
+                .OrderBy(row => int.TryParse(Read(row, "Код"), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out _) ? 0 : 1)
+                .ThenBy(row => int.TryParse(Read(row, "Код"), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var code) ? code : int.MaxValue)
+                .ThenBy(row => Read(row, "Код"), StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         private void ApplyAccount(InventoryLineRow row, Dictionary<string, object> picked)
@@ -1692,7 +2044,7 @@ namespace BIS.ERP.Views.Dialogs
         /// </summary>
         private void OnLinesGridPreviewKeyDown(object sender, KeyEventArgs e)
         {
-            if (Keyboard.Modifiers != ModifierKeys.None)
+            if (_readOnly || Keyboard.Modifiers != ModifierKeys.None)
                 return;
 
             if (e.Key == Key.Add)
@@ -1863,6 +2215,13 @@ namespace BIS.ERP.Views.Dialogs
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            // В просмотре кнопка называется «Закрыть»: данные не сохраняются.
+            if (_readOnly)
+            {
+                Close();
+                return;
+            }
+
             if (!SaveButton.IsEnabled)
                 return;
 
@@ -1918,15 +2277,23 @@ namespace BIS.ERP.Views.Dialogs
                 var data = BuildItemData();
                 var lines = _lines.ToList();
 
-                if (_recordId.HasValue)
+                // Повторная запись после неудачного проведения обновляет уже созданный
+                // документ, а не создаёт второй.
+                var targetId = _recordId ?? (SavedRecordId != Guid.Empty ? SavedRecordId : (Guid?)null);
+
+                if (targetId.HasValue)
                 {
-                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, _recordId.Value, data, lines);
-                    SavedRecordId = _recordId.Value;
+                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, targetId.Value, data, lines);
+                    SavedRecordId = targetId.Value;
                 }
                 else
                 {
                     SavedRecordId = await _metadataService.CreateDynamicRecordAsync(_document.Id, data, lines);
                 }
+
+                // Документы ТМЗ проводятся сразу при записи — отдельной кнопки «Провести» нет.
+                if (!await PostSavedDocumentAsync())
+                    return;
 
                 MdiDialogService.CloseWithResult(this, true);
             }
@@ -1937,6 +2304,98 @@ namespace BIS.ERP.Views.Dialogs
             finally
             {
                 SaveButton.IsEnabled = true;
+            }
+        }
+
+        /// <summary>
+        /// Режим просмотра — как в счёте-фактуре: реквизиты только для чтения, в строках
+        /// вместо полей ввода с «?» обычные текстовые колонки, остаётся одна кнопка «Закрыть».
+        /// </summary>
+        private void ApplyReadOnlyMode()
+        {
+            foreach (var control in _editors.Values)
+            {
+                switch (control)
+                {
+                    case TextBox textBox:
+                        textBox.IsReadOnly = true;
+                        break;
+                    case ComboBox comboBox:
+                        comboBox.IsEnabled = false;
+                        break;
+                    case DatePicker datePicker:
+                        datePicker.IsEnabled = false;
+                        break;
+                    default:
+                        control.IsEnabled = false;
+                        break;
+                }
+            }
+
+            foreach (var box in _referenceBoxes.Values)
+                box.IsReadOnly = true;
+
+            foreach (var button in _referenceButtons.Values)
+                button.IsEnabled = false;
+
+            RequestExchangeRateButton.IsEnabled = false;
+            CurrentRateButton.IsEnabled = false;
+
+            // Строки: вместо полей ввода и «?» — текстовые колонки, менять нечего.
+            ReplaceLinesColumn(MaterialColumn, nameof(InventoryLineRow.MaterialText));
+            ReplaceLinesColumn(AccountColumn, nameof(InventoryLineRow.AccountText));
+            ReplaceLinesColumn(SiteColumn, nameof(InventoryLineRow.SiteText));
+            ReplaceLinesColumn(PersonColumn, nameof(InventoryLineRow.ResponsiblePersonText));
+
+            LinesGrid.IsReadOnly = true;
+            AddLineButton.Visibility = Visibility.Collapsed;
+            DeleteLineButton.Visibility = Visibility.Collapsed;
+            RecalculateButton.Visibility = Visibility.Collapsed;
+            CancelButton.Visibility = Visibility.Collapsed;
+            ModeHintText.Visibility = Visibility.Visible;
+            SaveButton.Content = "Закрыть";
+        }
+
+        /// <summary>
+        /// Заменяет колонку с полем ввода и кнопкой «?» на обычную текстовую:
+        /// в просмотре строки не редактируются.
+        /// </summary>
+        private void ReplaceLinesColumn(DataGridColumn column, string property)
+        {
+            var index = LinesGrid.Columns.IndexOf(column);
+            if (index < 0)
+                return;
+
+            var text = new DataGridTextColumn
+            {
+                Header = column.Header,
+                Width = column.Width,
+                IsReadOnly = true,
+                Binding = new System.Windows.Data.Binding(property)
+            };
+
+            LinesGrid.Columns.RemoveAt(index);
+            LinesGrid.Columns.Insert(index, text);
+        }
+
+        /// <summary>
+        /// Проводит только что записанный документ ТМЗ. Если провести нельзя (нет счёта
+        /// в шапке, нет дебета в строках, дата в закрытом периоде), документ остаётся
+        /// сохранённым, но не проведённым: показываем причину и не закрываем окно —
+        /// можно исправить и нажать «Запись» ещё раз, проводки пересоздадутся.
+        /// </summary>
+        private async Task<bool> PostSavedDocumentAsync()
+        {
+            try
+            {
+                await _metadataService.PostInventoryDocumentAsync(_document.Id, SavedRecordId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Документ сохранён, но не проведён: {ex.Message}",
+                    "Документ ТМЗ", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return false;
             }
         }
 
@@ -2005,6 +2464,47 @@ namespace BIS.ERP.Views.Dialogs
                 SetField(data, "is_posted", false);
 
             return data;
+        }
+
+        /// <summary>Строка справочника по значению ссылки из базы (uuid или текст).</summary>
+        private Dictionary<string, object>? FindReferenceRow(string column, object? value)
+        {
+            if (!_rowsByColumn.TryGetValue(column, out var rows) || rows.Count == 0)
+                return null;
+
+            var text = Convert.ToString(value, CultureInfo.CurrentCulture)?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+                return null;
+
+            if (Guid.TryParse(text, out var id))
+            {
+                var byId = rows.FirstOrDefault(item => ReadGuid(item) == id);
+                if (byId != null)
+                    return byId;
+            }
+
+            return rows.FirstOrDefault(item =>
+                string.Equals(Read(item, "Код", "code", "Код участка", "site_code"), text,
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    Read(item, "Наименование", "ФИО", "Полное наименование", "Наименование материала",
+                        "Наименование участка", "site_name"), text, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Подпись ссылки в поле шапки — та же, что после выбора в окне:
+        /// «Код - Наименование» (у МОЛ и участка код может отсутствовать).
+        /// </summary>
+        private static string FormatReferenceText(Dictionary<string, object> row)
+        {
+            var code = Read(row, "Код", "code", "Код участка", "site_code");
+            var name = Read(row, "Наименование", "ФИО", "Полное наименование", "Наименование материала",
+                "Наименование участка", "site_name");
+
+            if (string.IsNullOrWhiteSpace(code))
+                return name;
+
+            return string.IsNullOrWhiteSpace(name) ? code : $"{code} - {name}";
         }
 
         private object? ResolveReference(string column, string text)
@@ -2160,6 +2660,24 @@ namespace BIS.ERP.Views.Dialogs
             }
 
             return string.Empty;
+        }
+
+        /// <summary>Идентификатор ссылки в строке справочника (не «Id» самой записи).</summary>
+        private static Guid? ReadReferenceGuid(Dictionary<string, object> row, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!row.TryGetValue(key, out var value) || value == null || value == DBNull.Value)
+                    continue;
+
+                if (value is Guid guid)
+                    return guid;
+
+                if (Guid.TryParse(value.ToString(), out var parsed))
+                    return parsed;
+            }
+
+            return null;
         }
 
         private static Guid? ReadGuid(Dictionary<string, object> row)

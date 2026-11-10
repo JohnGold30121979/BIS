@@ -27,7 +27,9 @@ namespace BIS.ERP.Views
         private readonly ObservableCollection<InventoryLineRow> _postingLines = new();
 
         private readonly Dictionary<Guid, string> _siteNames = new();
+        private readonly Dictionary<string, string> _accountNames = new(StringComparer.OrdinalIgnoreCase);
         private bool _sitesLoaded;
+        private bool _accountsLoaded;
 
         public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService, AppDbContext? context = null)
         {
@@ -37,6 +39,13 @@ namespace BIS.ERP.Views
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
             _context = context;
+
+            // Документы ТМЗ проводятся сразу при записи («Запись»/«Добавить» в карточке),
+            // поэтому отдельная кнопка «Провести» для них не нужна.
+            if (IsInventoryDocument)
+                PostButton.Visibility = Visibility.Collapsed;
+            else
+                ViewButton.Visibility = Visibility.Collapsed;
         }
 
         private bool IsInventoryDocument =>
@@ -54,9 +63,17 @@ namespace BIS.ERP.Views
             var row = DataGrid.SelectedItem as DataRowView;
             var hasSelection = row != null;
             var isPosted = row != null && IsPosted(row);
-            EditButton.IsEnabled = hasSelection && !isPosted;
-            DeleteButton.IsEnabled = hasSelection && !isPosted;
+
+            // Документы ТМЗ проводятся сразу при записи, поэтому признак «Проведен»
+            // не блокирует правку и удаление: при сохранении проводки пересоздаются,
+            // при удалении — удаляются вместе с документом.
+            var canChange = hasSelection && (!isPosted || IsInventoryDocument);
+            EditButton.IsEnabled = canChange;
+            DeleteButton.IsEnabled = canChange;
             PostButton.IsEnabled = hasSelection && !isPosted;
+
+            // Просмотр доступен для любого выбранного документа ТМЗ — даже проведённого.
+            ViewButton.IsEnabled = hasSelection && IsInventoryDocument;
         }
 
         private static bool IsPosted(DataRowView row)
@@ -118,12 +135,29 @@ namespace BIS.ERP.Views
                 var rate = row.DataView.Table.Columns.Contains("Курс валюты") &&
                     decimal.TryParse(row["Курс валюты"].ToString(), out var exchangeRate) && exchangeRate > 0
                     ? exchangeRate : (decimal?)null;
+
+                // Счёт шапки — вторая сторона проводки: у поступления это кредит,
+                // у выбытия и перемещения — дебет.
+                var headerAccount = row.DataView.Table.Columns.Contains("Счет")
+                    ? row["Счет"]?.ToString()?.Trim() ?? string.Empty
+                    : string.Empty;
+                var isIncoming = string.Equals(
+                    InventoryDocumentModel.MovementKindForDocument(_documentMetadata.Name), "Incoming",
+                    StringComparison.OrdinalIgnoreCase);
+
+                await EnsureAccountNamesAsync();
+
                 foreach (var line in lines)
                 {
                     line.CurrencyName = currency ?? string.Empty;
                     line.ExchangeRate = rate;
                     if (line.SiteId.HasValue && _siteNames.TryGetValue(line.SiteId.Value, out var siteName))
                         line.SiteText = siteName;
+
+                    // Как в проводках: Дт — счёт строки у поступления, Кт — счёт шапки;
+                    // у выбытия и перемещения наоборот.
+                    line.DebitAccountText = isIncoming ? FormatAccount(line.AccountCode) : FormatAccount(headerAccount);
+                    line.CreditAccountText = isIncoming ? FormatAccount(headerAccount) : FormatAccount(line.AccountCode);
 
                     _postingLines.Add(line);
                 }
@@ -132,6 +166,59 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = $"❌ Строки документа: {ex.Message}";
             }
+        }
+
+        /// <summary>Один раз читает план счетов — чтобы счёт-ссылка (uuid) в строке стал кодом.</summary>
+        private async Task EnsureAccountNamesAsync()
+        {
+            if (_accountsLoaded)
+                return;
+
+            _accountsLoaded = true;
+
+            try
+            {
+                var catalogs = await _metadataService.GetCatalogsAsync();
+                var catalog = catalogs.FirstOrDefault(item =>
+                    item.Name.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase));
+
+                if (catalog == null)
+                    return;
+
+                foreach (var account in await _metadataService.GetCatalogDataAsync(catalog.Id))
+                {
+                    var code = ReadCatalogText(account, "Код", "code");
+                    if (string.IsNullOrWhiteSpace(code))
+                        continue;
+
+                    _accountNames[code] = code;
+
+                    // Ссылка может прийти как uuid — тогда тоже находим код счёта.
+                    if (account.TryGetValue("Id", out var idValue) && idValue is Guid accountId)
+                        _accountNames[accountId.ToString()] = code;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"План счетов для строк проводки: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Только код счёта: из подписи «Код - Наименование» и из ссылки (uuid).
+        /// В строках проводки колонки Дебет/Кредит показывают именно код.
+        /// </summary>
+        private string FormatAccount(string? value)
+        {
+            var text = (value ?? string.Empty).Trim();
+            if (text.Length == 0)
+                return string.Empty;
+
+            if (_accountNames.TryGetValue(text, out var code))
+                return code;
+
+            var separator = text.IndexOf(" - ", StringComparison.Ordinal);
+            return separator > 0 ? text[..separator].Trim() : text;
         }
 
         /// <summary>Один раз читает справочник «Участки» — чтобы в строках было наименование, а не id.</summary>
@@ -781,6 +868,66 @@ namespace BIS.ERP.Views
                 }
             }
             UpdateButtonsState();
+        }
+
+        /// <summary>
+        /// Просмотр документа ТМЗ — режим только для чтения, как в счёте-фактуре:
+        /// все реквизиты и строки недоступны для изменения.
+        /// </summary>
+        private async void OnViewClick(object sender, RoutedEventArgs e)
+        {
+            if (!IsInventoryDocument || _context == null)
+                return;
+
+            if (DataGrid.SelectedItem is not DataRowView selectedRow)
+            {
+                MessageBox.Show("Выберите документ для просмотра!", "Внимание",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var id = (Guid)selectedRow["Id"];
+
+            try
+            {
+                StatusText.Text = "👁️ Просмотр документа";
+
+                var rows = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
+                var existing = rows.FirstOrDefault(row =>
+                    row.TryGetValue("Id", out var value) && value is Guid guid && guid == id);
+
+                var dialog = new InventoryDocumentDialog(
+                    _documentMetadata, _metadataService, _context, id, existing, readOnly: true)
+                {
+                    Owner = Window.GetWindow(this)
+                };
+
+                await MdiDialogService.ShowInWorkspaceForResultAsync(
+                    Window.GetWindow(this), dialog, $"Просмотр: {_documentMetadata.Name}");
+
+                StatusText.Text = "Готово";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "❌ Ошибка открытия";
+                MessageBox.Show($"Ошибка открытия документа: {ex.Message}", "Просмотр",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Двойной щелчок по строке открывает документ ТМЗ в просмотре —
+        /// как двойной щелчок по счёту-фактуре.
+        /// </summary>
+        private void OnDocumentDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (!IsInventoryDocument ||
+                ItemsControl.ContainerFromElement(DataGrid, e.OriginalSource as DependencyObject) is not DataGridRow)
+            {
+                return;
+            }
+
+            OnViewClick(sender, e);
         }
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)

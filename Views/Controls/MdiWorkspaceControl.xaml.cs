@@ -39,12 +39,20 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
             _selectedDocument = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(CurrentContent));
+            SelectedDocumentChanged?.Invoke(this, value);
         }
     }
 
+    /// <summary>
+    /// Активная вкладка сменилась (щелчок по закладке, закрытие вкладки,
+    /// «Закрыть все»). Оболочка по этому событию подсвечивает в дереве узел,
+    /// из которого открыт документ.
+    /// </summary>
+    public event EventHandler<MdiDocumentItem?>? SelectedDocumentChanged;
+
     public UserControl? CurrentContent => SelectedDocument?.Content;
 
-    public MdiDocumentItem OpenDocument(string key, string title, UserControl content, bool activate = true)
+    public MdiDocumentItem OpenDocument(string key, string title, UserControl content, bool activate = true, object? tag = null)
     {
         if (string.IsNullOrWhiteSpace(key))
             key = content.GetType().FullName ?? Guid.NewGuid().ToString("N");
@@ -56,12 +64,19 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
 
         if (existing != null)
         {
+            // Документ могли открыть раньше без метки — уточняем её сейчас.
+            if (tag != null && existing.Tag == null)
+                existing.Tag = tag;
+
             if (activate)
                 SelectedDocument = existing;
             return existing;
         }
 
-        var item = new MdiDocumentItem(key, title, content);
+        var item = new MdiDocumentItem(key, title, content)
+        {
+            Tag = tag
+        };
         Documents.Add(item);
         if (activate)
             SelectedDocument = item;
@@ -92,8 +107,12 @@ public partial class MdiWorkspaceControl : UserControl, INotifyPropertyChanged
         }
 
         var actualKey = key;
+        // Диалог открыт из уже открытой вкладки — наследует её узел дерева:
+        // карточка «Новый документ: Поступление ТМЗ» подсвечивает «Поступление ТМЗ»,
+        // а не лист, выбранный последним вручную.
+        var inheritedTag = SelectedDocument?.Tag;
         var host = new MdiDialogHostControl(window, () => CloseDocumentByKey(actualKey), documentClosed, fillWorkspace);
-        return OpenDocument(actualKey, title, host, activate);
+        return OpenDocument(actualKey, title, host, activate, inheritedTag);
     }
 
     public bool ActivateDocumentByKey(string? key)
@@ -287,4 +306,11 @@ public sealed class MdiDocumentItem
     public string Title { get; }
 
     public UserControl Content { get; }
+
+    /// <summary>
+    /// Узел дерева навигации, из которого открыт документ. Тип — object, чтобы
+    /// контрол рабочей области не зависел от типа оболочки (NavigationItem).
+    /// По этой метке оболочка подсвечивает левую панель при смене закладки.
+    /// </summary>
+    public object? Tag { get; set; }
 }

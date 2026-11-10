@@ -3,6 +3,7 @@ using BIS.ERP.Models;
 using BIS.ERP.Services;
 using BIS.ERP.Views;
 using BIS.ERP.Views.Dialogs;
+using BIS.ERP.Views.Controls;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
@@ -107,6 +108,14 @@ namespace BIS.ERP
         private int _navMatchIndex = -1;
         private int _navVisibilityApplyPasses;
 
+        // Идёт программное выделение узла дерева под активную вкладку MDI:
+        // SelectedItemChanged в этот момент документ повторно не открывает.
+        private bool _synchronizingNavigationSelection;
+
+        // «Комфортная» зона левой панели: 25 % сверху и 25 % снизу. Если выделенный
+        // узел вне неё — прокрутка центрует его, внутри неё — не дёргается.
+        private const double NavigationScrollComfortRatio = 0.25;
+
         public MainWorkWindow(IAuthService authService)
         {
             InitializeComponent();
@@ -116,6 +125,8 @@ namespace BIS.ERP
             _authService = authService;
             _infoBaseManager = new InfoBaseManager();
             _navigation = new AppNavigationService(ContentArea);
+            // Активная вкладка MDI → подсветка соответствующего узла дерева навигации.
+            ContentArea.SelectedDocumentChanged += OnWorkspaceSelectedDocumentChanged;
             NavigationItems = new ObservableCollection<NavigationItem>();
             NavigationTree.ItemsSource = NavigationItems;
             NavigationItems.CollectionChanged += OnNavigationItemsCollectionChanged;
@@ -380,6 +391,212 @@ namespace BIS.ERP
             return null;
         }
 
+        // ================= Связь активной вкладки MDI и дерева =================
+
+        /// <summary>
+        /// Сменилась активная вкладка — подсвечиваем в дереве узел, из которого
+        /// открыт документ. Сейчас вкладки и дерево жили раздельно: закладка
+        /// на «Поступление ТМЗ», а в дереве остался «Расходный/Приходный КО».
+        /// </summary>
+        private void OnWorkspaceSelectedDocumentChanged(object? sender, MdiDocumentItem? document)
+        {
+            if (_synchronizingNavigationSelection)
+                return;
+
+            // Дерево могли пересобрать (смена прав, обновление метаданных): в метке
+            // вкладки тогда лежит уже не существующий объект узла — ищем актуальный
+            // узел по Id, а если метки нет — по ключу документа.
+            var taggedItem = document?.Tag as NavigationItem;
+            var item = !string.IsNullOrEmpty(taggedItem?.Id)
+                ? FindNavigationItemById(NavigationItems, taggedItem!.Id)
+                : null;
+
+            item ??= FindNavigationItemByDocumentKey(document?.Key);
+            if (item == null)
+                return;
+
+            SelectNavigationItem(item);
+        }
+
+        /// <summary>Выделяет узел дерева программно, без открытия документа.</summary>
+        private void SelectNavigationItem(NavigationItem item)
+        {
+            if (ReferenceEquals(NavigationTree.SelectedItem, item))
+                return;
+
+            ExpandNavigationAncestors(item);
+            if (TrySelectNavigationContainer(item))
+                return;
+
+            // Контейнеры дочерних узлов WPF создаёт лениво: после раскрытия предков
+            // ждём генерации и повторяем выбор (тот же приём, что в поиске по дереву).
+            Dispatcher.BeginInvoke(
+                new Action(() => TrySelectNavigationContainer(item)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        private bool TrySelectNavigationContainer(NavigationItem item)
+        {
+            if (GetNavigationContainer(item) is not TreeViewItem container)
+                return false;
+
+            _synchronizingNavigationSelection = true;
+            try
+            {
+                container.IsSelected = true;
+                ScrollNavigationItemIntoView(container);
+            }
+            finally
+            {
+                _synchronizingNavigationSelection = false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Прокручивает левую панель к выделенному узлу. BringIntoView прижимает
+        /// элемент к самому краю области, а если предки были свёрнуты — часто
+        /// не доводит его до вида: узел остаётся за кадром и кажется, что
+        /// выделения нет. Здесь узел ставится в середину, если он оказался
+        /// вне средней половины видимой области.
+        ///
+        /// Измеряется строка заголовка (PART_Header), а не весь TreeViewItem:
+        /// у раскрытого узла ActualHeight включает всех потомков, и центр уехал бы
+        /// на середину поддерева — для папки с десятками детей это вообще за экран.
+        /// </summary>
+        private void ScrollNavigationItemIntoView(TreeViewItem container, bool allowRetry = true)
+        {
+            var scrollViewer = FindScrollingAncestor(container);
+            var header = container.Template?.FindName("PART_Header", container) as FrameworkElement ?? container;
+
+            if (scrollViewer == null || header.ActualHeight <= 0)
+            {
+                // Раскладка ещё не дошла до узла — пробуем ещё раз после генерации.
+                if (allowRetry)
+                {
+                    Dispatcher.BeginInvoke(
+                        new Action(() => ScrollNavigationItemIntoView(container, allowRetry: false)),
+                        System.Windows.Threading.DispatcherPriority.Loaded);
+                    return;
+                }
+
+                container.BringIntoView();
+                return;
+            }
+
+            var itemTop = header.TransformToAncestor(scrollViewer).Transform(new Point(0, 0)).Y;
+            var itemHeight = header.ActualHeight;
+            var viewportHeight = scrollViewer.ViewportHeight;
+            if (viewportHeight <= 0 || scrollViewer.ScrollableHeight <= 0)
+            {
+                container.BringIntoView();
+                return;
+            }
+
+            // Узел уже в средней половине области — прокрутку не трогаем,
+            // иначе список дёргается на каждом переключении закладки.
+            var comfort = viewportHeight * NavigationScrollComfortRatio;
+            if (itemTop >= comfort && itemTop + itemHeight <= viewportHeight - comfort)
+                return;
+
+            var targetOffset = scrollViewer.VerticalOffset + itemTop - (viewportHeight - itemHeight) / 2;
+            targetOffset = Math.Max(0, Math.Min(targetOffset, scrollViewer.ScrollableHeight));
+            scrollViewer.ScrollToVerticalOffset(targetOffset);
+        }
+
+        /// <summary>
+        /// Ближайший предок-<see cref="ScrollViewer"/>, у которого есть запас прокрутки.
+        /// В шаблоне TreeView тоже есть ScrollViewer, но дерево живёт внутри внешнего
+        /// ScrollViewer левой панели и растянуто на всю высоту — прокручивается именно
+        /// внешний, его и надо вернуть.
+        /// </summary>
+        private static ScrollViewer? FindScrollingAncestor(DependencyObject element)
+        {
+            ScrollViewer? fallback = null;
+            for (var current = VisualTreeHelper.GetParent(element); current != null; current = VisualTreeHelper.GetParent(current))
+            {
+                if (current is not ScrollViewer scrollViewer)
+                    continue;
+
+                fallback = scrollViewer;
+                if (scrollViewer.ScrollableHeight > 0)
+                    return scrollViewer;
+            }
+
+            return fallback;
+        }
+
+        /// <summary>Повторяет подсветку после пересборки дерева (узлы — новые объекты).</summary>
+        private void SyncNavigationWithActiveDocument() =>
+            OnWorkspaceSelectedDocumentChanged(this, ContentArea.SelectedDocument);
+
+        /// <summary>Раскрывает предков узла: без этого контейнер не создан и выделять нечего.</summary>
+        private void ExpandNavigationAncestors(NavigationItem target)
+        {
+            foreach (var root in NavigationItems)
+            {
+                if (ExpandNavigationPath(root, target))
+                    return;
+            }
+        }
+
+        private static bool ExpandNavigationPath(NavigationItem node, NavigationItem target)
+        {
+            if (ReferenceEquals(node, target))
+                return true;
+
+            foreach (var child in node.Children)
+            {
+                if (!ExpandNavigationPath(child, target))
+                    continue;
+
+                node.IsExpanded = true;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Запасной путь для вкладок, открытых не из дерева: ключ документа —
+        /// «catalog:{id}», «document:{id}», «overview:{id}» или просто Id узла.
+        /// </summary>
+        private NavigationItem? FindNavigationItemByDocumentKey(string? key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                return null;
+
+            var id = key;
+            foreach (var prefix in new[] { "catalog:", "document:", "overview:" })
+            {
+                if (!id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                id = id[prefix.Length..];
+                break;
+            }
+
+            return FindNavigationItemById(NavigationItems, id);
+        }
+
+        private static NavigationItem? FindNavigationItemById(IEnumerable<NavigationItem> items, string id)
+        {
+            if (string.IsNullOrEmpty(id))
+                return null;
+
+            foreach (var item in items)
+            {
+                if (string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase))
+                    return item;
+
+                if (FindNavigationItemById(item.Children, id) is NavigationItem found)
+                    return found;
+            }
+
+            return null;
+        }
+
         private void OnWindowClosing(object? sender, CancelEventArgs e)
         {
             if (ApplicationExitService.IsShuttingDown || _closeForModeSwitch)
@@ -470,6 +687,8 @@ namespace BIS.ERP
                     context.ChangeTracker.Clear();
                     initStage = "BuildNavigationTree (дерево навигации)";
                     await BuildNavigationTree();
+                    // Дерево строится позже первых вкладок — подсвечиваем узел активной.
+                    SyncNavigationWithActiveDocument();
                 }
             }
             catch (Exception ex)
@@ -1851,6 +2070,22 @@ namespace BIS.ERP
 
         private async Task OpenNavigationItemAsync(NavigationItem item)
         {
+            var previousKey = ContentArea.SelectedDocument?.Key;
+            await OpenNavigationItemCoreAsync(item);
+
+            // Запоминаем, каким узлом дерева открыт документ: при переключении
+            // закладок этот узел подсвечивается в левой панели.
+            var activeDocument = ContentArea.SelectedDocument;
+            if (activeDocument == null || activeDocument.Tag != null)
+                return;
+            if (string.Equals(activeDocument.Key, previousKey, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            activeDocument.Tag = item;
+        }
+
+        private async Task OpenNavigationItemCoreAsync(NavigationItem item)
+        {
             switch (item.Type)
             {
                 case "Section":
@@ -2097,6 +2332,10 @@ namespace BIS.ERP
             var item = e.NewValue as NavigationItem;
             if (item == null) return;
 
+            // Узел выделен программно (синхронизация с активной вкладкой MDI) —
+            // документ уже открыт, второй экземпляр не создаём.
+            if (_synchronizingNavigationSelection) return;
+
             if (_isLoadingReport) return;
 
             try
@@ -2174,6 +2413,7 @@ namespace BIS.ERP
         {
             // Перестраиваем дерево заново: сначала полное, затем фильтр по свежим правам.
             await BuildNavigationTree();
+            SyncNavigationWithActiveDocument();
             // Обновляем подпись текущего пользователя (на случай смены контекста).
             if (_authService.CurrentUser != null)
             {

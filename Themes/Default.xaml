@@ -59,6 +59,23 @@
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#34495E"/>
     <Color x:Key="AppHighlightColor">#34495E</Color>
 
+    <!--
+        Выделение узла в дереве навигации. Раньше для него бралась та же кисть,
+        что и для наведения (#34495E), а фон панели — #2C3E50: разница почти
+        незаметна, поэтому выбранный узел не читался. Здесь фон заметно светлее
+        панели и наведения, текст — белый (контраст 4.6:1), слева — акцентная
+        полоса в цвет иконки бренда. Цвета дублируются в Brush и Color: система
+        (SystemColors.HighlightBrushKey) умеет брать только Color.
+    -->
+    <SolidColorBrush x:Key="AppNavigationSelectionBrush" Color="#2C79B8"/>
+    <Color x:Key="AppNavigationSelectionColor">#2C79B8</Color>
+    <SolidColorBrush x:Key="AppNavigationSelectionTextBrush" Color="#FFFFFF"/>
+    <Color x:Key="AppNavigationSelectionTextColor">#FFFFFF</Color>
+    <SolidColorBrush x:Key="AppNavigationSelectionAccentBrush" Color="#64B5F6"/>
+    <!-- Наведение: заметнее фона панели (#2C3E50), но тише выделения (#2C79B8).
+         Раньше бралась AppHighlightBrush #34495E — 1.2:1 к панели, практически незаметно. -->
+    <SolidColorBrush x:Key="AppNavigationHoverBrush" Color="#3D566E"/>
+
     <SolidColorBrush x:Key="ConfiguratorSidebarBackgroundBrush" Color="#223241"/>
     <SolidColorBrush x:Key="ConfiguratorHeaderBackgroundBrush" Color="#132231"/>
     <SolidColorBrush x:Key="ConfiguratorSidebarCardBrush" Color="#2D4052"/>

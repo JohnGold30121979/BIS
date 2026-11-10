@@ -43,6 +43,10 @@ namespace BIS.ERP.Views
             _filteredItems = _items;
 
             RebuildGrid();
+
+            // В MDI-вкладке окно само управляет прокруткой: прокручивается только таблица,
+            // а поиск и кнопки остаются наверху.
+            Tag = MdiDialogService.ManageOwnScrollTag;
         }
 
         /// <summary>
@@ -171,7 +175,14 @@ public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>
         /// </summary>
         public void SetSearchText(string? text)
         {
+            // В ячейке счёт, материал или участок хранится как «1010 - Касса».
+            // В строку поиска ставим наименование: при поиске по первым символам
+            // составная подпись не совпала бы с отдельными колонками Код/Наименование.
             var value = text?.Trim();
+            var separatorIndex = value?.IndexOf(" - ", StringComparison.Ordinal) ?? -1;
+            if (separatorIndex > 0 && separatorIndex + 3 < value!.Length)
+                value = value[(separatorIndex + 3)..].Trim();
+
             if (string.IsNullOrEmpty(value))
                 return;
 
@@ -202,10 +213,54 @@ public void ConfigureExtraAction(string caption, Func<Dictionary<string, object>
                 // коллекции рассинхронизирует генератор DataGrid (лог 09:49).
                 return new List<Dictionary<string, object>>(_items);
 
+            var query = search.Trim();
+            if (query.Length == 0)
+                return new List<Dictionary<string, object>>(_items);
+
             return _items
-                .Where(item => item.Values.Any(v => v?.ToString()?.Contains(search, StringComparison.OrdinalIgnoreCase) == true))
+                .Where(item => item.Any(pair => IsSearchableKey(pair.Key) && MatchesSearch(pair.Value, query)))
                 .ToList();
         }
+
+        /// <summary>
+        /// Поиск «по первым символам»: значение подходит, если оно начинается
+        /// с введённого текста. Раньше здесь был Contains (аналог LIKE '%текст%'):
+        /// одна буква вытаскивала половину справочника, и по списку нельзя было
+        /// понять, где именно совпадение. Теперь поведение как в прежних
+        /// справочниках — набираете код или начало наименования.
+        /// </summary>
+        private static bool MatchesSearch(object? value, string query)
+        {
+            var text = value?.ToString()?.Trim();
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            if (text.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Составная подпись «1010 - Касса»: код и наименование могут лежать
+            // в одной ячейке (резолв ссылок через DisplayPattern). Тогда
+            // наименование ищем с начала — после разделителя.
+            foreach (var separator in DisplaySeparators)
+            {
+                var index = text.IndexOf(separator, StringComparison.Ordinal);
+                if (index < 0)
+                    continue;
+
+                var tail = text[(index + separator.Length)..].TrimStart();
+                if (tail.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Служебные колонки в поиске не участвуют: их не видно в таблице.</summary>
+        private static bool IsSearchableKey(string key) =>
+            !key.Equals("Id", StringComparison.OrdinalIgnoreCase) &&
+            !key.StartsWith("__", StringComparison.Ordinal);
+
+        private static readonly string[] DisplaySeparators = { " - ", " – ", " — " };
 
         private void ItemsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
@@ -450,6 +505,8 @@ private async void OnEditClick(object sender, RoutedEventArgs e)
                 "Тип счета" or "account_type" => 120,
                 "Остаток брать из модуля" => 78,
                 "Табельный номер" => 92,
+                // «МОЛ» — ФИО (иногда несколько человек через запятую), одной строкой не влезает.
+                "МОЛ" or "responsible_person_id" => 220,
                 _ => 110
             };
         }

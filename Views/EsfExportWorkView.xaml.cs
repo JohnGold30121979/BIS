@@ -1,4 +1,4 @@
-﻿using BIS.ERP.Data;
+using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
 using Microsoft.EntityFrameworkCore;
@@ -17,9 +17,7 @@ namespace BIS.ERP.Views
     public partial class EsfExportWorkView : UserControl
     {
         private readonly AppDbContext _context;
-        private readonly MetadataService _metadataService;
-        private InvoiceService? _salesInvoiceService;
-        private InvoiceEsfExchangeService? _exchangeService;
+        private MetadataObject? _salesInvoiceDocument;
         private bool _isBulkSelectionUpdating;
 
         public ObservableCollection<EsfExportRow> Rows { get; } = new();
@@ -28,12 +26,28 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             _context = context;
-            _metadataService = new MetadataService(context);
             ExportGrid.ItemsSource = Rows;
 
             EndDatePicker.SelectedDate = DateTime.Today;
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
             Loaded += async (_, _) => await LoadRowsAsync();
+        }
+
+        /// <summary>
+        /// Отдельное подключение на операцию — как в остальной системе
+        /// (SchemaMigrationService, MainWorkWindow.LoadWithIndependentConnectionAsync,
+        /// InventoryDocumentLineService). Общий DbContext окна для запросов не используется:
+        /// загрузка запускается сразу из двух мест (Loaded и Checked чекбоксов при
+        /// инициализации XAML), а две команды на одном соединении дают
+        /// NpgsqlOperationInProgressException — «A command is already in progress».
+        /// </summary>
+        private AppDbContext CreateIsolatedContext()
+        {
+            var connectionString = _context.Database.GetConnectionString();
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("Не удалось определить строку подключения инфобазы.");
+
+            return new AppDbContext(connectionString);
         }
 
         private async Task LoadRowsAsync()
@@ -48,9 +62,15 @@ namespace BIS.ERP.Views
                 var endDate = (EndDatePicker.SelectedDate ?? DateTime.MaxValue).Date;
                 var onlyNotExported = OnlyNotExportedCheckBox.IsChecked == true;
 
+                // Вся загрузка — на своём подключении: две одновременные загрузки
+                // больше не делят одно соединение.
+                await using var context = CreateIsolatedContext();
+                var metadataService = new MetadataService(context);
+
                 if (InvoicesSourceCheckBox.IsChecked == true)
                 {
-                    var document = await FindSalesInvoiceDocumentAsync();
+                    var document = await FindSalesInvoiceDocumentAsync(context, metadataService);
+                    _salesInvoiceDocument = document;
                     if (document == null)
                     {
                         SummaryText.Text = "Документ выписки счет-фактур не найден в метаданных.";
@@ -58,12 +78,11 @@ namespace BIS.ERP.Views
                     }
                     else
                     {
-                        _salesInvoiceService = new InvoiceService(_context);
-                        _salesInvoiceService.Configure(document);
-                        _exchangeService = new InvoiceEsfExchangeService(_context, _salesInvoiceService);
-                        var invoiceModuleName = await ResolveDocumentModuleNameAsync(document);
+                        var salesInvoiceService = new InvoiceService(context);
+                        salesInvoiceService.Configure(document);
+                        var invoiceModuleName = await ResolveDocumentModuleNameAsync(metadataService, document);
 
-                        var invoices = await _salesInvoiceService.GetInvoicesAsync();
+                        var invoices = await salesInvoiceService.GetInvoicesAsync();
                         foreach (var invoice in invoices
                                      .Where(item => item.DocDate.Date >= startDate && item.DocDate.Date <= endDate)
                                      .Where(item => !onlyNotExported || !item.IsEsfExported)
@@ -77,7 +96,7 @@ namespace BIS.ERP.Views
 
                 if (PostingsSourceCheckBox.IsChecked == true)
                 {
-                    var postingService = new PostingService(_context);
+                    var postingService = new PostingService(context);
                     var postings = await postingService.GetAllPostingsAsync(startDate, endDate);
                     foreach (var posting in postings
                                  .Where(item => !InvoiceDocumentTypes.IsSales(item.DocumentType) &&
@@ -100,9 +119,11 @@ namespace BIS.ERP.Views
             }
         }
 
-        private async Task<MetadataObject?> FindSalesInvoiceDocumentAsync()
+        private static async Task<MetadataObject?> FindSalesInvoiceDocumentAsync(
+            AppDbContext context,
+            MetadataService metadataService)
         {
-            var document = await _context.MetadataObjects
+            var document = await context.MetadataObjects
                 .AsNoTracking()
                 .FirstOrDefaultAsync(item =>
                     item.ObjectType == "Document" &&
@@ -112,16 +133,18 @@ namespace BIS.ERP.Views
             if (document != null)
                 return document;
 
-            var allObjects = await _metadataService.GetAllMetadataObjectsAsync();
+            var allObjects = await metadataService.GetAllMetadataObjectsAsync();
             return allObjects.FirstOrDefault(item =>
                 item.ObjectType == "Document" &&
                 (item.TableName == "doc_sales_invoice" ||
                  item.Name == InvoiceDocumentTypes.SalesIssue));
         }
 
-        private async Task<string> ResolveDocumentModuleNameAsync(MetadataObject document)
+        private static async Task<string> ResolveDocumentModuleNameAsync(
+            MetadataService metadataService,
+            MetadataObject document)
         {
-            var assignedModuleName = await _metadataService.GetAssignedModuleNameAsync(document.Id, document.ObjectType);
+            var assignedModuleName = await metadataService.GetAssignedModuleNameAsync(document.Id, document.ObjectType);
             return string.IsNullOrWhiteSpace(assignedModuleName)
                 ? "Финансы"
                 : assignedModuleName.Trim();
@@ -168,7 +191,7 @@ namespace BIS.ERP.Views
 
         private async void OnExportClick(object sender, RoutedEventArgs e)
         {
-            if (_exchangeService == null)
+            if (_salesInvoiceDocument == null)
             {
                 MessageBox.Show("Сервис выгрузки ЭСФ не готов. Обновите список.", "Выгрузка ЭСФ",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -212,17 +235,29 @@ namespace BIS.ERP.Views
             try
             {
                 StatusText.Text = "Формирование XML ЭСФ...";
-                var result = await _exchangeService.ExportSelectedInvoicesAsync(
-                    selectedRows.Select(row => row.InvoiceId!.Value).ToArray(),
-                    saveDialog.FileName);
+                var invoiceIds = selectedRows.Select(row => row.InvoiceId!.Value).ToArray();
 
-                await LoadRowsAsync();
-                StatusText.Text = $"XML выгружен: {result.ExportedCount}";
-                MessageBox.Show(
-                    $"XML выгружен успешно.\nДокументов: {result.ExportedCount}\nФайл: {result.OutputPath}",
-                    "Выгрузка ЭСФ",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                // Отдельное подключение и на выгрузку: не делим соединение
+                // с фоновой загрузкой списка (общая причина ошибки
+                // «A command is already in progress»).
+                await using (var context = CreateIsolatedContext())
+                {
+                    var salesInvoiceService = new InvoiceService(context);
+                    salesInvoiceService.Configure(_salesInvoiceDocument);
+                    var exchangeService = new InvoiceEsfExchangeService(context, salesInvoiceService);
+
+                    var result = await exchangeService.ExportSelectedInvoicesAsync(
+                        invoiceIds,
+                        saveDialog.FileName);
+
+                    await LoadRowsAsync();
+                    StatusText.Text = $"XML выгружен: {result.ExportedCount}";
+                    MessageBox.Show(
+                        $"XML выгружен успешно.\nДокументов: {result.ExportedCount}\nФайл: {result.OutputPath}",
+                        "Выгрузка ЭСФ",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
             }
             catch (Exception ex)
             {

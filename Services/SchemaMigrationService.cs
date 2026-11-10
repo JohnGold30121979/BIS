@@ -160,8 +160,47 @@ namespace BIS.ERP.Services
                 new("2026.11.06.01",
                     "Виды материалов: замена начальных данных эталонным списком",
                     false,
-                    ReplaceMaterialTypesAsync)
+                    ReplaceMaterialTypesAsync),
+
+                new("2026.11.09.01",
+                    "Проводки: счёт-ссылка (uuid) в дебете/кредите заменяется кодом счёта",
+                    false,
+                    FixPostingAccountReferencesAsync)
             };
+        }
+
+        /// <summary>
+        /// Документы ТМЗ писали в проводку счёт шапки как ссылку (uuid): в журнале
+        /// и в деталях проводки вместо кредитового счёта был идентификатор.
+        /// Переводим такие значения в код счёта из плана счетов.
+        /// </summary>
+        private static async Task FixPostingAccountReferencesAsync(AppDbContext context)
+        {
+            if (!await context.Database.SqlQueryRaw<bool>(
+                    "SELECT (to_regclass('public.doc_postings') IS NOT NULL) AS \"Value\"")
+                .SingleAsync())
+            {
+                return;
+            }
+
+            var catalog = await context.MetadataObjects.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" &&
+                                             item.Name.StartsWith("План счетов"));
+
+            if (catalog == null)
+                return;
+
+            var table = "\"" + catalog.TableName.Replace("\"", "\"\"") + "\"";
+
+            foreach (var column in new[] { "debit_account", "credit_account" })
+            {
+                await context.Database.ExecuteSqlRawAsync($@"
+                    UPDATE doc_postings
+                       SET {column} = a.""code""
+                      FROM {table} a
+                     WHERE lower(a.""Id""::text) = lower(doc_postings.{column})
+                       AND doc_postings.{column} ~* '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$';");
+            }
         }
 
         private static async Task ReplaceMaterialTypesAsync(AppDbContext context)

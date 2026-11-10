@@ -233,7 +233,8 @@ if (string.Equals(_definition.Name, "Списание ТМЗ", StringComparison.
 
 - Модель строки — `InventoryLineRow` (`INotifyPropertyChanged`): `LineNumber`, `MaterialId`,
   `MaterialName`, `MaterialCode`, `UnitName`, `AccountCode`, `AccountText`, `SiteId`, `SiteText`,
-  `ResponsiblePersonId`, `Quantity`, `Price`, `AmountWithoutTax`, `VatRate`, `VatAmount`,
+  `ResponsiblePersonId`, `ResponsiblePersonText`, `ResponsibleOptions`,
+  `Quantity`, `Price`, `AmountWithoutTax`, `VatRate`, `VatAmount`,
   `SalesTaxRate`, `SalesTaxAmount`, `LineTotal`, `AmountCurrency`, `Description`.
 - `GetLinesAsync(linesTable, parentColumn, headerId)` — выборка по `line_number`.
 - `ReplaceLinesAsync(...)` — DELETE + INSERT в одной транзакции, перенумерация с 1.
@@ -273,7 +274,7 @@ _navigation.NavigateTo(dynamicView, item.Name, $"document:{item.Id}");
 - нижний блок «Строки проводки» (`PostingLinesGrid`) — строки выбранного документа
   (`LoadPostingLinesAsync` → `GetLinesAsync`), колонки №, Код, Материал, Ед., Дебет, Участок,
   %, Кол-во, Цена, Без НДС, НДС; наименования участков — через `EnsureSiteNamesAsync`;
-- кнопки: Добавить (диалог), Редактировать, Удалить, Провести, Обновить.
+- кнопки: Добавить (диалог), Редактировать, Просмотр (только чтение), Удалить, Обновить (кнопки «Провести» у документов ТМЗ нет — проведение идёт сразу при записи).
 
 Для нового документа правок в этом окне не требуется — достаточно `InventoryDocumentModel.Documents`.
 
@@ -285,8 +286,10 @@ _navigation.NavigateTo(dynamicView, item.Name, $"document:{item.Id}");
 `_metadataService.GetNextDocumentNumberAsync(_document)`: сервис создаёт таблицу `doc_numbering`,
 сканирует существующие документы типа и возвращает следующий номер; счётчик только растёт.
 
-**Проведение.** Кнопка «Провести» в окне списка вызывает `MetadataService.PostDocumentAsync(documentId, recordId)`.
-Для документов ТМЗ в `PostDocumentAsync` есть отдельная ветка `IsInventoryDocumentName(...)` →
+**Проведение.** Документы ТМЗ проводятся сразу при записи: диалог после сохранения вызывает
+`MetadataService.PostInventoryDocumentAsync(documentId, recordId)` — она удаляет старые проводки,
+сбрасывает `is_posted` и вызывает `PostDocumentAsync(documentId, recordId)` (повторное проведение
+без дублей). Для документов ТМЗ в `PostDocumentAsync` есть отдельная ветка `IsInventoryDocumentName(...)` →
 `ProcessInventoryDocumentAsync(...)`, которая пишет проводки в `doc_postings`:
 
 | Что | Значение |
@@ -333,9 +336,11 @@ _navigation.NavigateTo(dynamicView, item.Name, $"document:{item.Id}");
 7. **Строки**: «?» по материалу/дебету/участку открывает справочник вкладкой MDI; Enter идёт
    по колонкам и создаёт новую строку в конце; суммы пересчитываются при вводе.
 8. **Сохранение**: шапка попадает в `<шапка>`, строки — в `<шапка>_lines` (`line_number` = 1,2,3…),
-   окно закрывается (`MdiDialogService.CloseWithResult`).
-9. **Проведение**: «Провести» создаёт строки в `doc_postings` (по одной на строку документа,
-   `document_type` = имя документа, `document_id`/`document_table` заполнены), `is_posted = true`.
+   затем документ проводится сразу (`PostInventoryDocumentAsync`), окно закрывается
+   (`MdiDialogService.CloseWithResult`).
+9. **Проведение**: строки в `doc_postings` создаются при записи (по одной на строку документа,
+   `document_type` = имя документа, `document_id`/`document_table` заполнены), `is_posted = true`;
+   повторная запись пересоздаёт проводки без дублей.
 10. **Удаление**: после удаления документа в `doc_postings` не остаётся записей с его `document_id`
    или `doc_number`.
 11. **Окно списка**: выбранный документ показывает строки в нижнем гриде, «Вид операции» — наименование.

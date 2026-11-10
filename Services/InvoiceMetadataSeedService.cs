@@ -2,6 +2,8 @@ using BIS.ERP.Data;
 using BIS.ERP.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace BIS.ERP.Services
 {
@@ -10,6 +12,9 @@ namespace BIS.ERP.Services
         private readonly AppDbContext _context;
         private readonly MetadataService _metadataService;
         private readonly InvoiceService _invoiceService;
+
+        // Один прогон посадки на процесс: два окна не должны сеять одновременно.
+        private static readonly SemaphoreSlim SeedGate = new(1, 1);
 
         public InvoiceMetadataSeedService(AppDbContext context)
         {
@@ -26,34 +31,43 @@ namespace BIS.ERP.Services
 
         public async Task EnsureAsync()
         {
-            if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.InvoiceKey))
+            // Окно рабочего режима и окно конфигуратора живут одновременно и оба
+            // зовут посадку. Без этого замка они бы писали одни и те же записи
+            // на одном DbContext, а в лог летела лишняя строка «уже выполнена — пропуск».
+            await SeedGate.WaitAsync();
+            try
             {
-                SystemLogService.Info("Посадка счетов-фактур уже выполнена — пропуск.", "Seed");
-                return;
+                if (await SeedStateService.IsAppliedAsync(_context, SeedStateService.InvoiceKey))
+                    return;
+
+                await _invoiceService.EnsureSchemaAsync();
+
+                var configId = await _context.MetadataConfigurations.Select(item => (Guid?)item.Id).FirstOrDefaultAsync();
+                await EnsureEsfXmlTagCatalogAsync(configId);
+                await EnsureDocumentAsync(
+                    InvoiceDocumentTypes.SalesIssue,
+                    "doc_sales_invoice",
+                    "Выписка счет-фактур на реализацию (журнал поставок)",
+                    "🧾",
+                    15,
+                    configId);
+                await EnsureDocumentAsync(
+                    InvoiceDocumentTypes.PurchaseRegistration,
+                    "doc_purchase_invoice",
+                    "Регистрация полученных счет-фактур (журнал закупок)",
+                    "📥",
+                    16,
+                    configId);
+                await EnsureInvoiceReferenceDataAsync();
+                await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
+
+                await SeedStateService.MarkAsync(_context, SeedStateService.InvoiceKey, "Посадка счетов-фактур");
+                SystemLogService.Info("Посадка счетов-фактур выполнена.", "Seed");
             }
-
-            await _invoiceService.EnsureSchemaAsync();
-
-            var configId = await _context.MetadataConfigurations.Select(item => (Guid?)item.Id).FirstOrDefaultAsync();
-            await EnsureEsfXmlTagCatalogAsync(configId);
-            await EnsureDocumentAsync(
-                InvoiceDocumentTypes.SalesIssue,
-                "doc_sales_invoice",
-                "Выписка счет-фактур на реализацию (журнал поставок)",
-                "🧾",
-                15,
-                configId);
-            await EnsureDocumentAsync(
-                InvoiceDocumentTypes.PurchaseRegistration,
-                "doc_purchase_invoice",
-                "Регистрация полученных счет-фактур (журнал закупок)",
-                "📥",
-                16,
-                configId);
-            await EnsureInvoiceReferenceDataAsync();
-            await new ModuleMetadataService(_context).EnsureDefaultModulesAsync();
-
-            await SeedStateService.MarkAsync(_context, SeedStateService.InvoiceKey, "Посадка счетов-фактур");
+            finally
+            {
+                SeedGate.Release();
+            }
         }
 
         private async Task EnsureEsfXmlTagCatalogAsync(Guid? configId)

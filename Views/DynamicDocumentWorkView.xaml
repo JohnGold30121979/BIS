@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Loaded="UserControl_Loaded">
 
-    <Grid Margin="10">
+    <Grid Margin="10" Background="{DynamicResource AppWindowBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -12,7 +12,7 @@
         </Grid.RowDefinitions>
 
         <!-- Панель инструментов -->
-        <Border Grid.Row="0" Background="White" CornerRadius="5" Padding="10" Margin="0,0,0,10">
+        <Border Grid.Row="0" Background="{DynamicResource AppSurfaceBrush}" CornerRadius="5" Padding="10" Margin="0,0,0,10">
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="AddButton" Content="➕ Добавить" Click="OnAddClick" 
                         Background="#4CAF50" Foreground="White" Padding="15,8" Margin="0,0,10,0"
@@ -22,6 +22,9 @@
                 <Button x:Name="EditButton" Content="✏️ Редактировать" Click="OnEditClick" 
                         Background="#2196F3" Foreground="White" Padding="15,8" Margin="0,0,10,0"
                         Cursor="Hand"/>
+                <Button x:Name="ViewButton" Content="👁️ Просмотр" Click="OnViewClick" 
+                        Background="#607D8B" Foreground="White" Padding="15,8" Margin="0,0,10,0"
+                        Cursor="Hand" ToolTip="Открыть документ только для чтения"/>
                 <Button x:Name="DeleteButton" Content="🗑️ Удалить" Click="OnDeleteClick" 
                         Background="#F44336" Foreground="White" Padding="15,8" Margin="0,0,10,0"
                         Cursor="Hand"/>
@@ -33,6 +36,7 @@
 
         <!-- Таблица данных -->
         <DataGrid x:Name="DataGrid" Grid.Row="1"
+                  MouseDoubleClick="OnDocumentDoubleClick"
                   AutoGenerateColumns="True"
                   CanUserAddRows="False"
                   CanUserDeleteRows="False"
@@ -40,11 +44,11 @@
                   SelectionMode="Single"
                   SelectionUnit="FullRow"
                   RowHeaderWidth="0"
-                  AlternatingRowBackground="#F8F9FA"
-                  Background="White"
-                  BorderBrush="#E0E0E0"
+                  AlternatingRowBackground="{DynamicResource AppAlternateRowBrush}"
+                  Background="{DynamicResource AppSurfaceBrush}"
+                  BorderBrush="{DynamicResource AppBorderBrush}"
                   BorderThickness="1"
-                  RowHeight="35"
+                  RowHeight="28"
                   FontSize="13"
                   SelectionChanged="OnSelectionChanged">
             <DataGrid.Resources>
@@ -64,17 +68,20 @@
                       HeadersVisibility="Column"
                       RowHeaderWidth="0"
                       RowHeight="26"
-                      GridLinesVisibility="Horizontal"
-                      AlternatingRowBackground="#F8F9FA"
-                      Background="White"
-                      BorderBrush="#E0E0E0"
+                      GridLinesVisibility="All"
+                      HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}"
+                      VerticalGridLinesBrush="{DynamicResource AppBorderBrush}"
+                      AlternatingRowBackground="{DynamicResource AppAlternateRowBrush}"
+                      Background="{DynamicResource AppSurfaceBrush}"
+                      BorderBrush="{DynamicResource AppBorderBrush}"
                       BorderThickness="1">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="№" Binding="{Binding LineNumber}" Width="40"/>
                     <DataGridTextColumn Header="Код" Binding="{Binding MaterialCode}" Width="70"/>
                     <DataGridTextColumn Header="Материал" Binding="{Binding MaterialName}" Width="*"/>
                     <DataGridTextColumn Header="Ед." Binding="{Binding UnitName}" Width="55"/>
-                    <DataGridTextColumn Header="Дебет" Binding="{Binding AccountCode}" Width="90"/>
+                    <DataGridTextColumn Header="Дебет" Binding="{Binding DebitAccountText}" Width="100"/>
+                    <DataGridTextColumn Header="Кредит" Binding="{Binding CreditAccountText}" Width="100"/>
                     <DataGridTextColumn Header="Участок" Binding="{Binding SiteText}" Width="140"/>
                     <DataGridTextColumn Header="%" Binding="{Binding VatRate}" Width="55"/>
                     <DataGridTextColumn Header="Кол-во" Binding="{Binding Quantity}" Width="80"/>

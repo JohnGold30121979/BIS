@@ -53,6 +53,16 @@
     <SolidColorBrush x:Key="AppHighlightBrush" Color="#44475A"/>
     <Color x:Key="AppHighlightColor">#44475A</Color>
 
+    <!-- Выделение узла в дереве навигации в палитре Dracula: фиолетовый акцент
+         темы, фон #4F5D8A (контраст с белым 6.4:1) вместо серого наведения. -->
+    <SolidColorBrush x:Key="AppNavigationSelectionBrush" Color="#4F5D8A"/>
+    <Color x:Key="AppNavigationSelectionColor">#4F5D8A</Color>
+    <SolidColorBrush x:Key="AppNavigationSelectionTextBrush" Color="#FFFFFF"/>
+    <Color x:Key="AppNavigationSelectionTextColor">#FFFFFF</Color>
+    <SolidColorBrush x:Key="AppNavigationSelectionAccentBrush" Color="#BD93F9"/>
+    <!-- Наведение в Dracula: между фоном #282A36 и выделением #4F5D8A. -->
+    <SolidColorBrush x:Key="AppNavigationHoverBrush" Color="#3B3E52"/>
+
     <SolidColorBrush x:Key="ConfiguratorSidebarBackgroundBrush" Color="#282A36"/>
     <SolidColorBrush x:Key="ConfiguratorHeaderBackgroundBrush" Color="#21222C"/>
     <SolidColorBrush x:Key="ConfiguratorSidebarCardBrush" Color="#343746"/>
