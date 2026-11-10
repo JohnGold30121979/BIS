@@ -22,8 +22,6 @@ namespace BIS.ERP.Views
     public partial class AccountingReportsView : UserControl
     {
         private readonly Func<AppDbContext> _createContext;
-        private readonly BalanceService _balanceService;
-        private readonly OrganizationBalanceService _organizationBalanceService;
         private readonly AccountingPeriodService _periodService;
         private DataTable? _currentData;
         private Report? _currentReport;
@@ -38,18 +36,15 @@ namespace BIS.ERP.Views
         private string _trialBalanceAccountName = string.Empty;
         private IReadOnlyList<OrganizationSelectionItem> _organizationSelectionItems = Array.Empty<OrganizationSelectionItem>();
 
-        public AccountingReportsView(AppDbContext context)
+        public AccountingReportsView(string connectionString)
         {
             InitializeComponent();
             AmountColumnsBehavior.Attach(ReportGrid); // авто-генерируемые колонки отчётов — суммы с разрядами через пробел
             // Служебные колонки акта сверки нужны только механизму подстановки FRX-макета
             // и не должны появляться в экранной таблице, поэтому отменяем их генерацию.
             ReportGrid.AutoGeneratingColumn += OnReportGridAutoGeneratingColumn;
-            var connectionString = context.Database.GetConnectionString();
-            _createContext = () => new AppDbContext(connectionString!);
-            _balanceService = new BalanceService(context);
-            _organizationBalanceService = new OrganizationBalanceService(context);
-            _periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
+            _createContext = () => new AppDbContext(connectionString);
+            _periodService = new AccountingPeriodService(new ConnectionStringDbContextFactory(connectionString));
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
             Loaded += async (_, _) =>
@@ -589,12 +584,13 @@ namespace BIS.ERP.Views
                 if (end < start)
                     throw new Exception("Дата окончания периода не может быть раньше даты начала");
 
-                await _periodService.EnsureSchemaAsync();
-
                 var selectedReport = SelectedAccountingReport;
                 if (selectedReport == null)
                     throw new InvalidOperationException(
                         "В списке нет отчетов. Отметьте нужный отчет в конструкторе: «Показывать в бухгалтерской отчетности».");
+
+                if (selectedReport.ReportType != InventoryTurnoverReport.ReportType)
+                    await _periodService.EnsureSchemaAsync();
 
                 (_currentData, _currentReport) = await BuildSelectedAccountingReportAsync(selectedReport, start, end);
 
@@ -613,6 +609,7 @@ namespace BIS.ERP.Views
             }
             catch (Exception ex)
             {
+                SystemLogService.Error("Ошибка формирования бухгалтерского отчёта.", nameof(AccountingReportsView), ex);
                 MessageBox.Show($"Ошибка формирования отчета: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 StatusText.Text = "Ошибка формирования";
@@ -1099,7 +1096,7 @@ namespace BIS.ERP.Views
             var filterName = !string.IsNullOrWhiteSpace(selected?.Name) ? selected!.Name : NormalizeOrganizationName(_selectedOrganizationName);
             var titleName = scoped ? ResolveOrganizationTitle(selectedFilterId, filterName) : "Все организации";
 
-            var calc = await _organizationBalanceService.CalculateAsync(start, end);
+            var calc = await new OrganizationBalanceService(context).CalculateAsync(start, end);
             var pairs = calc.Rows
                 .Where(row => !row.IsOrganizationTotal && ReconciliationActBuilder.MatchesSelectedOrganization(row, selectedFilterId, filterName))
                 .OrderBy(row => row.OrganizationName, StringComparer.CurrentCultureIgnoreCase)
@@ -2018,7 +2015,8 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildGeneralLedgerAsync(int year)
         {
-            var ledger = await _balanceService.GetGeneralLedgerAsync(year);
+            await using var context = _createContext();
+            var ledger = await new BalanceService(context).GetGeneralLedgerAsync(year);
             var table = new DataTable("Главная книга");
             table.Columns.Add("Счет", typeof(string));
             table.Columns.Add("Наименование", typeof(string));
@@ -2059,7 +2057,8 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildFinancialPositionAsync(DateTime date)
         {
-            var balance = await _balanceService.GetEnterpriseBalanceAsync(date);
+            await using var context = _createContext();
+            var balance = await new BalanceService(context).GetEnterpriseBalanceAsync(date);
             var table = new DataTable("Баланс предприятия");
             table.Columns.Add("Раздел", typeof(string));
             table.Columns.Add("Счет", typeof(string));
@@ -2086,7 +2085,8 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildFinancialResultsAsync(DateTime start, DateTime end)
         {
-            var results = await _balanceService.GetFinancialResultsAsync(start, end);
+            await using var context = _createContext();
+            var results = await new BalanceService(context).GetFinancialResultsAsync(start, end);
             var table = new DataTable("Финансовые результаты");
             table.Columns.Add("Раздел", typeof(string));
             table.Columns.Add("Счет", typeof(string));
@@ -2109,7 +2109,7 @@ namespace BIS.ERP.Views
         private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
         {
             await using var context = _createContext();
-            var entries = await _balanceService.GetPurchaseSalesJournalAsync(start, end);
+            var entries = await new BalanceService(context).GetPurchaseSalesJournalAsync(start, end);
             var utcStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
             var utcEnd = DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc);
             var savedEntries = await context.TaxJournalRecords.AsNoTracking()
@@ -2158,7 +2158,8 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildOrganizationBalancesAsync(DateTime start, DateTime end)
         {
-            var calculation = await _organizationBalanceService.CalculateAsync(start, end);
+            await using var context = _createContext();
+            var calculation = await new OrganizationBalanceService(context).CalculateAsync(start, end);
             var table = new DataTable("Сальдо по организациям");
             table.Columns.Add("Организация", typeof(string));
             table.Columns.Add("Вид расчета", typeof(string));
@@ -2207,8 +2208,10 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildPeriodCollectionAsync(DateTime start, DateTime end)
         {
-            var collection = await _balanceService.CollectPeriodInformationAsync(start, end);
-            var balances = await _balanceService.GetTurnoverBalanceAsync(start, end);
+            await using var context = _createContext();
+            var balanceService = new BalanceService(context);
+            var collection = await balanceService.CollectPeriodInformationAsync(start, end);
+            var balances = await balanceService.GetTurnoverBalanceAsync(start, end);
             var table = new DataTable("Сбор информации за периода");
             table.Columns.Add("Показатель", typeof(string));
             table.Columns.Add("Всего", typeof(int));

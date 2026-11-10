@@ -2708,8 +2708,9 @@ namespace BIS.ERP
 
         private async Task OpenAccountingReportsAsync(string? selectedReportType = null)
         {
-            await using var context = await _infoBaseManager.GetCurrentDbContextAsync();
-            var view = new AccountingReportsView(context);
+            var infoBase = await _infoBaseManager.GetCurrentInfoBaseAsync()
+                ?? throw new InvalidOperationException("Не выбрана информационная база.");
+            var view = new AccountingReportsView(infoBase.ConnectionString);
             if (!string.IsNullOrWhiteSpace(selectedReportType))
                 view.SelectReportType(selectedReportType);
             _navigation.NavigateTo(view, "Бухгалтерские отчеты", $"AccountingReports:{selectedReportType ?? "default"}");
