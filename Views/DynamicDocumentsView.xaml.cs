@@ -15,15 +15,15 @@ namespace BIS.ERP.Views
 {
     public partial class DynamicDocumentsView : UserControl
     {
-        private readonly DocumentService _documentService;
+        private readonly IAppDbContextFactory _contextFactory;
         private List<DynamicDocument> _documents = new();
         private bool _isLoading = false;
 
-        public DynamicDocumentsView(DocumentService documentService)
+        public DynamicDocumentsView(IAppDbContextFactory contextFactory)
         {
             InitializeComponent();
             AmountColumnsBehavior.Attach(DataGrid); // динамические колонки — суммы с разрядами через пробел
-            _documentService = documentService;
+            _contextFactory = contextFactory;
             Loaded += OnLoaded;
         }
 
@@ -34,6 +34,8 @@ namespace BIS.ERP.Views
 
         private async Task LoadDocuments()
         {
+            await using var context = await _contextFactory.CreateAsync();
+            var documentService = new DocumentService(context);
             if (_isLoading) return;
 
             try
@@ -42,7 +44,7 @@ namespace BIS.ERP.Views
                 Mouse.OverrideCursor = Cursors.Wait;
                 StatusText.Text = "Загрузка списка документов...";
 
-                _documents = await _documentService.GetDocumentsAsync();
+                _documents = await documentService.GetDocumentsAsync();
                 DocumentsList.ItemsSource = _documents;
 
                 UpdateButtonsState();
@@ -85,6 +87,8 @@ namespace BIS.ERP.Views
 
         private async Task LoadDocumentDetails(DynamicDocument document)
         {
+            await using var context = await _contextFactory.CreateAsync();
+            var documentService = new DocumentService(context);
             if (_isLoading) return;
 
             try
@@ -99,12 +103,12 @@ namespace BIS.ERP.Views
                     DetailsInfo.Text = "Загрузка данных...";
                 });
 
-                var fullDocument = await _documentService.GetDocumentByIdAsync(document.Id);
+                var fullDocument = await documentService.GetDocumentByIdAsync(document.Id);
 
                 if (fullDocument == null) return;
 
                 // Получаем все поля
-                var allFields = await _documentService.GetAllFieldNamesAsync(fullDocument);
+                var allFields = await documentService.GetAllFieldNamesAsync(fullDocument);
 
                 // СОЗДАЕМ DATATABLE
                 var dataTable = new DataTable();
@@ -123,7 +127,7 @@ namespace BIS.ERP.Views
 
                 foreach (var row in rows)
                 {
-                    var rowData = await _documentService.GetRowDataAsync(row);
+                    var rowData = await documentService.GetRowDataAsync(row);
 
                     // Создаем новую строку DataTable
                     var dataRow = dataTable.NewRow();
@@ -200,6 +204,8 @@ namespace BIS.ERP.Views
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
+            await using var context = await _contextFactory.CreateAsync();
+            var documentService = new DocumentService(context);
             if (DocumentsList.SelectedItem is DynamicDocument document)
             {
                 var result = MessageBox.Show($"Удалить документ {document.Number}?\n" +
@@ -216,7 +222,7 @@ namespace BIS.ERP.Views
                         Mouse.OverrideCursor = Cursors.Wait;
                         StatusText.Text = $"Удаление документа {document.Number}...";
 
-                        await _documentService.DeleteDocumentAsync(document.Id);
+                        await documentService.DeleteDocumentAsync(document.Id);
                         await LoadDocuments();
 
                         StatusText.Text = $"Документ {document.Number} удален";
@@ -237,6 +243,8 @@ namespace BIS.ERP.Views
 
         private async void OnExportClick(object sender, RoutedEventArgs e)
         {
+            await using var context = await _contextFactory.CreateAsync();
+            var documentService = new DocumentService(context);
             if (DocumentsList.SelectedItem is DynamicDocument document)
             {
                 var saveDialog = new SaveFileDialog
@@ -253,7 +261,7 @@ namespace BIS.ERP.Views
                         Mouse.OverrideCursor = Cursors.Wait;
                         StatusText.Text = $"Экспорт документа {document.Number}...";
 
-                        var fullDocument = await _documentService.GetDocumentByIdAsync(document.Id);
+                        var fullDocument = await documentService.GetDocumentByIdAsync(document.Id);
 
                         var exportData = new
                         {
@@ -267,7 +275,7 @@ namespace BIS.ERP.Views
                                 fullDocument.CreatedAt
                             },
                             Rows = fullDocument.Rows.OrderBy(r => r.RowNumber)
-                                .Select(r => _documentService.GetRowData(r))
+                                .Select(r => documentService.GetRowData(r))
                                 .ToList()
                         };
 

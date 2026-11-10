@@ -202,6 +202,8 @@ namespace BIS.ERP.Views
         {
             if (_isLoading) return;
             _isLoading = true;
+            IsEnabled = false;
+            await DbContextScope.StartupGate.WaitAsync();
 
             try
             {
@@ -284,7 +286,9 @@ namespace BIS.ERP.Views
             }
             finally
             {
+                DbContextScope.StartupGate.Release();
                 Mouse.OverrideCursor = null;
+                IsEnabled = true;
                 _isLoading = false;
             }
         }
@@ -3117,7 +3121,8 @@ namespace BIS.ERP.Views
                     mapping.ReportId = copyId;
                 }
 
-                await _reportService.SaveReportAsync(copy);
+                await using var context = _metadataService.CreateIndependentContext();
+                await new ReportService(context).SaveReportAsync(copy);
                 await RefreshReportsTreeAndListAsync();
 
                 MessageBox.Show($"Создана копия отчёта: «{copy.Name}».", "Копирование отчёта",
@@ -3138,7 +3143,7 @@ namespace BIS.ERP.Views
         /// Копирует выбранный в дереве отчёт — то же действие, что кнопка
         /// «📄 Копировать» в списке, но из контекстного меню дерева.
         /// </summary>
-        private void OnCopyReportClick(object sender, RoutedEventArgs e)
+        private async void OnCopyReportClick(object sender, RoutedEventArgs e)
         {
             if (_selectedReport == null)
             {
@@ -3147,7 +3152,7 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            _ = CopyReportAsync(_selectedReport);
+            await CopyReportAsync(_selectedReport);
         }
 
         /// <summary>

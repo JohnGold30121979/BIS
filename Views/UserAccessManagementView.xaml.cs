@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using BIS.ERP.Data;
 using BIS.ERP.Models;
 using BIS.ERP.Services;
@@ -11,7 +12,7 @@ namespace BIS.ERP.Views
 {
     public partial class UserAccessManagementView : UserControl
     {
-        private readonly UserAccessService _accessService;
+        private readonly string _connectionString;
         private readonly List<NavigationItem> _navigationItems;
         private readonly User? _currentUser;
         private UserAccessRow? _selectedUser;
@@ -24,7 +25,7 @@ namespace BIS.ERP.Views
         {
             InitializeComponent();
             DataContext = this;
-            _accessService = new UserAccessService(context);
+            _connectionString = context.Database.GetConnectionString()!;
             // АДМИНИСТРИРОВАНИЕ тоже показываем: BuildNode сам скрывает служебные
             // UserProfile/SwitchMode/Logout/AboutSystem/HelpSection, а Settings/SystemLogs
             // и «Пользователи и права» должны быть настраиваемыми для второго администратора.
@@ -36,13 +37,17 @@ namespace BIS.ERP.Views
 
         private async Task LoadUsersAsync()
         {
-            var users = await _accessService.GetUsersAsync();
+            await using var context = new AppDbContext(_connectionString);
+            var accessService = new UserAccessService(context);
+            var users = await accessService.GetUsersAsync();
             UsersGrid.ItemsSource = users.Select(user => new UserAccessRow(user)).ToList();
             UsersGrid.SelectedIndex = users.Count > 0 ? 0 : -1;
         }
 
         private async void OnUserSelected(object sender, SelectionChangedEventArgs e)
         {
+            await using var context = new AppDbContext(_connectionString);
+            var accessService = new UserAccessService(context);
             _selectedUser = UsersGrid.SelectedItem as UserAccessRow;
             Capabilities.Clear();
             if (_selectedUser == null)
@@ -53,17 +58,24 @@ namespace BIS.ERP.Views
                 return;
             }
 
-            var isSelf = _currentUser != null && _selectedUser.User.Id == _currentUser.Id;
+            var selectedUser = _selectedUser;
+            SaveButton.IsEnabled = false;
+            DeleteUserButton.IsEnabled = false;
+            ToggleActiveButton.IsEnabled = false;
+            var isSelf = _currentUser != null && selectedUser.User.Id == _currentUser.Id;
             // Полный доступ закреплён только за главным системным администратором.
-            var isFixedAdmin = await _accessService.IsPrimarySystemAdminAsync(_selectedUser.User.Id);
+            var isFixedAdmin = await accessService.IsPrimarySystemAdminAsync(selectedUser.User.Id);
             var canManageTarget = _currentUser != null &&
-                                  UserAccessService.CanManageTargetRole(_currentUser.Role, _selectedUser.User.Role);
+                                  UserAccessService.CanManageTargetRole(_currentUser.Role, selectedUser.User.Role);
             // Второй администратор может менять видимость модулей для себя
             // (любой неглавный пользователь с правом управления — и для других).
             var isEditable = !isFixedAdmin && (isSelf || canManageTarget);
             var allowedKeys = isFixedAdmin
                 ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                : await _accessService.GetAllowedKeysAsync(_selectedUser.User.Id);
+                : await accessService.GetAllowedKeysAsync(selectedUser.User.Id);
+
+            if (!ReferenceEquals(_selectedUser, selectedUser))
+                return;
 
             foreach (var item in _navigationItems)
             {
@@ -125,6 +137,8 @@ namespace BIS.ERP.Views
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            await using var context = new AppDbContext(_connectionString);
+            var accessService = new UserAccessService(context);
             if (_selectedUser == null)
                 return;
             try
@@ -136,7 +150,7 @@ namespace BIS.ERP.Views
                     (!isSelf && !UserAccessService.CanManageTargetRole(_currentUser.Role, _selectedUser.User.Role)))
                     throw new InvalidOperationException("Недостаточно прав для изменения доступа этого пользователя.");
                 var keys = Capabilities.SelectMany(node => node.CheckedLeafKeys()).ToList();
-                await _accessService.SavePermissionsAsync(_selectedUser.User.Id, keys);
+                await accessService.SavePermissionsAsync(_selectedUser.User.Id, keys);
                 StatusText.Text = $"Права сохранены: {DateTime.Now:HH:mm:ss}.";
                 PermissionsChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -148,6 +162,8 @@ namespace BIS.ERP.Views
 
         private async void OnAddUserClick(object sender, RoutedEventArgs e)
         {
+            await using var context = new AppDbContext(_connectionString);
+            var accessService = new UserAccessService(context);
             try
             {
                 var roles = UserAccessService.GetCreatableRoles(_currentUser);
@@ -158,7 +174,7 @@ namespace BIS.ERP.Views
                 if (dialog.ShowDialog() != true)
                     return;
 
-                var createdUser = await _accessService.CreateUserAsync(
+                var createdUser = await accessService.CreateUserAsync(
                     _currentUser,
                     dialog.UserLogin,
                     dialog.Password,
@@ -183,6 +199,8 @@ namespace BIS.ERP.Views
 
         private async void OnDeleteUserClick(object sender, RoutedEventArgs e)
         {
+            await using var context = new AppDbContext(_connectionString);
+            var accessService = new UserAccessService(context);
             if (_selectedUser == null)
                 return;
 
@@ -196,7 +214,7 @@ namespace BIS.ERP.Views
 
             try
             {
-                await _accessService.DeleteUserAsync(_currentUser, _selectedUser.User.Id);
+                await accessService.DeleteUserAsync(_currentUser, _selectedUser.User.Id);
                 await LoadUsersAsync();
                 StatusText.Text = "Пользователь удален.";
             }
@@ -208,12 +226,14 @@ namespace BIS.ERP.Views
 
         private async void OnToggleActiveClick(object sender, RoutedEventArgs e)
         {
+            await using var context = new AppDbContext(_connectionString);
+            var accessService = new UserAccessService(context);
             if (_selectedUser == null)
                 return;
 
             try
             {
-                await _accessService.SetUserActiveAsync(
+                await accessService.SetUserActiveAsync(
                     _currentUser,
                     _selectedUser.User.Id,
                     !_selectedUser.User.IsActive);

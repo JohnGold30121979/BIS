@@ -635,9 +635,19 @@ namespace BIS.ERP.Services
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = checkSql;
 
-                await _context.Database.OpenConnectionAsync();
-                var count = Convert.ToInt32(await command.ExecuteScalarAsync());
-                await _context.Database.CloseConnectionAsync();
+                int count;
+                var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+                if (openedHere)
+                    await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    count = Convert.ToInt32(await command.ExecuteScalarAsync());
+                }
+                finally
+                {
+                    if (openedHere)
+                        await _context.Database.CloseConnectionAsync();
+                }
 
                 if (count == 0)
                 {

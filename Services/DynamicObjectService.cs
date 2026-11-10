@@ -103,22 +103,30 @@ namespace BIS.ERP.Services
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
 
-            await _context.Database.OpenConnectionAsync();
-            using var reader = await command.ExecuteReaderAsync();
-
-            if (await reader.ReadAsync())
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
             {
-                var result = new Dictionary<string, object>();
-                for (int i = 0; i < reader.FieldCount; i++)
-                {
-                    result[reader.GetName(i)] = reader.GetValue(i);
-                }
-                await _context.Database.CloseConnectionAsync();
-                return result;
-            }
+                using var reader = await command.ExecuteReaderAsync();
 
-            await _context.Database.CloseConnectionAsync();
-            return new Dictionary<string, object>();
+                if (await reader.ReadAsync())
+                {
+                    var result = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        result[reader.GetName(i)] = reader.GetValue(i);
+                    }
+                    return result;
+                }
+
+                return new Dictionary<string, object>();
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
         }
 
         private async Task<object> CalculateValueAsync(MetadataCalculation calc, Dictionary<string, object> data)
@@ -289,9 +297,18 @@ namespace BIS.ERP.Services
             param.Value = value ?? DBNull.Value;
             command.Parameters.Add(param);
 
-            await _context.Database.OpenConnectionAsync();
-            await command.ExecuteNonQueryAsync();
-            await _context.Database.CloseConnectionAsync();
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
         }
     }
 

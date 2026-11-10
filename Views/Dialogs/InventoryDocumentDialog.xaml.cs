@@ -33,7 +33,6 @@ namespace BIS.ERP.Views.Dialogs
 
         private readonly MetadataObject _document;
         private readonly MetadataService _metadataService;
-        private readonly InventoryDocumentLineService _lineService;
         private readonly InventoryDocumentModel.DocumentDefinition _definition;
         private readonly Guid? _recordId;
         private readonly Dictionary<string, object?> _existing;
@@ -66,7 +65,6 @@ namespace BIS.ERP.Views.Dialogs
         private readonly Dictionary<Guid, string> _entryOperationKinds = new();
         private ComboBox? _entryEditor;
 
-        private readonly TaxService _taxService;
         private readonly Dictionary<Guid, decimal> _taxRates = new();
         private readonly Dictionary<Guid, bool> _vatDefaults = new();
         private readonly Dictionary<Guid, bool> _salesTaxDefaults = new();
@@ -88,7 +86,6 @@ namespace BIS.ERP.Views.Dialogs
         public InventoryDocumentDialog(
             MetadataObject document,
             MetadataService metadataService,
-            AppDbContext context,
             Guid? recordId = null,
             Dictionary<string, object>? existingData = null,
             bool readOnly = false)
@@ -97,8 +94,6 @@ namespace BIS.ERP.Views.Dialogs
 
             _document = document;
             _metadataService = metadataService;
-            _lineService = new InventoryDocumentLineService(context);
-            _taxService = new TaxService(metadataService);
             _recordId = recordId;
             _readOnly = readOnly;
             _existing = existingData == null
@@ -126,15 +121,23 @@ namespace BIS.ERP.Views.Dialogs
             LinesGrid.AddHandler(PreviewMouseUpEvent,
                 new MouseButtonEventHandler(OnLinesGridPreviewMouseUp), handledEventsToo: true);
 
-            Loaded += async (_, _) => await InitializeAsync();
+            Loaded += OnFirstLoaded;
+        }
+
+        private async void OnFirstLoaded(object sender, RoutedEventArgs e)
+        {
+            Loaded -= OnFirstLoaded;
+            await InitializeAsync();
         }
 
         private async Task InitializeAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             try
             {
-                var catalogs = await _metadataService.GetCatalogsAsync();
-                var lineAccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                var catalogs = await metadata.GetCatalogsAsync();
+                var lineAccountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadata);
                 _lineAnalyticsColumns = new BIS.ERP.Views.Controls.LineAnalyticsColumns(LinesGrid,
                     _metadataService, lineAccountAnalytics, catalogs.ToList(), _lines,
                     row => ((InventoryLineRow)row).AccountCode, nameof(InventoryLineRow.AccountCode),
@@ -194,7 +197,7 @@ namespace BIS.ERP.Views.Dialogs
                     numberEditor is TextBox numberBox &&
                     string.IsNullOrWhiteSpace(numberBox.Text))
                 {
-                    numberBox.Text = await _metadataService.GetNextDocumentNumberAsync(_document);
+                    numberBox.Text = await metadata.GetNextDocumentNumberAsync(_document);
                 }
 
                 await LoadLinesAsync();
@@ -447,7 +450,8 @@ namespace BIS.ERP.Views.Dialogs
             List<Dictionary<string, object>> taxRows,
             DateTime documentDate)
         {
-            var options = await _taxService.GetTaxesAsync(kind, documentDate);
+            await using var context = _metadataService.CreateIndependentContext();
+            var options = await new TaxService(new MetadataService(context)).GetTaxesAsync(kind, documentDate);
 
             var byCode = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
             foreach (var row in taxRows)
@@ -981,6 +985,8 @@ namespace BIS.ERP.Views.Dialogs
         /// <summary>Последний курс из справочника; базовая валюта — 1.</summary>
         private async Task ApplyRateFromCatalogAsync(Guid currencyId, bool overwrite)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (!overwrite && !string.IsNullOrWhiteSpace(ExchangeRateBox.Text))
                 return;
 
@@ -989,7 +995,7 @@ namespace BIS.ERP.Views.Dialogs
                 var originalRate = ExchangeRateBox.Text;
                 var rate = IsBaseCurrency(currencyId)
                     ? 1m
-                    : (await _metadataService.GetLatestCurrencyRateAsync(currencyId))?.Rate;
+                    : (await metadata.GetLatestCurrencyRateAsync(currencyId))?.Rate;
 
                 if (rate is > 0 && _accountCurrencyId == currencyId && ExchangeRateBox.Text == originalRate)
                 {
@@ -1052,6 +1058,8 @@ namespace BIS.ERP.Views.Dialogs
         /// <summary>Кнопка «Текущий курс»: последний известный курс валюты.</summary>
         private async void OnCurrentRateClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (!TryGetSelectedCurrencyId(out var currencyId))
             {
                 MessageBox.Show("Сначала выберите валюту.", "Курс валюты",
@@ -1066,14 +1074,14 @@ namespace BIS.ERP.Views.Dialogs
                 // Опрос нового курса: тянем свежие официальные курсы НБКР, затем берём курс из справочника.
                 try
                 {
-                    await _metadataService.ImportLatestOfficialCurrencyRatesAsync();
+                    await metadata.ImportLatestOfficialCurrencyRatesAsync();
                 }
                 catch (Exception importError)
                 {
                     System.Diagnostics.Debug.WriteLine($"Документ ТМЗ: курсы НБКР не загружены: {importError.Message}");
                 }
 
-                var rate = await _metadataService.GetLatestCurrencyRateAsync(currencyId);
+                var rate = await metadata.GetLatestCurrencyRateAsync(currencyId);
                 if (rate == null)
                 {
                     MessageBox.Show(
@@ -1187,7 +1195,8 @@ namespace BIS.ERP.Views.Dialogs
                 return;
             }
 
-            var rows = await _lineService.GetLinesAsync(_definition.LinesTable, _definition.ParentColumn, _recordId.Value);
+            await using var context = _metadataService.CreateIndependentContext();
+            var rows = await new InventoryDocumentLineService(context).GetLinesAsync(_definition.LinesTable, _definition.ParentColumn, _recordId.Value);
             foreach (var row in rows)
             {
                 if (row.MaterialId.HasValue && _materialRows.TryGetValue(row.MaterialId.Value, out var material))
@@ -1909,12 +1918,14 @@ namespace BIS.ERP.Views.Dialogs
         /// <summary>Перечитывает справочник материалов после добавления записи в окне выбора.</summary>
         private async Task ReloadMaterialsAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (_materialsCatalog == null)
                 return;
 
             try
             {
-                var rows = await _metadataService.GetCatalogDataAsync(_materialsCatalog.Id);
+                var rows = await metadata.GetCatalogDataAsync(_materialsCatalog.Id);
                 _materials = rows;
                 _materialRows.Clear();
 
@@ -2215,6 +2226,8 @@ namespace BIS.ERP.Views.Dialogs
 
         private async void OnSaveClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             // В просмотре кнопка называется «Закрыть»: данные не сохраняются.
             if (_readOnly)
             {
@@ -2283,12 +2296,12 @@ namespace BIS.ERP.Views.Dialogs
 
                 if (targetId.HasValue)
                 {
-                    await _metadataService.UpdateDynamicRecordAsync(_document.Id, targetId.Value, data, lines);
+                    await metadata.UpdateDynamicRecordAsync(_document.Id, targetId.Value, data, lines);
                     SavedRecordId = targetId.Value;
                 }
                 else
                 {
-                    SavedRecordId = await _metadataService.CreateDynamicRecordAsync(_document.Id, data, lines);
+                    SavedRecordId = await metadata.CreateDynamicRecordAsync(_document.Id, data, lines);
                 }
 
                 // Документы ТМЗ проводятся сразу при записи — отдельной кнопки «Провести» нет.
@@ -2386,9 +2399,11 @@ namespace BIS.ERP.Views.Dialogs
         /// </summary>
         private async Task<bool> PostSavedDocumentAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             try
             {
-                await _metadataService.PostInventoryDocumentAsync(_document.Id, SavedRecordId);
+                await metadata.PostInventoryDocumentAsync(_document.Id, SavedRecordId);
                 return true;
             }
             catch (Exception ex)
@@ -2595,12 +2610,14 @@ namespace BIS.ERP.Views.Dialogs
             List<MetadataObject> catalogs,
             params string[] catalogNames)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var catalog = catalogs.FirstOrDefault(item => catalogNames.Any(name =>
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)));
 
             return catalog == null
                 ? new List<Dictionary<string, object>>()
-                : await _metadataService.GetCatalogDataAsync(catalog.Id);
+                : await metadata.GetCatalogDataAsync(catalog.Id);
         }
 
         private static List<RefItem> ToItems(

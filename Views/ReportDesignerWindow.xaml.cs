@@ -50,7 +50,21 @@ namespace BIS.ERP.Views
             InitializeClosedXmlDesignerState();
             ApplyLayoutKindVisibility();
 
-            _ = InitializeAsync(report);
+            RoutedEventHandler? initialize = null;
+            initialize = async (_, _) =>
+            {
+                Loaded -= initialize;
+                IsEnabled = false;
+                try
+                {
+                    await InitializeAsync(report);
+                }
+                finally
+                {
+                    IsEnabled = true;
+                }
+            };
+            Loaded += initialize;
         }
 
         private async Task InitializeAsync(Report report = null)

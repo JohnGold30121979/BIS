@@ -250,39 +250,48 @@ namespace BIS.ERP.Services
             var result = new List<InvoiceListRow>();
             await using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
-            await _context.Database.OpenConnectionAsync();
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
             {
-                var organizationId = ReadNullableGuid(reader, 3);
-                var currencyId = ReadNullableGuid(reader, 12);
-                result.Add(new InvoiceListRow
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
                 {
-                    Id = reader.GetGuid(0),
-                    DocNumber = MetadataService.NormalizeLegacyDocumentNumber(reader.GetString(1)),
-                    DocDate = reader.GetDateTime(2),
-                    OrganizationName = organizationId.HasValue && organizationMap.TryGetValue(organizationId.Value, out var name)
-                        ? name
-                        : string.Empty,
-                    TotalAmount = reader.GetDecimal(4),
-                    EsfNumber = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
-                    Basis = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                    IsPosted = reader.GetBoolean(7),
-                    TaxBlankNumber = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
-                    ModuleCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
-                    ExchangeCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
-                    TaxStatus = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
-                    CurrencyId = currencyId,
-                    CurrencyName = currencyId.HasValue && currencyMap.TryGetValue(currencyId.Value, out var currencyName)
-                        ? currencyName
-                        : string.Empty,
-                    ExchangeRate = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
-                    AmountCurrency = reader.IsDBNull(14) ? 0m : reader.GetDecimal(14),
-                    ExportedAt = reader.IsDBNull(15) ? null : reader.GetDateTime(15),
-                    TaxStatusDate = reader.IsDBNull(16) ? null : reader.GetDateTime(16)
-                });
+                    var organizationId = ReadNullableGuid(reader, 3);
+                    var currencyId = ReadNullableGuid(reader, 12);
+                    result.Add(new InvoiceListRow
+                    {
+                        Id = reader.GetGuid(0),
+                        DocNumber = MetadataService.NormalizeLegacyDocumentNumber(reader.GetString(1)),
+                        DocDate = reader.GetDateTime(2),
+                        OrganizationName = organizationId.HasValue && organizationMap.TryGetValue(organizationId.Value, out var name)
+                            ? name
+                            : string.Empty,
+                        TotalAmount = reader.GetDecimal(4),
+                        EsfNumber = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                        Basis = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                        IsPosted = reader.GetBoolean(7),
+                        TaxBlankNumber = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                        ModuleCode = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
+                        ExchangeCode = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+                        TaxStatus = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                        CurrencyId = currencyId,
+                        CurrencyName = currencyId.HasValue && currencyMap.TryGetValue(currencyId.Value, out var currencyName)
+                            ? currencyName
+                            : string.Empty,
+                        ExchangeRate = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
+                        AmountCurrency = reader.IsDBNull(14) ? 0m : reader.GetDecimal(14),
+                        ExportedAt = reader.IsDBNull(15) ? null : reader.GetDateTime(15),
+                        TaxStatusDate = reader.IsDBNull(16) ? null : reader.GetDateTime(16)
+                    });
+                }
             }
-            await _context.Database.CloseConnectionAsync();
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
             return result;
         }
 
@@ -361,50 +370,58 @@ namespace BIS.ERP.Services
             await using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
             command.Parameters.Add(new NpgsqlParameter("@invoiceId", invoiceId));
-            await _context.Database.OpenConnectionAsync();
-            await using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
+            InvoiceDocument invoice;
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
             {
-                await _context.Database.CloseConnectionAsync();
-                return null;
-            }
+                await using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                {
+                    return null;
+                }
 
-            var organizationId = ReadNullableGuid(reader, 10);
-            var currencyId = ReadNullableGuid(reader, 21);
-            var invoice = new InvoiceDocument
+                var organizationId = ReadNullableGuid(reader, 10);
+                var currencyId = ReadNullableGuid(reader, 21);
+                invoice = new InvoiceDocument
+                {
+                    Id = reader.GetGuid(0),
+                    DocNumber = MetadataService.NormalizeLegacyDocumentNumber(reader.GetString(1)),
+                    DocDate = reader.GetDateTime(2),
+                    EsfNumber = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    TaxBlankNumber = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    ModuleCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
+                    ExchangeCode = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
+                    TaxStatus = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+                    ExportedAt = reader.IsDBNull(8) ? null : reader.GetDateTime(8),
+                    TaxStatusDate = reader.IsDBNull(9) ? null : reader.GetDateTime(9),
+                    OrganizationId = organizationId,
+                    OrganizationName = organizationId.HasValue && organizationMap.TryGetValue(organizationId.Value, out var name)
+                        ? name
+                        : string.Empty,
+                    CounterpartyAccountCode = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+                    PaymentKind = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+                    DeliveryKind = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
+                    SupplyKind = reader.IsDBNull(14) ? string.Empty : reader.GetString(14),
+                    Basis = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
+                    AmountWithoutTax = reader.GetDecimal(16),
+                    VatTotal = reader.GetDecimal(17),
+                    SalesTaxTotal = reader.GetDecimal(18),
+                    TotalAmount = reader.GetDecimal(19),
+                    IsPosted = reader.GetBoolean(20),
+                    CurrencyId = currencyId,
+                    ExchangeRate = reader.IsDBNull(22) ? 0m : reader.GetDecimal(22),
+                    AmountCurrency = reader.IsDBNull(23) ? 0m : reader.GetDecimal(23)
+                };
+                if (invoice.CurrencyId.HasValue && currencyMap.TryGetValue(invoice.CurrencyId.Value, out var currencyName))
+                    invoice.CurrencyName = currencyName;
+            }
+            finally
             {
-                Id = reader.GetGuid(0),
-                DocNumber = MetadataService.NormalizeLegacyDocumentNumber(reader.GetString(1)),
-                DocDate = reader.GetDateTime(2),
-                EsfNumber = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                TaxBlankNumber = reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
-                ModuleCode = reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
-                ExchangeCode = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                TaxStatus = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                ExportedAt = reader.IsDBNull(8) ? null : reader.GetDateTime(8),
-                TaxStatusDate = reader.IsDBNull(9) ? null : reader.GetDateTime(9),
-                OrganizationId = organizationId,
-                OrganizationName = organizationId.HasValue && organizationMap.TryGetValue(organizationId.Value, out var name)
-                    ? name
-                    : string.Empty,
-                CounterpartyAccountCode = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
-                PaymentKind = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
-                DeliveryKind = reader.IsDBNull(13) ? string.Empty : reader.GetString(13),
-                SupplyKind = reader.IsDBNull(14) ? string.Empty : reader.GetString(14),
-                Basis = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
-                AmountWithoutTax = reader.GetDecimal(16),
-                VatTotal = reader.GetDecimal(17),
-                SalesTaxTotal = reader.GetDecimal(18),
-                TotalAmount = reader.GetDecimal(19),
-                IsPosted = reader.GetBoolean(20),
-                CurrencyId = currencyId,
-                ExchangeRate = reader.IsDBNull(22) ? 0m : reader.GetDecimal(22),
-                AmountCurrency = reader.IsDBNull(23) ? 0m : reader.GetDecimal(23)
-            };
-            if (invoice.CurrencyId.HasValue && currencyMap.TryGetValue(invoice.CurrencyId.Value, out var currencyName))
-                invoice.CurrencyName = currencyName;
-            await reader.CloseAsync();
-            await _context.Database.CloseConnectionAsync();
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
             invoice.Lines = await GetLinesAsync(invoiceId);
             return invoice;
         }

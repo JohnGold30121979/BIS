@@ -874,9 +874,19 @@ ORDER BY report_date, cash_account, correspondent_account, is_receipt DESC;";
             param.Value = tableName;
             command.Parameters.Add(param);
 
-            await _context.Database.OpenConnectionAsync();
-            var result = await command.ExecuteScalarAsync();
-            await _context.Database.CloseConnectionAsync();
+            object? result;
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
+            {
+                result = await command.ExecuteScalarAsync();
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
 
             return result != null && (bool)result;
         }

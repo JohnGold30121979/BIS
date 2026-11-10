@@ -18,7 +18,6 @@ namespace BIS.ERP.Views
     {
         private readonly MetadataObject _documentMetadata;
         private readonly MetadataService _metadataService;
-        private readonly AppDbContext? _context;
         private DataTable _dataTable;
 
         private const string EntryFieldName = "Вид операции";
@@ -31,14 +30,13 @@ namespace BIS.ERP.Views
         private bool _sitesLoaded;
         private bool _accountsLoaded;
 
-        public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService, AppDbContext? context = null)
+        public DynamicDocumentWorkView(MetadataObject documentMetadata, MetadataService metadataService)
         {
             InitializeComponent();
             AmountColumnsBehavior.Attach(DataGrid); // динамические колонки — суммы с разрядами через пробел
             PostingLinesGrid.ItemsSource = _postingLines;
             _documentMetadata = documentMetadata;
             _metadataService = metadataService;
-            _context = context;
 
             // Документы ТМЗ проводятся сразу при записи («Запись»/«Добавить» в карточке),
             // поэтому отдельная кнопка «Провести» для них не нужна.
@@ -101,11 +99,38 @@ namespace BIS.ERP.Views
         private Task LoadData() => LoadDataCore();
 
         /// <summary>Загружает строки выбранного документа в нижнюю таблицу «Строки проводки».</summary>
+        private bool _loadingPostingLines;
+        private bool _postingLinesReloadRequested;
+
         private async Task LoadPostingLinesAsync()
+        {
+            if (_loadingPostingLines)
+            {
+                _postingLinesReloadRequested = true;
+                return;
+            }
+
+            _loadingPostingLines = true;
+            try
+            {
+                do
+                {
+                    _postingLinesReloadRequested = false;
+                    await LoadPostingLinesCoreAsync();
+                }
+                while (_postingLinesReloadRequested);
+            }
+            finally
+            {
+                _loadingPostingLines = false;
+            }
+        }
+
+        private async Task LoadPostingLinesCoreAsync()
         {
             _postingLines.Clear();
 
-            if (_context == null || !IsInventoryDocument)
+            if (!IsInventoryDocument)
                 return;
 
             if (DataGrid.SelectedItem is not DataRowView row ||
@@ -123,7 +148,8 @@ namespace BIS.ERP.Views
 
             try
             {
-                var service = new InventoryDocumentLineService(_context);
+                await using var context = _metadataService.CreateIndependentContext();
+                var service = new InventoryDocumentLineService(context);
                 var lines = await service.GetLinesAsync(definition.LinesTable, definition.ParentColumn, documentId);
 
                 await EnsureSiteNamesAsync();
@@ -146,6 +172,8 @@ namespace BIS.ERP.Views
                     StringComparison.OrdinalIgnoreCase);
 
                 await EnsureAccountNamesAsync();
+                if (!ReferenceEquals(DataGrid.SelectedItem, row))
+                    return;
 
                 foreach (var line in lines)
                 {
@@ -171,6 +199,8 @@ namespace BIS.ERP.Views
         /// <summary>Один раз читает план счетов — чтобы счёт-ссылка (uuid) в строке стал кодом.</summary>
         private async Task EnsureAccountNamesAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (_accountsLoaded)
                 return;
 
@@ -178,14 +208,14 @@ namespace BIS.ERP.Views
 
             try
             {
-                var catalogs = await _metadataService.GetCatalogsAsync();
+                var catalogs = await metadata.GetCatalogsAsync();
                 var catalog = catalogs.FirstOrDefault(item =>
                     item.Name.StartsWith("План счетов", StringComparison.OrdinalIgnoreCase));
 
                 if (catalog == null)
                     return;
 
-                foreach (var account in await _metadataService.GetCatalogDataAsync(catalog.Id))
+                foreach (var account in await metadata.GetCatalogDataAsync(catalog.Id))
                 {
                     var code = ReadCatalogText(account, "Код", "code");
                     if (string.IsNullOrWhiteSpace(code))
@@ -224,6 +254,8 @@ namespace BIS.ERP.Views
         /// <summary>Один раз читает справочник «Участки» — чтобы в строках было наименование, а не id.</summary>
         private async Task EnsureSiteNamesAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (_sitesLoaded)
                 return;
 
@@ -231,7 +263,7 @@ namespace BIS.ERP.Views
 
             try
             {
-                var catalogs = await _metadataService.GetCatalogsAsync();
+                var catalogs = await metadata.GetCatalogsAsync();
                 var catalog = catalogs.FirstOrDefault(item =>
                     string.Equals(item.Name, "Участки", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(item.Name, "Участки (новые)", StringComparison.OrdinalIgnoreCase));
@@ -239,7 +271,7 @@ namespace BIS.ERP.Views
                 if (catalog == null)
                     return;
 
-                foreach (var site in await _metadataService.GetCatalogDataAsync(catalog.Id))
+                foreach (var site in await metadata.GetCatalogDataAsync(catalog.Id))
                 {
                     if (!site.TryGetValue("Id", out var idValue) || !Guid.TryParse(idValue?.ToString(), out var siteId))
                         continue;
@@ -261,13 +293,15 @@ namespace BIS.ERP.Views
         /// </summary>
         private async Task<Dictionary<string, string>> LoadEntryNamesAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            var catalog = await _metadataService.GetCatalogByNameAsync(InventoryDocumentModel.EntryCatalogName);
+            var catalog = await metadata.GetCatalogByNameAsync(InventoryDocumentModel.EntryCatalogName);
             if (catalog == null)
                 return result;
 
-            var rows = await _metadataService.GetCatalogDataAsync(catalog.Id);
+            var rows = await metadata.GetCatalogDataAsync(catalog.Id);
             foreach (var row in rows)
             {
                 var id = row.TryGetValue("Id", out var idValue) ? idValue?.ToString()?.Trim() : null;
@@ -297,12 +331,14 @@ namespace BIS.ERP.Views
 
         private async Task LoadDataCore()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             try
             {
                 StatusText.Text = "Загрузка данных...";
-                var data = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
-                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+                var data = await metadata.GetCatalogDataAsync(_documentMetadata.Id);
+                var allCatalogs = await metadata.GetCatalogsAsync();
+                var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadata);
 
                 // Строим таблицу в локальной переменной и привязываем разом:
                 // частичная мутация привязанного DefaultView без Reset рассинхронизирует
@@ -327,7 +363,7 @@ namespace BIS.ERP.Views
                     var catalog = allCatalogs.FirstOrDefault(c => c.Name == field.ReferenceCatalog);
                     if (catalog != null)
                     {
-                        var catalogData = await _metadataService.GetCatalogDataAsync(catalog.Id);
+                        var catalogData = await metadata.GetCatalogDataAsync(catalog.Id);
                         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var item in catalogData)
                         {
@@ -637,7 +673,9 @@ namespace BIS.ERP.Views
         }
         private async Task<Dictionary<string, object>?> SelectFixedAssetMovementTypeAsync()
         {
-            var metadataItems = await _metadataService.GetCatalogsAsync();
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
+            var metadataItems = await metadata.GetCatalogsAsync();
             var entryCatalog = metadataItems.FirstOrDefault(item =>
                 item.ObjectType == "Catalog" &&
                 string.Equals(item.Name, "Ввод нового документа ОС", StringComparison.OrdinalIgnoreCase));
@@ -649,7 +687,7 @@ namespace BIS.ERP.Views
                 return null;
             }
 
-            var entries = await _metadataService.GetCatalogDataAsync(entryCatalog.Id);
+            var entries = await metadata.GetCatalogDataAsync(entryCatalog.Id);
             var activeEntries = entries
                 .Where(IsActiveCatalogRow)
                 .OrderBy(ReadSortOrder)
@@ -733,6 +771,8 @@ namespace BIS.ERP.Views
         }
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             // Для документа "Проводки" используем кастомный диалог
             if (_documentMetadata.Name == "Проводки")
             {
@@ -766,16 +806,16 @@ namespace BIS.ERP.Views
                         dialog,
                         $"Добавление: {_documentMetadata.Name}") == true)
                 {
-                    var createdId = await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
+                    var createdId = await metadata.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
                     // Остаёмся на только что созданной записи.
                     DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
                     StatusText.Text = "✅ Запись добавлена";
                 }
             }
-            else if (IsInventoryDocument && _context != null)
+            else if (IsInventoryDocument)
             {
-                var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService, _context);
+                var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService);
                 dialog.Owner = Window.GetWindow(this);
                 if (await MdiDialogService.ShowInWorkspaceForResultAsync(
                         Window.GetWindow(this),
@@ -796,7 +836,7 @@ namespace BIS.ERP.Views
                         dialog,
                         $"Добавление: {_documentMetadata.Name}") == true)
                 {
-                    var createdId = await _metadataService.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
+                    var createdId = await metadata.CreateDynamicRecordAsync(_documentMetadata.Id, dialog.ItemData);
                     await LoadData();
                     // Остаёмся на только что созданной записи.
                     DataGrid.SelectRowById(createdId, DataGridSelectionHelper.GetIdFromDataRow);
@@ -807,6 +847,8 @@ namespace BIS.ERP.Views
         }
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var selectedRow = DataGrid.SelectedItem as DataRowView;
             if (selectedRow == null)
             {
@@ -833,13 +875,13 @@ namespace BIS.ERP.Views
                     StatusText.Text = "✅ Проводка обновлена";
                 }
             }
-            else if (IsInventoryDocument && _context != null)
+            else if (IsInventoryDocument)
             {
-                var rows = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
+                var rows = await metadata.GetCatalogDataAsync(_documentMetadata.Id);
                 var existing = rows.FirstOrDefault(row =>
                     row.TryGetValue("Id", out var value) && value is Guid guid && guid == id);
 
-                var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService, _context, id, existing);
+                var dialog = new InventoryDocumentDialog(_documentMetadata, _metadataService, id, existing);
                 dialog.Owner = Window.GetWindow(this);
                 if (await MdiDialogService.ShowInWorkspaceForResultAsync(
                         Window.GetWindow(this),
@@ -860,7 +902,7 @@ namespace BIS.ERP.Views
                         dialog,
                         $"Редактирование: {_documentMetadata.Name}") == true)
                 {
-                    await _metadataService.UpdateDynamicRecordAsync(_documentMetadata.Id, id, dialog.ItemData);
+                    await metadata.UpdateDynamicRecordAsync(_documentMetadata.Id, id, dialog.ItemData);
                     await LoadData();
                     // Возвращаем выделение на отредактированную запись.
                     DataGrid.SelectRowById(id, DataGridSelectionHelper.GetIdFromDataRow);
@@ -876,7 +918,9 @@ namespace BIS.ERP.Views
         /// </summary>
         private async void OnViewClick(object sender, RoutedEventArgs e)
         {
-            if (!IsInventoryDocument || _context == null)
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
+            if (!IsInventoryDocument)
                 return;
 
             if (DataGrid.SelectedItem is not DataRowView selectedRow)
@@ -892,12 +936,12 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "👁️ Просмотр документа";
 
-                var rows = await _metadataService.GetCatalogDataAsync(_documentMetadata.Id);
+                var rows = await metadata.GetCatalogDataAsync(_documentMetadata.Id);
                 var existing = rows.FirstOrDefault(row =>
                     row.TryGetValue("Id", out var value) && value is Guid guid && guid == id);
 
                 var dialog = new InventoryDocumentDialog(
-                    _documentMetadata, _metadataService, _context, id, existing, readOnly: true)
+                    _documentMetadata, _metadataService, id, existing, readOnly: true)
                 {
                     Owner = Window.GetWindow(this)
                 };
@@ -932,6 +976,8 @@ namespace BIS.ERP.Views
 
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var selectedRow = DataGrid.SelectedItem as DataRowView;
             if (selectedRow == null)
             {
@@ -949,7 +995,7 @@ namespace BIS.ERP.Views
                 {
                     var id = (Guid)selectedRow["Id"];
                     StatusText.Text = "🗑️ Удаление...";
-                    await _metadataService.DeleteDynamicRecordAsync(_documentMetadata.Id, id);
+                    await metadata.DeleteDynamicRecordAsync(_documentMetadata.Id, id);
                     await LoadData();
                     StatusText.Text = "✅ Запись удалена";
                 }
@@ -967,6 +1013,8 @@ namespace BIS.ERP.Views
 
         private async void OnPostClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var selectedRow = DataGrid.SelectedItem as DataRowView;
             if (selectedRow == null)
             {
@@ -984,7 +1032,7 @@ namespace BIS.ERP.Views
                 try
                 {
                     StatusText.Text = "🔄 Проведение...";
-                    await _metadataService.PostDocumentAsync(_documentMetadata.Id, id);
+                    await metadata.PostDocumentAsync(_documentMetadata.Id, id);
                     await LoadData();
                     StatusText.Text = "✅ Документ проведён";
                 }

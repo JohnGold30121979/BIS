@@ -21,13 +21,10 @@ namespace BIS.ERP.Views
 {
     public partial class AccountingReportsView : UserControl
     {
-        private readonly AppDbContext _context;
+        private readonly Func<AppDbContext> _createContext;
         private readonly BalanceService _balanceService;
         private readonly OrganizationBalanceService _organizationBalanceService;
-        private readonly ReportService _reportService;
         private readonly AccountingPeriodService _periodService;
-        private readonly PostingService _postingService;
-        private readonly MetadataService _metadataService;
         private DataTable? _currentData;
         private Report? _currentReport;
         private bool _reconciliationVariantsLoaded;
@@ -48,13 +45,11 @@ namespace BIS.ERP.Views
             // Служебные колонки акта сверки нужны только механизму подстановки FRX-макета
             // и не должны появляться в экранной таблице, поэтому отменяем их генерацию.
             ReportGrid.AutoGeneratingColumn += OnReportGridAutoGeneratingColumn;
-            _context = context;
+            var connectionString = context.Database.GetConnectionString();
+            _createContext = () => new AppDbContext(connectionString!);
             _balanceService = new BalanceService(context);
             _organizationBalanceService = new OrganizationBalanceService(context);
-            _reportService = new ReportService(context);
             _periodService = new AccountingPeriodService(ServiceLocator.DbContextFactory);
-            _postingService = new PostingService(context);
-            _metadataService = new MetadataService(context);
             StartDatePicker.SelectedDate = new DateTime(DateTime.Today.Year, 1, 1);
             EndDatePicker.SelectedDate = DateTime.Today;
             Loaded += async (_, _) =>
@@ -112,9 +107,10 @@ namespace BIS.ERP.Views
         /// </summary>
         private async Task LoadAccountingReportsAsync()
         {
+            await using var context = _createContext();
             try
             {
-                var reports = await _context.Reports.AsNoTracking()
+                var reports = await context.Reports.AsNoTracking()
                     .Where(report => report.IsActive && report.ShowInAccountingReports)
                     .OrderBy(report => report.Order)
                     .ThenBy(report => report.Name)
@@ -487,11 +483,13 @@ namespace BIS.ERP.Views
 
         private async Task<List<Dictionary<string, object>>> LoadMetadataOrganizationsAsync()
         {
-            var organizationCatalog = await _context.MetadataObjects.AsNoTracking()
+            await using var context = _createContext();
+            var metadataService = new MetadataService(context);
+            var organizationCatalog = await context.MetadataObjects.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Организации");
             return organizationCatalog == null
                 ? new List<Dictionary<string, object>>()
-                : await _metadataService.GetCatalogDataAsync(organizationCatalog.Id);
+                : await metadataService.GetCatalogDataAsync(organizationCatalog.Id);
         }
 
         private static OrganizationSelectionItem BuildOrganizationSelectionItem(Dictionary<string, object> row)
@@ -646,6 +644,8 @@ namespace BIS.ERP.Views
 
         private void OnReportGridDoubleClick(object sender, MouseButtonEventArgs e)
         {
+            using var context = _createContext();
+            var postingService = new PostingService(context);
             if (ReportGrid.SelectedItem is not DataRowView row || !row.Row.Table.Columns.Contains("Счет"))
                 return;
             var code = row["Счет"]?.ToString();
@@ -653,7 +653,7 @@ namespace BIS.ERP.Views
                 return;
             var name = row.Row.Table.Columns.Contains("Наименование") ? row["Наименование"]?.ToString() ?? code : code;
             var (start, end) = GetPeriod();
-            new TurnoversDialog(code, name, start, end, _postingService) { Owner = Window.GetWindow(this) }.ShowDialog();
+            new TurnoversDialog(code, name, start, end, postingService) { Owner = Window.GetWindow(this) }.ShowDialog();
         }
 
         /// <summary>
@@ -690,18 +690,19 @@ namespace BIS.ERP.Views
         /// </summary>
         private async Task<(DataTable, Report)> BuildTurnoverStatementAsync(DateTime start, DateTime end)
         {
+            await using var context = _createContext();
             if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
                 throw new ReportNeedsAccountException(
                     "Для оборотной ведомости нужен счёт. Нажмите 🔍 рядом с полем «Счёт», выберите счёт и повторите формирование.");
 
-            var report = await _context.Reports.AsNoTracking()
+            var report = await context.Reports.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Code == "standard.finance.trial-balance-closedxml");
 
             if (report == null)
                 throw new InvalidOperationException(
                     "Отчёт «Оборотная ведомость (ClosedXML)» не найден в базе. Проверьте метаданные отчётов.");
 
-            var dataSet = await _context.ReportDataSets.AsNoTracking()
+            var dataSet = await context.ReportDataSets.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Code == SystemReportCalculators.MovementsCode);
 
             if (dataSet == null)
@@ -719,7 +720,7 @@ namespace BIS.ERP.Views
                 ["OrganizationId"] = selectedOrganization?.Id?.ToString() ?? string.Empty
             };
 
-            var table = await new ReportDataSetService(_context).ExecuteAsync(dataSet, parameters);
+            var table = await new ReportDataSetService(context).ExecuteAsync(dataSet, parameters);
 
             var reportTitle = $"Оборотная ведомость по счету {_trialBalanceAccountCode} " +
                               $"с {start:dd/MM/yyyy} по {end:dd/MM/yyyy}";
@@ -799,7 +800,8 @@ namespace BIS.ERP.Views
             DateTime start,
             DateTime end)
         {
-            var stored = await _context.Reports.AsNoTracking()
+            await using var context = _createContext();
+            var stored = await context.Reports.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Code == reportCode);
 
             if (stored == null)
@@ -807,7 +809,7 @@ namespace BIS.ERP.Views
 
             var dataSetCode = ResolveDataSetCodeForReport(stored.ReportType);
 
-            var dataSet = await _context.ReportDataSets.AsNoTracking()
+            var dataSet = await context.ReportDataSets.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Code == dataSetCode);
 
             if (dataSet == null)
@@ -823,7 +825,7 @@ namespace BIS.ERP.Views
                 ["OrganizationId"] = selectedOrganization?.Id?.ToString() ?? string.Empty
             };
 
-            var table = await new ReportDataSetService(_context).ExecuteAsync(dataSet, parameters);
+            var table = await new ReportDataSetService(context).ExecuteAsync(dataSet, parameters);
 
             var report = CreateReport(table, stored.Name, true);
 
@@ -870,6 +872,7 @@ namespace BIS.ERP.Views
             DateTime end,
             bool closedXml = false)
         {
+            await using var context = _createContext();
             if (string.IsNullOrWhiteSpace(_trialBalanceAccountCode))
                 throw new ReportNeedsAccountException(
                     "Для оборотно-сальдовой ведомости нужен счёт. Нажмите 🔍 рядом с полем «Счёт», выберите счёт и повторите формирование.");
@@ -881,7 +884,7 @@ namespace BIS.ERP.Views
             // Построение таблицы выполняет общий сервис: тот же код используется
             // диагностическим инструментом, поэтому поведение можно проверить
             // без запуска окна.
-            var builder = new TrialBalanceBuilder(_context);
+            var builder = new TrialBalanceBuilder(context);
             var request = new TrialBalanceRequest(
                 _trialBalanceAccountCode,
                 start,
@@ -957,8 +960,11 @@ namespace BIS.ERP.Views
         private static TrialBalanceSide GetSelectedTrialBalanceSide() => TrialBalanceSide.Debit;
 
         /// <summary>Строки плана счетов — для выбора счёта в интерфейсе.</summary>
-        private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync() =>
-            await new TrialBalanceBuilder(_context).LoadAccountSelectionDataAsync();
+        private async Task<List<Dictionary<string, object>>> LoadTrialBalanceAccountSelectionDataAsync()
+        {
+            await using var context = _createContext();
+            return await new TrialBalanceBuilder(context).LoadAccountSelectionDataAsync();
+        }
 
         private async Task<(DataTable, Report)> BuildPaymentOrderRegisterAsync(DateTime start, DateTime end)
         {
@@ -1020,7 +1026,8 @@ namespace BIS.ERP.Views
         /// </summary>
         private async Task<string> LoadClosedXmlActLayoutAsync()
         {
-            var stored = await _context.Reports.AsNoTracking()
+            await using var context = _createContext();
+            var stored = await context.Reports.AsNoTracking()
                 .Where(report => report.Code == ClosedXmlReconciliationActCode)
                 .Select(report => report.ClosedXmlLayout)
                 .FirstOrDefaultAsync();
@@ -1033,7 +1040,8 @@ namespace BIS.ERP.Views
         /// </summary>
         private async Task<string> LoadClosedXmlTrialBalanceLayoutAsync()
         {
-            var stored = await _context.Reports.AsNoTracking()
+            await using var context = _createContext();
+            var stored = await context.Reports.AsNoTracking()
                 .Where(report => report.Code == ClosedXmlTrialBalanceCode)
                 .Select(report => report.ClosedXmlLayout)
                 .FirstOrDefaultAsync();
@@ -1050,6 +1058,7 @@ namespace BIS.ERP.Views
             DateTime end,
             bool closedXml = false)
         {
+            await using var context = _createContext();
             var variant = closedXml ? null : GetSelectedReconciliationReportVariant();
             var selectedOrganizationId = _selectedOrganizationId.GetValueOrDefault();
             var scoped = selectedOrganizationId != Guid.Empty;
@@ -1071,7 +1080,7 @@ namespace BIS.ERP.Views
 
             // Построение таблицы выполняется общим сервисом: тот же код используется
             // диагностическим инструментом, поэтому поведение можно проверить без окна.
-            var builder = new ReconciliationActBuilder(_context);
+            var builder = new ReconciliationActBuilder(context);
             var movements = await builder.LoadMovementsAsync(selectedFilterId, start, end);
             var parties = await builder.LoadPartiesAsync(scoped ? selectedFilterId : null, scoped ? titleName : null);
             var act = builder.BuildTable(pairs, totals, movements, start, end, scoped, titleName, parties);
@@ -1218,10 +1227,12 @@ namespace BIS.ERP.Views
         }
         private async Task ApplyReconciliationVariantLayoutAsync(Report report, ReconciliationReportVariant? variant)
         {
+            await using var context = _createContext();
+            var reportService = new ReportService(context);
             if (variant?.ReportId == null)
                 return;
 
-            var templateReport = await _reportService.GetReportAsync(variant.ReportId.Value);
+            var templateReport = await reportService.GetReportAsync(variant.ReportId.Value);
             if (templateReport == null || string.IsNullOrWhiteSpace(templateReport.Template))
                 return;
 
@@ -1429,15 +1440,17 @@ namespace BIS.ERP.Views
                 .Trim();
         private async Task<List<PaymentOrderReportRow>> LoadPaymentOrderReportRowsAsync(DateTime? start, DateTime end)
         {
-            var document = await _context.MetadataObjects
+            await using var context = _createContext();
+            var metadataService = new MetadataService(context);
+            var document = await context.MetadataObjects
                 .Include(item => item.Fields)
                 .FirstOrDefaultAsync(item => item.ObjectType == "Document" && item.Name == "Платежное поручение");
             if (document == null)
                 return new List<PaymentOrderReportRow>();
 
-            var rows = await _metadataService.GetCatalogDataAsync(document.Id);
-            var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(document, _metadataService);
-            var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(_metadataService);
+            var rows = await metadataService.GetCatalogDataAsync(document.Id);
+            var referenceMaps = await ReferenceDisplayHelper.LoadMapsAsync(document, metadataService);
+            var accountAnalytics = await AccountAnalyticsRegistry.LoadAsync(metadataService);
             var result = new List<PaymentOrderReportRow>();
 
             foreach (var row in rows)
@@ -2054,10 +2067,11 @@ namespace BIS.ERP.Views
 
         private async Task<(DataTable, Report)> BuildPurchaseSalesJournalAsync(DateTime start, DateTime end)
         {
+            await using var context = _createContext();
             var entries = await _balanceService.GetPurchaseSalesJournalAsync(start, end);
             var utcStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
             var utcEnd = DateTime.SpecifyKind(end.Date.AddDays(1), DateTimeKind.Utc);
-            var savedEntries = await _context.TaxJournalRecords.AsNoTracking()
+            var savedEntries = await context.TaxJournalRecords.AsNoTracking()
                 .Where(record => record.Date >= utcStart && record.Date < utcEnd)
                 .OrderBy(record => record.Date).ThenBy(record => record.DocumentNumber).ToListAsync();
             var table = new DataTable("Журнал закупок и продаж");
@@ -2337,6 +2351,8 @@ namespace BIS.ERP.Views
         /// </summary>
         private async void OnExportClosedXmlPdfClick(object sender, RoutedEventArgs e)
         {
+            await using var context = _createContext();
+            var reportService = new ReportService(context);
             try
             {
                 if (_currentData == null || _currentReport == null)
@@ -2363,7 +2379,7 @@ namespace BIS.ERP.Views
                 if (layout == null)
                     throw new InvalidOperationException(layoutError);
 
-                var renderParameters = await _reportService.ResolveParametersForPreviewAsync(reportSnapshot);
+                var renderParameters = await reportService.ResolveParametersForPreviewAsync(reportSnapshot);
                 // Период берётся из окна и передаётся всегда: иначе подстановки {PeriodStart}
                 // и {PeriodEnd} в макете берут значения по умолчанию и шапка расходится с данными.
                 // Организация необязательна: пусто значит «все организации».
@@ -2508,6 +2524,8 @@ namespace BIS.ERP.Views
 
         private async void OnExportProgrammaticPdfClick(object sender, RoutedEventArgs e)
         {
+            await using var context = _createContext();
+            var reportService = new ReportService(context);
             if (_currentData == null || _currentReport == null)
             {
                 MessageBox.Show("Сначала сформируйте отчет.", "Программный PDF",
@@ -2525,13 +2543,13 @@ namespace BIS.ERP.Views
                 byte[] pdfBytes;
                 if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
                 {
-                    var printFormService = new PrintFormService(_context);
+                    var printFormService = new PrintFormService(context);
                     pdfBytes = await Task.Run(() =>
                         printFormService.ExportProgrammaticReconciliationActPreview(dataSnapshot, reportSnapshot));
                 }
                 else
                 {
-                    pdfBytes = await Task.Run(() => _reportService.ExportToPdf(dataSnapshot, reportSnapshot));
+                    pdfBytes = await Task.Run(() => reportService.ExportToPdf(dataSnapshot, reportSnapshot));
                 }
 
                 ShowPdfPreview(pdfBytes, $"{_currentReport.Name} (программный)");
@@ -2551,6 +2569,7 @@ namespace BIS.ERP.Views
 
         private async void OnExportNativePdfClick(object sender, RoutedEventArgs e)
         {
+            await using var context = _createContext();
             if (_currentData == null || _currentReport == null)
             {
                 MessageBox.Show("Сначала сформируйте отчет.", "Нативный PDF",
@@ -2573,7 +2592,7 @@ namespace BIS.ERP.Views
 
                 var dataSnapshot = _currentData.Copy();
                 var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
-                var printFormService = new PrintFormService(_context);
+                var printFormService = new PrintFormService(context);
                 var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot));
                 var completedTask = await Task.WhenAny(pdfTask, Task.Delay(TimeSpan.FromSeconds(20)));
                 if (completedTask != pdfTask)
@@ -2608,6 +2627,7 @@ namespace BIS.ERP.Views
 
         private async void OnExportFrxPdfClick(object sender, RoutedEventArgs e)
         {
+            await using var context = _createContext();
             if (_currentData == null || _currentReport == null)
             {
                 MessageBox.Show("Сначала сформируйте отчет.", "PDF по FRX-макету",
@@ -2630,7 +2650,7 @@ namespace BIS.ERP.Views
 
                 var dataSnapshot = _currentData.Copy();
                 var reportSnapshot = CloneReportForBackgroundPreview(_currentReport);
-                var printFormService = new PrintFormService(_context);
+                var printFormService = new PrintFormService(context);
                 var pdfTask = Task.Run(() => printFormService.ExportReportTemplatePreview(dataSnapshot, reportSnapshot));
                 var completedTask = await Task.WhenAny(pdfTask, Task.Delay(TimeSpan.FromSeconds(20)));
                 if (completedTask != pdfTask)
@@ -2664,6 +2684,8 @@ namespace BIS.ERP.Views
         }
         private async void OnExportExcelClick(object sender, RoutedEventArgs e)
         {
+            await using var context = _createContext();
+            var reportService = new ReportService(context);
             try
             {
                 if (_currentData == null || _currentReport == null)
@@ -2735,7 +2757,7 @@ namespace BIS.ERP.Views
                     if (layout == null)
                         throw new InvalidOperationException(layoutError);
 
-                    var renderParameters = await _reportService.ResolveParametersForPreviewAsync(reportSnapshot);
+                    var renderParameters = await reportService.ResolveParametersForPreviewAsync(reportSnapshot);
                     var preparedData = ClosedXmlReportRenderer.PrepareData(dataSnapshot, reportSnapshot);
                     var typedParameters = renderParameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value);
                     excelBytes = await Task.Run(() =>
@@ -2743,19 +2765,19 @@ namespace BIS.ERP.Views
                 }
                 else if (useFoxProExcelLayout || useNativeExcelLayout)
                 {
-                    var printFormService = new PrintFormService(_context);
+                    var printFormService = new PrintFormService(context);
                     excelBytes = await Task.Run(() =>
                         printFormService.ExportReportTemplateExcel(dataSnapshot, reportSnapshot));
                 }
                 else if (IsReconciliationActReport(dataSnapshot, reportSnapshot))
                 {
-                    var printFormService = new PrintFormService(_context);
+                    var printFormService = new PrintFormService(context);
                     excelBytes = await Task.Run(() =>
                         printFormService.ExportProgrammaticReconciliationActExcel(dataSnapshot, reportSnapshot));
                 }
                 else
                 {
-                    excelBytes = await Task.Run(() => _reportService.ExportToExcel(dataSnapshot, reportSnapshot));
+                    excelBytes = await Task.Run(() => reportService.ExportToExcel(dataSnapshot, reportSnapshot));
                 }
 
                 File.WriteAllBytes(outputPath, excelBytes);
@@ -2776,6 +2798,7 @@ namespace BIS.ERP.Views
 
         private async void OnExportVatClick(object sender, RoutedEventArgs e)
         {
+            await using var context = _createContext();
             try
             {
                 var (start, end) = GetPeriod();
@@ -2791,7 +2814,7 @@ namespace BIS.ERP.Views
                     }
                 }
 
-                var templateService = new RegulatedReportTemplateService(_context);
+                var templateService = new RegulatedReportTemplateService(context);
                 var activeTemplate = await templateService.GetActiveTemplateAsync(VatTaxReportExportService.OfficialTemplateCode);
                 var templateExtension = activeTemplate?.FileExtension;
                 if (string.IsNullOrWhiteSpace(templateExtension))
@@ -2807,7 +2830,7 @@ namespace BIS.ERP.Views
                     ? "Формирование внутреннего налогового Excel-отчета..."
                     : $"Заполнение шаблона {activeTemplate.Code} из базы данных...";
 
-                var exportService = new VatTaxReportExportService(_context);
+                var exportService = new VatTaxReportExportService(context);
                 var exportResult = await exportService.ExportMonthlyVatReportAsync(start, end, outputPath);
                 OpenGeneratedFile(outputPath);
 

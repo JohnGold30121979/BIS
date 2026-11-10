@@ -380,6 +380,8 @@ namespace BIS.ERP.Views
 
         private async Task LoadCurrencyRateFilterAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var items = new List<BIS.ERP.Models.ReferenceItem>
             {
                 new() { Id = Guid.Empty, DisplayName = "Все валюты" }
@@ -388,7 +390,7 @@ namespace BIS.ERP.Views
             if (_catalogsDict != null &&
                 _catalogsDict.TryGetValue("Справочник валют", out var currencyCatalog))
             {
-                var rows = await _metadataService.GetCatalogDataAsync(currencyCatalog.Id);
+                var rows = await metadata.GetCatalogDataAsync(currencyCatalog.Id);
                 foreach (var row in rows)
                 {
                     if (!Guid.TryParse(GetRowId(row).ToString(), out var id))
@@ -432,6 +434,8 @@ namespace BIS.ERP.Views
 
         private async void OnUpdateNbkrRatesClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (!IsCurrencyRatesCatalog || !ValidateCurrencyRatePeriod())
                 return;
 
@@ -443,7 +447,7 @@ namespace BIS.ERP.Views
                 UpdateNbkrRatesButton.IsEnabled = false;
                 StatusText.Text = $"Загрузка курсов НБКР за {startDate:dd/MM/yyyy}-{endDate:dd/MM/yyyy}...";
 
-                var results = await _metadataService.ImportOfficialCurrencyRatesAsync(startDate, endDate);
+                var results = await metadata.ImportOfficialCurrencyRatesAsync(startDate, endDate);
                 var imported = results.Sum(item => item.Imported);
                 var skipped = results.Sum(item => item.Skipped);
 
@@ -722,6 +726,8 @@ namespace BIS.ERP.Views
 
         private async Task<Dictionary<Guid, decimal>> LoadLatestCurrencyRatesAsync(IEnumerable<Dictionary<string, object>> currencyRows)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var rates = new Dictionary<Guid, decimal>();
             foreach (var row in currencyRows)
             {
@@ -729,7 +735,7 @@ namespace BIS.ERP.Views
                 if (rowId == Guid.Empty)
                     continue;
 
-                var latestRate = await _metadataService.GetLatestCurrencyRateAsync(rowId);
+                var latestRate = await metadata.GetLatestCurrencyRateAsync(rowId);
                 if (latestRate?.Rate > 0m)
                     rates[rowId] = latestRate.Rate;
             }
@@ -776,6 +782,8 @@ namespace BIS.ERP.Views
 
         private async Task LoadDataCore()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             try
             {
                 // Пока таблица ещё не перезагружена, запоминаем выбранную организацию:
@@ -786,7 +794,7 @@ namespace BIS.ERP.Views
                 StatusText.Text = "Загрузка данных...";
                 ProgressText.Text = "⏳ Загрузка...";
 
-                var data = await _metadataService.GetCatalogDataAsync(_catalog.Id);
+                var data = await metadata.GetCatalogDataAsync(_catalog.Id);
                 if (IsAdvancePaymentsCatalog || IsChartOfAccountsCatalog)
                     data = SortRowsByNumericCode(data).ToList();
                 if (IsCurrencyRatesCatalog)
@@ -798,7 +806,7 @@ namespace BIS.ERP.Views
                 _rawRowsById.Clear();
 
                 // Загружаем все справочники один раз
-                var allCatalogs = await _metadataService.GetCatalogsAsync();
+                var allCatalogs = await metadata.GetCatalogsAsync();
                 _catalogsDict = allCatalogs.GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
 
                 // Та же защита, что и в DynamicDocumentWorkView: строим таблицу
@@ -983,6 +991,8 @@ namespace BIS.ERP.Views
         /// </summary>
         private async Task LoadReferenceDataAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             _referenceCache.Clear();
 
             var fields = GetReferenceFieldsForDisplay().ToList();
@@ -1006,7 +1016,7 @@ namespace BIS.ERP.Views
             // Загружаем данные справочников последовательно и формируем словарь отображения
             foreach (var grp in groups)
             {
-                var refData = await _metadataService.GetCatalogDataAsync(grp.RefCatalog.Id);
+                var refData = await metadata.GetCatalogDataAsync(grp.RefCatalog.Id);
 
                 // Для каждого поля, ссылочного на этот каталог, формируем свой словарь отображения
                 var perFieldDicts = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
@@ -1528,6 +1538,8 @@ namespace BIS.ERP.Views
 
         private async Task RefreshOrganizationAccountsAsync(string organizationId)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var requestId = ++_organizationAccountsRequestId;
             var grid = OrganizationAccountsGridControl;
             var summary = OrganizationAccountsSummaryControl;
@@ -1556,7 +1568,7 @@ namespace BIS.ERP.Views
                     return;
                 }
 
-                var rows = await _metadataService.GetCatalogDataAsync(accountsCatalog.Id);
+                var rows = await metadata.GetCatalogDataAsync(accountsCatalog.Id);
                 var referenceMaps = await GetBankAccountsReferenceMapsAsync(accountsCatalog);
 
                 // Пока грузились данные, пользователь мог выбрать другую организацию
@@ -1636,6 +1648,8 @@ namespace BIS.ERP.Views
 
         private async void OrganizationAccountAddButton_Click(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var accountsCatalog = await GetBankAccountsCatalogAsync();
             if (accountsCatalog == null)
             {
@@ -1667,7 +1681,7 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "💾 Сохранение...";
                 ProgressText.Text = "⏳ Сохранение...";
-                var newAccountId = await _metadataService.AddCatalogItemAsync(accountsCatalog.Id, dialog.ItemData);
+                var newAccountId = await metadata.AddCatalogItemAsync(accountsCatalog.Id, dialog.ItemData);
                 await RefreshOrganizationAccountsAsync(_currentOrganizationId);
                 // Остаёмся на только что добавленном расчётном счёте.
                 if (OrganizationAccountsGridControl is { } organizationAccountsGrid)
@@ -1687,6 +1701,8 @@ namespace BIS.ERP.Views
 
         private async void OrganizationAccountEditButton_Click(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var (accountId, rawRow) = GetSelectedOrganizationAccount();
             if (accountId == Guid.Empty)
                 return;
@@ -1714,7 +1730,7 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "💾 Обновление...";
                 ProgressText.Text = "⏳ Обновление...";
-                await _metadataService.UpdateDynamicRecordAsync(accountsCatalog.Id, accountId, dialog.ItemData);
+                await metadata.UpdateDynamicRecordAsync(accountsCatalog.Id, accountId, dialog.ItemData);
                 await RefreshOrganizationAccountsAsync(_currentOrganizationId);
                 // Возвращаем выделение на отредактированный расчётный счёт.
                 if (OrganizationAccountsGridControl is { } organizationAccountsGrid)
@@ -1734,6 +1750,8 @@ namespace BIS.ERP.Views
 
         private async void OrganizationAccountDeleteButton_Click(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var (accountId, rawRow) = GetSelectedOrganizationAccount();
             if (accountId == Guid.Empty)
                 return;
@@ -1760,7 +1778,7 @@ namespace BIS.ERP.Views
             {
                 StatusText.Text = "🗑️ Удаление...";
                 ProgressText.Text = "⏳ Удаление...";
-                await _metadataService.DeleteDynamicRecordAsync(accountsCatalog.Id, accountId);
+                await metadata.DeleteDynamicRecordAsync(accountsCatalog.Id, accountId);
                 await RefreshOrganizationAccountsAsync(_currentOrganizationId);
             }
             catch (Exception ex)
@@ -1777,6 +1795,8 @@ namespace BIS.ERP.Views
 
         private async Task<MetadataObject?> GetBankAccountsCatalogAsync()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (_bankAccountsCatalog != null)
                 return _bankAccountsCatalog;
 
@@ -1787,13 +1807,15 @@ namespace BIS.ERP.Views
                 return _bankAccountsCatalog;
             }
 
-            _bankAccountsCatalog = await _metadataService.GetCatalogByNameAsync("Расчетные счета организаций");
+            _bankAccountsCatalog = await metadata.GetCatalogByNameAsync("Расчетные счета организаций");
             return _bankAccountsCatalog;
         }
 
         private async Task<Dictionary<string, Dictionary<string, string>>> GetBankAccountsReferenceMapsAsync(
             MetadataObject accountsCatalog)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (_bankAccountsReferenceMaps != null)
                 return _bankAccountsReferenceMaps;
 
@@ -1810,11 +1832,11 @@ namespace BIS.ERP.Views
                 if (_catalogsDict != null)
                     _catalogsDict.TryGetValue(field.ReferenceCatalog!, out referenceCatalog);
 
-                referenceCatalog ??= await _metadataService.GetCatalogByNameAsync(field.ReferenceCatalog!);
+                referenceCatalog ??= await metadata.GetCatalogByNameAsync(field.ReferenceCatalog!);
                 if (referenceCatalog == null)
                     continue;
 
-                var rows = await _metadataService.GetCatalogDataAsync(referenceCatalog.Id);
+                var rows = await metadata.GetCatalogDataAsync(referenceCatalog.Id);
                 var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var row in rows)
                 {
@@ -2598,6 +2620,8 @@ namespace BIS.ERP.Views
         }
         private async void OnAddClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (IsFixedAssetsCatalog)
             {
                 var fixedAssetDialog = new FixedAssetDetailsDialog(
@@ -2618,7 +2642,7 @@ namespace BIS.ERP.Views
                     {
                         StatusText.Text = "💾 Сохранение...";
                         ProgressText.Text = "⏳ Сохранение...";
-                        var createdId = await _metadataService.CreateDynamicRecordAsync(_catalog.Id, fixedAssetDialog.ItemData);
+                        var createdId = await metadata.CreateDynamicRecordAsync(_catalog.Id, fixedAssetDialog.ItemData);
                         _recordToKeepSelected = createdId;
                         await LoadData();
                         // Остаёмся на только что созданном основном средстве.
@@ -2653,7 +2677,7 @@ namespace BIS.ERP.Views
                 {
                     StatusText.Text = "💾 Сохранение...";
                     ProgressText.Text = "⏳ Сохранение...";
-                    var createdId = await _metadataService.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
+                    var createdId = await metadata.AddCatalogItemAsync(_catalog.Id, dialog.ItemData);
                     _recordToKeepSelected = createdId;
                     await LoadData();
                     // Остаёмся на только что созданной записи справочника.
@@ -2676,6 +2700,8 @@ namespace BIS.ERP.Views
 
         private async void OnEditClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var selectedRow = DataGrid.SelectedItem as DataRowView;
             if (selectedRow == null) return;
 
@@ -2704,7 +2730,7 @@ namespace BIS.ERP.Views
                     {
                         StatusText.Text = "💾 Обновление...";
                         ProgressText.Text = "⏳ Обновление...";
-                        await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, fixedAssetDialog.ItemData);
+                        await metadata.UpdateDynamicRecordAsync(_catalog.Id, id, fixedAssetDialog.ItemData);
                         _recordToKeepSelected = id;
                         await LoadData();
                         // Возвращаем выделение на отредактированное основное средство.
@@ -2738,7 +2764,7 @@ namespace BIS.ERP.Views
                 {
                     StatusText.Text = "💾 Обновление...";
                     ProgressText.Text = "⏳ Обновление...";
-                    await _metadataService.UpdateDynamicRecordAsync(_catalog.Id, id, dialog.ItemData);
+                    await metadata.UpdateDynamicRecordAsync(_catalog.Id, id, dialog.ItemData);
                     _recordToKeepSelected = id;
                     await LoadData();
                     // Возвращаем выделение на отредактированную запись.
@@ -2759,6 +2785,8 @@ namespace BIS.ERP.Views
         }
         private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var selectedRow = DataGrid.SelectedItem as DataRowView;
             if (selectedRow == null) return;
 
@@ -2777,7 +2805,7 @@ namespace BIS.ERP.Views
                 {
                     StatusText.Text = "🗑️ Удаление...";
                     ProgressText.Text = "⏳ Удаление...";
-                    await _metadataService.DeleteDynamicRecordAsync(_catalog.Id, id);
+                    await metadata.DeleteDynamicRecordAsync(_catalog.Id, id);
                     _recordToKeepSelected = null;
                     await LoadData();
                     StatusText.Text = "✅ Запись удалена";
@@ -2853,6 +2881,8 @@ namespace BIS.ERP.Views
 
         private async void OnImportDbfClick(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             if (!CanImportDbf)
                 return;
 
@@ -2870,7 +2900,7 @@ namespace BIS.ERP.Views
 
                 if (IsPaymentClassificationCatalog)
                 {
-                    var result = await _metadataService.ImportPaymentClassificationsFromDbfAsync(openDialog.FileName);
+                    var result = await metadata.ImportPaymentClassificationsFromDbfAsync(openDialog.FileName);
                     await LoadData();
 
                     MessageBox.Show(
@@ -2881,7 +2911,7 @@ namespace BIS.ERP.Views
                 }
                 else
                 {
-                    var result = await _metadataService.ImportChartOfAccountsFromDbfAsync(openDialog.FileName);
+                    var result = await metadata.ImportChartOfAccountsFromDbfAsync(openDialog.FileName);
                     await LoadData();
 
                     MessageBox.Show(

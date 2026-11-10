@@ -17,14 +17,14 @@ namespace BIS.ERP.Views
 {
     public partial class PostingsJournalView : UserControl
     {
-        private readonly PostingService _postingService;
+        private readonly IAppDbContextFactory _contextFactory;
         private ObservableCollection<PostingViewModel> _allPostings = new();
         private ObservableCollection<PostingViewModel> _filteredPostings = new();
 
-        public PostingsJournalView(PostingService postingService)
+        public PostingsJournalView(IAppDbContextFactory contextFactory)
         {
             InitializeComponent();
-            _postingService = postingService;
+            _contextFactory = contextFactory;
 
             var today = DateTime.Now;
             dpStartDate.SelectedDate = new DateTime(today.Year, today.Month, 1);
@@ -38,7 +38,34 @@ namespace BIS.ERP.Views
             await LoadPostingsAsync();
         }
 
+        private bool _loading;
+        private bool _reloadRequested;
+
         private async Task LoadPostingsAsync()
+        {
+            if (_loading)
+            {
+                _reloadRequested = true;
+                return;
+            }
+
+            _loading = true;
+            try
+            {
+                do
+                {
+                    _reloadRequested = false;
+                    await LoadPostingsAsyncCore();
+                }
+                while (_reloadRequested);
+            }
+            finally
+            {
+                _loading = false;
+            }
+        }
+
+        private async Task LoadPostingsAsyncCore()
         {
             try
             {
@@ -48,7 +75,8 @@ namespace BIS.ERP.Views
                 var startDate = dpStartDate.SelectedDate ?? DateTime.Now.AddMonths(-1);
                 var endDate = dpEndDate.SelectedDate ?? DateTime.Now;
 
-                var postings = await _postingService.GetAllPostingsAsync(startDate, endDate);
+                await using var context = await _contextFactory.CreateAsync();
+                var postings = await new PostingService(context).GetAllPostingsAsync(startDate, endDate);
 
                 _allPostings.Clear();
                 foreach (var posting in postings)

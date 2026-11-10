@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,14 +15,13 @@ namespace BIS.ERP.Views
 {
     public partial class EmployeesCatalogView : UserControl
     {
-        private readonly EmployeeService _employeeService;
+        private CancellationTokenSource? _searchCancellation;
         private readonly MetadataService _metadataService;
         private ObservableCollection<Employee> _employees = new();
 
-        public EmployeesCatalogView(EmployeeService employeeService, MetadataService metadataService)
+        public EmployeesCatalogView(MetadataService metadataService)
         {
             InitializeComponent();
-            _employeeService = employeeService;
             _metadataService = metadataService;
             Loaded += OnLoaded;
         }
@@ -39,37 +39,13 @@ namespace BIS.ERP.Views
             TerminateButton.IsEnabled = hasSelection;
         }
 
-        private async Task LoadEmployees()
-        {
-            try
-            {
-                Mouse.OverrideCursor = Cursors.Wait;
-                StatusText.Text = "Загрузка...";
-
-                var list = await _employeeService.GetAllEmployeesAsync();
-                _employees.Clear();
-                foreach (var emp in list)
-                    _employees.Add(emp);
-
-                EmployeesGrid.ItemsSource = _employees;
-                TotalInfo.Text = $"Всего: {_employees.Count} сотрудников";
-                StatusText.Text = "Готово";
-            }
-            catch (Exception ex)
-            {
-                StatusText.Text = $"Ошибка: {ex.Message}";
-                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                Mouse.OverrideCursor = null;
-            }
-        }
+        private Task LoadEmployees() => SearchEmployees();
 
         // Обработчики для кнопок (имена из XAML)
         private async void AddButton_Click(object sender, RoutedEventArgs e)
         {
+            await using var context = _metadataService.CreateIndependentContext();
+            var employeeService = new EmployeeService(context, new MetadataService(context));
             var dialog = new EmployeeDialog(null, _metadataService);
             dialog.Owner = Window.GetWindow(this);
 
@@ -78,7 +54,7 @@ namespace BIS.ERP.Views
                     dialog,
                     "Добавление сотрудника") == true)
             {
-                var savedEmployee = await _employeeService.AddEmployeeAsync(dialog.Employee);
+                var savedEmployee = await employeeService.AddEmployeeAsync(dialog.Employee);
                 await LoadEmployees();
                 // Остаёмся на только что созданном сотруднике.
                 EmployeesGrid.SelectRowById(savedEmployee.Id, row => (row as Employee)?.Id);
@@ -89,6 +65,8 @@ namespace BIS.ERP.Views
 
         private async void EditButton_Click(object sender, RoutedEventArgs e)
         {
+            await using var context = _metadataService.CreateIndependentContext();
+            var employeeService = new EmployeeService(context, new MetadataService(context));
             var selected = EmployeesGrid.SelectedItem as Employee;
             if (selected == null) return;
 
@@ -100,7 +78,7 @@ namespace BIS.ERP.Views
                     dialog,
                     "Редактирование сотрудника") == true)
             {
-                var updatedEmployee = await _employeeService.UpdateEmployeeAsync(dialog.Employee);
+                var updatedEmployee = await employeeService.UpdateEmployeeAsync(dialog.Employee);
                 await LoadEmployees();
                 // Возвращаем выделение на отредактированного сотрудника.
                 EmployeesGrid.SelectRowById(updatedEmployee.Id, row => (row as Employee)?.Id);
@@ -110,13 +88,15 @@ namespace BIS.ERP.Views
 
         private async void DeleteButton_Click(object sender, RoutedEventArgs e)
         {
+            await using var context = _metadataService.CreateIndependentContext();
+            var employeeService = new EmployeeService(context, new MetadataService(context));
             var selected = EmployeesGrid.SelectedItem as Employee;
             if (selected == null) return;
 
             if (MessageBox.Show($"Удалить сотрудника {selected.FullName}?", "Подтверждение",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
-                await _employeeService.DeleteEmployeeAsync(selected.Id);
+                await employeeService.DeleteEmployeeAsync(selected.Id);
                 await LoadEmployees();
                 StatusText.Text = "✅ Сотрудник удалён";
             }
@@ -124,6 +104,8 @@ namespace BIS.ERP.Views
 
         private async void TerminateButton_Click(object sender, RoutedEventArgs e)
         {
+            await using var context = _metadataService.CreateIndependentContext();
+            var employeeService = new EmployeeService(context, new MetadataService(context));
             var selected = EmployeesGrid.SelectedItem as Employee;
             if (selected == null) return;
 
@@ -132,7 +114,7 @@ namespace BIS.ERP.Views
 
             if (dialog.ShowDialog() == true)
             {
-                await _employeeService.TerminateEmployeeAsync(selected.Id, dialog.TerminationDate, dialog.Reason);
+                await employeeService.TerminateEmployeeAsync(selected.Id, dialog.TerminationDate, dialog.Reason);
                 await LoadEmployees();
                 StatusText.Text = "✅ Сотрудник уволен";
             }
@@ -140,6 +122,8 @@ namespace BIS.ERP.Views
 
         private async void ExportButton_Click(object sender, RoutedEventArgs e)
         {
+            await using var context = _metadataService.CreateIndependentContext();
+            var employeeService = new EmployeeService(context, new MetadataService(context));
             var dlg = new SaveFileDialog
             {
                 Filter = "JSON файлы (*.json)|*.json",
@@ -148,7 +132,7 @@ namespace BIS.ERP.Views
 
             if (dlg.ShowDialog() == true)
             {
-                var json = await _employeeService.ExportEmployeesToJsonAsync();
+                var json = await employeeService.ExportEmployeesToJsonAsync();
                 await System.IO.File.WriteAllTextAsync(dlg.FileName, json);
                 StatusText.Text = $"✅ Экспортировано сотрудников: {_employees.Count} → {dlg.FileName}";
             }
@@ -156,11 +140,13 @@ namespace BIS.ERP.Views
 
         private async void ImportButton_Click(object sender, RoutedEventArgs e)
         {
+            await using var context = _metadataService.CreateIndependentContext();
+            var employeeService = new EmployeeService(context, new MetadataService(context));
             var dlg = new OpenFileDialog { Filter = "JSON файлы (*.json)|*.json" };
             if (dlg.ShowDialog() == true)
             {
                 var json = await System.IO.File.ReadAllTextAsync(dlg.FileName);
-                var count = await _employeeService.ImportEmployeesFromJsonAsync(json);
+                var count = await employeeService.ImportEmployeesFromJsonAsync(json);
                 await LoadEmployees();
                 StatusText.Text = $"✅ Импортировано сотрудников: {count}";
             }
@@ -178,7 +164,7 @@ namespace BIS.ERP.Views
 
         private async void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            await SearchEmployees();
+            await SearchEmployees(debounce: true);
         }
 
         private void EmployeesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -186,22 +172,45 @@ namespace BIS.ERP.Views
             UpdateButtonsState();
         }
 
-        private async Task SearchEmployees()
+        private async Task SearchEmployees(bool debounce = false)
         {
-            string text = SearchBox.Text;
-            if (string.IsNullOrWhiteSpace(text))
+            _searchCancellation?.Cancel();
+            using var cancellation = new CancellationTokenSource();
+            _searchCancellation = cancellation;
+            try
             {
-                await LoadEmployees();
-                return;
+                if (debounce)
+                    await Task.Delay(275, cancellation.Token);
+
+                var text = SearchBox.Text;
+                await using var context = _metadataService.CreateIndependentContext();
+                var employeeService = new EmployeeService(context, new MetadataService(context));
+                var results = string.IsNullOrWhiteSpace(text)
+                    ? await employeeService.GetAllEmployeesAsync()
+                    : await employeeService.SearchEmployeesAsync(text);
+                cancellation.Token.ThrowIfCancellationRequested();
+
+                _employees.Clear();
+                foreach (var employee in results)
+                    _employees.Add(employee);
+
+                EmployeesGrid.ItemsSource = _employees;
+                TotalInfo.Text = $"Найдено: {_employees.Count}";
+                StatusText.Text = "Готово";
             }
-
-            var results = await _employeeService.SearchEmployeesAsync(text);
-            _employees.Clear();
-            foreach (var emp in results)
-                _employees.Add(emp);
-
-            EmployeesGrid.ItemsSource = _employees;
-            TotalInfo.Text = $"Найдено: {_employees.Count}";
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                if (!cancellation.IsCancellationRequested)
+                    StatusText.Text = $"Ошибка поиска: {ex.Message}";
+            }
+            finally
+            {
+                if (_searchCancellation == cancellation)
+                    _searchCancellation = null;
+            }
         }
     }
 }

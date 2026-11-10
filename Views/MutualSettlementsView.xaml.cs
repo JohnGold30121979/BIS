@@ -2,6 +2,7 @@ using BIS.ERP.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -34,11 +35,13 @@ namespace BIS.ERP.Views
             };
         }
 
-        private async System.Threading.Tasks.Task LoadAdvancePaymentPairs()
+        private async Task LoadAdvancePaymentPairs()
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             try
             {
-                var pairs = await _metadataService.GetAdvancePaymentPairsAsync();
+                var pairs = await metadata.GetAdvancePaymentPairsAsync();
                 cmbAccountPair.ItemsSource = pairs;
                 cmbAccountPair.DisplayMemberPath = "name";
                 cmbAccountPair.SelectedValuePath = "Id";
@@ -49,14 +52,43 @@ namespace BIS.ERP.Views
             }
         }
 
-        private async System.Threading.Tasks.Task LoadData()
+        private bool _loading;
+        private bool _reloadRequested;
+
+        private async Task LoadData()
         {
+            if (_loading)
+            {
+                _reloadRequested = true;
+                return;
+            }
+
+            _loading = true;
+            try
+            {
+                do
+                {
+                    _reloadRequested = false;
+                    await LoadDataCore();
+                }
+                while (_reloadRequested);
+            }
+            finally
+            {
+                _loading = false;
+            }
+        }
+
+        private async Task LoadDataCore()
+        {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             try
             {
                 var startDate = dpStartDate.SelectedDate ?? DateTime.Now.AddMonths(-1);
                 var endDate = dpEndDate.SelectedDate ?? DateTime.Now;
 
-                var calculation = await _metadataService.CalculateOrganizationBalancesAsync(startDate, endDate);
+                var calculation = await metadata.CalculateOrganizationBalancesAsync(startDate, endDate);
                 foreach (var warning in calculation.Warnings)
                     System.Diagnostics.Debug.WriteLine($"Предупреждение расчета взаиморасчетов: {warning}");
 
@@ -169,6 +201,8 @@ namespace BIS.ERP.Views
 
         private async void btnReconciliation_Click(object sender, RoutedEventArgs e)
         {
+            var metadata = _metadataService.CreateIndependent(out var operationContext);
+            await using var contextScope = operationContext;
             var selected = dgSettlements.SelectedItem as MutualSettlementItem;
             if (selected == null)
             {
@@ -188,7 +222,7 @@ namespace BIS.ERP.Views
             }
 
             // For now, show the data in a message
-            var data = await _metadataService.GetReconciliationStatementAsync(
+            var data = await metadata.GetReconciliationStatementAsync(
                 organizationId, startDate, endDate);
 
             var details = string.Join("\n", data.Select(d =>

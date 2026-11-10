@@ -1909,9 +1909,19 @@ namespace BIS.ERP.Services
             var checkSql = $"SELECT COUNT(*) FROM \"{catalog.TableName}\"";
             using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
             checkCommand.CommandText = checkSql;
-            await _context.Database.OpenConnectionAsync();
-            var count = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
-            await _context.Database.CloseConnectionAsync();
+            int count;
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
+            {
+                count = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
 
             // Если данных нет, добавляем
             if (count == 0)

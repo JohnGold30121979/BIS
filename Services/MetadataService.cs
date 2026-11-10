@@ -485,23 +485,31 @@ namespace BIS.ERP.Services
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = sql;
 
-                if (_context.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+                if (openedHere)
                     await _context.Database.OpenConnectionAsync();
-
-                using var reader = await command.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
+                try
                 {
-                    var id = reader.GetGuid(0);
-                    var name = reader.GetString(1);
-                    result[id] = name;
-                }
 
-                if (_context.Database.GetDbConnection().State == System.Data.ConnectionState.Open)
-                    await _context.Database.CloseConnectionAsync();
+                    using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
+                    {
+                        var id = reader.GetGuid(0);
+                        var name = reader.GetString(1);
+                        result[id] = name;
+                    }
+
+                }
+                finally
+                {
+                    if (openedHere)
+                        await _context.Database.CloseConnectionAsync();
+                }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Ошибка загрузки справочника {catalogName}: {ex.Message}");
+                SystemLogService.Warning($"Ошибка загрузки справочника {catalogName}: {ex.Message}", "Metadata");
+                throw;
             }
 
             return result;
@@ -539,72 +547,80 @@ namespace BIS.ERP.Services
             var missingRequired = new List<string>();
 
             // Типы колонок: без приведения строка уйдёт в integer/uuid как text (42804).
-            await _context.Database.OpenConnectionAsync();
-            var columnTypes = await DbValueConverter.LoadColumnTypesAsync(
-                _context.Database.GetDbConnection(), catalog.TableName);
-
-            // Счёт из диалога приходит кодом, а колонка в новой базе — uuid.
-            await NormalizeAccountReferenceValuesAsync(catalog, itemData, columnTypes);
-
-            foreach (var field in SelectFieldsForWrite(catalog, itemData))
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
             {
-                // Диалог кладёт в itemData все поля, включая пустые (DBNull.Value),
-                // а DbValueConverter отдаёт DBNull и для пустой строки. Писать такой
-                // NULL в NOT NULL-колонку бессмысленно: PostgreSQL отвечает 23502
-                // («значение NULL в столбце "name" …»). Поэтому пустое значение
-                // не включаем в INSERT, а по обязательным полям сразу говорим,
-                // что именно не заполнено.
-                if (!TryGetFieldValue(itemData, field, out var rawValue) || rawValue is null)
+                var columnTypes = await DbValueConverter.LoadColumnTypesAsync(
+                    _context.Database.GetDbConnection(), catalog.TableName);
+
+                // Счёт из диалога приходит кодом, а колонка в новой базе — uuid.
+                await NormalizeAccountReferenceValuesAsync(catalog, itemData, columnTypes);
+
+                foreach (var field in SelectFieldsForWrite(catalog, itemData))
                 {
-                    if (field.IsRequired)
-                        missingRequired.Add(field.Name);
-                    continue;
+                    // Диалог кладёт в itemData все поля, включая пустые (DBNull.Value),
+                    // а DbValueConverter отдаёт DBNull и для пустой строки. Писать такой
+                    // NULL в NOT NULL-колонку бессмысленно: PostgreSQL отвечает 23502
+                    // («значение NULL в столбце "name" …»). Поэтому пустое значение
+                    // не включаем в INSERT, а по обязательным полям сразу говорим,
+                    // что именно не заполнено.
+                    if (!TryGetFieldValue(itemData, field, out var rawValue) || rawValue is null)
+                    {
+                        if (field.IsRequired)
+                            missingRequired.Add(field.Name);
+                        continue;
+                    }
+
+                    var value = DbValueConverter.Convert(
+                        rawValue, columnTypes.GetValueOrDefault(field.DbColumnName));
+
+                    if (value is DBNull)
+                    {
+                        if (field.IsRequired)
+                            missingRequired.Add(field.Name);
+                        continue;
+                    }
+
+                    columns.Add($"\"{field.DbColumnName}\"");
+                    values.Add($"@{field.DbColumnName}");
+                    parameters[$"@{field.DbColumnName}"] = value;
                 }
 
-                var value = DbValueConverter.Convert(
-                    rawValue, columnTypes.GetValueOrDefault(field.DbColumnName));
-
-                if (value is DBNull)
+                if (missingRequired.Count > 0)
                 {
-                    if (field.IsRequired)
-                        missingRequired.Add(field.Name);
-                    continue;
+                    throw new Exception(
+                        $"Заполните обязательные поля: {string.Join(", ", missingRequired)}.");
                 }
 
-                columns.Add($"\"{field.DbColumnName}\"");
-                values.Add($"@{field.DbColumnName}");
-                parameters[$"@{field.DbColumnName}"] = value;
-            }
+                columns.Add("\"Id\"");
+                values.Add("@Id");
+                parameters["@Id"] = Guid.NewGuid();
 
-            if (missingRequired.Count > 0)
+                columns.Add("\"CreatedAt\"");
+                values.Add("@CreatedAt");
+                parameters["@CreatedAt"] = DateTime.UtcNow;
+
+                var sql = $"INSERT INTO \"{catalog.TableName}\" ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
+
+                using var command = _context.Database.GetDbConnection().CreateCommand();
+                command.CommandText = sql;
+                foreach (var param in parameters)
+                {
+                    var dbParam = command.CreateParameter();
+                    dbParam.ParameterName = param.Key;
+                    dbParam.Value = param.Value ?? DBNull.Value;
+                    command.Parameters.Add(dbParam);
+                }
+
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
             {
-                throw new Exception(
-                    $"Заполните обязательные поля: {string.Join(", ", missingRequired)}.");
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
             }
-
-            columns.Add("\"Id\"");
-            values.Add("@Id");
-            parameters["@Id"] = Guid.NewGuid();
-
-            columns.Add("\"CreatedAt\"");
-            values.Add("@CreatedAt");
-            parameters["@CreatedAt"] = DateTime.UtcNow;
-
-            var sql = $"INSERT INTO \"{catalog.TableName}\" ({string.Join(", ", columns)}) VALUES ({string.Join(", ", values)})";
-
-            using var command = _context.Database.GetDbConnection().CreateCommand();
-            command.CommandText = sql;
-            foreach (var param in parameters)
-            {
-                var dbParam = command.CreateParameter();
-                dbParam.ParameterName = param.Key;
-                dbParam.Value = param.Value ?? DBNull.Value;
-                command.Parameters.Add(dbParam);
-            }
-
-            await _context.Database.OpenConnectionAsync();
-            await command.ExecuteNonQueryAsync();
-            await _context.Database.CloseConnectionAsync();
 
             await EnsureSingleCatalogDefaultsAsync(catalog, itemData, (Guid)parameters["@Id"]);
 
@@ -1984,9 +2000,19 @@ namespace BIS.ERP.Services
                 using var command = _context.Database.GetDbConnection().CreateCommand();
                 command.CommandText = sql;
 
-                await _context.Database.OpenConnectionAsync();
-                var value = await command.ExecuteScalarAsync();
-                await _context.Database.CloseConnectionAsync();
+                object? value;
+                var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+                if (openedHere)
+                    await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    value = await command.ExecuteScalarAsync();
+                }
+                finally
+                {
+                    if (openedHere)
+                        await _context.Database.CloseConnectionAsync();
+                }
 
                 if (value == null || value == DBNull.Value)
                     return null;
@@ -1995,7 +2021,7 @@ namespace BIS.ERP.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Не удалось получить валюту по умолчанию: {ex.Message}");
+                SystemLogService.Warning($"Не удалось получить валюту по умолчанию: {ex.Message}", "Metadata");
                 return null;
             }
         }
@@ -2447,9 +2473,18 @@ namespace BIS.ERP.Services
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
 
-            await _context.Database.OpenConnectionAsync();
-            await command.ExecuteNonQueryAsync();
-            await _context.Database.CloseConnectionAsync();
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
 
             await SyncManualPostingCashBalanceAsync(metadata, previousRecord, currentRecord: null);
             await new EventLogService(_context).LogAsync(
@@ -2961,9 +2996,18 @@ namespace BIS.ERP.Services
             using var command = _context.Database.GetDbConnection().CreateCommand();
             command.CommandText = sql;
 
-            await _context.Database.OpenConnectionAsync();
-            await command.ExecuteNonQueryAsync();
-            await _context.Database.CloseConnectionAsync();
+            var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+            if (openedHere)
+                await _context.Database.OpenConnectionAsync();
+            try
+            {
+                await command.ExecuteNonQueryAsync();
+            }
+            finally
+            {
+                if (openedHere)
+                    await _context.Database.CloseConnectionAsync();
+            }
         }
 
         public async Task UpdateMetadataObjectAsync(MetadataObject obj)
@@ -5454,9 +5498,19 @@ namespace BIS.ERP.Services
 
                 using var checkCommand = _context.Database.GetDbConnection().CreateCommand();
                 checkCommand.CommandText = checkSql;
-                await _context.Database.OpenConnectionAsync();
-                var exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
-                await _context.Database.CloseConnectionAsync();
+                int exists;
+                var openedHere = _context.Database.GetDbConnection().State != System.Data.ConnectionState.Open;
+                if (openedHere)
+                    await _context.Database.OpenConnectionAsync();
+                try
+                {
+                    exists = Convert.ToInt32(await checkCommand.ExecuteScalarAsync());
+                }
+                finally
+                {
+                    if (openedHere)
+                        await _context.Database.CloseConnectionAsync();
+                }
 
                 if (exists > 0)
                 {

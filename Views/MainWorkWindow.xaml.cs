@@ -58,7 +58,6 @@ namespace BIS.ERP
         private InfoBaseManager _infoBaseManager;
         private MetadataService _metadataService;
         private ReportService _reportService;
-        private DocumentService _documentService;
         private LocalizationService _localizationService;
         private AccountingPeriodService _accountingPeriodService;
         private UserAccessService _userAccessService;
@@ -608,6 +607,8 @@ namespace BIS.ERP
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
+            Loaded -= OnLoaded;
+            await DbContextScope.StartupGate.WaitAsync();
             // Контекст и имя текущего шага нужны в catch для диагностики
             // DbUpdateConcurrencyException, поэтому объявлены вне блока try.
             AppDbContext? diagnosticContext = null;
@@ -646,7 +647,6 @@ namespace BIS.ERP
                     _localizationService = new LocalizationService(context, settings.Language);
                     _metadataService = new MetadataService(context);
                     _reportService = new ReportService(context);
-                    _documentService = new DocumentService(context);
                     _userAccessService = new UserAccessService(context);
                     _moduleMetadataService = new ModuleMetadataService(context);
 
@@ -707,6 +707,10 @@ namespace BIS.ERP
                     nameof(MainWorkWindow), ex);
                 MessageBox.Show($"Ошибка загрузки: {ex.Message}", "Ошибка",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                DbContextScope.StartupGate.Release();
             }
         }
 
@@ -940,7 +944,7 @@ namespace BIS.ERP
             {
                 Id = "ServiceDataSection", Name = "СЛУЖЕБНЫЕ ДАННЫЕ", Icon = "🗄", Type = "Section"
             };
-            var dbfCount = await _documentService.GetDocumentsCountAsync();
+            var dbfCount = await LoadWithIndependentConnectionAsync(context => new DocumentService(context).GetDocumentsCountAsync());
             serviceSection.Children.Add(new NavigationItem
             {
                 Id = "DbfDocuments", Name = "FoxPro documents", Icon = "🗄", Type = "DbfDocuments",
@@ -1409,7 +1413,7 @@ namespace BIS.ERP
             }
 
             // Imported FoxPro documents
-            var dbfCount = await _documentService.GetDocumentsCountAsync();
+            var dbfCount = await LoadWithIndependentConnectionAsync(context => new DocumentService(context).GetDocumentsCountAsync());
             dataSection.Children.Add(new NavigationItem
             {
                 Id = "DbfDocuments",
@@ -2068,20 +2072,32 @@ namespace BIS.ERP
             }
         }
 
+        private readonly HashSet<NavigationItem> _openingNavigationItems = new();
+
         private async Task OpenNavigationItemAsync(NavigationItem item)
         {
-            var previousKey = ContentArea.SelectedDocument?.Key;
-            await OpenNavigationItemCoreAsync(item);
-
-            // Запоминаем, каким узлом дерева открыт документ: при переключении
-            // закладок этот узел подсвечивается в левой панели.
-            var activeDocument = ContentArea.SelectedDocument;
-            if (activeDocument == null || activeDocument.Tag != null)
-                return;
-            if (string.Equals(activeDocument.Key, previousKey, StringComparison.OrdinalIgnoreCase))
+            if (!_openingNavigationItems.Add(item))
                 return;
 
-            activeDocument.Tag = item;
+            try
+            {
+                var previousKey = ContentArea.SelectedDocument?.Key;
+                await OpenNavigationItemCoreAsync(item);
+
+                // Запоминаем, каким узлом дерева открыт документ: при переключении
+                // закладок этот узел подсвечивается в левой панели.
+                var activeDocument = ContentArea.SelectedDocument;
+                if (activeDocument == null || activeDocument.Tag != null)
+                    return;
+                if (string.Equals(activeDocument.Key, previousKey, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                activeDocument.Tag = item;
+            }
+            finally
+            {
+                _openingNavigationItems.Remove(item);
+            }
         }
 
         private async Task OpenNavigationItemCoreAsync(NavigationItem item)
@@ -2102,30 +2118,25 @@ namespace BIS.ERP
                     break;
 
                 case "EmployeesCatalog":
-                    var dbContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                    var employeeService = new EmployeeService(dbContext, _metadataService);
-                    var employeesView = new EmployeesCatalogView(employeeService, _metadataService);
+                    var employeesView = new EmployeesCatalogView(_metadataService);
                     _navigation.NavigateTo(employeesView, item.Name, $"catalog:{item.Id}");
                     break;
 
                 case "DynamicDocument":
                     if (item.Tag is MetadataObject document)
                     {
-                        var documentContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                        var dynamicView = new DynamicDocumentWorkView(document, _metadataService, documentContext);
+                        var dynamicView = new DynamicDocumentWorkView(document, _metadataService);
                         _navigation.NavigateTo(dynamicView, item.Name, $"document:{item.Id}");
                     }
                     break;
 
                 case "DbfDocuments":
-                    var dbfView = new DynamicDocumentsView(_documentService);
+                    var dbfView = new DynamicDocumentsView(ServiceLocator.DbContextFactory);
                     _navigation.NavigateTo(dbfView, item.Name, item.Id);
                     break;
 
                 case "PostingsJournal":
-                    var journalContext = await _infoBaseManager.GetCurrentDbContextAsync();
-                    var postingService = new PostingService(journalContext);
-                    var journalView = new PostingsJournalView(postingService);
+                    var journalView = new PostingsJournalView(ServiceLocator.DbContextFactory);
                     _navigation.NavigateTo(journalView, item.Name, item.Id);
                     break;
 
@@ -2695,7 +2706,7 @@ namespace BIS.ERP
 
         private async Task OpenAccountingReportsAsync(string? selectedReportType = null)
         {
-            var context = await _infoBaseManager.GetCurrentDbContextAsync();
+            await using var context = await _infoBaseManager.GetCurrentDbContextAsync();
             var view = new AccountingReportsView(context);
             if (!string.IsNullOrWhiteSpace(selectedReportType))
                 view.SelectReportType(selectedReportType);

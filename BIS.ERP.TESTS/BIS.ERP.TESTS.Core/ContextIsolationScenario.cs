@@ -52,11 +52,14 @@ public sealed class ContextIsolationScenario : SmokeTestScenarioBase
         // Корневой сервис — как MainWorkWindow. Каждое «окно» получает СВОЁ
         // подключение через боевой путь MetadataService.CreateIndependent().
         var root = new MetadataService(probe);
-        var windowServices = new List<MetadataService>();
-        for (var index = 0; index < ParallelWindows; index++)
-            windowServices.Add(root.CreateIndependent());
+        async Task<T> ReadAsync<T>(Func<MetadataService, Task<T>> read)
+        {
+            var service = root.CreateIndependent(out var context);
+            await using var scope = context;
+            return await read(service);
+        }
 
-        var catalogs = await windowServices[0].GetCatalogsAsync();
+        var catalogs = await ReadAsync(service => service.GetCatalogsAsync());
         if (catalogs.Count == 0)
             errors.Add("В базе нет справочников — нечего читать.");
 
@@ -64,20 +67,40 @@ public sealed class ContextIsolationScenario : SmokeTestScenarioBase
 
         for (var iteration = 1; iteration <= Iterations && errors.Count == 0; iteration++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 // Все окна одновременно грузят метаданные и данные справочника.
-                await Task.WhenAll(windowServices.Select(service => service.GetCatalogsAsync()));
+                await Task.WhenAll(Enumerable.Range(0, ParallelWindows).Select(_ =>
+                    ReadAsync(service => service.GetCatalogsAsync())));
                 if (catalogId != Guid.Empty)
                 {
-                    await Task.WhenAll(windowServices.Select(service =>
-                        service.GetCatalogDataAsync(catalogId)));
+                    await Task.WhenAll(Enumerable.Range(0, ParallelWindows * 2).Select(_ =>
+                        ReadAsync(service => service.GetCatalogDataAsync(catalogId))));
                 }
             }
             catch (Exception ex)
             {
                 errors.Add($"Итерация {iteration}: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        try
+        {
+            await using var context = root.CreateIndependentContext();
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync("SELECT 1 / 0", cancellationToken);
+                errors.Add("PostgreSQL не вернул ожидаемую ошибку деления на ноль.");
+            }
+            catch (Npgsql.PostgresException ex) when (ex.SqlState == "22012")
+            {
+                await context.Database.ExecuteSqlRawAsync("SELECT 1", cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors.Add($"Повтор запроса после ошибки: {ex.GetType().Name}: {ex.Message}");
         }
 
         details.Add($"Окон: {ParallelWindows}, итераций: {Iterations}, справочников: {catalogs.Count}.");
