@@ -210,6 +210,15 @@ namespace BIS.ERP.Views.Dialogs
                 await StartupProfiler.MeasureAsync("ТМЗ: строки документа", LoadLinesAsync);
                 if (IsInternalMovement)
                     LoadMovementSource();
+                if (IsIncomingReceipt)
+                {
+                    UpdateReceiptOperation();
+                    if (IsProductionReceipt && _recordId.HasValue)
+                        LoadLegacyProductionCreditAccount();
+
+                    if (!_readOnly && _entryEditor != null)
+                        _entryEditor.SelectionChanged += (_, _) => UpdateReceiptOperation(recalculate: true);
+                }
                 UpdateAccountDependencies();
                 UpdateTotals();
 
@@ -238,6 +247,11 @@ namespace BIS.ERP.Views.Dialogs
             AddText(HeaderTopPanel, "№ пачки", "pack_number", 80);
             AddText(HeaderTopPanel, "Серия/№ бланка", "tax_blank_number", 130);
             AddText(HeaderTopPanel, "Номер ЭСФ", "esf_number", 150);
+            if (IsIncomingReceipt)
+            {
+                var basisEditor = AddText(HeaderTopPanel, "Основание акта", "basis", 250);
+                basisEditor.MaxLength = 500;
+            }
         }
 
 
@@ -356,6 +370,101 @@ namespace BIS.ERP.Views.Dialogs
         {
             var text = Read(row, "Порядок", "sort_order");
             return int.TryParse(text, out var order) ? order : int.MaxValue;
+        }
+
+        private bool IsIncomingReceipt => _definition.Table == InventoryDocumentModel.IncomingTable;
+
+        private string SelectedOperation => _entryEditor?.SelectedValue is Guid entryId
+            ? _entryOperationKinds.GetValueOrDefault(entryId) ?? string.Empty
+            : string.Empty;
+
+        private bool IsProductionReceipt => string.Equals(SelectedOperation,
+            InventoryDocumentModel.ProductionReceiptOperation, StringComparison.OrdinalIgnoreCase);
+
+        private bool IsReceiptByAct => string.Equals(SelectedOperation,
+            InventoryDocumentModel.ReceiptByActOperation, StringComparison.OrdinalIgnoreCase);
+
+        private bool IsReceiptWithoutPurchaseTaxes => IsIncomingReceipt && (IsProductionReceipt || IsReceiptByAct);
+
+        private void UpdateReceiptOperation(bool recalculate = false)
+        {
+            var showPurchaseFields = !IsReceiptWithoutPurchaseTaxes;
+            SecondPartyCard.Visibility = showPurchaseFields ? Visibility.Visible : Visibility.Collapsed;
+            SetPanelVisibility("supply_kind", showPurchaseFields);
+            SupplierCard.Header = showPurchaseFields ? "Поставщик" : "Источник поступления";
+            _referencePanels["counterparty_account"].Children.OfType<TextBlock>().First().Text =
+                showPurchaseFields ? "Счет" : "Счёт кредита";
+            SupplierCard.Visibility = IsProductionReceipt ? Visibility.Collapsed : Visibility.Visible;
+
+            SetEditorVisibility("tax_blank_number", showPurchaseFields);
+            SetEditorVisibility("esf_number", showPurchaseFields);
+            SetEditorVisibility("basis", IsReceiptByAct);
+            ReceiptCreditAccountColumn.Visibility = IsProductionReceipt ? Visibility.Visible : Visibility.Collapsed;
+            ReceiptVatColumn.Visibility = SecondPartyCard.Visibility;
+            ReceiptSalesTaxColumn.Visibility = SecondPartyCard.Visibility;
+            ReceiptBaseAmountColumn.Header = showPurchaseFields ? "Без НДС" : "Сумма";
+
+            if (recalculate)
+            {
+                SetReceiptLineTaxRates();
+                UpdateAccountDependencies();
+            }
+        }
+
+        private void SetEditorVisibility(string column, bool visible)
+        {
+            if (_editors.TryGetValue(column, out var editor) && editor.Parent is FrameworkElement container)
+                container.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SetReceiptLineTaxRates()
+        {
+            var valueAddedTaxRate = IsReceiptWithoutPurchaseTaxes ? 0m : ReadDecimalEditor("vat_rate");
+            var salesTaxRate = IsReceiptWithoutPurchaseTaxes ? 0m : ReadDecimalEditor("sales_tax_rate");
+            foreach (var line in _lines)
+            {
+                line.VatRate = valueAddedTaxRate;
+                line.SalesTaxRate = salesTaxRate;
+            }
+        }
+
+        private void LoadLegacyProductionCreditAccount()
+        {
+            var previousCreditAccount = FindAccountRow();
+            if (previousCreditAccount == null)
+                return;
+
+            var accountCode = Read(previousCreditAccount, "Код", "code");
+            foreach (var line in _lines.Where(line => string.IsNullOrWhiteSpace(line.CreditAccountCode)))
+                line.CreditAccountCode = accountCode;
+        }
+
+        private void ValidateReceiptOperation()
+        {
+            if (IsReceiptByAct)
+            {
+                if (_editors["basis"] is TextBox basis && string.IsNullOrWhiteSpace(basis.Text))
+                    throw new InvalidOperationException("Укажите основание прихода по акту.");
+
+                if (FindAccountRow() == null)
+                    throw new InvalidOperationException("Выберите счёт кредита для прихода по акту.");
+            }
+
+            if (IsProductionReceipt)
+            {
+                var accountCodes = _accountRows.Select(account => Read(account, "Код", "code"))
+                    .Where(code => code.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var line in _lines)
+                {
+                    line.CreditAccountCode = line.CreditAccountCode.Trim();
+                    if (!accountCodes.Contains(line.CreditAccountCode) || !accountCodes.Contains(line.AccountCode) ||
+                        string.Equals(line.CreditAccountCode, line.AccountCode, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Строка {line.LineNumber}: укажите разные счета дебета и кредита из плана счетов.");
+                }
+            }
+
+            if (IsReceiptWithoutPurchaseTaxes)
+                SetReceiptLineTaxRates();
         }
 
         private bool IsInternalMovement => _definition.Table == InventoryDocumentModel.MovementTable;
@@ -680,6 +789,9 @@ namespace BIS.ERP.Views.Dialogs
         /// </summary>
         private void ApplyHeaderRateToLines(bool isVat)
         {
+            if (IsReceiptWithoutPurchaseTaxes)
+                return;
+
             var rate = ReadDecimalEditor(isVat ? "vat_rate" : "sales_tax_rate");
             var previous = isVat ? _lastVatRate : _lastSalesTaxRate;
 
@@ -1012,8 +1124,8 @@ namespace BIS.ERP.Views.Dialogs
         private void UpdateAccountDependencies()
         {
             var account = FindAccountRow();
-            var linkOrganizations = account != null && IsTrue(account, "Связь с организациями");
-            var linkEmployees = account != null && IsTrue(account, "Связь со списочным составом");
+            var linkOrganizations = !IsReceiptWithoutPurchaseTaxes && account != null && IsTrue(account, "Связь с организациями");
+            var linkEmployees = !IsReceiptWithoutPurchaseTaxes && account != null && IsTrue(account, "Связь со списочным составом");
             var currencyAccount = _lines.Select(line => _accountRows.FirstOrDefault(row =>
                     string.Equals(Read(row, "Код", "code"), line.AccountCode, StringComparison.OrdinalIgnoreCase)))
                 .FirstOrDefault(row => row != null && ResolveAccountCurrencyId(row).HasValue) ?? account;
@@ -1363,8 +1475,8 @@ namespace BIS.ERP.Views.Dialogs
         {
             var line = new InventoryLineRow
             {
-                VatRate = ReadDecimalEditor("vat_rate"),
-                SalesTaxRate = ReadDecimalEditor("sales_tax_rate")
+                VatRate = IsReceiptWithoutPurchaseTaxes ? 0m : ReadDecimalEditor("vat_rate"),
+                SalesTaxRate = IsReceiptWithoutPurchaseTaxes ? 0m : ReadDecimalEditor("sales_tax_rate")
             };
 
             line.PropertyChanged += OnLinePropertyChanged;
@@ -1412,7 +1524,18 @@ namespace BIS.ERP.Views.Dialogs
                     {
                         row.MaterialName = Read(material, "Наименование материала", "Наименование");
                         row.MaterialCode = Read(material, "Код", "code");
-                        var unit = Read(material, "Ед изм", "Единица");
+                        if (IsProductionReceipt && string.IsNullOrWhiteSpace(row.AccountCode))
+            {
+                var storageAccount = Read(material, "Счет хранения", "storage_account");
+                var account = _accountRows.FirstOrDefault(candidate =>
+                    string.Equals(Read(candidate, "Код", "code"), storageAccount, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(Read(candidate, "Id"), storageAccount, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(AccountDisplay(candidate), storageAccount, StringComparison.OrdinalIgnoreCase));
+                if (storageAccount.Length > 0 && account != null)
+                    ApplyAccount(row, account);
+            }
+
+            var unit = Read(material, "Единица измерения", "unit", "Ед изм", "Единица");
                         if (!string.IsNullOrWhiteSpace(unit))
                             row.UnitName = unit;
                     }
@@ -2088,7 +2211,7 @@ namespace BIS.ERP.Views.Dialogs
                     ["Id"] = material.TryGetValue("Id", out var id) ? id : DBNull.Value,
                     ["Код"] = Read(material, "Код", "code"),
                     ["Наименование"] = Read(material, "Наименование материала", "Наименование"),
-                    ["Ед. изм."] = Read(material, "Ед изм", "Единица")
+                    ["Единица измерения"] = Read(material, "Единица измерения", "unit", "Ед изм", "Единица")
                 });
             }
 
@@ -2153,7 +2276,7 @@ namespace BIS.ERP.Views.Dialogs
             row.MaterialName = Read(material, "Наименование материала", "Наименование");
             row.MaterialText = FormatMaterialText(row.MaterialCode, row.MaterialName);
 
-            var unit = Read(material, "Ед изм", "Единица");
+            var unit = Read(material, "Единица измерения", "unit", "Ед изм", "Единица");
             if (unit.Length > 0)
                 row.UnitName = unit;
 
@@ -2424,6 +2547,8 @@ namespace BIS.ERP.Views.Dialogs
 
                 if (IsInternalMovement)
                     ApplyMovementParties();
+                if (IsIncomingReceipt)
+                    ValidateReceiptOperation();
 
                 var data = BuildItemData();
                 var lines = _lines.ToList();
@@ -2560,6 +2685,20 @@ namespace BIS.ERP.Views.Dialogs
 
             foreach (var field in _document.Fields)
             {
+                if ((IsReceiptWithoutPurchaseTaxes && field.DbColumnName is
+                        ("supply_kind" or "vat_type" or "sales_tax_type" or "payment_kind" or "tax_blank_number" or "esf_number")) ||
+                    (IsProductionReceipt && field.DbColumnName is ("counterparty_account" or "organization_id" or "employee_id")))
+                {
+                    data[field.Name] = DBNull.Value;
+                    continue;
+                }
+
+                if (IsReceiptWithoutPurchaseTaxes && field.DbColumnName is ("vat_rate" or "sales_tax_rate"))
+                {
+                    data[field.Name] = 0m;
+                    continue;
+                }
+
                 if (_referenceBoxes.TryGetValue(field.DbColumnName, out var referenceBox))
                 {
                     var text = referenceBox.Text?.Trim() ?? string.Empty;

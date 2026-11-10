@@ -165,7 +165,12 @@ namespace BIS.ERP.Services
                 new("2026.11.09.01",
                     "Проводки: счёт-ссылка (uuid) в дебете/кредите заменяется кодом счёта",
                     false,
-                    FixPostingAccountReferencesAsync)
+                    FixPostingAccountReferencesAsync),
+
+                new("2026.11.10.01",
+                    "Счёт кредита в строках поступления материалов",
+                    true,
+                    EnsureReceiptCreditAccountColumnAsync)
             };
         }
 
@@ -726,6 +731,11 @@ namespace BIS.ERP.Services
             foreach (var warning in report.Warnings)
                 SystemLogService.Warning($"ТМЗ: {warning}", "Migration");
         }
+
+        private static Task EnsureReceiptCreditAccountColumnAsync(AppDbContext context) =>
+            context.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE IF EXISTS public.{InventoryDocumentModel.IncomingLinesTable} " +
+                $"ADD COLUMN IF NOT EXISTS {InventoryDocumentModel.CreditAccountCodeColumn} text NULL;");
 
         private static async Task EnsureInventoryLineAnalyticsAsync(AppDbContext context)
         {

@@ -2613,6 +2613,9 @@ namespace BIS.ERP.Services
             var currencyId = ReadRecordGuid(record, "currency_id", "Валюта");
             var organizationId = ReadRecordGuid(record, "organization_id", "Организация");
             var isIncoming = definition.Table == InventoryDocumentModel.IncomingTable;
+            var isProductionReceipt = isIncoming && string.Equals(
+                GetStringValue(record, "operation_kind"), InventoryDocumentModel.ProductionReceiptOperation,
+                StringComparison.OrdinalIgnoreCase);
             var isMovement = definition.Table == InventoryDocumentModel.MovementTable;
             var destinationSite = ReadRecordGuid(record, "destination_site_id", "Участок-получатель");
             var destinationPerson = ReadRecordGuid(record, "destination_person_id", "МОЛ-получатель");
@@ -2632,6 +2635,8 @@ namespace BIS.ERP.Services
                 var lineAccount = (line.AccountCode ?? string.Empty).Trim();
                 var debit = isIncoming || (isMovement && headerAccount.Length == 0) ? lineAccount : headerAccount;
                 var credit = isIncoming ? headerAccount : lineAccount;
+                if (isProductionReceipt && !string.IsNullOrWhiteSpace(line.CreditAccountCode))
+                    credit = line.CreditAccountCode.Trim();
 
                 // Внутреннее перемещение может идти по одному счёту при смене участка или МОЛ.
                 var changesCustody = isMovement &&
@@ -2682,6 +2687,9 @@ namespace BIS.ERP.Services
 
             if (created == 0)
             {
+                if (isProductionReceipt)
+                    throw new InvalidOperationException("Проверьте счета дебета и кредита и сумму в строках прихода из производства.");
+
                 if (isMovement)
                 {
                     throw new InvalidOperationException(

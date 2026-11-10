@@ -795,7 +795,7 @@ namespace BIS.ERP.Services
                 .FirstOrDefaultAsync(item => item.ObjectType == "Catalog" && item.Name == "Справочник материалов");
             if (materials != null)
                 await EnsureReportAsync("Ведомость наличия материалов", "inventory.materials.available", materials,
-                    "Код", "Наименование материала", "Ед изм", "Ном номер", "Вид материала", "Счет хранения", "Активен");
+                    "Код", "Наименование материала", "Единица измерения", "Номенклатурный номер", "Вид материала", "Счет хранения", "Активен");
         }
 
         private async Task EnsureReportAsync(string name, string code, MetadataObject source, params string[] fieldNames)

@@ -33,7 +33,7 @@
 
                 <!-- Поставщик — узкая колонка: каждый контрол в отдельной строке и растянут
                      на всю ширину карточки; налоги и оплата занимают две трети ширины. -->
-                <GroupBox Header="Поставщик" Padding="8">
+                <GroupBox x:Name="SupplierCard" Header="Поставщик" Padding="8">
                     <StackPanel x:Name="SupplierPanel"/>
                 </GroupBox>
 
@@ -237,9 +237,12 @@
                 <DataGridTextColumn Header="%" Binding="{Binding VatRate, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.##}" Width="46"/>
                 <DataGridTextColumn Header="К-во" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=0.####}" Width="60"/>
                 <DataGridTextColumn Header="Цена" Binding="{Binding Price, UpdateSourceTrigger=LostFocus, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="100"/>
-                <DataGridTextColumn Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
-                <DataGridTextColumn Header="НДС" Binding="{Binding VatAmount}" Width="70" IsReadOnly="True"/>
-                <DataGridTextColumn Header="НСП" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="70" IsReadOnly="True"/>
+                <DataGridTextColumn x:Name="ReceiptCreditAccountColumn" Header="Кредит" Width="110"
+                                    Visibility="Collapsed"
+                                    Binding="{Binding CreditAccountCode, UpdateSourceTrigger=PropertyChanged}"/>
+                <DataGridTextColumn x:Name="ReceiptBaseAmountColumn" Header="Без НДС" Binding="{Binding AmountWithoutTax}" Width="110" IsReadOnly="True"/>
+                <DataGridTextColumn x:Name="ReceiptVatColumn" Header="НДС" Binding="{Binding VatAmount}" Width="70" IsReadOnly="True"/>
+                <DataGridTextColumn x:Name="ReceiptSalesTaxColumn" Header="НСП" Binding="{Binding SalesTaxAmount, Converter={StaticResource DecimalInputConverter}, ConverterParameter=N2}" Width="70" IsReadOnly="True"/>
             </DataGrid.Columns>
         </DataGrid>
 

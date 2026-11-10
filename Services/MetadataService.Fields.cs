@@ -377,10 +377,10 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Ед изм",
-            DbColumnName = "unit",
+            Name = "Полное наименование материала",
+            DbColumnName = "full_name",
             FieldType = "String",
-            Length = 20,
+            Length = 500,
             IsRequired = false,
             Order = 3,
             MetadataObjectId = metadataObjectId
@@ -388,12 +388,23 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Ном номер",
+            Name = "Единица измерения",
+            DbColumnName = "unit",
+            FieldType = "String",
+            Length = 20,
+            IsRequired = false,
+            Order = 4,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Номенклатурный номер",
             DbColumnName = "article",
             FieldType = "String",
             Length = 100,
             IsRequired = false,
-            Order = 4,
+            Order = 5,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -407,7 +418,7 @@ public partial class MetadataService
             DisplayFields = "Наименование вида",     // ← добавить
             IsRequired = false,
             IsUnique = false,
-            Order = 5,
+            Order = 6,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -419,7 +430,7 @@ public partial class MetadataService
             Precision = 18,
             Scale = 6,
             IsRequired = false,
-            Order = 9,
+            Order = 10,
             MetadataObjectId = metadataObjectId
         },
         // Счета материала выбираются из плана счетов кнопкой «?» — так же, как
@@ -438,7 +449,7 @@ public partial class MetadataService
             DisplayPattern = "{Код} - {Наименование}",
             DisplayFields = "Код,Наименование",
             IsRequired = false,
-            Order = 6,
+            Order = 7,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -452,7 +463,7 @@ public partial class MetadataService
             DisplayPattern = "{Код} - {Наименование}",
             DisplayFields = "Код,Наименование",
             IsRequired = false,
-            Order = 7,
+            Order = 8,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -466,7 +477,7 @@ public partial class MetadataService
             DisplayPattern = "{Код} - {Наименование}",
             DisplayFields = "Код,Наименование",
             IsRequired = false,
-            Order = 8,
+            Order = 9,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -476,7 +487,7 @@ public partial class MetadataService
             DbColumnName = "is_active",
             FieldType = "Bool",                   // ← "Bool"
             IsRequired = true,
-            Order = 10,
+            Order = 11,
             MetadataObjectId = metadataObjectId
         },
         new MetadataField
@@ -487,7 +498,7 @@ public partial class MetadataService
             FieldType = "String",
             Length = 500,
             IsRequired = false,
-            Order = 11,
+            Order = 12,
             MetadataObjectId = metadataObjectId
         },
         // Международная классификация: код товара/услуги ТН ВЭД. Показывается
@@ -495,12 +506,34 @@ public partial class MetadataService
         new MetadataField
         {
             Id = Guid.NewGuid(),
-            Name = "Код товара ТНВЭД",
+            Name = "Код товара по товарной номенклатуре внешнеэкономической деятельности",
             DbColumnName = "tnved_code",
             FieldType = "String",
             Length = 30,
             IsRequired = false,
-            Order = 12,
+            Order = 13,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код услуги по классификатору видов экономической деятельности",
+            DbColumnName = "economic_activity_service_code",
+            FieldType = "String",
+            Length = 30,
+            IsRequired = false,
+            Order = 14,
+            MetadataObjectId = metadataObjectId
+        },
+        new MetadataField
+        {
+            Id = Guid.NewGuid(),
+            Name = "Код позиции классификатора товаров и услуг",
+            DbColumnName = "product_or_service_classification_code",
+            FieldType = "String",
+            Length = 30,
+            IsRequired = false,
+            Order = 15,
             MetadataObjectId = metadataObjectId
         }
       };

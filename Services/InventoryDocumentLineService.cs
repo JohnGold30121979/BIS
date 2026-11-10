@@ -56,6 +56,7 @@ namespace BIS.ERP.Services
         /// </summary>
         public string MaterialText { get => _materialText; set => Set(ref _materialText, value); }
         public string UnitName { get => _unitName; set => Set(ref _unitName, value); }
+        public string CreditAccountCode { get; set; } = string.Empty;
         public string AccountCode { get => _accountCode; set => Set(ref _accountCode, value); }
 
         /// <summary>Текст ячейки «Дебет»: «Код - Наименование» счёта плана счетов.</summary>
@@ -164,12 +165,15 @@ namespace BIS.ERP.Services
             await using var command = connection.CreateCommand();
             // Колонка аналитики появилась позже самих таблиц строк: если её нет,
             // читаем без неё — открытие документа не падает с 42703.
+            var hasCreditAccount = linesTable == InventoryDocumentModel.IncomingLinesTable &&
+                await TableColumnProbe.HasColumnAsync(connection, linesTable, InventoryDocumentModel.CreditAccountCodeColumn);
+            var creditAccountProjection = hasCreditAccount ? InventoryDocumentModel.CreditAccountCodeColumn : "NULL::text";
             var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
             command.CommandText = $@"
                 SELECT ""Id"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"", ""account_code"",
                        ""site_id"", ""responsible_person_id"", ""quantity"", ""price"", ""amount_without_tax"",
                        ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"", ""line_total"",
-                       ""amount_currency"", ""description""{analyticsColumn}
+                       ""amount_currency"", ""description"", {creditAccountProjection}{analyticsColumn}
                 FROM ""{linesTable}""
                 WHERE ""{parentColumn}"" = @header
                 ORDER BY ""line_number""";
@@ -198,8 +202,9 @@ namespace BIS.ERP.Services
                     LineTotal = reader.GetDecimal(15),
                     AmountCurrency = reader.GetDecimal(16),
                     Description = reader.IsDBNull(17) ? string.Empty : reader.GetString(17),
-                    Analytics = hasAnalytics && !reader.IsDBNull(18)
-                        ? BIS.ERP.Models.LineAnalytics.FromJson(reader.GetString(18))
+                    CreditAccountCode = reader.IsDBNull(18) ? string.Empty : reader.GetString(18),
+                    Analytics = hasAnalytics && !reader.IsDBNull(19)
+                        ? BIS.ERP.Models.LineAnalytics.FromJson(reader.GetString(19))
                         : new BIS.ERP.Models.LineAnalytics()
                 });
             }
@@ -226,6 +231,14 @@ namespace BIS.ERP.Services
             var hasAnalytics = await TableColumnProbe.HasColumnAsync(connection, linesTable, "line_analytics", transaction);
             var analyticsColumn = hasAnalytics ? ", \"line_analytics\"" : string.Empty;
             var analyticsValue = hasAnalytics ? ", @lineAnalytics" : string.Empty;
+            var hasCreditAccount = linesTable == InventoryDocumentModel.IncomingLinesTable &&
+                await TableColumnProbe.HasColumnAsync(connection, linesTable, InventoryDocumentModel.CreditAccountCodeColumn, transaction);
+            if (linesTable == InventoryDocumentModel.IncomingLinesTable && !hasCreditAccount &&
+                lines.Any(line => !string.IsNullOrWhiteSpace(line.CreditAccountCode)))
+                throw new InvalidOperationException("Обновите схему базы для записи счёта кредита в строках поступления.");
+
+            var creditAccountColumn = hasCreditAccount ? $", {InventoryDocumentModel.CreditAccountCodeColumn}" : string.Empty;
+            var creditAccountValue = hasCreditAccount ? ", @creditAccountCode" : string.Empty;
 
             await using (var delete = connection.CreateCommand())
             {
@@ -245,12 +258,12 @@ namespace BIS.ERP.Services
                         (""Id"", ""{parentColumn}"", ""line_number"", ""material_id"", ""material_name"", ""unit_name"",
                          ""account_code"", ""site_id"", ""responsible_person_id"", ""quantity"", ""price"",
                          ""amount_without_tax"", ""vat_rate"", ""vat_amount"", ""sales_tax_rate"", ""sales_tax_amount"",
-                         ""line_total"", ""amount_currency"", ""description""{analyticsColumn}, ""CreatedAt"", ""UpdatedAt"")
+                         ""line_total"", ""amount_currency"", ""description""{analyticsColumn}{creditAccountColumn}, ""CreatedAt"", ""UpdatedAt"")
                     VALUES
                         (@id, @header, @line_number, @material_id, @material_name, @unit_name,
                          @account_code, @site_id, @responsible_person_id, @quantity, @price,
                          @amount_without_tax, @vat_rate, @vat_amount, @sales_tax_rate, @sales_tax_amount,
-                         @line_total, @amount_currency, @description{analyticsValue}, NOW(), NOW())";
+                         @line_total, @amount_currency, @description{analyticsValue}{creditAccountValue}, NOW(), NOW())";
 
                 line.Recalculate();
                 line.LineNumber = number++;
@@ -274,6 +287,8 @@ namespace BIS.ERP.Services
                 insert.Parameters.Add(new NpgsqlParameter("line_total", line.LineTotal));
                 insert.Parameters.Add(new NpgsqlParameter("amount_currency", line.AmountCurrency));
                 insert.Parameters.Add(new NpgsqlParameter("description", line.Description ?? string.Empty));
+                if (hasCreditAccount)
+                    insert.Parameters.Add(new NpgsqlParameter("creditAccountCode", line.CreditAccountCode ?? string.Empty));
                 if (hasAnalytics)
                     insert.Parameters.Add(new NpgsqlParameter("lineAnalytics", line.Analytics.ToJson()));
 

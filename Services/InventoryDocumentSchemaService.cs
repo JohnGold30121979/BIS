@@ -529,10 +529,13 @@ namespace BIS.ERP.Services
                 var indexName = QuoteIdentifier($"IX_{definition.LinesTable}_parent");
                 var indexLineName = QuoteIdentifier($"IX_{definition.LinesTable}_parent_line");
 
+                IEnumerable<(string Column, string Definition)> lineColumns = definition.Table == InventoryDocumentModel.IncomingTable
+                    ? InventoryDocumentModel.LineColumns.Append((InventoryDocumentModel.CreditAccountCodeColumn, "text NULL"))
+                    : InventoryDocumentModel.LineColumns;
                 var columns = new StringBuilder();
                 columns.AppendLine("\"Id\" uuid PRIMARY KEY,");
                 columns.AppendLine($"{parent} uuid NOT NULL,");
-                foreach (var (column, columnDefinition) in InventoryDocumentModel.LineColumns)
+                foreach (var (column, columnDefinition) in lineColumns)
                     columns.AppendLine($"{QuoteIdentifier(column)} {columnDefinition},");
                 columns.AppendLine("\"CreatedAt\" timestamp NOT NULL DEFAULT NOW(),");
                 columns.AppendLine("\"UpdatedAt\" timestamp NOT NULL DEFAULT NOW()");
@@ -563,7 +566,7 @@ namespace BIS.ERP.Services
                 // догоняем на уже существующих таблицах строк.
                 // Все недостающие колонки — одним ALTER: на удалённой базе
                 // это один round-trip вместо десятков.
-                var addedColumns = InventoryDocumentModel.LineColumns
+                var addedColumns = lineColumns
                     .Select(pair => $"ADD COLUMN IF NOT EXISTS {QuoteIdentifier(pair.Column)} {pair.Definition}")
                     .ToList();
 

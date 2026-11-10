@@ -36,6 +36,11 @@ namespace BIS.ERP.Services
         public const string OutgoingLinesTable = "doc_inventory_outgoing_lines";
         public const string MovementLinesTable = "doc_inventory_movement_lines";
 
+        public const string PurchaseOperation = "INCOMING_PURCHASE";
+        public const string ProductionReceiptOperation = "INCOMING_PRODUCTION";
+        public const string ReceiptByActOperation = "INCOMING_ACT";
+        public const string CreditAccountCodeColumn = "credit_account_code";
+
         public const string EntryCatalogName = "Вид операции ТМЗ";
 
         /// <summary>Прежнее имя справочника видов операций — переименовывается на существующих базах.</summary>
@@ -129,11 +134,11 @@ namespace BIS.ERP.Services
         /// </summary>
         public static IReadOnlyList<KindDefinition> Kinds { get; } = new[]
         {
-            new KindDefinition("INCOMING_PURCHASE", "Приобретение ТМЗ", IncomingName, "Incoming", 1,
+            new KindDefinition(PurchaseOperation, "Приобретение ТМЗ", IncomingName, "Incoming", 1,
                 "Покупка ТМЗ у поставщика"),
-            new KindDefinition("INCOMING_PRODUCTION", "Приход из производства", IncomingName, "Incoming", 2,
+            new KindDefinition(ProductionReceiptOperation, "Приход из производства", IncomingName, "Incoming", 2,
                 "Возврат/поступление ТМЗ из производства"),
-            new KindDefinition("INCOMING_ACT", "Приход по акту", IncomingName, "Incoming", 3,
+            new KindDefinition(ReceiptByActOperation, "Приход по акту", IncomingName, "Incoming", 3,
                 "Оприходование по акту (излишки, инвентаризация)"),
             new KindDefinition("OUTGOING_SALE", "Реализация ТМЗ", OutgoingName, "Outgoing", 4,
                 "Продажа ТМЗ на сторону"),

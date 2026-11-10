@@ -190,6 +190,14 @@ inputControl = AccountPickerControlFactory.Create(
 
         private void NormalizeCatalogItemDataBeforeSave()
         {
+            if (IsMaterialsCatalog())
+            {
+                var fullNameField = _catalog.Fields.FirstOrDefault(field => field.DbColumnName == "full_name");
+                if (fullNameField != null && string.IsNullOrWhiteSpace(GetItemText(fullNameField.Name)))
+                    _itemData[fullNameField.Name] = GetItemText("Наименование материала", "name");
+                return;
+            }
+
             if (!IsEmployeesCatalog())
                 return;
 
@@ -1652,14 +1660,9 @@ inputControl = AccountPickerControlFactory.Create(
             string.Equals(_catalog.TableName, "catalog_materials", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(_catalog.Name, "Справочник материалов", StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>
-        /// Поле международной классификации (код товара/услуги ТН ВЭД). Такое поле
-        /// показывается отдельным блоком под остальными реквизитами материала.
-        /// </summary>
+        /// <summary>Коды классификаторов в отдельном блоке карточки материала.</summary>
         private static bool IsInternationalCodeField(MetadataField field) =>
-            string.Equals(field.DbColumnName, "tnved_code", StringComparison.OrdinalIgnoreCase) ||
-            field.Name.Contains("ТНВЭД", StringComparison.OrdinalIgnoreCase) ||
-            field.Name.Contains("ТН ВЭД", StringComparison.OrdinalIgnoreCase);
+            field.DbColumnName is "tnved_code" or "economic_activity_service_code" or "product_or_service_classification_code";
 
         /// <summary>Блок международных кодов нужен, только если в нём есть поля.</summary>
         private void UpdateExtraBlockVisibility()
@@ -1675,7 +1678,7 @@ inputControl = AccountPickerControlFactory.Create(
                 return;
 
             textBox.MaxLength = field.Length > 0 ? field.Length : 30;
-            textBox.ToolTip = "Код товара или услуги по международной классификации (ТН ВЭД)";
+            textBox.ToolTip = field.Name;
         }
 
         private async Task<string?> ResolveDefaultCurrencyIdAsync(
