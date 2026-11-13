@@ -1461,8 +1461,8 @@ WITH raw_orders AS (
         COALESCE(""basis"", '') AS basis,
         COALESCE(""description"", '') AS description
     FROM ""doc_cash_orders""
-    WHERE COALESCE(""is_posted"", false) = true
-      AND (@CashDeskId = '' OR CAST(""cash_desk_id"" AS text) = @CashDeskId)
+        WHERE COALESCE(""is_posted"", false) = true
+          AND (@CashDeskId = '' OR CAST(""cash_desk_id"" AS text) = @CashDeskId::text)
 ),
 base_orders AS (
     SELECT
